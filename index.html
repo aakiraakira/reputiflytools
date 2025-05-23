@@ -24,27 +24,22 @@
     #container { display:flex; flex-direction:column; height:100% }
 
     .header {
-      display:flex; align-items:center;
+      display:flex; align-items:center; justify-content:space-between;
       padding:var(--s); background:var(--panel);
       border-bottom:1px solid var(--bd);
     }
+    .header-left { display:flex; align-items:center }
     .header img { width:32px; height:32px; margin-right:12px }
-    .header h1 { font-size:20px; font-weight:600 }
+    .header h1 { font-size:20px; font-weight:600; color:var(--fg) }
 
     .body { flex:1; overflow-y:auto; padding:var(--s) }
     .section-title { font-size:16px; font-weight:500; margin-bottom:8px }
 
-    /* NEW: Button row spacing */
-    .button-row {
-      display: flex;
-      gap: 12px;
-      margin-bottom: var(--s);
-    }
-
+    .button-row { display:flex; gap:12px; margin-bottom:var(--s) }
     .btn {
-      font-size:14px; font-weight:500;
-      padding:10px 20px; border-radius:var(--r);
-      cursor:pointer; border:1px solid transparent;
+      font-size:14px; font-weight:500; padding:10px 20px;
+      border-radius:var(--r); cursor:pointer;
+      border:1px solid transparent;
       transition:background .2s,box-shadow .2s;
     }
     .btn + .btn { margin-left:12px }
@@ -57,6 +52,12 @@
       background:none; color:var(--fg); border-color:var(--bd);
     }
     .btn-secondary:hover { background:rgba(255,255,255,0.05); }
+
+    .btn-note {
+      background:none; border:none; cursor:pointer;
+      margin-left:8px; padding:0;
+    }
+    .btn-note img { width:18px; height:18px; }
 
     textarea {
       width:100%; background:var(--input); border:1px solid var(--bd);
@@ -133,6 +134,9 @@
     .line2 {
       color:var(--fg2);
     }
+    .note {
+      font-size:12px; color:var(--fg2); margin-top:4px;
+    }
 
     .data-preview .right a {
       font-weight:500; color:var(--p1);
@@ -146,14 +150,14 @@
     }
     .popup {
       background:var(--panel); border:1px solid var(--bd);
-      border-radius:var(--r); padding:var(--s); width:360px;
+      border-radius:var(--r); padding:var(--s); width:400px;
       box-shadow:0 8px 24px rgba(0,0,0,0.6);
     }
-    .popup h2 { font-size:18px; margin-bottom:12px }
+    .popup h2 { font-size:18px; margin-bottom:12px; color:var(--fg) }
     .popup textarea {
       width:100%; background:var(--input); border:1px solid var(--bd);
       border-radius:var(--r); padding:8px; color:var(--fg);
-      margin-bottom:12px; font-size:14px;
+      margin-bottom:12px; font-size:14px; min-height:120px;
     }
     .popup .guide {
       font-size:13px; color:var(--fg2); margin-bottom:8px;
@@ -170,18 +174,23 @@
       .data-preview .right { margin-top:8px }
       .data-preview .left { flex-wrap:wrap; gap:8px }
       .line1 { max-width:100% }
+      .popup { width:90%; }
     }
   </style>
 </head>
 <body>
   <div id="container">
+
     <div class="header">
-      <h1>Reputifly | Google Maps Extractor</h1>
+      <div class="header-left">
+        <img src="https://reputifly.com/wp-content/uploads/2025/05/reputifly-new-e1746390492876.png" alt="Reputifly">
+        <h1>Maps Extractor</h1>
+      </div>
+      <button id="btn-importexport" class="btn btn-secondary">Import / Export Data</button>
     </div>
+
     <div class="body">
       <div class="section-title">Maps Extractor</div>
-
-      <!-- Wrapped buttons for spacing -->
       <div class="button-row">
         <button id="btn-customize" class="btn btn-secondary">Customize Message</button>
         <button id="btn-extract"   class="btn btn-primary">Extract Filtered Phone Numbers</button>
@@ -204,7 +213,6 @@
           <option value="4.5">4.5+</option>
           <option value="5.0">5.0</option>
         </select>
-
         Sort:
         <select id="sort-filter">
           <option value="desc">Highest→Lowest</option>
@@ -221,7 +229,8 @@
       <div id="data-div" class="data-preview"></div>
     </div>
 
-    <div id="popup" class="popup-overlay">
+    <!-- Customize Message Popup -->
+    <div id="popup-custom" class="popup-overlay">
       <div class="popup">
         <h2>Customize Message Template</h2>
         <textarea id="tmpl-text" placeholder="Use %business and %rating…"></textarea>
@@ -236,91 +245,148 @@
         </div>
       </div>
     </div>
+
+    <!-- Import/Export Popup -->
+    <div id="popup-io" class="popup-overlay">
+      <div class="popup">
+        <h2>Import / Export Data</h2>
+        <textarea id="export-data" readonly placeholder="Exported JSON will appear here…"></textarea>
+        <div class="popup-buttons">
+          <button id="btn-download" class="btn btn-primary">Download JSON</button>
+        </div>
+        <hr style="border-color:var(--bd);margin:12px 0;">
+        <textarea id="import-data" placeholder="Paste JSON here to import…"></textarea>
+        <div class="popup-buttons">
+          <button id="btn-import" class="btn btn-secondary">Import JSON</button>
+          <button id="btn-close-io" class="btn btn-primary">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Note Popup -->
+    <div id="popup-note" class="popup-overlay">
+      <div class="popup">
+        <h2>Add / Edit Note</h2>
+        <textarea id="note-text" placeholder="Enter note…"></textarea>
+        <div class="popup-buttons">
+          <button id="note-delete" class="btn btn-secondary">Delete</button>
+          <button id="note-cancel" class="btn btn-secondary">Cancel</button>
+          <button id="note-save"   class="btn btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script>
-    // References
-    const rawInput     = document.getElementById('raw-input'),
-          progInfo     = document.getElementById('progress-info'),
-          progWrap     = document.getElementById('progress-wrap'),
-          progBar      = document.getElementById('progress-bar'),
-          ratingFilter = document.getElementById('rating-filter'),
-          sortFilter   = document.getElementById('sort-filter'),
-          tabAll       = document.getElementById('tab-all'),
-          tabYes       = document.getElementById('tab-yes'),
-          tabNo        = document.getElementById('tab-no'),
-          cntAll       = document.getElementById('cnt-all'),
-          cntYes       = document.getElementById('cnt-yes'),
-          cntNo        = document.getElementById('cnt-no'),
-          dataDiv      = document.getElementById('data-div'),
-          popup        = document.getElementById('popup'),
-          tmplText     = document.getElementById('tmpl-text');
+    // Storage helpers
+    const loadAll   = ()=> JSON.parse(localStorage.getItem('mapsAll')||'[]');
+    const saveAll   = arr=> localStorage.setItem('mapsAll', JSON.stringify(arr));
+    const loadTxt   = ()=> new Set(JSON.parse(localStorage.getItem('mapsTxt')||'[]'));
+    const saveTxt   = s=> localStorage.setItem('mapsTxt', JSON.stringify([...s]));
+    const loadNotes = ()=> JSON.parse(localStorage.getItem('mapsNotes')||'{}');
+    const saveNotes = o=> localStorage.setItem('mapsNotes', JSON.stringify(o));
 
-    // Default template
+    // Refs
+    const rawInput      = document.getElementById('raw-input'),
+          progInfo      = document.getElementById('progress-info'),
+          progWrap      = document.getElementById('progress-wrap'),
+          progBar       = document.getElementById('progress-bar'),
+          ratingFilter  = document.getElementById('rating-filter'),
+          sortFilter    = document.getElementById('sort-filter'),
+          tabAll        = document.getElementById('tab-all'),
+          tabYes        = document.getElementById('tab-yes'),
+          tabNo         = document.getElementById('tab-no'),
+          cntAll        = document.getElementById('cnt-all'),
+          cntYes        = document.getElementById('cnt-yes'),
+          cntNo         = document.getElementById('cnt-no'),
+          dataDiv       = document.getElementById('data-div'),
+          popupCustom   = document.getElementById('popup-custom'),
+          popupIO       = document.getElementById('popup-io'),
+          popupNote     = document.getElementById('popup-note'),
+          tmplText      = document.getElementById('tmpl-text'),
+          exportTA      = document.getElementById('export-data'),
+          importTA      = document.getElementById('import-data'),
+          noteTextTA    = document.getElementById('note-text');
+
+    const btnImportExport = document.getElementById('btn-importexport');
+
     let msgTpl = 'Hi %business, your rating is %rating stars.';
+    let currentNotePhone = null;
 
-    // Helpers for localStorage
-    const loadAll = ()=>JSON.parse(localStorage.getItem('mapsAll')||'[]'),
-          saveAll = a=>localStorage.setItem('mapsAll',JSON.stringify(a)),
-          loadTxt = ()=>new Set(JSON.parse(localStorage.getItem('mapsTxt')||'[]')),
-          saveTxt = s=>localStorage.setItem('mapsTxt',JSON.stringify([...s]));
-
-    // Update tab counters
+    // Update counts
     function updateCounts(){
-      const all=loadAll(), txt=loadTxt();
+      const all = loadAll(), t = loadTxt();
       cntAll.textContent = all.length;
-      const y=all.filter(o=>txt.has(o.phone)).length;
+      const y = all.filter(o=> t.has(o.phone) ).length;
       cntYes.textContent = y;
       cntNo.textContent  = all.length - y;
     }
 
-    // Render rows
+    // Render
     function clearActive(){
       [tabAll,tabYes,tabNo].forEach(t=>t.classList.remove('active'));
     }
     function render(){
-      dataDiv.innerHTML='';
-      let list=loadAll(), txt=loadTxt();
-      if(tabYes.classList.contains('active')) list=list.filter(o=>txt.has(o.phone));
-      else if(tabNo.classList.contains('active')) list=list.filter(o=>!txt.has(o.phone));
+      dataDiv.innerHTML = '';
+      let list = loadAll(), t = loadTxt(), notes = loadNotes();
 
-      const minR=parseFloat(ratingFilter.value);
-      list=list.filter(o=>parseFloat(o.rating)>=minR);
+      if(tabYes.classList.contains('active'))    list = list.filter(o=>t.has(o.phone));
+      else if(tabNo.classList.contains('active'))list = list.filter(o=>!t.has(o.phone));
 
-      const dir=sortFilter.value;
+      list = list.filter(o=>parseFloat(o.rating)>=parseFloat(ratingFilter.value));
+
+      const dir = sortFilter.value;
       list.sort((a,b)=>{
         const ra=parseFloat(a.rating), rb=parseFloat(b.rating);
         return dir==='asc'? ra-rb : rb-ra;
       });
 
       list.forEach(o=>{
-        const row=document.createElement('div');row.className='row';
-        const left=document.createElement('div');left.className='left';
-        const cb=document.createElement('input');cb.type='checkbox';
-        cb.checked=loadTxt().has(o.phone);
+        const row = document.createElement('div'); row.className='row';
+        const left = document.createElement('div'); left.className='left';
+
+        const cb = document.createElement('input'); cb.type='checkbox';
+        cb.checked = t.has(o.phone);
         cb.addEventListener('change',()=>{
-          const s=loadTxt();
+          const s = loadTxt();
           if(cb.checked) s.add(o.phone); else s.delete(o.phone);
           saveTxt(s); updateCounts(); render();
         });
         left.appendChild(cb);
 
-        const info=document.createElement('div');info.className='info';
-        const l1=document.createElement('div');l1.className='line1';
-        l1.textContent=o.business;
-        const l2=document.createElement('div');l2.className='line2';
-        l2.textContent=`(${o.rating} ☆) | +65 ${o.phone.slice(-8,-4)} ${o.phone.slice(-4)}`;
-        info.appendChild(l1);info.appendChild(l2);
+        const info = document.createElement('div'); info.className='info';
+        const l1 = document.createElement('div'); l1.className='line1';
+        l1.textContent = o.business;
+        const l2 = document.createElement('div'); l2.className='line2';
+        l2.textContent = `(${o.rating} ☆) | +65 ${o.phone.slice(-8,-4)} ${o.phone.slice(-4)}`;
+        info.appendChild(l1); info.appendChild(l2);
+
+        if(notes[o.phone]){
+          const n = document.createElement('div'); n.className='note';
+          n.textContent = '📌 '+notes[o.phone];
+          info.appendChild(n);
+        }
         left.appendChild(info);
+
+        const noteBtn = document.createElement('button');
+        noteBtn.className = 'btn-note';
+        noteBtn.innerHTML = '<img src="https://cdn-icons-png.flaticon.com/512/9239/9239205.png" alt="note">';
+        noteBtn.addEventListener('click',()=>{
+          currentNotePhone = o.phone;
+          noteTextTA.value = notes[o.phone]||'';
+          popupNote.style.display = 'flex';
+        });
+        left.appendChild(noteBtn);
 
         row.appendChild(left);
 
-        const right=document.createElement('div');right.className='right';
-        const a=document.createElement('a');
-        a.textContent='Send Custom WhatsApp Message';
-        const msg=msgTpl.replace(/%business/g,o.business).replace(/%rating/g,o.rating);
-        a.href=`https://wa.me/${o.phone.replace('+','')}?text=${encodeURIComponent(msg)}`;
-        a.target='_blank';
+        const right = document.createElement('div'); right.className='right';
+        const a = document.createElement('a');
+        a.textContent = 'Send WhatsApp';
+        const msg = msgTpl.replace(/%business/g,o.business).replace(/%rating/g,o.rating);
+        a.href = `https://api.whatsapp.com/send?phone=${o.phone.replace('+','')}&text=${encodeURIComponent(msg)}`;
+        a.target = '_blank';
         right.appendChild(a);
         row.appendChild(right);
 
@@ -328,49 +394,101 @@
       });
     }
 
-    // Tab clicks
+    // Tabs & filters
     tabAll.addEventListener('click',()=>{clearActive();tabAll.classList.add('active');render();});
     tabYes.addEventListener('click',()=>{clearActive();tabYes.classList.add('active');render();});
-    tabNo.addEventListener('click', ()=>{clearActive();tabNo.classList.add('active');render();});
-    ratingFilter.onchange=render; sortFilter.onchange=render;
+    tabNo .addEventListener('click',()=>{clearActive();tabNo .classList.add('active');render();});
+    ratingFilter.onchange = render;
+    sortFilter.onchange   = render;
 
     // Customize popup
-    document.getElementById('btn-customize').onclick=()=>{
-      tmplText.value=msgTpl;
-      popup.style.display='flex';
+    document.getElementById('btn-customize').onclick = ()=>{
+      tmplText.value = msgTpl;
+      popupCustom.style.display = 'flex';
     };
-    document.getElementById('btn-cancel').onclick=()=>popup.style.display='none';
-    document.getElementById('btn-save').onclick=()=>{
-      msgTpl=tmplText.value.trim()||msgTpl;
-      popup.style.display='none';
+    document.getElementById('btn-cancel').onclick = ()=> popupCustom.style.display='none';
+    document.getElementById('btn-save').onclick = ()=>{
+      msgTpl = tmplText.value.trim()||msgTpl;
+      popupCustom.style.display='none';
       render();
     };
 
-    // Extract
-    document.getElementById('btn-extract').onclick=async()=>{
-      const lines=rawInput.value.split('\n'), entries=[];
+    // Import/Export popup
+    btnImportExport.onclick = ()=>{
+      const data = { all: loadAll(), texted: [...loadTxt()], notes: loadNotes() };
+      exportTA.value = JSON.stringify(data, null, 2);
+      importTA.value = '';
+      popupIO.style.display = 'flex';
+    };
+    document.getElementById('btn-download').onclick = ()=>{
+      const blob = new Blob([exportTA.value],{type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download='data.json'; a.click();
+      URL.revokeObjectURL(url);
+    };
+    document.getElementById('btn-import').onclick = ()=>{
+      try {
+        const obj = JSON.parse(importTA.value);
+        if(!Array.isArray(obj.all)||!Array.isArray(obj.texted)||typeof obj.notes!=='object')
+          throw new Error('Invalid JSON');
+        saveAll(obj.all);
+        saveTxt(new Set(obj.texted));
+        saveNotes(obj.notes);
+        popupIO.style.display='none';
+        updateCounts(); render();
+        alert('Import successful');
+      } catch(e){
+        alert('Import failed: '+e.message);
+      }
+    };
+    document.getElementById('btn-close-io').onclick = ()=> popupIO.style.display='none';
+
+    // Note popup
+    document.getElementById('note-save').onclick = ()=>{
+      const notes = loadNotes();
+      const txt = noteTextTA.value.trim();
+      if(txt) notes[currentNotePhone] = txt;
+      else delete notes[currentNotePhone];
+      saveNotes(notes);
+      popupNote.style.display = 'none';
+      render();
+    };
+    document.getElementById('note-delete').onclick = ()=>{
+      const notes = loadNotes();
+      delete notes[currentNotePhone];
+      saveNotes(notes);
+      popupNote.style.display = 'none';
+      render();
+    };
+    document.getElementById('note-cancel').onclick = ()=> popupNote.style.display='none';
+
+    // Extract logic
+    document.getElementById('btn-extract').onclick = async ()=>{
+      const lines = rawInput.value.split('\n'), entries = [];
       for(let i=0;i<lines.length;i++){
-        const m=lines[i].match(/(\d{4})\s*(\d{4})/);
+        const m = lines[i].match(/(\d{4})\s*(\d{4})/);
         if(m){
-          const num=m[1]+m[2]; if(num[0]==='6') continue;
+          const num=m[1]+m[2];
+          if(num[0]==='6') continue;
           const phone='+65'+num;
-          let rating='', ridx=-1;
+          let rating='',ridx=-1;
           for(let j=i-1;j>=0;j--){
             const rm=lines[j].match(/([\d.]+)\(\d+\)/);
             if(rm){rating=rm[1];ridx=j;break;}
           }
           let business='Business';
           for(let k=(ridx>=0?ridx-1:i-1);k>=0;k--){
-            const txt=lines[k].trim();
-            if(txt&&!/\d/.test(txt)){business=txt;break;}
+            const t=lines[k].trim();
+            if(t&&!/\d/.test(t)){business=t;break;}
           }
           entries.push({phone,business,rating:rating||'0.0'});
         }
       }
-      let all=loadAll();
-      entries.forEach(o=>{if(!all.find(x=>x.phone===o.phone))all.push(o)});
-      saveAll(all); rawInput.value='';
-      progInfo.style.display='block';progWrap.style.display='block';
+      let all = loadAll();
+      entries.forEach(o=>{ if(!all.find(x=>x.phone===o.phone)) all.push(o) });
+      saveAll(all);
+      rawInput.value='';
+      progInfo.style.display='block'; progWrap.style.display='block';
       for(let i=1;i<=30;i++){
         const p=Math.round(i/30*100), s=Math.round(entries.length*(i/30));
         progInfo.textContent=`${p}% Complete | Scanned: ${s}`;
