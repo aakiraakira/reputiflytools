@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Functional Analytics Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@3.6.0/cdn.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/litepicker/dist/css/litepicker.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/litepicker/dist/litepicker.js"></script>
+
+    
+    <script>
+        // Custom Tailwind theme configuration
+        tailwind.config = {
+            darkMode: 'class', // Enable dark mode using a class
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        'dark-bg': '#0F172A', // Main dark background
+                        'dark-surface': '#1E293B', // Card and modal backgrounds
+                        'dark-border': '#334155',
+                        'dark-text-primary': '#F8FAFC',
+                        'dark-text-secondary': '#94A3B8',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        /* Custom styles for a polished look and feel */
+        body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+        .modal { display: none; animation: fadeIn 0.3s ease-out; }
+        .modal-content { animation: slideInUp 0.4s ease-out; }
+        .page-view { display: none; animation: fadeIn 0.5s ease-out; }
+        .page-view.active { display: block; }
+        .loader { border-top-color: #3b82f6; animation: spin 1s linear infinite; }
+        th.sortable:hover { cursor: pointer; background-color: #f9fafb; }
+        .dark th.sortable:hover { background-color: #334155; }
+        th.sortable .sort-indicator { opacity: 0.3; transition: opacity 0.2s; }
+        th.sortable:hover .sort-indicator { opacity: 0.7; }
+        th.sort-asc .sort-indicator,
+        th.sort-desc .sort-indicator { opacity: 1; }
+
+        .switcher-btn { transition: background-color 0.2s, color 0.2s; padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 500; }
+        .switcher-btn.active { background-color: #3b82f6; color: white; }
+        .switcher-btn:not(.active) { background-color: transparent; }
+        .dark .switcher-btn:not(.active) { color: #94a3b8; }
+        
+        .table-tab-btn {
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+         .table-tab-btn.active {
+            background-color: #e5e7eb;
+            color: #111827;
+        }
+        .dark .table-tab-btn.active {
+            background-color: #4b5563;
+            color: #f9fafb;
+        }
+        
+        /* Invoice specific styles */
+        #invoice-preview-wrapper { font-family: 'Inter', sans-serif; }
+        .invoice-box { border: 1px solid #eee; box-shadow: 0 0 10px rgba(0, 0, 0, 0.15); font-size: 16px; line-height: 24px; color: #555; }
+        .dark .invoice-box { border-color: #334155; box-shadow: 0 0 10px rgba(0,0,0, .5); color: #ccc; }
+        .invoice-box table { width: 100%; line-height: inherit; text-align: left; border-collapse: collapse; }
+        .invoice-box table td { padding: 8px 12px; vertical-align: top; }
+        .invoice-box table tr.top table td { padding-bottom: 20px; }
+        .invoice-box table tr.information table td { padding-bottom: 40px; }
+        .invoice-box table tr.heading td { background: #eee; border-bottom: 1px solid #ddd; font-weight: bold; }
+        .dark .invoice-box table tr.heading td { background: #1E293B; border-bottom-color: #334155; }
+        .invoice-box table tr.details td { padding-bottom: 20px; }
+        .invoice-box table tr.item td { border-bottom: 1px solid #eee; }
+        .dark .invoice-box table tr.item td { border-bottom-color: #334155; }
+        .invoice-box table tr.item.last td { border-bottom: none; }
+        .invoice-box table tr.total td:not(:first-child) { border-top: 2px solid #eee; font-weight: bold; }
+        .dark .invoice-box table tr.total td:not(:first-child) { border-top-color: #334155; }
+        .dark .invoice-box .invoice-title { color: #f1f5f9 !important; }
+        .legend-item { cursor: pointer; }
+        .legend-item.hidden-dataset { text-decoration: line-through; opacity: 0.5; }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideInUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #9ca3af; border-radius: 4px; }
+        .dark ::-webkit-scrollbar-thumb { background: #4b5563; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-dark-bg font-sans text-gray-800 dark:text-dark-text-primary">
+    
+    <div id="mobile-menu-overlay" class="fixed inset-0 bg-black/50 z-30 hidden md:hidden"></div>
+
+    <div class="flex min-h-screen">
+        <aside class="bg-white dark:bg-dark-surface p-4 flex flex-col items-center shadow-xl fixed h-full z-40 transform -translate-x-full md:translate-x-0 transition-transform duration-300 ease-in-out w-64 md:w-20">
+            <div id="desktop-logo" class="text-blue-600 dark:text-blue-400 font-extrabold text-3xl hidden md:block">R</div>
+            <div id="mobile-logo" class="text-blue-600 dark:text-blue-400 font-extrabold text-xl md:hidden">Reputifly</div>
+            <nav class="flex flex-col items-start md:items-center space-y-6 flex-grow mt-8 w-full px-4 md:px-0">
+                <a href="#" data-page="dashboard" class="sidebar-link p-3 rounded-lg flex items-center gap-4 md:gap-0 w-full" title="Analytics">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 13h18"/><path d="M16 3v18"/></svg>
+                    <span class="md:hidden">Analytics</span>
+                </a>
+                <a href="#" data-page="invoicing" class="sidebar-link p-3 rounded-lg flex items-center gap-4 md:gap-0 w-full" title="Invoicing">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2Z"/></svg>
+                    <span class="md:hidden">Invoicing</span>
+                </a>
+            </nav>
+            <div id="theme-toggle" class="p-3 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg cursor-pointer" title="Toggle Theme"></div>
+        </aside>
+
+        <main class="flex-1 p-4 sm:p-6 lg:p-8 md:ml-20 w-full">
+             <header class="md:hidden flex justify-between items-center mb-4">
+                 <button id="hamburger-menu-button" class="p-2 text-gray-500">
+                    <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
+                </button>
+                <div class="text-blue-600 dark:text-blue-400 font-extrabold text-2xl">Reputifly</div>
+                <div></div>
+            </header>
+
+            <div id="dashboard-page" class="page-view">
+                <header class="hidden md:flex flex-wrap justify-between items-center gap-4 mb-8">
+                    <div>
+                        <h1 class="text-3xl font-bold text-gray-900 dark:text-dark-text-primary">Analytics</h1>
+                        <p class="text-gray-500 dark:text-dark-text-secondary">Dashboard / Analytics</p>
+                    </div>
+                    <div class="flex items-center space-x-2 sm:space-x-4">
+                        <div id="date-presets-container" class="flex items-center bg-gray-100 dark:bg-dark-surface rounded-lg p-1 text-sm font-semibold text-gray-600 dark:text-dark-text-secondary">
+                            <button data-range="day" class="date-preset-btn px-3 py-1.5 rounded-md transition-colors">Daily</button>
+                            <button data-range="week" class="date-preset-btn px-3 py-1.5 rounded-md transition-colors">Weekly</button>
+                            <button data-range="month" class="date-preset-btn px-3 py-1.5 rounded-md transition-colors">Monthly</button>
+                        </div>
+                        <input id="date-range-picker" class="bg-white text-gray-800 dark:bg-slate-700 dark:text-white px-4 py-2 rounded-lg shadow-sm font-semibold text-sm focus:ring-2 focus:ring-blue-500 border border-gray-200 dark:border-dark-border" placeholder="Select Date Range">
+                        <input type="file" id="import-file-input" class="hidden" accept=".json">
+                        <button id="import-data-button" class="bg-white text-gray-800 dark:bg-slate-800 dark:text-white px-4 py-2 rounded-lg shadow-sm hover:bg-gray-100 dark:hover:bg-slate-600 font-semibold flex items-center gap-2 text-sm border border-gray-200 dark:border-dark-border">Import</button>
+                        <button id="export-data-button" class="bg-white text-gray-800 dark:bg-slate-800 dark:text-white px-4 py-2 rounded-lg shadow-sm hover:bg-gray-100 dark:hover:bg-slate-600 font-semibold flex items-center gap-2 text-sm border border-gray-200 dark:border-dark-border">Export</button>
+                        <button id="add-entry-button" class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-md hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 font-semibold flex items-center gap-2 text-sm"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>Add Transaction</button>
+                    </div>
+                </header>
+                
+                <div id="loader" class="flex justify-center items-center h-64"><div class="loader h-16 w-16 border-4 border-gray-200 dark:border-gray-700 rounded-full"></div></div>
+                
+                <div id="dashboard-content" class="space-y-8 hidden">
+                    <div id="kpi-card-container" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6"></div>
+
+                    <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
+                        <div id="revenue-by-sector-container" class="xl:col-span-1 bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border flex flex-col">
+                            <div class="flex flex-wrap justify-between items-center gap-4 mb-2">
+                                 <h2 class="text-xl font-bold">Revenue by Sector</h2>
+                            </div>
+                            <div id="sector-legend-container" class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 mb-4 text-sm"></div>
+                            <div id="sector-chart-wrapper" class="flex-grow relative min-h-[300px]">
+                                <canvas id="revenue-by-sector-chart"></canvas>
+                            </div>
+                            <div id="sector-chart-no-data" class="flex-grow flex flex-col justify-center items-center text-center min-h-[300px] hidden">
+                                <p class="text-gray-500 dark:text-dark-text-secondary px-4">Add a 'sector' to a revenue transaction to see data here.</p>
+                            </div>
+                        </div>
+
+                        <div class="xl:col-span-2 bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border">
+                            <div class="flex flex-wrap justify-between items-center gap-4 mb-4">
+                                <h2 class="text-xl font-bold">Revenue Statistics</h2>
+                            </div>
+                            <div class="h-80 relative"><canvas id="revenue-line-chart"></canvas></div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                         <div class="lg:col-span-1 bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border">
+                             <h2 class="text-xl font-bold mb-4">Revenue Breakdown</h2>
+                             <div class="grid grid-cols-2 gap-x-4">
+                                <div class="col-span-1 text-center">
+                                    <h3 class="text-md font-bold mb-2">By Source</h3>
+                                    <div class="h-40 w-full relative"><canvas id="source-pie-chart"></canvas></div>
+                                </div>
+                                <div class="col-span-1 text-center">
+                                     <h3 class="text-md font-bold mb-2">By Business</h3>
+                                    <div class="h-40 w-full relative"><canvas id="business-pie-chart"></canvas></div>
+                                </div>
+                             </div>
+                             <div id="business-breakdown-container" class="col-span-2 mt-4 pt-4 border-t border-gray-200 dark:border-dark-border"></div>
+                        </div>
+                        <div class="lg:col-span-2 bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border">
+                            <div class="flex flex-wrap justify-between items-center gap-4 mb-4">
+                                 <h2 class="text-xl font-bold">Daily Sales Activity</h2>
+                            </div>
+                            <div class="h-[280px] relative"><canvas id="daily-sales-bar-chart"></canvas></div>
+                        </div>
+                    </div>
+
+                    <div id="transaction-table-container" class="bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border"></div>
+                </div>
+            </div>
+
+            <div id="invoice-creator-page" class="page-view">
+                <header class="flex flex-wrap justify-between items-center gap-4 mb-8 sticky top-0 bg-gray-100 dark:bg-dark-bg py-4 z-10 -mt-4 -mx-4 px-4 sm:-mx-6 sm:px-6">
+                    <div>
+                        <h1 class="text-xl md:text-3xl font-bold text-gray-900 dark:text-dark-text-primary">Invoice Creator</h1>
+                        <p class="text-sm md:text-base text-gray-500 dark:text-dark-text-secondary">Create and download a new invoice.</p>
+                    </div>
+                    <div class="flex items-center space-x-2 sm:space-x-4">
+                         <button id="download-invoice-pdf" class="bg-green-600 text-white px-5 py-2.5 rounded-lg shadow-md hover:bg-green-700 font-semibold flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                            Download PDF
+                        </button>
+                    </div>
+                </header>
+                 <div class="p-1 grid grid-cols-1 lg:grid-cols-5 gap-8">
+                    <form id="invoice-form" class="lg:col-span-2 space-y-6 bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border self-start">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="invoice-from-name" class="block text-sm font-medium dark:text-dark-text-secondary">From</label>
+                                <textarea id="invoice-from-name" rows="3" class="mt-1 block w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-300 dark:border-dark-border rounded-lg" placeholder="Your Company, Inc.&#10;123 Main Street&#10;Anytown, USA 12345"></textarea>
+                            </div>
+                            <div>
+                                <label for="invoice-to-name" class="block text-sm font-medium dark:text-dark-text-secondary">Bill To</label>
+                                <textarea id="invoice-to-name" rows="3" list="client-datalist" class="mt-1 block w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-300 dark:border-dark-border rounded-lg" placeholder="Client Name&#10;Client Address"></textarea>
+                                <datalist id="client-datalist"></datalist>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label for="invoice-number" class="block text-sm font-medium dark:text-dark-text-secondary">Invoice #</label>
+                                <input type="text" id="invoice-number" class="mt-1 block w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-300 dark:border-dark-border rounded-lg">
+                            </div>
+                            <div>
+                                <label for="invoice-date-issued" class="block text-sm font-medium dark:text-dark-text-secondary">Date Issued</label>
+                                <input type="date" id="invoice-date-issued" class="mt-1 block w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-300 dark:border-dark-border rounded-lg">
+                            </div>
+                            <div>
+                                <label for="invoice-date-due" class="block text-sm font-medium dark:text-dark-text-secondary">Date Due</label>
+                                <input type="date" id="invoice-date-due" class="mt-1 block w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-300 dark:border-dark-border rounded-lg">
+                            </div>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold mb-2">Items</h3>
+                            <div id="invoice-items-container" class="space-y-2"></div>
+                            <button type="button" id="add-invoice-item-btn" class="mt-2 text-sm text-blue-600 hover:text-blue-800 font-semibold">+ Add Line Item</button>
+                        </div>
+                        <div class="space-y-4 pt-4 border-t dark:border-dark-border">
+                             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div>
+                                    <label for="invoice-discount" class="block text-sm font-medium dark:text-dark-text-secondary">Discount (Optional)</label>
+                                    <input type="number" step="0.01" id="invoice-discount" placeholder="$0.00" class="mt-1 block w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border-gray-300 dark:border-dark-border rounded-lg">
+                                </div>
+                                <div>
+                                    <label for="invoice-tax-rate" class="block text-sm font-medium dark:text-dark-text-secondary">Tax (Optional, %)</label>
+                                    <input type="number" step="0.01" id="invoice-tax-rate" placeholder="0" class="mt-1 block w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border-gray-300 dark:border-dark-border rounded-lg">
+                                </div>
+                                <div>
+                                    <label for="invoice-shipping" class="block text-sm font-medium dark:text-dark-text-secondary">Shipping (Optional)</label>
+                                    <input type="number" step="0.01" id="invoice-shipping" placeholder="$0.00" class="mt-1 block w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border-gray-300 dark:border-dark-border rounded-lg">
+                                </div>
+                            </div>
+                        </div>
+                         <div>
+                            <label for="invoice-notes" class="block text-sm font-medium dark:text-dark-text-secondary">Notes</label>
+                            <textarea id="invoice-notes" rows="3" class="mt-1 block w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-300 dark:border-dark-border rounded-lg" placeholder="e.g. Thank you for your business!"></textarea>
+                        </div>
+                        <div>
+                            <label for="invoice-terms" class="block text-sm font-medium dark:text-dark-text-secondary">Terms</label>
+                            <textarea id="invoice-terms" rows="3" class="mt-1 block w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-300 dark:border-dark-border rounded-lg" placeholder="e.g. Payment due within 30 days."></textarea>
+                        </div>
+                    </form>
+                    <div id="invoice-preview-wrapper" class="lg:col-span-3">
+                        <div id="invoice-preview-template" class="invoice-box bg-white dark:bg-dark-surface p-8 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border">
+                            </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <div id="add-entry-modal" class="modal fixed inset-0 bg-black/70 flex justify-center items-center z-50 p-4">
+        <div class="modal-content bg-white dark:bg-dark-surface rounded-xl shadow-2xl w-full max-w-lg border border-gray-200 dark:border-dark-border">
+            <div class="flex justify-between items-center p-6 border-b border-gray-200 dark:border-dark-border">
+                <h2 class="text-2xl font-bold">New Transaction</h2>
+                <button id="modal-close-button" class="text-gray-400 hover:text-white text-3xl leading-none">&times;</button>
+            </div>
+            <div class="p-6">
+                <div id="modal-error" class="bg-red-500/10 text-red-500 p-3 rounded-md mb-4 hidden font-medium"></div>
+                <div class="flex items-center bg-gray-100 dark:bg-slate-800 rounded-lg p-1 space-x-1 mb-6">
+                    <button class="switcher-btn flex-1" data-type="revenue">Revenue</button>
+                    <button class="switcher-btn flex-1" data-type="expense">Expense</button>
+                </div>
+                <form id="add-entry-form" class="space-y-4"></form>
+            </div>
+        </div>
+    </div>
+
+    <div id="delete-modal" class="modal fixed inset-0 bg-black/70 flex justify-center items-center z-50 p-4">
+        <div class="modal-content bg-white dark:bg-dark-surface rounded-xl shadow-2xl p-8 w-full max-w-md text-center border border-gray-200 dark:border-dark-border">
+            <h3 class="text-xl font-bold mb-4">Confirm Deletion</h3>
+            <p class="dark:text-dark-text-secondary mb-8">This action cannot be undone.</p>
+            <div class="flex justify-center space-x-4">
+                <button type="button" id="delete-cancel-button" class="w-full px-4 py-2.5 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 dark:bg-dark-border dark:text-dark-text-primary dark:hover:bg-gray-600 font-semibold">Cancel</button>
+                <button type="button" id="delete-confirm-button" class="w-full px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold">Delete</button>
+            </div>
+        </div>
+    </div>
+        
+    <datalist id="tags-datalist"></datalist>
+
+    <script>
+    (() => {
+        // To hold the picker instance globally within this IIFE
+        let pickerInstance = null;
+        
+        // Destructure date-fns functions for easy access
+        // FIX: Added addMonths for recurring transaction logic.
+        const { parseISO, format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, startOfDay, endOfDay, eachDayOfInterval, eachWeekOfInterval, eachMonthOfInterval, subDays, isAfter, addDays, isSameMonth, isSameDay, addMonths } = dateFns;
+
+        // PDF generation library
+        const { jsPDF } = window.jspdf;
+
+        // Initial sample data
+        const initialData = [
+            { id: '7', itemName: 'Ritesh', business: 'Google Reviews', date: '2025-06-28', type: 'revenue', sector: 'Marketing', customerSource: 'Google Ads', fulfillmentExpense: 1200, status: 'Recurring', amount: 3400 },
+            { id: '1', itemName: 'Alice Johnson', business: 'Web Design', date: '2025-06-26', type: 'revenue', sector: 'Services', customerSource: 'Referral', fulfillmentExpense: 300, status: 'Recurring', amount: 1500 },
+            { id: '2', itemName: 'Office Supplies', business: 'Overhead', date: '2025-06-24', type: 'expense', sector: 'General', customerSource: 'N/A', fulfillmentExpense: 0, status: 'Actual', amount: 150 },
+            { id: '3', itemName: 'Bob Williams', business: 'SEO', date: '2025-06-20', type: 'revenue', sector: 'Marketing', customerSource: 'Google Ads', fulfillmentExpense: 200, status: 'New Customer', amount: 800 },
+            { id: '4', itemName: 'Figma Subscription', business: 'Software', date: '2025-06-18', type: 'expense', sector: 'Tools', customerSource: 'N/A', fulfillmentExpense: 0, status: 'Recurring', amount: 50 },
+            { id: '5', itemName: 'Charlie Brown', business: 'Web Design', date: '2025-06-15', type: 'revenue', sector: 'E-commerce', customerSource: 'Instagram', fulfillmentExpense: 800, status: 'Warm Lead', amount: 2500 },
+            { id: '6', itemName: 'David Davis', business: 'Photography', date: '2025-05-28', type: 'revenue', sector: 'Services', customerSource: 'Facebook', fulfillmentExpense: 100, status: 'Recurring', amount: 750 },
+        ];
+        
+        // --- Application State ---
+        const state = {
+            entries: [], // Holds all transaction data
+            theme: 'light',
+            itemToDelete: null,
+            ui: {
+                activePage: 'dashboard',
+                activeTableTab: 'all',
+                dateRange: { start: startOfMonth(new Date()), end: endOfMonth(new Date()) },
+                sort: { key: 'date', order: 'desc' },
+                searchQuery: '',
+                activeModalForm: 'revenue',
+                activeDatePreset: 'month',
+            },
+            chartInstances: {}, // To keep track of created charts
+        };
+
+        // --- DOM Element References ---
+        const DOMElements = {
+            html: document.documentElement,
+            loader: document.getElementById('loader'),
+            dashboardContent: document.getElementById('dashboard-content'),
+            themeToggle: document.getElementById('theme-toggle'), 
+            transactionTableContainer: document.getElementById('transaction-table-container'),
+            businessBreakdownContainer: document.getElementById('business-breakdown-container'), 
+            addEntryButton: document.getElementById('add-entry-button'),
+            tagsDataList: document.getElementById('tags-datalist'),
+            // Page containers
+            pages: {
+                dashboard: document.getElementById('dashboard-page'),
+                invoicing: document.getElementById('invoice-creator-page'),
+            },
+            sidebar: document.querySelector('aside'),
+            sidebarLinks: document.querySelectorAll('.sidebar-link'),
+            mobileMenu: {
+                button: document.getElementById('hamburger-menu-button'),
+                overlay: document.getElementById('mobile-menu-overlay'),
+            },
+            dateRangePicker: document.getElementById('date-range-picker'),
+            datePresetsContainer: document.getElementById('date-presets-container'),
+            kpiCardContainer: document.getElementById('kpi-card-container'),
+            // Chart specific elements
+            sectorChart: {
+                wrapper: document.getElementById('sector-chart-wrapper'),
+                noData: document.getElementById('sector-chart-no-data'),
+                legendContainer: document.getElementById('sector-legend-container')
+            },
+            // Modals
+            addEntryModal: {
+                modal: document.getElementById('add-entry-modal'),
+                form: document.getElementById('add-entry-form'),
+                closeButton: document.getElementById('modal-close-button'),
+                error: document.getElementById('modal-error'),
+                typeButtons: document.querySelectorAll('#add-entry-modal .switcher-btn'),
+            },
+            deleteModal: {
+                modal: document.getElementById('delete-modal'),
+                confirmButton: document.getElementById('delete-confirm-button'),
+                cancelButton: document.getElementById('delete-cancel-button'),
+            },
+            invoice: {
+                form: document.getElementById('invoice-form'),
+                itemsContainer: document.getElementById('invoice-items-container'),
+                addItemButton: document.getElementById('add-invoice-item-btn'),
+                preview: document.getElementById('invoice-preview-template'),
+                downloadPdfButton: document.getElementById('download-invoice-pdf'),
+                clientDatalist: document.getElementById('client-datalist'),
+            },
+            importData: {
+                button: document.getElementById('import-data-button'),
+                input: document.getElementById('import-file-input'),
+            },
+            exportDataButton: document.getElementById('export-data-button'),
+        };
+
+        // --- Utility Functions ---
+        const formatCurrency = (v) => `$${(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const formatPercent = (v) => `${(v * 100).toFixed(1)}%`;
+        
+        // --- State Management (LocalStorage) ---
+        const saveState = () => {
+            try {
+                const entriesToSave = state.entries.map(({dateObj, ...rest}) => rest);
+                localStorage.setItem('dashboard-entries-v15', JSON.stringify(entriesToSave));
+                localStorage.setItem('dashboard-theme-v15', state.theme);
+                localStorage.setItem('lastRecurringCheck', new Date().toISOString());
+            } catch (error) {
+                console.error("Failed to save state to localStorage:", error);
+            }
+        };
+        const loadState = () => {
+            const savedEntries = localStorage.getItem('dashboard-entries-v15');
+            let savedTheme = localStorage.getItem('dashboard-theme-v15');
+            
+            if (!savedTheme) { 
+                savedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+
+            const entries = savedEntries ? JSON.parse(savedEntries) : initialData;
+            state.entries = entries.map(e => ({...e, dateObj: parseISO(e.date)}));
+            state.theme = savedTheme;
+        };
+        
+        // --- Charting ---
+        const chartStyler = {
+            grid: () => state.theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+            labels: () => state.theme === 'dark' ? '#94A3B8' : '#64748b',
+            legend: () => state.theme === 'dark' ? '#F8FAFC' : '#334155',
+            sectorColors: ['#6366f1', '#ec4899', '#f97316', '#22c55e', '#facc15', '#38bdf8', '#8b5cf6', '#ef4444'],
+            getColor: function(index) { return this.sectorColors[index % this.sectorColors.length]; },
+        };
+
+        const renderChart = (id, config) => {
+            const ctx = document.getElementById(id)?.getContext('2d');
+            if (!ctx) return;
+            if (state.chartInstances[id]) state.chartInstances[id].destroy();
+            state.chartInstances[id] = new Chart(ctx, config);
+        };
+        
+        const renderAllCharts = (filteredData) => {
+            renderMainRevenueChart(filteredData);
+            renderDailySalesBarChart(filteredData);
+            renderRevenueBySectorChart(filteredData);
+            renderSourcePieChart(filteredData);
+            renderBusinessPieChart(filteredData);
+        };
+
+        const renderMainRevenueChart = (data) => {
+             const getGroupedData = () => {
+                if (!data.length) return { labels: [], revenue: [], expenses: [] };
+                
+                const sorted = [...data].sort((a, b) => a.dateObj - b.dateObj);
+                
+                const daysInRange = (state.ui.dateRange.end - state.ui.dateRange.start) / (1000 * 60 * 60 * 24);
+                let interval, fmt, periodFn;
+                
+                if (daysInRange < 0) return { labels: [], revenue: [], expenses: [] };
+                if (daysInRange <= 31) { // Daily
+                     interval = eachDayOfInterval({start:state.ui.dateRange.start, end:state.ui.dateRange.end}); 
+                     fmt = 'MMM d'; periodFn = (d) => d;
+                } else if (daysInRange <= 180) { // Weekly
+                    interval = eachWeekOfInterval({start:state.ui.dateRange.start, end:state.ui.dateRange.end},{weekStartsOn:1}); 
+                    fmt = "'Wk' w, yy"; periodFn = (d) => startOfWeek(d, {weekStartsOn:1});
+                } else { // Monthly
+                    interval = eachMonthOfInterval({start:state.ui.dateRange.start, end:state.ui.dateRange.end}); 
+                    fmt = 'MMM yy'; periodFn = startOfMonth;
+                }
+
+                const map = new Map(interval.map(d => [format(d, fmt), { revenue: 0, expenses: 0 }]));
+                for (const entry of sorted) {
+                    const key = format(periodFn(entry.dateObj), fmt);
+                    if (map.has(key)) {
+                        const periodData = map.get(key);
+                        if (entry.type === 'revenue') {
+                            periodData.revenue += entry.amount;
+                            periodData.expenses += (entry.fulfillmentExpense || 0);
+                        } else {
+                            periodData.expenses += entry.amount;
+                        }
+                    }
+                }
+                return { labels: [...map.keys()], revenue: [...map.values()].map(v => v.revenue), expenses: [...map.values()].map(v => v.expenses) };
+            };
+            const { labels, revenue, expenses } = getGroupedData();
+            renderChart('revenue-line-chart', { type: 'line', data: { labels, datasets: [ { label: 'Revenue', data: revenue, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 6 }, { label: 'Expenses', data: expenses, borderColor: '#ec4899', backgroundColor: 'rgba(236, 72, 153, 0.1)', fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 6 } ] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { color: chartStyler.labels(), callback: v => `$${v/1000}k` }, grid: { color: chartStyler.grid() }, border: { dash: [4, 4] } }, x: { ticks: { color: chartStyler.labels() }, grid: { display: false } } }, plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } } } });
+        };
+        
+        const renderDailySalesBarChart = (data) => {
+            const recentEntries = data.filter(e => e.type === 'revenue');
+            
+            const salesByDay = recentEntries.reduce((acc, e) => {
+                const day = format(e.dateObj, 'MMM d');
+                acc[day] = (acc[day] || 0) + e.amount;
+                return acc;
+            }, {});
+
+            const labels = Object.keys(salesByDay);
+            const salesData = Object.values(salesByDay);
+            renderChart('daily-sales-bar-chart', { type: 'bar', data: { labels, datasets: [{ label: 'Sales', data: salesData, backgroundColor: '#818cf8', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { color: chartStyler.labels() }, grid: { color: chartStyler.grid() } }, x: { ticks: { color: chartStyler.labels() }, grid: { display: false } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${formatCurrency(c.raw)}` } } } } });
+        };
+
+        const renderRevenueBySectorChart = (data) => {
+            const revenueEntriesWithSector = data.filter(e => e.type === 'revenue' && e.sector && e.sector.trim() !== '');
+            const chartId = 'revenue-by-sector-chart';
+            const chartInstance = state.chartInstances[chartId];
+
+            if (revenueEntriesWithSector.length === 0) {
+                DOMElements.sectorChart.wrapper.classList.add('hidden');
+                DOMElements.sectorChart.legendContainer.classList.add('hidden');
+                DOMElements.sectorChart.noData.classList.remove('hidden');
+                if (chartInstance) {
+                    chartInstance.destroy();
+                    delete state.chartInstances[chartId];
+                }
+                return;
+            }
+            
+            DOMElements.sectorChart.wrapper.classList.remove('hidden');
+            DOMElements.sectorChart.legendContainer.classList.remove('hidden');
+            DOMElements.sectorChart.noData.classList.add('hidden');
+
+            const sectors = [...new Set(revenueEntriesWithSector.map(e => e.sector))].sort();
+            const sectorColorMap = new Map(sectors.map((s, i) => [s, chartStyler.getColor(i)]));
+
+            const daysInRange = (state.ui.dateRange.end - state.ui.dateRange.start) / (1000 * 60 * 60 * 24);
+            let interval, fmt, periodFn;
+
+            if (daysInRange < 0) return;
+            if (daysInRange <= 31) { // Daily
+                 interval = eachDayOfInterval({start:state.ui.dateRange.start, end:state.ui.dateRange.end}); 
+                 fmt = 'MMM d'; periodFn = (d) => d;
+            } else if (daysInRange <= 180) { // Weekly
+                interval = eachWeekOfInterval({start:state.ui.dateRange.start, end:state.ui.dateRange.end},{weekStartsOn:1}); 
+                fmt = "'Wk' w, yy"; periodFn = (d) => startOfWeek(d, {weekStartsOn:1});
+            } else { // Monthly
+                interval = eachMonthOfInterval({start:state.ui.dateRange.start, end:state.ui.dateRange.end}); 
+                fmt = 'MMM yy'; periodFn = startOfMonth;
+            }
+            
+            const labels = interval.map(d => format(d, fmt));
+            const groupedData = new Map(labels.map(l => [l, new Map(sectors.map(s => [s, {revenue: 0, profit: 0}]))]));
+            
+            for (const entry of revenueEntriesWithSector) {
+                const key = format(periodFn(entry.dateObj), fmt);
+                if (groupedData.has(key) && entry.sector) {
+                    const periodMap = groupedData.get(key);
+                    if (periodMap.has(entry.sector)) {
+                        const sectorData = periodMap.get(entry.sector);
+                        sectorData.revenue += entry.amount;
+                        sectorData.profit += (entry.amount - (entry.fulfillmentExpense || 0));
+                    }
+                }
+            }
+            
+            const datasets = sectors.map(sector => {
+                const data = [];
+                const customData = [];
+                labels.forEach(label => {
+                    const dataPoint = groupedData.get(label)?.get(sector);
+                    const revenue = dataPoint?.revenue || 0;
+                    const profit = dataPoint?.profit || 0;
+                    const margin = revenue > 0 ? profit / revenue : 0;
+                    data.push(revenue);
+                    customData.push({ profit, margin });
+                });
+
+                return {
+                    label: sector,
+                    data: data,
+                    customData: customData,
+                    backgroundColor: sectorColorMap.get(sector),
+                    borderRadius: 2,
+                    barPercentage: 0.7,
+                    categoryPercentage: 0.8
+                }
+            });
+
+            // Render custom legend
+            const legendContainer = DOMElements.sectorChart.legendContainer;
+            legendContainer.innerHTML = '';
+            datasets.forEach((dataset, index) => {
+                const legendItem = document.createElement('div');
+                legendItem.className = 'legend-item flex items-center gap-2';
+                legendItem.innerHTML = `<span class="w-3 h-3 rounded-full" style="background-color: ${dataset.backgroundColor}"></span><span>${dataset.label}</span>`;
+                
+                // FIX: Replaced buggy legend click handler with the working version.
+                legendItem.onclick = () => {
+                    const chart = state.chartInstances[chartId];
+                    if (chart) {
+                        chart.toggleDataVisibility(index);
+                        chart.update();
+                        legendItem.classList.toggle('hidden-dataset', !chart.getDataVisibility(index));
+                    }
+                };
+                legendContainer.appendChild(legendItem);
+            });
+
+            renderChart(chartId, {
+                type: 'bar',
+                data: { labels, datasets },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { stacked: true, ticks: { color: chartStyler.labels(), maxRotation: 0, autoSkip: true, maxTicksLimit: 7 }, grid: { display: false } },
+                        y: { stacked: true, ticks: { color: chartStyler.labels(), callback: v => `$${v/1000}k` }, grid: { color: chartStyler.grid() } }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.dataset.label || '';
+                                    const revenue = context.parsed.y || 0;
+                                    const customInfo = context.dataset.customData[context.dataIndex];
+                                    
+                                    if (!customInfo) {
+                                        return `${label}: ${formatCurrency(revenue)}`;
+                                    }
+
+                                    const { profit, margin } = customInfo;
+                                    
+                                    return [
+                                        `${label}: ${formatCurrency(revenue)}`,
+                                        `Profit: ${formatCurrency(profit)}`,
+                                        `Margin: ${formatPercent(margin)}`
+                                    ];
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        };
+
+        const createPieChartConfig = (dataMap) => ({
+            type: 'doughnut',
+            data: { labels: [...dataMap.keys()], datasets: [{ data: [...dataMap.values()], backgroundColor: chartStyler.sectorColors, borderWidth: 0 }] },
+            options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.label}: ${formatCurrency(c.raw)}` } } } }
+        });
+
+        const renderSourcePieChart = (data) => {
+            const sourceMap = data.filter(e => e.type === 'revenue' && e.customerSource && e.customerSource !== 'N/A').reduce((acc, e) => acc.set(e.customerSource, (acc.get(e.customerSource) || 0) + e.amount), new Map());
+            renderChart('source-pie-chart', createPieChartConfig(sourceMap));
+        };
+        
+        const renderBusinessPieChart = (data) => {
+            const businessMap = data.filter(e => e.type === 'revenue' && e.business).reduce((acc, e) => acc.set(e.business, (acc.get(e.business) || 0) + e.amount), new Map());
+            renderChart('business-pie-chart', createPieChartConfig(businessMap));
+        };
+
+        const renderKpiCards = (data) => {
+            const revenueEntries = data.filter(e => e.type === 'revenue');
+            const expenseEntries = data.filter(e => e.type === 'expense');
+
+            const totalRevenue = revenueEntries.reduce((sum, e) => sum + e.amount, 0);
+            const fulfillmentCosts = revenueEntries.reduce((sum, e) => sum + (e.fulfillmentExpense || 0), 0);
+            const totalExpenses = expenseEntries.reduce((sum, e) => sum + e.amount, 0) + fulfillmentCosts;
+            const netProfit = totalRevenue - totalExpenses;
+            const newCustomers = new Set(revenueEntries.filter(e => e.status === 'New Customer').map(e => e.itemName)).size;
+            
+            const kpis = [
+                { label: 'Total Revenue', value: formatCurrency(totalRevenue), icon: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>' },
+                { label: 'Net Profit', value: formatCurrency(netProfit), icon: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>' },
+                { label: 'Total Expenses', value: formatCurrency(totalExpenses), icon: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="16" height="16" x="4" y="4" rx="2"/><path d="M9 12h6"/></svg>' },
+                { label: 'New Customers', value: newCustomers, icon: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></svg>' },
+            ];
+
+            DOMElements.kpiCardContainer.innerHTML = kpis.map(kpi => `
+                <div class="bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border flex items-start gap-4">
+                    <div class="bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 p-3 rounded-lg">${kpi.icon}</div>
+                    <div>
+                        <p class="text-sm text-gray-500 dark:text-dark-text-secondary">${kpi.label}</p>
+                        <p class="text-2xl font-bold">${kpi.value}</p>
+                    </div>
+                </div>
+            `).join('');
+        };
+        
+        // --- Main Render & UI Update Functions ---
+        const renderDashboard = () => {
+            const { start, end } = state.ui.dateRange;
+            const filteredData = state.entries.filter(e => {
+                const entryDate = e.dateObj;
+                return entryDate >= start && entryDate <= end;
+            });
+            
+            renderKpiCards(filteredData);
+            renderAllCharts(filteredData);
+            renderBusinessBreakdown(filteredData);
+            renderTransactionTable(filteredData);
+        };
+
+        const renderTheme = () => {
+            DOMElements.html.classList.toggle('dark', state.theme === 'dark');
+            DOMElements.themeToggle.innerHTML = state.theme === 'dark' ? `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>` : `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`;
+            if (state.ui.activePage === 'invoicing') {
+                updateInvoicePreview();
+            } else {
+                 renderDashboard();
+            }
+        };
+
+        const renderBusinessBreakdown = (data) => {
+            const breakdown = data.reduce((acc, e) => {
+                if(!e.business) return acc;
+                if(!acc[e.business]) acc[e.business] = { revenue: 0, expenses: 0 };
+                if (e.type === 'revenue') {
+                    acc[e.business].revenue += e.amount;
+                    acc[e.business].expenses += (e.fulfillmentExpense || 0);
+                }
+                if (e.type === 'expense') {
+                    acc[e.business].expenses += e.amount;
+                }
+                return acc;
+            }, {});
+            let content = `<h3 class="text-md font-bold mb-2">Business Summary</h3><div class="space-y-2 overflow-y-auto max-h-24 pr-4 text-sm">`;
+            const sortedBusinesses = Object.entries(breakdown).sort((a,b) => b[1].revenue - a[1].revenue);
+            content += sortedBusinesses.length ? sortedBusinesses.map(([b,d]) => `<div><p class="font-semibold text-gray-700 dark:text-gray-300">${b}</p><div class="flex justify-between text-xs"><span class="text-green-500">Rev: ${formatCurrency(d.revenue)}</span><span class="text-red-500">Exp: ${formatCurrency(d.expenses)}</span></div></div>`).join('') : `<p class="dark:text-dark-text-secondary">No data.</p>`;
+            DOMElements.businessBreakdownContainer.innerHTML = content + `</div>`;
+        };
+        
+        const renderTransactionTable = (data) => {
+            const tableContainer = DOMElements.transactionTableContainer;
+            if (!tableContainer.querySelector('table')) { // Initial render of table structure
+                tableContainer.innerHTML = `
+                    <div class="flex flex-wrap justify-between items-center mb-4 gap-4">
+                        <h2 class="text-xl font-bold">Recent Activity</h2>
+                        <div class="relative flex-1 min-w-[240px] max-w-md">
+                            <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" /></svg>
+                            <input id="search-input" type="text" placeholder="Search transactions..." class="w-full pl-10 pr-4 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                        </div>
+                        <div id="table-tabs" class="flex items-center border border-gray-200 dark:border-dark-border rounded-lg p-1 space-x-1">${['all', 'revenue', 'expense'].map(t => `<button class="table-tab-btn" data-tab="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</button>`).join('')}</div>
+                    </div>
+                    <div class="overflow-x-auto"><table class="w-full text-left"><thead id="table-head"></thead><tbody id="table-body"></tbody></table></div>`;
+                // Attach event listeners once
+                tableContainer.querySelector('#search-input').addEventListener('input', handleSearch);
+                tableContainer.querySelector('#table-tabs').addEventListener('click', handleTabClick);
+                tableContainer.querySelector('#table-head').addEventListener('click', handleSortClick);
+            }
+            // Update active tab style
+            tableContainer.querySelectorAll('.table-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === state.ui.activeTableTab));
+            
+            // Render table header
+            const { key, order } = state.ui.sort;
+            const renderHeader = (k, t) => { const isCurr = key===k; return `<th class="p-3 font-semibold sortable ${isCurr ? `sort-${order}` : ''}" data-sort-key="${k}"><span class="flex items-center gap-2">${t}<span class="sort-indicator">${isCurr&&order==='asc'?'▲':'▼'}</span></span></th>`; };
+            tableContainer.querySelector('#table-head').innerHTML = `<tr class="text-sm dark:text-dark-text-secondary border-b dark:border-dark-border">${renderHeader('itemName', 'Customer/Item')}${renderHeader('amount', 'Amount')}${renderHeader('netProfit', 'Net Profit')}${renderHeader('netMargin', 'Net Margin')}${renderHeader('date', 'Date')}${renderHeader('status', 'Status')}<th class="p-3 font-semibold">Actions</th></tr>`;
+            
+            // Filter and sort data
+            const query = state.ui.searchQuery.toLowerCase();
+            const filtered = data.filter(e => 
+                (state.ui.activeTableTab === 'all' || e.type === state.ui.activeTableTab) && 
+                (!query || [e.itemName,e.business,e.customerSource,e.status,e.sector].join(' ').toLowerCase().includes(query))
+            );
+            const sorted = filtered.sort((a,b) => {
+                let valA, valB;
+                if (key === 'netProfit') { valA = a.type==='revenue' ? a.amount - (a.fulfillmentExpense || 0) : -Infinity; valB = b.type==='revenue' ? b.amount - (b.fulfillmentExpense || 0) : -Infinity; }
+                else if (key === 'netMargin') { valA = a.type==='revenue' && a.amount > 0 ? (a.amount-(a.fulfillmentExpense || 0)) / a.amount : -Infinity; valB = b.type==='revenue' && b.amount > 0 ? (b.amount - (b.fulfillmentExpense || 0)) / b.amount : -Infinity; }
+                else { valA = a[key]; valB = b[key]; }
+                return (valA < valB ? -1 : valA > valB ? 1 : 0) * (order === 'asc' ? 1 : -1);
+            });
+            
+            // Render table body
+            const tbody = tableContainer.querySelector('#table-body');
+            tbody.innerHTML = sorted.length ? sorted.map(renderTransactionRow).join('') : `<tr><td colspan="7" class="text-center p-8 dark:text-dark-text-secondary">No matching transactions in this date range.</td></tr>`;
+            tbody.querySelectorAll('.delete-btn').forEach(b => b.addEventListener('click', handleDeleteClick));
+        };
+        
+        const renderTransactionRow = (entry) => {
+            const statusColors = {'Recurring':'bg-green-500/10 text-green-400','New Customer':'bg-blue-500/10 text-blue-400','Warm Lead':'bg-yellow-500/10 text-yellow-400','Actual':'bg-gray-500/10 text-gray-400'};
+            const avatarColor = (name='X') => ['bg-blue-500','bg-green-500','bg-purple-500','bg-red-500','bg-yellow-500', 'bg-pink-500'][name.charCodeAt(0) % 6];
+            const netProfit = entry.type==='revenue' ? entry.amount - (entry.fulfillmentExpense || 0) : null;
+            const netMargin = netProfit !== null && entry.amount > 0 ? (netProfit / entry.amount) : null;
+            
+            return `<tr class="border-b dark:border-dark-border hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                <td class="p-3"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold ${avatarColor(entry.itemName)}">${(entry.itemName||'X').charAt(0).toUpperCase()}</div><div><div class="font-bold">${entry.itemName}</div><div class="text-sm dark:text-dark-text-secondary">${entry.business || ''}${entry.customerSource && entry.customerSource!=='N/A' ? ` | ${entry.customerSource}`:''}</div></div></div></td>
+                <td class="p-3 font-bold ${entry.type === 'revenue' ? 'text-green-400' : 'text-red-400'}">${formatCurrency(entry.amount)}</td>
+                <td class="p-3 dark:text-dark-text-secondary">${netProfit!==null?formatCurrency(netProfit):'N/A'}</td>
+                <td class="p-3 dark:text-dark-text-secondary">${netMargin!==null?formatPercent(netMargin):'N/A'}</td>
+                <td class="p-3 dark:text-dark-text-secondary">${format(entry.dateObj, 'MMM d, yyyy')}</td>
+                <td class="p-3"><span class="px-2.5 py-1 text-xs font-semibold rounded-full ${statusColors[entry.status] || 'bg-gray-500/10 text-gray-400'}">${entry.status}</span></td>
+                <td class="p-3"><button class="text-gray-400 hover:text-red-500 delete-btn" data-id="${entry.id}"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button></td></tr>`;
+        };
+        
+        const renderModalForm = () => {
+            const type = state.ui.activeModalForm;
+            DOMElements.tagsDataList.innerHTML = [...new Set(state.entries.map(e => e.sector).filter(Boolean))].map(t => `<option value="${t}"></option>`).join('');
+            DOMElements.addEntryModal.typeButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.type === type));
+            const base = "mt-1 block w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-300 dark:border-dark-border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:text-sm";
+            const field = (n, l, o={}) => {
+                const {t='text', p='', note='', span='md:col-span-1'} = o;
+                const label = `<label for="${n}" class="block text-sm font-medium dark:text-dark-text-secondary">${l}</label>${note?`<p class="text-xs text-gray-500">${note}</p>`:''}`;
+                if (t==='select') return `<div class="${span}">${label}<select name="${n}" id="${n}" class="${base}">${o.choices.map(c=>`<option value="${c}">${c}</option>`).join('')}</select></div>`;
+                if (t==='textarea') return `<div class="${span}">${label}<textarea name="${n}" id="${n}" rows="2" class="${base}" placeholder="${p}"></textarea></div>`;
+                return `<div class="${span}">${label}<input type="${t}" name="${n}" id="${n}" class="${base}" placeholder="${p}" ${t==='date'?`value="${format(new Date(),'yyyy-MM-dd')}"`:''} ${o.list?`list="${o.list}"`:''} required></div>`;
+            };
+            const common = `${field('date','Date',{t:'date'})}${field('amount','Amount ($)',{t:'number',p:'1500.00'})}`;
+            const revenue = `${field('itemName','Customer Name',{p:'John Doe'})}${field('business','Business',{p:'Web Design'})}${field('fulfillmentExpense','Fulfillment Cost ($)',{t:'number',p:'250.00'})}${field('sector','Sector/Tag',{p:'Services',list:'tags-datalist'})}${field('customerSource','Source',{p:'Referral'})}${field('status','Status',{t:'select',choices:['New Customer','Warm Lead','Recurring','N/A']})}`;
+            const expense = `${field('itemName','Item/Service',{p:'Office Supplies'})}${field('business','Category',{p:'Software, Overhead'})}${field('sector','Tag',{p:'Tools, Marketing',list:'tags-datalist'})}${field('status','Status',{t:'select',choices:['Actual','Recurring','N/A']})}`;
+            const fields = type==='revenue' ? `${common}${revenue}` : `${common}${expense}`;
+            DOMElements.addEntryModal.form.innerHTML = `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">${fields}${field('notes','Notes',{t:'textarea',p:'Optional details...',span:'md:col-span-2'})}</div><div class="flex justify-end space-x-3 pt-4"><button type="button" class="modal-cancel px-5 py-2.5 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 dark:bg-dark-border dark:text-dark-text-primary dark:hover:bg-gray-600 font-semibold">Cancel</button><button type="submit" class="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold">Save Transaction</button></div>`;
+            DOMElements.addEntryModal.form.querySelector('.modal-cancel').addEventListener('click', () => toggleModal(DOMElements.addEntryModal.modal, false));
+        };
+        
+        // --- Page Switching ---
+        const switchPage = (pageId) => {
+            state.ui.activePage = pageId;
+            updateActivePage();
+        };
+
+        const updateActivePage = () => {
+             // Hide all pages
+            Object.values(DOMElements.pages).forEach(page => page.classList.remove('active'));
+            // Show active page
+            if (DOMElements.pages[state.ui.activePage]) {
+                DOMElements.pages[state.ui.activePage].classList.add('active');
+            }
+
+            // Update sidebar link styles
+            DOMElements.sidebarLinks.forEach(link => {
+                if (link.dataset.page === state.ui.activePage) {
+                    link.classList.add('bg-blue-100', 'dark:bg-blue-500/20', 'text-blue-600', 'dark:text-blue-400');
+                    link.classList.remove('text-gray-500', 'hover:bg-gray-100', 'dark:hover:bg-gray-700/50');
+                } else {
+                    link.classList.remove('bg-blue-100', 'dark:bg-blue-500/20', 'text-blue-600', 'dark:text-blue-400');
+                    link.classList.add('text-gray-500', 'hover:bg-gray-100', 'dark:hover:bg-gray-700/50');
+                }
+            });
+
+            if (state.ui.activePage === 'invoicing') {
+                initInvoice();
+            } else {
+                renderTheme(); // Use renderTheme to ensure charts are colored correctly on page switch
+            }
+        };
+
+
+        // --- Invoice Functions ---
+        const initInvoice = () => {
+            DOMElements.invoice.form.reset();
+            document.getElementById('invoice-date-issued').value = format(new Date(), 'yyyy-MM-dd');
+            document.getElementById('invoice-date-due').value = format(addDays(new Date(), 30), 'yyyy-MM-dd');
+            DOMElements.invoice.itemsContainer.innerHTML = '';
+            addInvoiceItem();
+            updateInvoicePreview();
+
+             // Populate client datalist
+            const clientNames = [...new Set(state.entries.filter(e => e.type === 'revenue').map(e => e.itemName))];
+            DOMElements.invoice.clientDatalist.innerHTML = clientNames.map(name => `<option value="${name}"></option>`).join('');
+        };
+
+        const addInvoiceItem = () => {
+            const itemHtml = `
+                <div class="grid grid-cols-12 gap-2 items-center invoice-item-row">
+                    <div class="col-span-12 sm:col-span-5"><input type="text" placeholder="Item Description" class="invoice-item-desc w-full px-2 py-1 bg-gray-50 dark:bg-slate-900/50 border-gray-300 dark:border-dark-border rounded"></div>
+                    <div class="col-span-4 sm:col-span-2"><input type="number" value="1" min="0" placeholder="Qty" class="invoice-item-qty w-full px-2 py-1 bg-gray-50 dark:bg-slate-900/50 border-gray-300 dark:border-dark-border rounded"></div>
+                    <div class="col-span-4 sm:col-span-2"><input type="number" value="0" min="0" step="0.01" placeholder="Rate" class="invoice-item-rate w-full px-2 py-1 bg-gray-50 dark:bg-slate-900/50 border-gray-300 dark:border-dark-border rounded"></div>
+                    <div class="col-span-3 sm:col-span-2 text-right dark:text-dark-text-secondary"><span class="invoice-item-total">$0.00</span></div>
+                    <div class="col-span-1 text-right"><button type="button" class="text-red-500 hover:text-red-700 remove-invoice-item-btn font-bold text-lg">&times;</button></div>
+                </div>
+            `;
+            DOMElements.invoice.itemsContainer.insertAdjacentHTML('beforeend', itemHtml);
+        };
+        
+        const updateInvoicePreview = () => {
+            const form = DOMElements.invoice.form;
+            const fromText = form.querySelector('#invoice-from-name').value.replace(/\n/g, '<br>') || 'Your Company, Inc.<br>123 Main Street<br>Anytown, USA 12345';
+            const toText = form.querySelector('#invoice-to-name').value.replace(/\n/g, '<br>') || 'Client Name<br>Client Address';
+            const invoiceNum = form.querySelector('#invoice-number').value || 'INV-001';
+            const dateIssued = form.querySelector('#invoice-date-issued').value;
+            const dateDue = form.querySelector('#invoice-date-due').value;
+            const notes = form.querySelector('#invoice-notes').value.replace(/\n/g, '<br>');
+            const terms = form.querySelector('#invoice-terms').value.replace(/\n/g, '<br>');
+            
+            const discount = parseFloat(form.querySelector('#invoice-discount').value) || 0;
+            const taxRate = parseFloat(form.querySelector('#invoice-tax-rate').value) || 0;
+            const shipping = parseFloat(form.querySelector('#invoice-shipping').value) || 0;
+
+
+            let subtotal = 0;
+            const itemRows = Array.from(DOMElements.invoice.itemsContainer.children).map(itemEl => {
+                const desc = itemEl.querySelector('.invoice-item-desc').value || 'Service/Product';
+                const qty = parseFloat(itemEl.querySelector('.invoice-item-qty').value) || 0;
+                const rate = parseFloat(itemEl.querySelector('.invoice-item-rate').value) || 0;
+                const total = qty * rate;
+                subtotal += total;
+                itemEl.querySelector('.invoice-item-total').textContent = formatCurrency(total);
+                return `<tr class="item"><td>${desc}</td><td style="text-align: center;">${qty}</td><td style="text-align: right;">${formatCurrency(rate)}</td><td style="text-align: right;">${formatCurrency(total)}</td></tr>`;
+            }).join('');
+
+            const subtotalAfterDiscount = subtotal - discount;
+            const tax = subtotalAfterDiscount * (taxRate / 100);
+            const total = subtotalAfterDiscount + tax + shipping;
+
+            const previewHTML = `
+                <table cellpadding="0" cellspacing="0">
+                    <tr class="top">
+                        <td colspan="4">
+                            <table>
+                                <tr>
+                                    <td class="invoice-title" style="font-size: 45px; line-height: 45px; color: #333; font-weight: bold;">
+                                        INVOICE
+                                    </td>
+                                    <td style="text-align: right;">
+                                        Invoice #: ${invoiceNum}<br />
+                                        Created: ${dateIssued ? format(parseISO(dateIssued), 'MMM d, yyyy') : ''}<br />
+                                        Due: ${dateDue ? format(parseISO(dateDue), 'MMM d, yyyy') : ''}
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr class="information">
+                        <td colspan="4">
+                            <table>
+                                <tr>
+                                    <td>
+                                       ${fromText}
+                                    </td>
+                                    <td style="text-align: right;">
+                                        ${toText}
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr class="heading">
+                        <td>Item</td><td style="text-align: center;">Quantity</td><td style="text-align: right;">Rate</td><td style="text-align: right;">Price</td>
+                    </tr>
+                    ${itemRows}
+                </table>
+                <table cellpadding="0" cellspacing="0" style="width: 40%; margin-left: auto; margin-top: 20px;">
+                     <tr class="total">
+                        <td style="text-align: right;">Subtotal:</td>
+                        <td style="text-align: right;">${formatCurrency(subtotal)}</td>
+                    </tr>
+                     ${discount > 0 ? `<tr class="total">
+                        <td style="text-align: right;">Discount:</td>
+                        <td style="text-align: right;">${formatCurrency(discount)}</td>
+                    </tr>` : ''}
+                     ${tax > 0 ? `<tr class="total">
+                        <td style="text-align: right;">Tax (${taxRate}%):</td>
+                        <td style="text-align: right;">${formatCurrency(tax)}</td>
+                    </tr>` : ''}
+                    ${shipping > 0 ? `<tr class="total">
+                        <td style="text-align: right;">Shipping:</td>
+                        <td style="text-align: right;">${formatCurrency(shipping)}</td>
+                    </tr>` : ''}
+                     <tr class="total" style="font-size: 20px; font-weight: bold;">
+                        <td style="text-align: right;">Total:</td>
+                        <td style="text-align: right;">${formatCurrency(total)}</td>
+                    </tr>
+                </table>
+                 ${notes ? `<div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee;"><strong>Notes:</strong><br>${notes}</div>` : ''}
+                 ${terms ? `<div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;"><strong>Terms:</strong><br>${terms}</div>` : ''}
+            `;
+            DOMElements.invoice.preview.innerHTML = previewHTML;
+        };
+
+        const handleDownloadPDF = async () => {
+            const invoiceTemplate = DOMElements.invoice.preview;
+            const canvas = await html2canvas(invoiceTemplate, { scale: 3, useCORS: true, backgroundColor: null });
+            const imgData = canvas.toDataURL('image/png');
+            
+            const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = pdf.internal.pageSize.getHeight();
+
+            const bgColor = state.theme === 'dark' ? '#1E293B' : '#FFFFFF';
+            pdf.setFillColor(bgColor);
+            pdf.rect(0, 0, pdfWidth, pdfHeight, 'F');
+            
+            const canvasAspectRatio = canvas.width / canvas.height;
+            const imgWidth = pdfWidth - 20; // Add some margin
+            const imgHeight = imgWidth / canvasAspectRatio;
+            
+            // Center the image on the PDF
+            const x = 10;
+            const y = (pdfHeight - imgHeight) / 2;
+
+            pdf.addImage(imgData, 'PNG', x, y, imgWidth, imgHeight);
+            
+            const invoiceNum = document.getElementById('invoice-number').value || 'invoice';
+            pdf.save(`invoice-${invoiceNum}.pdf`);
+        };
+
+
+        // --- Event Handlers ---
+        const toggleTheme = () => { 
+            state.theme = state.theme === 'light' ? 'dark' : 'light'; 
+            saveState();
+            renderTheme(); 
+        };
+        const handleTabClick = (e) => { if (e.target.matches('[data-tab]')) { state.ui.activeTableTab = e.target.dataset.tab; renderDashboard(); }};
+        const handleSortClick = (e) => {
+            const th = e.target.closest('[data-sort-key]'); if(!th) return;
+            const newKey = th.dataset.sortKey;
+            state.ui.sort.order = state.ui.sort.key === newKey && state.ui.sort.order === 'desc' ? 'asc' : 'desc';
+            state.ui.sort.key = newKey; renderDashboard();
+        };
+        const handleDeleteClick = (e) => {
+            state.itemToDelete = e.target.closest('[data-id]').dataset.id;
+            toggleModal(DOMElements.deleteModal.modal, true);
+        };
+        const confirmDelete = () => {
+            state.entries = state.entries.filter(e => e.id !== state.itemToDelete);
+            state.itemToDelete = null;
+            toggleModal(DOMElements.deleteModal.modal, false);
+            renderDashboard();
+            saveState();
+        };
+        const handleFormSubmit = (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const data = Object.fromEntries(new FormData(form).entries());
+            if (!data.amount || !data.itemName) {
+                DOMElements.addEntryModal.error.textContent = 'Please fill out at least the name and amount fields.';
+                DOMElements.addEntryModal.error.classList.remove('hidden');
+                return;
+            }
+            const newEntry = {
+                id: crypto.randomUUID(),
+                type: state.ui.activeModalForm,
+                ...data,
+                amount: parseFloat(data.amount),
+                fulfillmentExpense: parseFloat(data.fulfillmentExpense || 0),
+                dateObj: parseISO(data.date)
+            };
+            if (newEntry.type === 'expense') {
+                newEntry.customerSource = 'N/A';
+                newEntry.fulfillmentExpense = 0;
+            }
+            
+            state.entries.unshift(newEntry);
+
+            const newRangeStart = startOfMonth(newEntry.dateObj);
+            const newRangeEnd = endOfMonth(newEntry.dateObj);
+            state.ui.dateRange = { start: newRangeStart, end: newRangeEnd };
+
+            const now = new Date();
+            if (isSameDay(newRangeStart, startOfMonth(now)) && isSameDay(newRangeEnd, endOfMonth(now))) {
+                state.ui.activeDatePreset = 'month';
+            } else {
+                state.ui.activeDatePreset = null;
+            }
+
+            if (pickerInstance) {
+                pickerInstance.setDateRange(newRangeStart, newRangeEnd);
+            }
+            updateActiveDatePresetButtons();
+            
+            toggleModal(DOMElements.addEntryModal.modal, false);
+            form.reset();
+            renderDashboard();
+            saveState();
+        };
+        const handleSearch = (e) => { state.ui.searchQuery = e.target.value; renderDashboard(); };
+        const toggleModal = (modal, show) => {
+            modal.style.display = show ? 'flex' : 'none';
+            if(show && modal.id === 'add-entry-modal'){
+                DOMElements.addEntryModal.error.classList.add('hidden');
+                renderModalForm();
+            }
+        };
+        
+        const updateActiveDatePresetButtons = () => {
+            DOMElements.datePresetsContainer.querySelectorAll('.date-preset-btn').forEach(btn => {
+                if (btn.dataset.range === state.ui.activeDatePreset) {
+                    btn.classList.add('bg-white', 'dark:bg-slate-800', 'shadow-sm', 'text-gray-900', 'dark:text-white');
+                    btn.classList.remove('text-gray-600', 'dark:text-dark-text-secondary');
+                } else {
+                    btn.classList.remove('bg-white', 'dark:bg-slate-800', 'shadow-sm', 'text-gray-900', 'dark:text-white');
+                    btn.classList.add('text-gray-600', 'dark:text-dark-text-secondary');
+                }
+            });
+        };
+        
+        const handleDatePresetClick = (picker) => (e) => {
+            const button = e.target.closest('.date-preset-btn');
+            if (!button) return;
+
+            const range = button.dataset.range;
+            const now = new Date();
+            let start, end;
+
+            switch(range) {
+                case 'day':
+                    start = startOfDay(now);
+                    end = endOfDay(now);
+                    break;
+                case 'week':
+                    start = startOfWeek(now, { weekStartsOn: 1 });
+                    end = endOfWeek(now, { weekStartsOn: 1 });
+                    break;
+                case 'month':
+                    start = startOfMonth(now);
+                    end = endOfMonth(now);
+                    break;
+                default:
+                    return;
+            }
+
+            state.ui.dateRange = { start, end };
+            state.ui.activeDatePreset = range;
+            picker.setDateRange(start, end);
+            updateActiveDatePresetButtons();
+            renderDashboard();
+        }
+
+        const handleExportData = () => {
+            const dataToExport = JSON.stringify(state.entries.map(({dateObj, ...rest}) => rest), null, 2);
+            const blob = new Blob([dataToExport], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `transactions-export-${format(new Date(), 'yyyy-MM-dd')}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        };
+
+        const handleImportData = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    if (!Array.isArray(importedData)) {
+                        throw new Error('Invalid data format. Expected an array.');
+                    }
+                    if (importedData.length > 0 && (!importedData[0].id || !importedData[0].date)) {
+                         throw new Error('Invalid data structure in imported file.');
+                    }
+                    state.entries = importedData.map(entry => ({...entry, dateObj: parseISO(entry.date)}));
+                    renderDashboard();
+                    saveState();
+                } catch (error) {
+                    console.error('Failed to import data:', error);
+                    alert(`Import failed: ${error.message}`);
+                }
+            };
+            reader.onerror = () => {
+                alert('Failed to read the file.');
+            };
+            reader.readAsText(file);
+            event.target.value = ''; // Reset file input
+        };
+
+        const processRecurringEntries = () => {
+            const now = new Date();
+            const lastCheck = localStorage.getItem('lastRecurringCheck');
+            // Only run once per day to be safe
+            if (lastCheck && isSameDay(parseISO(lastCheck), now)) {
+                return false;
+            }
+
+            const recurringEntries = state.entries.filter(e => e.status === 'Recurring');
+            const newEntries = [];
+
+            // Group by a unique key (item name + business + type)
+            const groups = recurringEntries.reduce((acc, entry) => {
+                const key = `${entry.itemName}-${entry.business}-${entry.type}`;
+                if (!acc[key]) acc[key] = [];
+                acc[key].push(entry);
+                return acc;
+            }, {});
+
+            Object.values(groups).forEach(group => {
+                // Find the latest entry in this group
+                const latestEntry = group.sort((a,b) => b.dateObj - a.dateObj)[0];
+                
+                // If the latest entry is not in the current month, create a new one
+                if (!isSameMonth(latestEntry.dateObj, now)) {
+                    // FIX: Changed logic to correctly advance by one month.
+                    let newDate = addMonths(latestEntry.dateObj, 1);
+                    
+                    // Ensure the new date is not in the future
+                    if (isAfter(newDate, now)) return;
+
+                    const newEntry = {
+                        ...latestEntry,
+                        id: crypto.randomUUID(),
+                        date: format(newDate, 'yyyy-MM-dd'),
+                        dateObj: newDate,
+                        status: 'Recurring' // Keep it recurring
+                    };
+                    newEntries.push(newEntry);
+                }
+            });
+
+            if (newEntries.length > 0) {
+                state.entries.unshift(...newEntries);
+                return true; // Indicates that data has changed
+            }
+            return false;
+        };
+
+        const toggleMobileMenu = () => {
+            DOMElements.sidebar.classList.toggle('-translate-x-full');
+            DOMElements.mobileMenu.overlay.classList.toggle('hidden');
+        };
+        
+        // --- Initialization ---
+        const init = () => {
+            loadState();
+            
+            // Attach event listeners
+            DOMElements.themeToggle.addEventListener('click', toggleTheme);
+            DOMElements.addEntryButton.addEventListener('click', () => {
+                toggleModal(DOMElements.addEntryModal.modal, true);
+            });
+            DOMElements.addEntryModal.closeButton.addEventListener('click', () => toggleModal(DOMElements.addEntryModal.modal, false));
+            DOMElements.addEntryModal.typeButtons.forEach(btn => btn.addEventListener('click', (e) => {
+                if(e.target.matches('[data-type]')){
+                    state.ui.activeModalForm = e.target.dataset.type;
+                    renderModalForm();
+                }
+            }));
+            DOMElements.addEntryModal.form.addEventListener('submit', handleFormSubmit);
+            DOMElements.deleteModal.confirmButton.addEventListener('click', confirmDelete);
+            DOMElements.deleteModal.cancelButton.addEventListener('click', () => toggleModal(DOMElements.deleteModal.modal, false));
+            
+            // Page switching listeners
+            DOMElements.sidebarLinks.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    switchPage(link.dataset.page);
+                    if (window.innerWidth < 768) { // md breakpoint
+                        toggleMobileMenu();
+                    }
+                });
+            });
+
+            // Mobile Menu Listeners
+            DOMElements.mobileMenu.button.addEventListener('click', toggleMobileMenu);
+            DOMElements.mobileMenu.overlay.addEventListener('click', toggleMobileMenu);
+
+            // Invoice listeners
+            DOMElements.invoice.addItemButton.addEventListener('click', addInvoiceItem);
+            DOMElements.invoice.form.addEventListener('input', updateInvoicePreview);
+            DOMElements.invoice.itemsContainer.addEventListener('click', (e) => {
+                if (e.target.classList.contains('remove-invoice-item-btn')) {
+                    e.target.closest('.invoice-item-row').remove();
+                    updateInvoicePreview();
+                }
+            });
+            DOMElements.invoice.downloadPdfButton.addEventListener('click', handleDownloadPDF);
+            
+            // Data Import / Export Listeners
+            DOMElements.exportDataButton.addEventListener('click', handleExportData);
+            DOMElements.importData.button.addEventListener('click', () => DOMElements.importData.input.click());
+            DOMElements.importData.input.addEventListener('change', handleImportData);
+
+            // Date Range Picker
+            const picker = new Litepicker({
+                element: DOMElements.dateRangePicker,
+                singleMode: false,
+                format: 'MMM D, YYYY',
+                startDate: state.ui.dateRange.start,
+                endDate: state.ui.dateRange.end,
+                setup: (picker) => {
+                    picker.on('selected', (date1, date2) => {
+                        state.ui.dateRange.start = date1.dateInstance;
+                        state.ui.dateRange.end = date2.dateInstance;
+                        state.ui.activeDatePreset = null; // A custom range clears presets
+                        updateActiveDatePresetButtons();
+                        renderDashboard();
+                    });
+                },
+            });
+            pickerInstance = picker; // Assign to global instance
+            
+            DOMElements.datePresetsContainer.addEventListener('click', handleDatePresetClick(picker));
+            
+            // Initial render
+            DOMElements.loader.style.display = 'none';
+            DOMElements.dashboardContent.classList.remove('hidden');
+            
+            if (processRecurringEntries()) {
+                saveState(); // Save new recurring entries
+            }
+            
+            updateActivePage(); // This will call renderTheme -> renderDashboard
+            updateActiveDatePresetButtons();
+        };
+        document.addEventListener('DOMContentLoaded', init);
+    })();
+    </script>
+</body>
+</html>
