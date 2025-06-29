@@ -217,6 +217,41 @@
         .dark .all-day-task-item {
             background-color: #1e40af;
         }
+        .calendar-month-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            height: 100%;
+        }
+        .calendar-day-cell {
+            border-right: 1px solid #e5e7eb;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 8px;
+            min-height: 120px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .dark .calendar-day-cell {
+             border-right-color: #334155;
+             border-bottom-color: #334155;
+        }
+        .calendar-day-cell:nth-child(7n) { border-right: none; }
+        .calendar-day-cell.other-month { background-color: #f9fafb; color: #9ca3af; }
+        .dark .calendar-day-cell.other-month { background-color: #1a2438; color: #6b7280; }
+        .calendar-day-cell.is-today { background-color: #eff6ff; }
+        .dark .calendar-day-cell.is-today { background-color: #1e3a8a; }
+        .calendar-day-cell:hover { background-color: #f0f9ff; }
+        .dark .calendar-day-cell:hover { background-color: #172554; }
+        .month-task-item {
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
 
 
     </style>
@@ -333,12 +368,17 @@
                         <h1 class="text-3xl font-bold text-gray-900 dark:text-dark-text-primary">Task Manager</h1>
                         <p class="text-gray-500 dark:text-dark-text-secondary">Dashboard / Tasks</p>
                     </div>
-                    <div class="flex items-center space-x-4">
+                    <div class="flex items-center flex-wrap gap-4">
                         <div id="task-view-switcher" class="flex items-center bg-gray-200 dark:bg-dark-surface rounded-lg p-1 text-sm font-semibold text-gray-600 dark:text-dark-text-secondary">
                             <button data-view="board" class="task-view-btn px-3 py-1.5 rounded-md">Board</button>
                             <button data-view="list" class="task-view-btn px-3 py-1.5 rounded-md">List</button>
                             <button data-view="calendar" class="task-view-btn px-3 py-1.5 rounded-md">Calendar</button>
                             <button data-view="analytics" class="task-view-btn px-3 py-1.5 rounded-md">Analytics</button>
+                        </div>
+                         <div class="flex gap-2">
+                            <input type="file" id="import-tasks-input" class="hidden" accept=".json">
+                            <button id="import-tasks-button" class="bg-white text-gray-800 dark:bg-slate-800 dark:text-white px-3 py-2 rounded-lg shadow-sm hover:bg-gray-100 dark:hover:bg-slate-600 font-semibold flex items-center justify-center gap-2 text-sm border border-gray-200 dark:border-dark-border">Import Tasks</button>
+                            <button id="export-tasks-button" class="bg-white text-gray-800 dark:bg-slate-800 dark:text-white px-3 py-2 rounded-lg shadow-sm hover:bg-gray-100 dark:hover:bg-slate-600 font-semibold flex items-center justify-center gap-2 text-sm border border-gray-200 dark:border-dark-border">Export Tasks</button>
                         </div>
                         <button id="add-task-button" class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-md hover:bg-blue-700 font-semibold flex items-center gap-2 text-sm">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>Add Task
@@ -421,7 +461,7 @@
         let calendarDraggedTaskId = null; // For calendar view drag-and-drop
         
         // Destructure date-fns functions for easy access
-        const { parseISO, format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, startOfDay, endOfDay, eachDayOfInterval, eachWeekOfInterval, eachMonthOfInterval, subDays, addDays, isSameMonth, isSameDay, addMonths, getDaysInMonth, getDay, formatDuration, intervalToDuration, isToday, isTomorrow, isWithinInterval, differenceInHours, isBefore, set, getHours, getMinutes, addMinutes, roundToNearestMinutes } = dateFns;
+        const { parseISO, format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, startOfDay, endOfDay, eachDayOfInterval, eachWeekOfInterval, eachMonthOfInterval, subDays, addDays, isSameMonth, isSameDay, addMonths, addWeeks, getDaysInMonth, getDay, formatDuration, intervalToDuration, isToday, isTomorrow, isWithinInterval, differenceInHours, isBefore, set, getHours, getMinutes, addMinutes, roundToNearestMinutes } = dateFns;
 
         // --- Data Model: Sub-tasks are now more complex objects
         const initialTasks = [
@@ -465,6 +505,7 @@
                 activePage: 'tasks',
                 activeTableTab: 'all',
                 activeTaskView: 'board',
+                activeCalendarView: 'month',
                 todoFilter: 'all',
                 currentCalendarDate: new Date(),
                 dateRange: { start: startOfMonth(new Date()), end: endOfMonth(new Date()) },
@@ -539,6 +580,9 @@
                 content: document.getElementById('tasks-content'),
                 viewSwitcher: document.getElementById('task-view-switcher'),
                 addTaskButton: document.getElementById('add-task-button'),
+                importTasksButton: document.getElementById('import-tasks-button'),
+                importTasksInput: document.getElementById('import-tasks-input'),
+                exportTasksButton: document.getElementById('export-tasks-button'),
                 detailModal: document.getElementById('task-detail-modal'),
                 detailModalBody: document.getElementById('task-modal-body'),
                 detailModalClose: document.getElementById('task-modal-close-button'),
@@ -607,15 +651,15 @@
                     projects: state.projects,
                     theme: state.theme,
                 };
-                localStorage.setItem('dashboardState-v26', JSON.stringify(stateToSave));
-                localStorage.setItem('lastRecurringCheck-v26', new Date().toISOString());
+                localStorage.setItem('dashboardState-v27', JSON.stringify(stateToSave));
+                localStorage.setItem('lastRecurringCheck-v27', new Date().toISOString());
             } catch (error) {
                 console.error("Failed to save state to localStorage:", error);
             }
         };
 
         const loadState = () => {
-            const savedStateJSON = localStorage.getItem('dashboardState-v26');
+            const savedStateJSON = localStorage.getItem('dashboardState-v27');
             
             if (savedStateJSON) {
                 const savedState = JSON.parse(savedStateJSON);
@@ -1219,40 +1263,74 @@
 
         const renderTaskCalendarView = () => {
             const date = state.ui.currentCalendarDate;
+            const view = state.ui.activeCalendarView;
+            let title = '';
+            if (view === 'day') title = format(date, 'MMMM d, yyyy');
+            if (view === 'week') {
+                const start = startOfWeek(date, { weekStartsOn: 1 });
+                const end = endOfWeek(date, { weekStartsOn: 1 });
+                title = `${format(start, 'MMM d')} - ${format(end, 'MMM d, yyyy')}`;
+            }
+            if (view === 'month') title = format(date, 'MMMM yyyy');
+
+            const viewSwitcherButtons = ['day', 'week', 'month'].map(v => 
+                `<button data-view="${v}" class="calendar-view-btn table-tab-btn ${view === v ? 'active' : ''}">${v.charAt(0).toUpperCase() + v.slice(1)}</button>`
+            ).join('');
+
             DOMElements.tasks.content.innerHTML = `
-                <div class="bg-white dark:bg-dark-surface rounded-xl shadow-lg border border-gray-200 dark:border-dark-border p-4 flex flex-col h-[80vh]">
+                <div class="bg-white dark:bg-dark-surface rounded-xl shadow-lg border border-gray-200 dark:border-dark-border p-4 flex flex-col h-[85vh]">
                     <div class="flex-shrink-0">
-                        <div class="flex justify-between items-center mb-4">
+                        <div class="flex flex-wrap justify-between items-center mb-4 gap-4">
                             <div class="flex items-center gap-4">
                                 <button id="cal-prev" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-dark-border">&lt;</button>
-                                <h3 class="text-xl font-bold">${format(date, 'MMMM d, yyyy')}</h3>
+                                <h3 class="text-xl font-bold">${title}</h3>
                                 <button id="cal-next" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-dark-border">&gt;</button>
                                 <button id="cal-today" class="text-sm font-semibold px-3 py-1 bg-gray-200 dark:bg-dark-border rounded-md">Today</button>
                             </div>
+                             <div id="calendar-view-switcher" class="flex items-center border border-gray-200 dark:border-dark-border rounded-lg p-1 space-x-1">
+                                ${viewSwitcherButtons}
+                            </div>
                         </div>
-                        <div id="all-day-container" class="border-b dark:border-dark-border pb-2 mb-2">
-                             </div>
                     </div>
-                    <div id="calendar-scroll-container" class="flex-grow overflow-y-auto relative">
-                        </div>
+                    <div id="calendar-view-container" class="flex-grow overflow-auto"></div>
                 </div>`;
             
-            renderDayCalendar(date);
+            renderCalendar();
 
             document.getElementById('cal-prev').addEventListener('click', () => { 
-                state.ui.currentCalendarDate = addDays(state.ui.currentCalendarDate, -1); 
+                const view = state.ui.activeCalendarView;
+                if(view === 'day') state.ui.currentCalendarDate = addDays(state.ui.currentCalendarDate, -1); 
+                if(view === 'week') state.ui.currentCalendarDate = addWeeks(state.ui.currentCalendarDate, -1); 
+                if(view === 'month') state.ui.currentCalendarDate = addMonths(state.ui.currentCalendarDate, -1); 
                 renderTaskCalendarView(); 
             });
             document.getElementById('cal-next').addEventListener('click', () => { 
-                state.ui.currentCalendarDate = addDays(state.ui.currentCalendarDate, 1); 
+                const view = state.ui.activeCalendarView;
+                if(view === 'day') state.ui.currentCalendarDate = addDays(state.ui.currentCalendarDate, 1); 
+                if(view === 'week') state.ui.currentCalendarDate = addWeeks(state.ui.currentCalendarDate, 1); 
+                if(view === 'month') state.ui.currentCalendarDate = addMonths(state.ui.currentCalendarDate, 1); 
                 renderTaskCalendarView(); 
             });
             document.getElementById('cal-today').addEventListener('click', () => {
                 state.ui.currentCalendarDate = new Date();
                 renderTaskCalendarView();
             });
+            document.getElementById('calendar-view-switcher').addEventListener('click', e => {
+                 const button = e.target.closest('.calendar-view-btn');
+                if (button && button.dataset.view) {
+                    state.ui.activeCalendarView = button.dataset.view;
+                    renderTaskCalendarView();
+                }
+            });
         }
         
+        const renderCalendar = () => {
+             const view = state.ui.activeCalendarView;
+             if (view === 'day') renderDayCalendar(state.ui.currentCalendarDate);
+             if (view === 'week') renderWeekCalendar(state.ui.currentCalendarDate);
+             if (view === 'month') renderMonthCalendar(state.ui.currentCalendarDate);
+        }
+
         const renderDayCalendar = (date) => {
              const allDayTasks = state.tasks.filter(task => {
                 if (!task.dueDate) return false;
@@ -1265,26 +1343,31 @@
                 return isSameDay(dueDate, date) && format(dueDate, 'HH:mm') !== '00:00';
             }).sort((a,b) => parseISO(a.dueDate) - parseISO(b.dueDate));
             
-            const allDayContainer = DOMElements.tasks.content.querySelector('#all-day-container');
-            allDayContainer.innerHTML = `
-                <div class="flex items-center">
-                    <div class="w-16 text-center pr-4 text-xs font-semibold text-gray-500">All-day</div>
-                    <div class="flex-1 pl-2 grid grid-cols-1 gap-1">
-                        ${allDayTasks.length > 0 ? allDayTasks.map(task => {
-                            const colors = getTagColor(task.tags?.[0]);
-                            return `<div class="all-day-task-item text-sm font-semibold p-1 rounded" style="background-color: ${colors.bg}; color: ${colors.text}" data-task-id="${task.id}">${task.title}</div>`;
-                        }).join('') : `<div class="text-sm text-gray-400"></div>`}
+            const container = DOMElements.tasks.content.querySelector('#calendar-view-container');
+            container.innerHTML = `
+                <div class="flex flex-col h-full">
+                    <div id="all-day-container" class="border-b dark:border-dark-border pb-2 mb-2 flex-shrink-0">
+                         <div class="flex items-center">
+                            <div class="w-16 text-center pr-4 text-xs font-semibold text-gray-500">All-day</div>
+                            <div class="flex-1 pl-2 grid grid-cols-1 gap-1">
+                                ${allDayTasks.length > 0 ? allDayTasks.map(task => {
+                                    const colors = getTagColor(task.tags?.[0]);
+                                    return `<div class="all-day-task-item text-sm font-semibold p-1 rounded" style="background-color: ${colors.bg}; color: ${colors.text}" data-task-id="${task.id}">${task.title}</div>`;
+                                }).join('') : `<div class="text-sm text-gray-400 h-6"></div>`}
+                            </div>
+                        </div>
                     </div>
+                    <div id="calendar-scroll-container" class="flex-grow overflow-y-auto relative"></div>
                 </div>
             `;
             
-            const scrollContainer = DOMElements.tasks.content.querySelector('#calendar-scroll-container');
+            const scrollContainer = container.querySelector('#calendar-scroll-container');
             let timeSlotsHTML = '';
             for (let i = 0; i < 24; i++) {
                 const hour = i.toString().padStart(2, '0');
                  timeSlotsHTML += `<div class="flex">
                             <div class="w-16 text-right pr-4 text-xs text-gray-400 dark:text-dark-text-secondary -mt-2">${i === 0 ? '' : `${hour}:00`}</div>
-                            <div class="time-slot flex-1 border-l dark:border-dark-border/50" data-hour="${i}"></div>
+                            <div class="time-slot flex-1 border-t dark:border-dark-border/50" data-hour="${i}"></div>
                         </div>`;
             }
 
@@ -1308,11 +1391,69 @@
             
             scrollContainer.innerHTML = `<div class="time-slot-grid relative">${timeSlotsHTML}${taskItemsHTML}</div>`;
             
-            // Scroll to 8 AM on initial load
-            setTimeout(() => {
-                scrollContainer.scrollTop = 8 * 60; // 8 hours * 60px/hour
-            }, 0);
+            setTimeout(() => { scrollContainer.scrollTop = 8 * 60; }, 0);
         }
+
+        const renderWeekCalendar = (date) => {
+             const container = DOMElements.tasks.content.querySelector('#calendar-view-container');
+             const start = startOfWeek(date, { weekStartsOn: 1 });
+             const end = endOfWeek(date, { weekStartsOn: 1 });
+             const days = eachDayOfInterval({start, end});
+
+             container.innerHTML = `
+                <div class="grid grid-cols-7 h-full">
+                 ${days.map(day => `
+                    <div class="flex flex-col border-r dark:border-dark-border">
+                        <div class="text-center font-semibold p-2 border-b dark:border-dark-border ${isToday(day) ? 'bg-blue-100 dark:bg-blue-900' : ''}">
+                             <span class="text-sm text-gray-500 dark:text-gray-400">${format(day, 'E')}</span>
+                             <div class="text-2xl">${format(day, 'd')}</div>
+                        </div>
+                        <div class="day-column flex-grow overflow-y-auto relative p-1 space-y-1" data-date="${format(day, 'yyyy-MM-dd')}">
+                             ${state.tasks.filter(t => t.dueDate && isSameDay(parseISO(t.dueDate), day)).map(task => {
+                                 const colors = getTagColor(task.tags?.[0]);
+                                 return `<div class="month-task-item p-2 cursor-pointer" style="background-color:${colors.bg}; color:${colors.text}" data-task-id="${task.id}">${task.title}</div>`;
+                             }).join('')}
+                        </div>
+                    </div>
+                 `).join('')}
+                </div>
+             `;
+        }
+
+        const renderMonthCalendar = (date) => {
+             const container = DOMElements.tasks.content.querySelector('#calendar-view-container');
+             const monthStart = startOfMonth(date);
+             const monthEnd = endOfMonth(date);
+             const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+             const gridEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+             const days = eachDayOfInterval({start: gridStart, end: gridEnd});
+            
+             const headerDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="text-center font-bold text-sm p-2 text-gray-500 dark:text-dark-text-secondary">${d}</div>`).join('');
+
+             container.innerHTML = `
+                <div class="flex flex-col h-full">
+                    <div class="grid grid-cols-7 border-b border-l border-r dark:border-dark-border">${headerDays}</div>
+                    <div class="calendar-month-grid flex-grow border-l dark:border-dark-border">
+                        ${days.map(day => {
+                            const tasksForDay = state.tasks.filter(t => t.dueDate && isSameDay(parseISO(t.dueDate), day)).sort((a,b) => parseISO(a.dueDate) - parseISO(b.dueDate));
+                            const isCurrentMonth = isSameMonth(day, date);
+                            return `
+                                <div class="calendar-day-cell ${isCurrentMonth ? '' : 'other-month'} ${isToday(day) ? 'is-today' : ''}" data-date="${format(day, 'yyyy-MM-dd')}">
+                                    <span class="font-semibold">${format(day, 'd')}</span>
+                                    <div class="flex flex-col gap-1 overflow-hidden">
+                                        ${tasksForDay.slice(0, 3).map(task => {
+                                            const colors = getTagColor(task.tags?.[0] || 'default');
+                                            return `<div class="month-task-item" style="background-color: ${colors.bg}; color: ${colors.text};" data-task-id="${task.id}">${task.title}</div>`;
+                                        }).join('')}
+                                        ${tasksForDay.length > 3 ? `<div class="text-xs font-semibold text-blue-500 mt-1">+ ${tasksForDay.length - 3} more</div>` : ''}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+             `;
+        };
         
         const renderTaskAnalytics = () => {
              DOMElements.tasks.content.innerHTML = `
@@ -1751,20 +1892,7 @@
                                 <p id="total-time-display" class="font-mono text-2xl font-bold">${formatTime(calculateTotalTime(task))}</p>
                             </div>
                             <div id="session-timer-controls" class="border-t dark:border-dark-border pt-4 space-y-3">
-                                <p class="text-center text-sm font-semibold">Start a Timed Session</p>
-                                <div class="flex justify-center gap-2">
-                                    <button data-mins="15" class="session-preset-btn text-sm px-3 py-1 bg-gray-200 dark:bg-slate-700 rounded-md">15m</button>
-                                    <button data-mins="30" class="session-preset-btn text-sm px-3 py-1 bg-gray-200 dark:bg-slate-700 rounded-md">30m</button>
-                                    <button data-mins="45" class="session-preset-btn text-sm px-3 py-1 bg-gray-200 dark:bg-slate-700 rounded-md">45m</button>
                                 </div>
-                                <div class="flex items-center gap-2">
-                                    <input type="number" id="session-custom-mins" placeholder="Custom" class="w-full px-2 py-1 bg-white dark:bg-slate-900 border-gray-300 dark:border-dark-border border rounded-md text-sm ${inputStyling}">
-                                    <span class="text-sm dark:text-dark-text-secondary">min</span>
-                                </div>
-                                <div class="flex items-center gap-2">
-                                    <button id="session-toggle-btn" class="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-sm">Start Session</button>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -1772,12 +1900,7 @@
             
             DOMElements.tasks.unarchiveTaskButton.classList.toggle('hidden', task.status !== 'Archived');
             
-            // Check timer status and update buttons
-            const session = state.activeSessionTimer;
-            if (session && session.taskId === task.id) {
-                // UI update logic for timer will be handled inside updateTaskFromModal
-            }
-
+            updateTimerControlsUI(task.id);
             toggleModal(DOMElements.tasks.detailModal, true);
             updateTaskFromModal(task.id);
         };
@@ -1881,27 +2004,6 @@
                     openTaskModal(taskId);
                 }
             };
-            
-            // Timer session listeners
-            const toggleBtn = modal.querySelector('#session-toggle-btn');
-            
-            toggleBtn.onclick = () => {
-                const session = state.activeSessionTimer;
-                if (session && session.taskId === taskId) {
-                    // This button should not be visible if a session is active
-                } else {
-                    const customMins = parseInt(modal.querySelector('#session-custom-mins').value, 10);
-                    if (customMins > 0) {
-                        startTimerSession(taskId, customMins * 60 * 1000);
-                    }
-                }
-            };
-            
-            modal.querySelectorAll('.session-preset-btn').forEach(btn => {
-                btn.onclick = () => {
-                    modal.querySelector('#session-custom-mins').value = btn.dataset.mins;
-                };
-            });
         };
         
         const closeTaskModal = () => {
@@ -2093,62 +2195,81 @@
             return `${zeroPad(hours)}:${zeroPad(duration.minutes || 0)}:${zeroPad(duration.seconds || 0)}`;
         };
 
-        const startTimerSession = (taskId, durationMs) => {
-            if (state.activeSessionTimer) stopTimerSession();
+        const startTimerSession = (taskId, durationMins) => {
+            if (state.activeSessionTimer) stopTimerSession(true); // Stop and save any previous timer
 
-            state.activeSessionTimer = {
+            const session = {
                 taskId,
                 startTime: Date.now(),
-                durationMs,
+                durationMs: durationMins * 60 * 1000,
                 isPaused: false,
                 remainingMsOnPause: 0,
             };
-
-            const intervalId = setInterval(updateCountdownDisplay, 1000);
-            state.activeSessionTimer.intervalId = intervalId;
-
-            updateCountdownDisplay();
+            
+            session.intervalId = setInterval(updateCountdownDisplay, 1000);
+            state.activeSessionTimer = session;
+            
+            updateTimerControlsUI(taskId);
         };
         
         const stopTimerSession = (saveLog = true) => {
             const session = state.activeSessionTimer;
             if (!session) return;
-
+        
             clearInterval(session.intervalId);
-
             const endTime = Date.now();
-            let elapsedTime;
-            let loggedStartTime;
-
-            if (session.isPaused) {
-                elapsedTime = session.durationMs - session.remainingMsOnPause;
-                loggedStartTime = endTime - elapsedTime;
-            } else {
-                elapsedTime = endTime - session.startTime;
-                loggedStartTime = session.startTime;
+        
+            if (saveLog) {
+                const task = state.tasks.find(t => t.id === session.taskId);
+                if (task) {
+                    if (!task.timeLog) task.timeLog = [];
+                    const timeToLog = {
+                        start: new Date(session.startTime).toISOString(),
+                        end: new Date(endTime).toISOString(),
+                    };
+                    task.timeLog.push(timeToLog);
+                    saveState();
+                    const totalTimeDisplay = document.getElementById('total-time-display');
+                    if (totalTimeDisplay) {
+                        totalTimeDisplay.textContent = formatTime(calculateTotalTime(task));
+                    }
+                }
             }
-            
-            const task = state.tasks.find(t => t.id === session.taskId);
-            if (saveLog && task && elapsedTime > 1000) {
-                if (!task.timeLog) task.timeLog = [];
-                task.timeLog.push({
-                    start: new Date(loggedStartTime).toISOString(),
-                    end: new Date(endTime).toISOString(),
-                });
-                saveState();
-            }
-
-            DOMElements.tasks.sessionTimerDisplay.textContent = '';
-            document.querySelectorAll(`[data-timer-for="${session.taskId}"]`).forEach(el => el.textContent = '');
+        
+            const taskId = session.taskId;
             state.activeSessionTimer = null;
-
-            const totalTimeDisplay = document.getElementById('total-time-display');
-            if (totalTimeDisplay && task) {
-                 totalTimeDisplay.textContent = formatTime(calculateTotalTime(task));
-            }
-            
+        
+            // Clear display on board/list
+             document.querySelectorAll(`[data-timer-for="${taskId}"]`).forEach(el => el.textContent = '');
+             // Clear display in modal footer
+             DOMElements.tasks.sessionTimerDisplay.textContent = '';
+        
+            updateTimerControlsUI(taskId);
             renderTasks();
         };
+
+        const pauseTimerSession = () => {
+            const session = state.activeSessionTimer;
+            if (!session || session.isPaused) return;
+
+            session.isPaused = true;
+            const elapsed = Date.now() - session.startTime;
+            session.remainingMsOnPause = Math.max(0, session.durationMs - elapsed);
+
+            updateTimerControlsUI(session.taskId);
+        }
+
+        const resumeTimerSession = () => {
+             const session = state.activeSessionTimer;
+            if (!session || !session.isPaused) return;
+
+            session.isPaused = false;
+            session.durationMs = session.remainingMsOnPause; // The new duration is the time that was left
+            session.startTime = Date.now(); // Start new countdown from now
+            session.remainingMsOnPause = 0;
+
+            updateTimerControlsUI(session.taskId);
+        }
 
         const updateCountdownDisplay = () => {
             const session = state.activeSessionTimer;
@@ -2164,15 +2285,69 @@
             
             const display = `⏳ ${formatTime(remainingMs)}`;
             
+            // Update display in modal footer if open
             if (DOMElements.tasks.detailModal.style.display === 'flex' && state.taskToDelete === session.taskId) {
                 DOMElements.tasks.sessionTimerDisplay.textContent = display;
             }
+            // Update display on board/list view
             document.querySelectorAll(`[data-timer-for="${session.taskId}"]`).forEach(el => el.textContent = display);
 
             if (remainingMs === 0 && !session.isPaused) {
-                stopTimerSession();
+                stopTimerSession(true);
             }
         };
+        
+        const updateTimerControlsUI = (taskId) => {
+            const modal = DOMElements.tasks.detailModalBody;
+            if (!modal) return;
+            
+            const controlsContainer = modal.querySelector('#session-timer-controls');
+            if(!controlsContainer) return;
+
+            const session = state.activeSessionTimer;
+            let html = '';
+
+            if(session && session.taskId === taskId) {
+                // Timer is active for this task
+                if (session.isPaused) {
+                     html = `
+                        <p class="text-center text-sm font-semibold">Session Paused</p>
+                        <div class="flex items-center gap-2">
+                            <button id="session-resume-btn" class="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-sm">Resume</button>
+                            <button id="session-stop-btn" class="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold text-sm">Stop & Save</button>
+                        </div>
+                    `;
+                } else {
+                    html = `
+                        <p class="text-center text-sm font-semibold">Session in Progress</p>
+                        <div class="flex items-center gap-2">
+                            <button id="session-pause-btn" class="w-full px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 font-semibold text-sm">Pause</button>
+                             <button id="session-stop-btn" class="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold text-sm">Stop & Save</button>
+                        </div>
+                    `;
+                }
+
+            } else {
+                // No active timer for this task, show start controls
+                const inputStyling = "text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400";
+                html = `
+                    <p class="text-center text-sm font-semibold">Start a Timed Session</p>
+                    <div class="flex justify-center gap-2">
+                        <button data-mins="15" class="session-preset-btn text-sm px-3 py-1 bg-gray-200 dark:bg-slate-700 rounded-md">15m</button>
+                        <button data-mins="30" class="session-preset-btn text-sm px-3 py-1 bg-gray-200 dark:bg-slate-700 rounded-md">30m</button>
+                        <button data-mins="45" class="session-preset-btn text-sm px-3 py-1 bg-gray-200 dark:bg-slate-700 rounded-md">45m</button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <input type="number" id="session-custom-mins" placeholder="Custom" class="w-full px-2 py-1 bg-white dark:bg-slate-900 border-gray-300 dark:border-dark-border border rounded-md text-sm ${inputStyling}">
+                        <span class="text-sm dark:text-dark-text-secondary">min</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="session-start-btn" class="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-sm">Start Session</button>
+                    </div>
+                `;
+            }
+            controlsContainer.innerHTML = html;
+        }
 
         const renderTheme = () => {
             DOMElements.html.classList.toggle('dark', state.theme === 'dark');
@@ -2428,12 +2603,12 @@
         }
 
         const handleExportData = () => {
-            const dataToExport = JSON.stringify(state, null, 2);
+            const dataToExport = JSON.stringify({ entries: state.entries.map(({dateObj, ...rest}) => rest), theme: state.theme }, null, 2);
             const blob = new Blob([dataToExport], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `dashboard-backup-${format(new Date(), 'yyyy-MM-dd')}.json`;
+            a.download = `financial-backup-${format(new Date(), 'yyyy-MM-dd')}.json`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -2448,18 +2623,14 @@
             reader.onload = (e) => {
                 try {
                     const importedState = JSON.parse(e.target.result);
-                    if (!importedState.tasks || !importedState.entries) {
-                        throw new Error('Invalid backup file structure.');
-                    }
+                    if (!importedState.entries) { throw new Error('Invalid backup file structure.'); }
                     
                     state.entries = (importedState.entries || []).map(entry => ({...entry, dateObj: parseISO(entry.date)}));
-                    state.tasks = importedState.tasks || [];
-                    state.projects = importedState.projects || [];
                     state.theme = importedState.theme || 'light';
 
                     updateActivePage();
                     saveState();
-                    alert('Data imported successfully!');
+                    alert('Financial data imported successfully!');
                 } catch (error) {
                     console.error('Failed to import data:', error);
                     alert(`Import failed: ${error.message}`);
@@ -2470,8 +2641,49 @@
             event.target.value = '';
         };
 
+         const handleExportTasks = () => {
+            const dataToExport = JSON.stringify({ tasks: state.tasks, projects: state.projects }, null, 2);
+            const blob = new Blob([dataToExport], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `tasks-backup-${format(new Date(), 'yyyy-MM-dd')}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        };
+
+        const handleImportTasks = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    if (!importedData.tasks || !importedData.projects) {
+                        throw new Error('Invalid task backup file. It must contain "tasks" and "projects".');
+                    }
+                    
+                    state.tasks = importedData.tasks;
+                    state.projects = importedData.projects;
+
+                    renderTasks();
+                    saveState();
+                    alert('Tasks imported successfully!');
+                } catch (error) {
+                    console.error('Failed to import tasks:', error);
+                    alert(`Task import failed: ${error.message}`);
+                }
+            };
+            reader.onerror = () => alert('Failed to read the file.');
+            reader.readAsText(file);
+            event.target.value = '';
+        };
+
         const processRecurringEntries = () => {
-            const lastCheck = localStorage.getItem('lastRecurringCheck-v26');
+            const lastCheck = localStorage.getItem('lastRecurringCheck-v27');
             if (lastCheck && isSameDay(parseISO(lastCheck), new Date())) return false;
 
             const now = new Date();
@@ -2545,6 +2757,10 @@
             DOMElements.tasks.detailModalClose.addEventListener('click', closeTaskModal);
             DOMElements.tasks.deleteTaskButton.addEventListener('click', deleteTask);
             DOMElements.tasks.unarchiveTaskButton.addEventListener('click', unarchiveTask);
+            DOMElements.tasks.exportTasksButton.addEventListener('click', handleExportTasks);
+            DOMElements.tasks.importTasksButton.addEventListener('click', () => DOMElements.tasks.importTasksInput.click());
+            DOMElements.tasks.importTasksInput.addEventListener('change', handleImportTasks);
+
 
             DOMElements.tasks.viewSwitcher.addEventListener('click', (e) => {
                 const view = e.target.dataset.view;
@@ -2553,6 +2769,27 @@
                     state.ui.expandedListTasks = {};
                     renderTasks();
                 }
+            });
+
+            DOMElements.tasks.detailModalBody.addEventListener('click', e => {
+                 const taskId = state.taskToDelete;
+                 if(!taskId) return;
+
+                 if (e.target.id === 'session-start-btn') {
+                    const customMins = parseInt(DOMElements.tasks.detailModalBody.querySelector('#session-custom-mins').value, 10);
+                    if (customMins > 0) {
+                        startTimerSession(taskId, customMins);
+                    }
+                 } else if (e.target.matches('.session-preset-btn')) {
+                     const mins = parseInt(e.target.dataset.mins, 10);
+                     DOMElements.tasks.detailModalBody.querySelector('#session-custom-mins').value = mins;
+                 } else if (e.target.id === 'session-pause-btn') {
+                     pauseTimerSession();
+                 } else if (e.target.id === 'session-resume-btn') {
+                     resumeTimerSession();
+                 } else if (e.target.id === 'session-stop-btn') {
+                     stopTimerSession(true);
+                 }
             });
             
             // Delegated event listeners for dynamic content
@@ -2565,11 +2802,17 @@
                     openTaskModal(null, newDate);
                     return;
                 }
-                const calendarItem = e.target.closest('.calendar-task-item, .all-day-task-item');
+                const calendarItem = e.target.closest('.calendar-task-item, .all-day-task-item, .month-task-item');
                 if (calendarItem) {
                      openTaskModal(calendarItem.dataset.taskId);
                      return;
                 }
+                 const dayCell = e.target.closest('.calendar-day-cell');
+                 if(dayCell) {
+                     state.ui.currentCalendarDate = parseISO(dayCell.dataset.date);
+                     state.ui.activeCalendarView = 'day';
+                     renderTaskCalendarView();
+                 }
                 
                 const todoFilterBtn = e.target.closest('.todo-filter-btn');
                 if (todoFilterBtn) {
@@ -2628,8 +2871,7 @@
                 if (mutation.addedNodes.length > 0) {
                    if (DOMElements.tasks.content.querySelector('#calendar-scroll-container')) {
                     setupCalendarDragAndDrop();
-                    observer.disconnect(); // Stop observing once calendar is found
-                    break;
+                    // Do not disconnect, as view can change
                   }
                 }
               }
