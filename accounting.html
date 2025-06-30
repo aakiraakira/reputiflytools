@@ -1483,15 +1483,20 @@
                     </div>
 
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                         <div id="due-date-performance-container" class="dashboard-card bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border">
-                             <h2 class="text-xl font-bold mb-4">On-Time Completion Rate</h2>
-                             <div class="h-64 relative"><canvas id="due-date-chart"></canvas></div>
-                        </div>
-                       <div class="dashboard-card bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border">
-                        <h2 class="text-xl font-bold mb-4">Time Efficiency Breakdown (Completed Tasks)</h2>
-                        <div id="time-efficiency-container" class="space-y-4 max-h-[400px] overflow-y-auto pr-2"></div>
-                    </div>
-                    </div>
+    <div id="due-date-performance-container" class="dashboard-card bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border">
+        <h2 class="text-xl font-bold mb-4">On-Time Completion Rate</h2>
+        <div class="h-64 relative"><canvas id="due-date-chart"></canvas></div>
+    </div>
+    <div id="project-summary-container" class="dashboard-card bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border">
+        <h2 class="text-xl font-bold mb-4">Project Summary</h2>
+        <div id="project-summary-table" class="overflow-x-auto"></div>
+    </div>
+</div>
+
+<div class="dashboard-card bg-white dark:bg-dark-surface p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border mt-8">
+    <h2 class="text-xl font-bold mb-4">Time Efficiency Breakdown (Completed Tasks)</h2>
+    <div id="time-efficiency-container" class="space-y-4 max-h-[400px] overflow-y-auto pr-2"></div>
+</div>
                 </div>
              `;
             
@@ -1509,6 +1514,7 @@
             renderTaskVelocityChart(completedOrArchivedTasks);
             renderTimeEfficiencyBreakdown(completedOrArchivedTasks);
             renderDueDatePerformanceChart(completedOrArchivedTasks);
+            renderProjectSummaryTable(allTasks);
         }
 
         const renderAnalyticsKPIs = (allTasks, completedTasks) => {
@@ -1783,7 +1789,67 @@
                 }
             });
         };
+        
+    const renderProjectSummaryTable = (allTasks) => {
+        const container = document.getElementById('project-summary-table');
+        const projectsMap = new Map(state.projects.map(p => [p.id, { ...p, tasks: [], completed: 0, timeLogged: 0, timeEstimate: 0 }]));
 
+        allTasks.forEach(task => {
+            const project = projectsMap.get(task.projectId);
+            if (project) {
+                project.tasks.push(task);
+                if (task.status === 'Done') {
+                    project.completed++;
+                }
+                project.timeLogged += calculateTotalTime(task);
+                project.timeEstimate += (task.timeEstimate || 0);
+            }
+        });
+
+        const projectsData = [...projectsMap.values()].filter(p => p.tasks.length > 0);
+    
+        if (projectsData.length === 0) {
+             container.innerHTML = `<div class="text-center py-8 text-gray-500 dark:text-dark-text-secondary">No tasks assigned to projects.</div>`;
+            return;
+        }
+
+        container.innerHTML = `
+            <table class="w-full text-left text-sm">
+            <thead class="text-xs text-gray-500 dark:text-dark-text-secondary uppercase bg-gray-50 dark:bg-dark-surface/50">
+                <tr>
+                    <th class="p-2">Project</th>
+                    <th class="p-2 text-center">Progress</th>
+                    <th class="p-2 text-center">Time Logged</th>
+                    <th class="p-2 text-center">Efficiency</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${projectsData.map(p => {
+                    const completionRate = p.tasks.length > 0 ? (p.completed / p.tasks.length) * 100 : 0;
+                    const efficiency = p.timeEstimate > 0 ? (p.timeEstimate - (p.timeLogged / 60000)) / p.timeEstimate : 0;
+                    const efficiencyText = p.timeEstimate > 0 ? `${(efficiency * 100).toFixed(0)}%` : 'N/A';
+                    const efficiencyColor = efficiency >= 0 ? 'text-green-500' : 'text-red-500';
+
+                    return `
+                    <tr class="border-b dark:border-dark-border/50">
+                        <td class="p-2 font-bold">${p.name}</td>
+                        <td class="p-2 align-middle">
+                            <div class="flex items-center justify-center gap-2">
+                                <div class="w-full bg-gray-200 rounded-full h-1.5 dark:bg-gray-700">
+                                    <div class="bg-blue-600 h-1.5 rounded-full" style="width: ${completionRate}%"></div>
+                                </div>
+                                <span class="text-xs w-12 text-right">${completionRate.toFixed(0)}%</span>
+                            </div>
+                        </td>
+                        <td class="p-2 text-center font-mono">${formatHours(p.timeLogged)}</td>
+                        <td class="p-2 text-center font-bold ${efficiencyColor}">${efficiencyText}</td>
+                    </tr>
+                    `;
+                }).join('')}
+            </tbody>
+            </table>
+        `;
+    };
         const openTaskModal = (taskId, prefillDate = null) => {
              let task;
              if(taskId) {
@@ -2095,26 +2161,54 @@
                 zone.addEventListener('dragleave', (e) => { zone.classList.remove('drag-over'); });
                 
                 zone.addEventListener('drop', (e) => {
-                    e.preventDefault();
-                    zone.classList.remove('drag-over');
-                    document.querySelectorAll('.drop-placeholder').forEach(p => p.remove());
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    document.querySelectorAll('.drop-placeholder').forEach(p => p.remove());
 
-                    const newStatus = zone.dataset.status;
-                    const draggedTask = state.tasks.find(t => t.id === draggedTaskId);
-                    if (!draggedTask) return;
+    const newStatus = zone.dataset.status;
+    const draggedTask = state.tasks.find(t => t.id === draggedTaskId);
+    if (!draggedTask) return;
 
-                    const oldStatus = draggedTask.status;
-                    draggedTask.status = newStatus;
-                    
-                    if ((oldStatus !== 'Done' && oldStatus !== 'Archived') && (newStatus === 'Done' || newStatus === 'Archived')) {
-                        draggedTask.completedAt = new Date().toISOString();
-                    } else if ((oldStatus === 'Done' || oldStatus === 'Archived') && (newStatus !== 'Done' && newStatus !== 'Archived')) {
-                        draggedTask.completedAt = null;
-                    }
-                    
-                    saveState();
-                    renderTaskBoard();
-                });
+    // --- Start of Fix ---
+    // This corrected logic handles reordering by updating the underlying data array.
+
+    // 1. Find the original position of the task and remove it from the array.
+    const originalIndex = state.tasks.findIndex(t => t.id === draggedTaskId);
+    if (originalIndex > -1) {
+        state.tasks.splice(originalIndex, 1);
+    }
+
+    // 2. Update the task's status and completion date if necessary.
+    const oldStatus = draggedTask.status;
+    draggedTask.status = newStatus;
+
+    if ((oldStatus !== 'Done' && oldStatus !== 'Archived') && (newStatus === 'Done' || newStatus === 'Archived')) {
+        draggedTask.completedAt = new Date().toISOString();
+    } else if ((oldStatus === 'Done' || oldStatus === 'Archived') && (newStatus !== 'Done' && newStatus !== 'Archived')) {
+        draggedTask.completedAt = null;
+    }
+
+    // 3. Find where to insert the task in the array based on the drop position.
+    const afterElement = getDragAfterElement(zone, e.clientY);
+    if (afterElement) {
+        // If dropped before another task, find that task's index.
+        const referenceTaskId = afterElement.dataset.taskId;
+        const targetIndex = state.tasks.findIndex(t => t.id === referenceTaskId);
+        if (targetIndex > -1) {
+            // Insert the dragged task before the reference task.
+            state.tasks.splice(targetIndex, 0, draggedTask);
+        } else {
+            state.tasks.push(draggedTask); // Fallback if target not found
+        }
+    } else {
+        // If dropped at the bottom of the column, add it to the end of the array.
+        state.tasks.push(draggedTask);
+    }
+    // --- End of Fix ---
+
+    saveState();
+    renderTaskBoard();
+});
             });
         };
         
