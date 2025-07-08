@@ -142,6 +142,13 @@
         #note-editor-body h1 { font-size: 2.25rem; }
         #note-editor-body h2 { font-size: 1.875rem; }
         #note-editor-body h3 { font-size: 1.5rem; }
+        #note-editor-body img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin: 0.5em 0;
+            cursor: default;
+        }
 
 
         /* Hide scrollbar but allow scrolling */
@@ -168,11 +175,20 @@
         /* Mobile specific styles */
         @media (max-width: 768px) {
             #notes-list-pane {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                z-index: 30;
                 transform: translateX(-100%);
                 transition: transform 300ms ease-in-out;
+                box-shadow: 4px 0 15px rgba(0,0,0,0.1);
             }
             #notes-list-pane.open {
                 transform: translateX(0);
+            }
+            #pane-resizer {
+                display: none;
             }
             #mobile-menu-button {
                 display: block;
@@ -225,7 +241,7 @@
         <main id="editor-pane" class="flex-grow bg-bg-main flex flex-col">
            <header class="flex justify-between items-center p-4 border-b border-border-color flex-shrink-0">
               <div class="flex items-center gap-2">
-                <button id="mobile-menu-button" class="md:hidden p-1 -ml-2"><i data-feather="menu"></i></button>
+                <button id="mobile-menu-button" class="md:hidden p-1 -ml-2 hidden"><i data-feather="menu"></i></button>
                 <h2 id="current-view-title" class="text-lg font-semibold"></h2>
               </div>
               <div class="flex items-center gap-4">
@@ -268,6 +284,8 @@
     </div>
     
     <div id="modal-backdrop" class="fixed inset-0 bg-black/30 z-40 hidden transition-opacity duration-300"></div>
+    <div id="mobile-sidebar-overlay" class="fixed inset-0 bg-black/30 z-20 hidden md:hidden transition-opacity duration-300 opacity-0"></div>
+
     
     <div id="new-collection-modal" class="modal fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-full max-w-md z-50 hidden transition-all duration-300 transform scale-95 opacity-0">
         <h3 class="text-lg font-semibold mb-4">New Collection</h3>
@@ -280,7 +298,7 @@
     </div>
     
     <div id="search-bar-container" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-in-out origin-top" style="transform: scale(0.5); opacity: 0; pointer-events: none;">
-        <div class="w-[500px] bg-bg-pane-dark rounded-full shadow-lg flex items-center px-4">
+        <div class="w-[95vw] max-w-[500px] bg-bg-pane-dark rounded-full shadow-lg flex items-center px-4">
             <i data-feather="search" class="text-text-tertiary"></i>
             <input id="search-input" type="text" placeholder="Search notes and folders..." class="w-full bg-transparent p-3 focus:outline-none text-text-primary">
             <button id="search-close-btn" class="text-text-tertiary text-xs">ESC</button>
@@ -293,6 +311,7 @@
         <button data-command="bold" class="p-2 hover:bg-bg-main rounded"><i data-feather="bold" class="w-4 h-4"></i></button>
         <button data-command="italic" class="p-2 hover:bg-bg-main rounded"><i data-feather="italic" class="w-4 h-4"></i></button>
         <button data-command="createLink" class="p-2 hover:bg-bg-main rounded"><i data-feather="link" class="w-4 h-4"></i></button>
+        <button data-command="insertImage" class="p-2 hover:bg-bg-main rounded"><i data-feather="image" class="w-4 h-4"></i></button>
         <button data-command="insertUnorderedList" class="p-2 hover:bg-bg-main rounded"><i data-feather="list" class="w-4 h-4"></i></button>
         <div class="w-px h-5 bg-border-color mx-1"></div>
         <button data-command="formatBlock" data-value="h1" class="p-2 hover:bg-bg-main rounded font-bold text-sm">H1</button>
@@ -305,6 +324,7 @@
         <button data-action="new-folder" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="folder-plus" class="w-4 h-4"></i>New Folder</button>
         <hr class="my-1 border-border-color">
         <button data-action="toggle-pin" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="paperclip" class="w-4 h-4"></i><span id="pin-action-text">Pin</span></button>
+        <button data-action="duplicate" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="copy" class="w-4 h-4"></i>Duplicate</button>
         <button data-action="rename" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="edit-2" class="w-4 h-4"></i>Rename</button>
         <button data-action="delete" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark text-red-500 rounded flex items-center gap-2"><i data-feather="trash-2" class="w-4 h-4"></i>Delete</button>
     </div>
@@ -343,6 +363,7 @@
                     noteEditorTitle: document.getElementById('note-editor-title'),
                     noteEditorBody: document.getElementById('note-editor-body'),
                     mobileMenuBtn: document.getElementById('mobile-menu-button'),
+                    mobileSidebarOverlay: document.getElementById('mobile-sidebar-overlay'),
                     sortOrderSelect: document.getElementById('sort-order'),
                     listViewControls: document.getElementById('list-view-controls'),
                     viewSwitcher: document.getElementById('view-switcher-container'),
@@ -374,6 +395,9 @@
                     targetIsContainer: false,
                     pinActionText: document.getElementById('pin-action-text'),
                     togglePinBtn: document.querySelector('[data-action="toggle-pin"]'),
+                    renameBtn: document.querySelector('[data-action="rename"]'),
+                    deleteBtn: document.querySelector('[data-action="delete"]'),
+                    duplicateBtn: document.querySelector('[data-action="duplicate"]'),
                 }
             };
 
@@ -390,7 +414,7 @@
                         { id: 'n2', name: 'Inspiration', type: 'note', content: 'Check out Dribbble, Awwwards, and Behance for design inspiration.', status: 'col2', pinned: false, createdAt: new Date(Date.now() - 86400000).toISOString(), modifiedAt: new Date().toISOString() },
                     ], expanded: true },
                     { id: 'c2', name: 'Marketing', type: 'folder', children: [], expanded: false },
-                    { id: 'n3', name: 'lol', type: 'note', content: 'A standalone note, not in any project.', status: 'todo', pinned: false, createdAt: new Date(Date.now() - 86400000 * 3).toISOString(), modifiedAt: new Date(Date.now() - 86400000).toISOString() },
+                    { id: 'n3', name: 'Standalone Note', type: 'note', content: 'A standalone note, not in any project.', status: null, pinned: false, createdAt: new Date(Date.now() - 86400000 * 3).toISOString(), modifiedAt: new Date(Date.now() - 86400000).toISOString() },
                 ],
                 settings: {
                     theme: 'light',
@@ -410,7 +434,6 @@
                 localStorage.setItem('codex-notes-appState', JSON.stringify(state));
             }
             
-            // Data migration logic to ensure state shape is up-to-date
             function migrateState(loadedState) {
                 const migrateNode = (node) => {
                     if (node.type === 'note') {
@@ -453,6 +476,19 @@
                 }
                 return null;
             }
+            
+            const getAllNotes = (items) => {
+                let notes = [];
+                for (const item of items) {
+                    if (item.type === 'note') {
+                        notes.push(item);
+                    }
+                    if (item.type === 'folder' && item.children) {
+                        notes = notes.concat(getAllNotes(item.children));
+                    }
+                }
+                return notes;
+            };
 
             const debounce = (func, delay) => {
                 let timeout;
@@ -571,10 +607,8 @@
                 const isNoteActive = !!state.settings.activeNoteId;
                 app.elements.newNoteBtn.style.display = isNoteActive ? 'none' : 'flex';
 
-                // View controls logic
                 app.elements.viewSwitcher.style.display = isNoteActive || !activeCollection ? 'none' : 'block';
-                app.elements.listViewControls.style.display = !isNoteActive && state.settings.activeView === 'list' && activeCollection ? 'flex' : 'none';
-
+                app.elements.listViewControls.style.display = !isNoteActive && state.settings.activeView === 'list' ? 'flex' : 'none';
 
                 document.querySelectorAll('.notes-view').forEach(v => v.classList.add('hidden'));
 
@@ -592,7 +626,6 @@
                         renderListView();
                     }
                 } else {
-                     // No active collection (e.g., showing all notes) - default to list view
                      app.views.list.classList.remove('hidden');
                      renderListView();
                 }
@@ -603,7 +636,7 @@
                 const collection = findItem(collectionId)?.item;
 
                 if (!collection || collection.type !== 'folder') {
-                    app.containers.kanbanBoard.innerHTML = `<div class="text-center p-10 text-text-secondary">Board view is available for projects. Select a project folder.</div>`;
+                    app.containers.kanbanBoard.innerHTML = `<div class="text-center p-10 text-text-secondary">Board view is available for project folders.</div>`;
                     return;
                 }
                 
@@ -639,7 +672,7 @@
                     `;
                 }).join('');
                 
-                const addColumnBtnHTML = columns.length < 3 ? `
+                const addColumnBtnHTML = columns.length < 5 ? `
                      <div class="w-[300px] flex-shrink-0">
                         <button id="add-column-btn" class="w-full bg-bg-pane-dark p-3 rounded-lg text-text-secondary hover:bg-bg-main hover:text-accent-primary transition-colors">
                             <i data-feather="plus" class="inline-block mr-2"></i>Add Column
@@ -652,7 +685,9 @@
             function renderListView() {
                  const collectionId = state.settings.activeCollectionId;
                  const collection = findItem(collectionId)?.item;
-                 const notes = collection ? collection.children.filter(c => c.type === 'note') : state.collections.filter(c => c.type === 'note');
+                 const notes = collection 
+                    ? collection.children.filter(c => c.type === 'note') 
+                    : getAllNotes(state.collections);
 
                  if (notes.length === 0) {
                      app.containers.notesListContent.innerHTML = `<div class="text-center p-10 text-text-secondary">No notes in this view.</div>`;
@@ -667,7 +702,7 @@
                      let valB = b[key];
                      if(key === 'name') {
                          return direction === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-                     } else { // Dates
+                     } else {
                          return direction === 'desc' ? new Date(valB) - new Date(valA) : new Date(valA) - new Date(valB);
                      }
                  });
@@ -717,7 +752,7 @@
                             const queryRegex = new RegExp(query, 'i');
                             if (queryRegex.test(noteName) || queryRegex.test(plainContent)) {
                                 const excerptMatch = plainContent.match(new RegExp(`.{0,50}${query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}.{0,50}`, 'i'));
-                                const excerpt = excerptMatch ? `...${excerptMatch[0]}...` : plainContent.substring(0, 100) + '...';
+                                const excerpt = excerptMatch ? `...${highlightText(excerptMatch[0], query)}...` : highlightText(plainContent.substring(0, 100) + '...', query);
                                 results.push({
                                     noteId: item.id,
                                     projectName: parentName,
@@ -740,11 +775,11 @@
                 }
 
                 app.containers.searchResultsList.innerHTML = results.map(res => `
-                    <div class="p-4 mb-3 rounded-lg hover:bg-bg-pane-dark cursor-pointer border border-border-color" data-note-id="${res.noteId}">
+                    <div class="search-result-item p-4 mb-3 rounded-lg hover:bg-bg-pane-dark cursor-pointer border border-border-color" data-note-id="${res.noteId}">
                         <div class="font-semibold text-text-secondary text-sm">
-                            ${res.projectName ? `${highlightText(res.projectName, query)} | ` : ''}${highlightText(res.noteName, query)}
+                            ${res.projectName ? `${highlightText(res.projectName, query)} / ` : ''}<span class="text-text-primary">${highlightText(res.noteName, query)}</span>
                         </div>
-                        <p class="text-text-primary mt-2">${highlightText(res.excerpt, query)}</p>
+                        <p class="text-text-primary mt-2">${res.excerpt}</p>
                     </div>
                 `).join('');
             }
@@ -759,7 +794,6 @@
                 app.elements.notesListPane.style.width = `${state.settings.paneWidth}px`;
                 app.elements.sortOrderSelect.value = state.settings.listSortOrder;
                 
-                // --- Theme Toggle ---
                 app.elements.themeToggle.addEventListener('click', () => {
                     state.settings.theme = state.settings.theme === 'light' ? 'dark' : 'light';
                     localStorage.setItem('codex-notes-theme', state.settings.theme); 
@@ -767,7 +801,6 @@
                     renderTheme();
                 });
 
-                // --- Pane Resizer ---
                 app.elements.paneResizer.addEventListener('mousedown', (e) => {
                     e.preventDefault();
                     app.elements.paneResizer.classList.add('dragging');
@@ -791,6 +824,27 @@
                     document.addEventListener('mouseup', stopDrag);
                 });
 
+                // --- Mobile Sidebar Logic ---
+                const toggleMobileSidebar = (open) => {
+                    const overlay = app.elements.mobileSidebarOverlay;
+                    if (open) {
+                        app.elements.notesListPane.classList.add('open');
+                        overlay.classList.remove('hidden');
+                        setTimeout(() => overlay.style.opacity = '1', 10);
+                    } else {
+                        app.elements.notesListPane.classList.remove('open');
+                        overlay.style.opacity = '0';
+                        setTimeout(() => overlay.classList.add('hidden'), 300);
+                    }
+                };
+                
+                app.elements.mobileMenuBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleMobileSidebar(true);
+                });
+                
+                app.elements.mobileSidebarOverlay.addEventListener('click', () => toggleMobileSidebar(false));
+
                 // --- Collections List (Event Delegation) ---
                 app.containers.collectionsList.addEventListener('click', (e) => {
                     const itemLink = e.target.closest('.collection-item');
@@ -809,6 +863,9 @@
                          state.settings.activeNoteId = id;
                          const { parent } = findItem(id);
                          state.settings.activeCollectionId = (parent && parent.id) ? parent.id : null;
+                         if (window.innerWidth < 768) {
+                             toggleMobileSidebar(false);
+                         }
                     }
                     saveState();
                     render();
@@ -828,7 +885,7 @@
 
                 app.containers.collectionsList.addEventListener('dragover', (e) => {
                     e.preventDefault();
-                    document.querySelectorAll('.drop-indicator, .drop-target-folder').forEach(el => el.classList.remove('drop-target-folder'));
+                    document.querySelectorAll('.drop-target-folder').forEach(el => el.classList.remove('drop-target-folder'));
                     document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
 
                     const targetWrapper = e.target.closest('.collection-item-wrapper');
@@ -924,16 +981,17 @@
                     } else if (deleteBtn) {
                         const columnEl = deleteBtn.closest('.kanban-column');
                         const columnId = columnEl.dataset.columnId;
-                        if (confirm('Are you sure you want to delete this column? Notes inside will be moved to the first column.')) {
+                        if (confirm('Are you sure you want to delete this column? Notes inside will be handled.')) {
                             const columns = state.kanbanColumns[collectionId];
                             const columnIndex = columns.findIndex(c => c.id === columnId);
                             const notesToMove = findItem(collectionId).item.children.filter(n => n.status === columnId);
                             
-                            columns.splice(columnIndex, 1); // Remove the column
+                            columns.splice(columnIndex, 1);
 
-                            // Move notes to the first column if it exists
                             if(columns.length > 0) {
                                 notesToMove.forEach(n => n.status = columns[0].id);
+                            } else {
+                                notesToMove.forEach(n => n.status = null);
                             }
 
                             saveState();
@@ -987,7 +1045,6 @@
                     }
                 });
                 
-                // --- View Switcher ---
                 document.getElementById('view-switcher-container').addEventListener('click', (e) => {
                     const button = e.target.closest('.view-btn');
                     if(button && !button.classList.contains('active')) {
@@ -997,14 +1054,12 @@
                     }
                 });
                 
-                // --- List Sort Order ---
                 app.elements.sortOrderSelect.addEventListener('change', (e) => {
                     state.settings.listSortOrder = e.target.value;
                     saveState();
                     renderListView();
                 });
 
-                // --- Note Editor & Search Results Navigation ---
                 app.containers.mainContentArea.addEventListener('click', (e) => {
                     const card = e.target.closest('.kanban-card, .list-note-item, .search-result-item');
                     if (card) {
@@ -1017,7 +1072,6 @@
                         return;
                     }
                     
-                    // Handle opening links in new tab from editor
                     const link = e.target.closest('a');
                     if (link && app.elements.noteEditorBody.contains(link)) {
                         e.preventDefault();
@@ -1038,7 +1092,7 @@
                             note.modifiedAt = new Date().toISOString();
                             saveState();
                             showToast("Note saved!", 'success');
-                            renderCollectionsList(); // Re-render sidebar in case name changed
+                            renderCollectionsList();
                             feather.replace();
                         }
                     }
@@ -1047,18 +1101,54 @@
                 app.elements.noteEditorTitle.addEventListener('input', saveNoteContent);
                 app.elements.noteEditorBody.addEventListener('input', saveNoteContent);
                 
+                // --- Note Editor Image Pasting/Dropping ---
+                const handleImageFile = (file) => {
+                    if (file.type.startsWith('image/')) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const imgHTML = `<img src="${e.target.result}" alt="Pasted image">`;
+                            document.execCommand('insertHTML', false, imgHTML);
+                            saveNoteContent();
+                        };
+                        reader.readAsDataURL(file);
+                        return true;
+                    }
+                    return false;
+                };
+
+                app.elements.noteEditorBody.addEventListener('paste', (e) => {
+                    const files = e.clipboardData.files;
+                    for (const file of files) {
+                        if (handleImageFile(file)) {
+                            e.preventDefault();
+                        }
+                    }
+                });
+
+                app.elements.noteEditorBody.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const files = e.dataTransfer.files;
+                    for (const file of files) {
+                        handleImageFile(file);
+                    }
+                });
+                
+                app.elements.noteEditorBody.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                });
+                
                 // --- New Collection Modal ---
                 const openModal = (modal) => {
                     app.modals.backdrop.classList.remove('hidden');
                     modal.classList.remove('hidden');
                     setTimeout(() => {
-                        app.modals.backdrop.classList.add('opacity-100');
+                        app.modals.backdrop.style.opacity = '1';
                         modal.classList.remove('scale-95', 'opacity-0');
                     }, 10);
                 };
 
                 const closeModal = (modal) => {
-                    app.modals.backdrop.classList.remove('opacity-100');
+                    app.modals.backdrop.style.opacity = '0';
                     modal.classList.add('scale-95', 'opacity-0');
                     setTimeout(() => {
                         app.modals.backdrop.classList.add('hidden');
@@ -1100,23 +1190,29 @@
                     let parentId = state.settings.activeCollectionId;
 
                     if (parentId) {
-                        parentCollection = findItem(parentId).item;
-                        targetArray = parentCollection.children;
+                        const parentResult = findItem(parentId);
+                        if (parentResult) {
+                            parentCollection = parentResult.item;
+                            if (parentCollection.type !== 'folder') return;
+                            targetArray = parentCollection.children;
+                            parentCollection.expanded = true;
+                        } else {
+                           parentId = null;
+                           targetArray = state.collections;
+                        }
                     } else {
                         targetArray = state.collections;
                     }
 
-                    if (parentCollection && parentCollection.type !== 'folder') return;
-
                     const now = new Date().toISOString();
                     const newNote = {
                         id: generateId('n'), name: 'Untitled Note', type: 'note', content: '',
-                        status: state.kanbanColumns[parentId]?.[0]?.id || null,
+                        status: parentId ? state.kanbanColumns[parentId]?.[0]?.id || null : null,
                         createdAt: now,
                         modifiedAt: now,
                         pinned: false
                     };
-                    targetArray.unshift(newNote); // Add to top
+                    targetArray.unshift(newNote);
                     state.settings.activeNoteId = newNote.id;
                     saveState();
                     render();
@@ -1136,14 +1232,14 @@
                     app.search.container.style.pointerEvents = 'none';
                     app.search.input.value = '';
                     isSearchActive = false;
-                    render(); // Re-render the original view
+                    render();
                 }
 
                 app.search.icon.addEventListener('click', openSearch);
                 app.search.closeBtn.addEventListener('click', closeSearch);
                 app.search.input.addEventListener('input', () => {
                     isSearchActive = app.search.input.value.length > 0;
-                    renderMainView(); // Will trigger search results render
+                    renderMainView();
                 });
 
                 // --- Inline Formatting Toolbar ---
@@ -1175,40 +1271,45 @@
                     if (command === 'createLink') {
                         const url = prompt('Enter a URL:');
                         if (url) document.execCommand(command, false, url);
+                    } else if (command === 'insertImage') {
+                        const url = prompt('Enter image URL:');
+                        if (url) document.execCommand(command, false, url);
                     } else if (command === 'formatBlock') {
                         document.execCommand(command, false, value);
                     } else {
                         document.execCommand(command, false, null);
                     }
+                    saveNoteContent();
                 });
 
                 // --- Context Menu ---
                 app.containers.collectionsList.addEventListener('contextmenu', e => {
                     const itemWrapper = e.target.closest('.collection-item-wrapper');
                     
+                    app.contextMenu.togglePinBtn.style.display = 'none';
+                    app.contextMenu.renameBtn.style.display = 'none';
+                    app.contextMenu.deleteBtn.style.display = 'none';
+                    app.contextMenu.duplicateBtn.style.display = 'none';
+
                     if (!itemWrapper && e.target.closest('#collections-list-container')) {
-                        app.contextMenu.targetId = null; // Right-clicked on empty space
+                        app.contextMenu.targetId = null;
                         app.contextMenu.targetIsContainer = true;
-                        app.contextMenu.togglePinBtn.style.display = 'none';
-                        app.contextMenu.menu.querySelector('[data-action="rename"]').style.display = 'none';
-                        app.contextMenu.menu.querySelector('[data-action="delete"]').style.display = 'none';
                     } else if (itemWrapper) {
                         e.preventDefault();
                         app.contextMenu.targetId = itemWrapper.dataset.id;
                         app.contextMenu.targetIsContainer = false;
                         const { item } = findItem(app.contextMenu.targetId);
                         
-                        app.contextMenu.menu.querySelector('[data-action="rename"]').style.display = 'flex';
-                        app.contextMenu.menu.querySelector('[data-action="delete"]').style.display = 'flex';
+                        app.contextMenu.renameBtn.style.display = 'flex';
+                        app.contextMenu.deleteBtn.style.display = 'flex';
+                        app.contextMenu.duplicateBtn.style.display = 'flex';
 
                         if (item && item.type === 'note') {
                             app.contextMenu.togglePinBtn.style.display = 'flex';
                             app.contextMenu.pinActionText.textContent = item.pinned ? 'Unpin' : 'Pin';
-                        } else {
-                            app.contextMenu.togglePinBtn.style.display = 'none';
                         }
                     } else {
-                        return; // Not a valid context menu click
+                        return;
                     }
 
                     app.contextMenu.menu.style.top = `${e.clientY}px`;
@@ -1218,16 +1319,36 @@
                     feather.replace();
                 });
 
+                const duplicateItem = (sourceItem) => {
+                    const newItem = JSON.parse(JSON.stringify(sourceItem));
+                    newItem.id = generateId(sourceItem.type[0]);
+                    newItem.name = `${sourceItem.name} (copy)`;
+                    
+                    const now = new Date().toISOString();
+                    if (newItem.type === 'note') {
+                        newItem.createdAt = now;
+                        newItem.modifiedAt = now;
+                    }
+
+                    if (newItem.type === 'folder' && newItem.children) {
+                        newItem.children = newItem.children.map(child => duplicateItem(child));
+                        if (state.kanbanColumns[sourceItem.id]) {
+                            state.kanbanColumns[newItem.id] = JSON.parse(JSON.stringify(state.kanbanColumns[sourceItem.id]));
+                        }
+                    }
+                    return newItem;
+                };
+
                 app.contextMenu.menu.addEventListener('click', e => {
                     const button = e.target.closest('button');
                     if (!button) return;
                     const action = button.dataset.action;
                     const id = app.contextMenu.targetId;
                     
-                    let targetItem, parent, parentArray;
+                    let findResult, targetItem, parent, parentArray;
 
                     if (id) {
-                        const findResult = findItem(id);
+                        findResult = findItem(id);
                         targetItem = findResult.item;
                         parent = findResult.parent;
                         parentArray = Array.isArray(parent) ? parent : parent.children;
@@ -1242,19 +1363,32 @@
                             ...(type === 'folder' && { children: [], expanded: true })
                         };
 
-                        if (type === 'folder') {
-                            state.kanbanColumns[newItem.id] = [{ id: generateId('col'), title: 'To Do' }];
-                        }
-
                         let destinationArray = state.collections;
+                        let parentFolder = null;
+                        
                         if (targetItem) {
                             if (targetItem.type === 'folder') {
                                 destinationArray = targetItem.children;
+                                targetItem.expanded = true;
+                                parentFolder = targetItem;
                             } else {
                                 destinationArray = parentArray;
+                                parentFolder = parent;
                             }
                         }
+                        
+                        if (newItem.type === 'note') {
+                            const parentId = parentFolder?.id || null;
+                            newItem.status = parentId ? state.kanbanColumns[parentId]?.[0]?.id || null : null;
+                        }
+                        
                         destinationArray.unshift(newItem);
+                        
+                        if (type === 'note') {
+                            state.settings.activeNoteId = newItem.id;
+                        } else {
+                           state.kanbanColumns[newItem.id] = [{ id: generateId('col'), title: 'To Do' }];
+                        }
                         
                         saveState();
                         render();
@@ -1268,12 +1402,12 @@
                             createNewItem('folder');
                             break;
                         case 'delete':
-                            if (confirm(`Are you sure you want to delete "${targetItem.name}"?`)) {
+                            if (confirm(`Are you sure you want to delete "${targetItem.name}"? This cannot be undone.`)) {
                                const index = parentArray.findIndex(i => i.id === id);
                                parentArray.splice(index, 1);
                                showToast(`"${targetItem.name}" deleted.`);
                                if (state.settings.activeNoteId === id) state.settings.activeNoteId = null;
-                               if (state.settings.activeCollectionId === id) state.settings.activeCollectionId = state.collections[0]?.id || null;
+                               if (state.settings.activeCollectionId === id) state.settings.activeCollectionId = null;
                                saveState();
                                render();
                             }
@@ -1289,10 +1423,18 @@
                         case 'toggle-pin':
                             if(targetItem && targetItem.type === 'note') {
                                 targetItem.pinned = !targetItem.pinned;
-                                showToast(targetItem.pinned ? `"${targetItem.name}" pinned.` : `"${targetItem.name}" unpinned.`);
+                                showToast(targetItem.pinned ? `Pinned "${targetItem.name}"` : `Unpinned "${targetItem.name}"`);
                                 saveState();
                                 render();
                             }
+                            break;
+                        case 'duplicate':
+                            if (!targetItem) return;
+                            const newItem = duplicateItem(targetItem);
+                            parentArray.splice(findResult.index + 1, 0, newItem);
+                            showToast(`Duplicated "${targetItem.name}"`);
+                            saveState();
+                            render();
                             break;
                     }
                     closeContextMenu();
@@ -1303,12 +1445,14 @@
                     setTimeout(() => app.contextMenu.menu.classList.add('hidden'), 100);
                 }
                 
-                // --- Keyboard Shortcuts ---
                 document.addEventListener('keydown', (e) => {
                     if (e.key === 'Escape') {
                         closeSearch();
                         closeContextMenu();
                         closeModal(app.modals.newCollection);
+                        if (app.elements.notesListPane.classList.contains('open')) {
+                            toggleMobileSidebar(false);
+                        }
                     }
                     if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
                         if (e.key === 'f') { e.preventDefault(); openSearch(); }
@@ -1316,13 +1460,12 @@
                     }
                 });
                 
-                // Close context menu on any click
                 document.addEventListener('click', (e) => {
                     if(!app.contextMenu.menu.contains(e.target)) closeContextMenu();
                 });
 
 
-                render(); // Initial Render
+                render();
             }
 
             init();
