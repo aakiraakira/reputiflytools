@@ -8,7 +8,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- The Google Maps script with the API key and a single, global callback -->
     <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBXdjRQZJd9ySH5mxql4tlXCEVpDH9GGbI&libraries=places&callback=initializeGoogleMaps"></script>
     <style>
         /* Base styling for the page, using the Inter font */
@@ -90,28 +89,23 @@
     <div id="notification" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-white py-3 px-5 rounded-lg shadow-xl z-[10001]"></div>
     
     <script>
-        // --- ROBUST INITIALIZATION LOGIC ---
-        
-        // This global flag will be true once the Google Maps script has loaded and run its callback.
-        let isGoogleMapsApiReady = false;
-
-        // The single global callback function for the Google Maps API script.
-        // This function is the ONLY place where Google Maps objects are created.
+        // Create a global function that the Google Maps script will call directly.
+        // This is the most reliable way to know the API is ready.
         function initializeGoogleMaps() {
-            isGoogleMapsApiReady = true;
-            
-            // If the main application object exists, tell it to try initializing its map components.
             if (window.reviewApp) {
-                window.reviewApp.initializeMapsForCurrentView();
+                window.reviewApp.mapsApiLoaded();
             }
         }
 
         document.addEventListener('DOMContentLoaded', () => {
+            // Main application object
             const app = {
                 // --- STATE ---
                 state: {
                     currentView: 'initial',
                     isClientLoggedIn: false, isOwnerLoggedIn: false, isAdminLoggedIn: false,
+                    mapsInitialized: false,
+                    placesService: null,
                     data: { companies: [] },
                     activeCompanyId: localStorage.getItem('activeCompanyTab') || null,
                     clientState: { link: '', reviews: [] },
@@ -120,7 +114,14 @@
                         geminiApiKey: localStorage.getItem('geminiApiKey') || '',
                         geminiModel: 'normal',
                         isAiGenerating: false,
-                        selectedPlace: { name: '', reviewLink: '', startingCount: 0, reviews: [], placeId: '', details: null },
+                        selectedPlace: {
+                            name: '',
+                            reviewLink: '',
+                            startingCount: 0,
+                            reviews: [],
+                            placeId: '',
+                            details: null 
+                        },
                         reviews: [],
                         bulkText: '',
                         promptGenerator: { input: '', output: '' },
@@ -138,18 +139,13 @@
                     genericModalContainer: document.getElementById('generic-modal-container'),
                     notification: document.getElementById('notification'),
                 },
-                
                 // --- INITIALIZATION ---
                 init() {
+                    // Make the app instance globally accessible for the Maps callback.
                     window.reviewApp = this; 
+                    
                     this.loadData();
                     this.attachInitialListeners();
-                    
-                    // If the Google Maps API finished loading *before* the app was ready,
-                    // we need to trigger the map initialization now.
-                    if (isGoogleMapsApiReady) {
-                        this.initializeMapsForCurrentView();
-                    }
                     
                     this.state.isClientLoggedIn = sessionStorage.getItem('isClientLoggedIn') === 'true';
                     this.state.isOwnerLoggedIn = sessionStorage.getItem('isOwnerLoggedIn') === 'true';
@@ -163,36 +159,47 @@
                     }
                 },
                 
-                // This function is the central point for setting up map features.
-                // It's safe to call multiple times. It checks if the API is ready
-                // and which view is active.
+                // This function is now called by the global callback.
+                mapsApiLoaded() {
+                    this.state.mapsInitialized = true;
+                    // Now that the API is definitely loaded, initialize maps for the current view.
+                    this.initializeMapsForCurrentView();
+                },
+
                 initializeMapsForCurrentView() {
-                    if (!isGoogleMapsApiReady) return; // Guard: Don't run if the API script isn't ready.
+                     if (!this.state.mapsInitialized) return;
                     
                     const view = this.state.currentView;
-                    if (view === 'client') {
-                        this.initAutocomplete('client-link-input', this.handleClientPlaceSelection.bind(this));
-                    }
-                    if (view === 'owner') {
-                        if (this.state.ownerState.activeTab === 'submitter') {
-                            this.initAutocomplete('owner-link-input', this.handleOwnerPlaceSelection.bind(this));
-                        }
-                        if (this.state.ownerState.activeTab === 'tools') {
-                            this.initPlaceIdFinderMap();
-                        }
-                    }
-                    if (view === 'admin') {
-                         const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
-                         if(company) {
-                            this.initAutocomplete(`admin-link-input-${company.id}`, (place) => this.handleAdminPlaceSelection(place, company.id));
-                         }
-                    }
+                    if (view === 'client') this.initializeClientViewMaps();
+                    if (view === 'owner') this.initializeOwnerViewMaps();
+                    if (view === 'admin') this.initializeAdminViewMaps();
                 },
 
                 // --- GOOGLE MAPS & PLACES INTEGRATION ---
+                 initializeClientViewMaps() {
+                    this.initAutocomplete('client-link-input', this.handleClientPlaceSelection.bind(this));
+                },
+                initializeOwnerViewMaps() {
+                    if (this.state.ownerState.activeTab === 'submitter') {
+                        this.initAutocomplete('owner-link-input', this.handleOwnerPlaceSelection.bind(this));
+                    }
+                    if (this.state.ownerState.activeTab === 'tools') {
+                        this.initPlaceIdFinderMap();
+                    }
+                },
+                
+                initializeAdminViewMaps() {
+                     const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
+                     if(company) {
+                        this.initAutocomplete(`admin-link-input-${company.id}`, (place) => this.handleAdminPlaceSelection(place, company.id));
+                     }
+                },
+
+                // Simplified and made more robust. It's called after the view is rendered.
                 initAutocomplete(inputId, callback) {
+                    if (!this.state.mapsInitialized) return;
                     const input = document.getElementById(inputId);
-                    // Guard: Exit if the input element doesn't exist in the DOM yet, or if it's already initialized.
+                    // Ensure the input exists in the DOM and hasn't already been initialized.
                     if (!input || input.dataset.acAttached) return;
 
                     const autocompleteOptions = {
@@ -200,7 +207,7 @@
                         types: ["establishment"]
                     };
                     const autocomplete = new google.maps.places.Autocomplete(input, autocompleteOptions);
-                    input.dataset.acAttached = 'true'; // Mark as initialized to prevent re-attaching.
+                    input.dataset.acAttached = 'true'; // Mark as initialized
 
                     autocomplete.addListener('place_changed', () => {
                         const place = autocomplete.getPlace();
@@ -209,10 +216,12 @@
                 },
                 
                 initPlaceIdFinderMap() {
+                    if (!this.state.mapsInitialized) return;
                     const mapEl = document.getElementById("map");
                     const inputEl = document.getElementById("pac-input");
                     
                     if (!mapEl || !inputEl || inputEl.dataset.acAttached) return;
+                    // Clear any previous map instance to prevent errors
                     mapEl.innerHTML = ''; 
 
                     const map = new google.maps.Map(mapEl, { center: { lat: 1.3521, lng: 103.8198 }, zoom: 11 });
@@ -344,6 +353,10 @@
                     }
                     
                     this.render();
+                    
+                    // Defer map initialization until after rendering is complete
+                    // to ensure the input elements exist in the DOM.
+                    setTimeout(() => this.initializeMapsForCurrentView(), 0);
                 },
                 
                 // --- RENDERING ---
@@ -357,10 +370,6 @@
                     if (this.state.currentView === 'client') this.renderClientView();
                     if (this.state.currentView === 'owner') this.renderOwnerView();
                     if (this.state.currentView === 'admin') this.renderAdminView();
-
-                    // After every render, try to initialize maps. This ensures that if the API
-                    // is ready, any newly visible inputs will get the autocomplete feature.
-                    this.initializeMapsForCurrentView();
                 },
                 
                 renderOwnerView() {
@@ -388,7 +397,6 @@
                     const { selectedPlace, reviews, bulkText } = this.state.ownerState;
                     const isPlaceSelected = !!selectedPlace.placeId;
                     const areReviewsProcessed = reviews.length > 0;
-                    
                     return `
                         <div id="owner-link-section" class="p-6 bg-gray-800 border border-gray-700 rounded-xl">
                              <h2 class="text-xl font-semibold text-white mb-4">Step 1: Find Business</h2>
@@ -454,7 +462,6 @@
                 },
                 renderOwnerToolsView() {
                     const { selectedPlace, sheetRow } = this.state.ownerState;
-
                     return `<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             <div class="p-6 bg-gray-800 border border-gray-700 rounded-xl space-y-4">
                                 <h2 class="text-xl font-semibold text-white">Place ID Finder</h2>
@@ -498,7 +505,6 @@
                 renderClientView() {
                     const { link, reviews } = this.state.clientState;
                     const isLinkSet = !!link;
-
                     this.elements.clientView.innerHTML = `
                         <div class="flex justify-between items-center mb-8">
                             <button class="back-to-initial-btn text-gray-400 hover:text-white">← Logout & Return</button>
@@ -519,7 +525,11 @@
                                 <button id="add-client-review-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">Add New Review</button>
                             </div>
                             <div id="client-reviews-container">${this.renderReviewCards('client')}</div>
-                            <div class="mt-8 pt-6 border-t border-gray-700"> <button id="submit-client-file-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg" ${reviews.length === 0 ? 'disabled' : ''}>Submit Reviews</button> </div>
+                            <div class="mt-8 pt-6 border-t border-gray-700">
+                                <button id="download-client-file-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg" ${reviews.length === 0 ? 'disabled' : ''}>
+                                    Download Submission File
+                                </button>
+                            </div>
                         </div>`;
                 },
                 renderReviewCards(viewType) {
@@ -610,7 +620,6 @@
                     const doneReviews = company.reviews?.filter(r => r.status === 'done').length || 0;
                     const progress = totalReviews > 0 ? (doneReviews / totalReviews) * 100 : 0;
                     const undoneReviews = company.reviews?.filter(r => r.status !== 'done') || [];
-
                     return `
                         <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 mb-8">
                             <div class="flex flex-wrap justify-between items-start gap-4 mb-4">
@@ -676,6 +685,8 @@
                 handleOwnerTabClick(tab) {
                     this.state.ownerState.activeTab = tab;
                     this.render();
+                    // Re-initialize maps for the new tab if needed
+                    setTimeout(() => this.initializeOwnerViewMaps(), 0);
                 },
                 handleGenericClick(e) {
                     const target = e.target;
@@ -686,16 +697,15 @@
 
                     if (this.state.currentView === 'client') {
                         if (target.id === 'add-client-review-btn') { this.state.clientState.reviews.unshift({ text: '', requiresImage: false, imageDataUrls: [] }); this.render(); }
-                        if (target.id === 'how-to-use-btn') { this.showInfoModal('How to Use the Client Portal', `<ol class="list-decimal list-inside space-y-3"><li><strong>Find Business:</strong> Use the search bar to find the business. The review link will be set automatically.</li><li><strong>Set Manually (Optional):</strong> If search doesn't work, paste the full Google Review link and click "Set Link Manually".</li><li><strong>Add Reviews:</strong> Click "Add New Review" to create a card.</li><li><strong>Write Content:</strong> Type your review in the text box.</li><li><strong>Add Images:</strong> Check the "This review requires image(s)" box to show the uploader. Click it to select pictures.</li><li><strong>Submit Reviews:</strong> When done, click "Submit Reviews".</li><li><strong>Name Your File:</strong> A pop-up will ask for a filename (e.g., 'yourname_reviews').</li><li><strong>Confirmation:</strong> The data will be sent automatically. You will see a success message.</li></ol>`); }
+                        if (target.id === 'how-to-use-btn') { this.showInfoModal('How to Use the Client Portal', `<ol class="list-decimal list-inside space-y-3"><li><strong>Find Business:</strong> Use the search bar to find the business. The review link will be set automatically.</li><li><strong>Set Manually (Optional):</strong> If search doesn't work, paste the full Google Review link and click "Set Link Manually".</li><li><strong>Add Reviews:</strong> Click "Add New Review" to create a card.</li><li><strong>Write Content:</strong> Type your review in the text box.</li><li><strong>Add Images:</strong> Check the "This review requires image(s)" box to show the uploader. Click it to select pictures.</li><li><strong>Download File:</strong> When done, click "Download Submission File".</li><li><strong>Name Your File:</strong> A pop-up will ask for a filename (e.g., 'yourname_reviews').</li><li><strong>Send on WhatsApp:</strong> After downloading, a new pop-up will appear with instructions to send the file to us via WhatsApp.</li></ol>`); }
                          if (target.id === 'set-client-link-btn') {
                             const input = document.getElementById('client-link-input');
                             if(this.validateLink(input.value)) { this.state.clientState.link = input.value; this.render(); }
                             else { this.showNotification('Please enter a valid URL starting with http:// or https://', 'error'); }
                         }
-                        if (target.id === 'submit-client-file-btn') {
-                             this.showPromptModal('Enter your name or a filename', 'e.g., yourname_reviews', (filename) => {
-                                if (!filename) { this.showNotification('Submission cancelled.', 'error'); return; }
-                                this.handleClientWeb3FormsSubmit(filename);
+                        if (target.id === 'download-client-file-btn') {
+                             this.showPromptModal('Enter your name or a filename for the download', 'e.g., yourname_reviews', (filename) => {
+                                this.handleClientDownload(filename);
                             });
                         }
                     }
@@ -728,6 +738,7 @@
                         if (target.id === 'craft-ai-reviews-btn') this.craftAiReviews();
                         if (target.id === 'copy-place-link-btn') this.copyToClipboard(this.state.ownerState.selectedPlace.reviewLink, "Place link copied!");
                         if (target.id === 'generate-sheet-row-btn') this.generateSheetRow();
+                        if (target.id === 'copy-sheet-row-btn') this.copyToClipboard(this.state.ownerState.sheetRow.output, "Sheet row copied!");
                         if (target.id === 'download-owner-file-btn') {
                             this.showPromptModal('Enter a filename', 'e.g., company_reviews', (filename) => {
                                 if (!filename) { this.showNotification('Download cancelled.', 'error'); return; }
@@ -767,12 +778,15 @@
                             this.state.activeCompanyId = newCompany.id;
                             this.saveData(); 
                             this.render(); 
+                            setTimeout(() => this.initializeAdminViewMaps(), 0);
+                            nameInput.value = '';
                         }
                     }
                     if(target.closest('.company-tab-btn')) { 
                         this.state.activeCompanyId = target.closest('.company-tab-btn').dataset.id; 
                         localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
                         this.render(); 
+                        setTimeout(() => this.initializeAdminViewMaps(), 0);
                     }
                     if(target.closest('.remove-company-btn')) {
                         const id = target.closest('.remove-company-btn').dataset.id;
@@ -917,31 +931,47 @@
                          reader.readAsText(file);
                     }
                 },
-
-                async handleClientWeb3FormsSubmit(filename) {
-                    this.showNotification('Submitting...', 'info');
-                    const formData = new FormData();
-                    formData.append("apikey", "df839469-7072-4818-8962-4362eb379953");
-                    formData.append("subject", `New Review Submission: ${filename}`);
-                    formData.append("from_name", "Review Management System");
-                    const businessName = document.getElementById('client-link-input')?.value || 'N/A';
-                    formData.append("message", `A new review submission has been received for:\n\nBusiness: ${businessName}\nReview Link: ${this.state.clientState.link}\n\nThe full submission data is attached as a JSON file.`);
-                    const dataToSubmit = { link: this.state.clientState.link, reviews: this.state.clientState.reviews };
-                    const jsonBlob = new Blob([JSON.stringify(dataToSubmit, null, 2)], { type: 'application/json' });
-                    formData.append("attachment", jsonBlob, `${filename.replace(/\s+/g, '_')}.json`);
-                    try {
-                        const response = await fetch("https://api.web3forms.com/submit", { method: "POST", body: formData });
-                        const result = await response.json();
-                        if (result.success) {
-                            this.showNotification('Submission successful! Thank you.');
-                            this.state.clientState = { link: '', reviews: [] };
-                            this.render();
-                        } else {
-                            this.showNotification(`Submission failed: ${result.message}`, 'error');
-                        }
-                    } catch (error) {
-                        this.showNotification('An error occurred during submission.', 'error');
+                
+                // NEW: Handles client file download and shows WhatsApp instructions
+                handleClientDownload(filename) {
+                    if (!filename) {
+                        this.showNotification('Download cancelled.', 'info');
+                        return;
                     }
+
+                    const dataToSubmit = {
+                        link: this.state.clientState.link,
+                        reviews: this.state.clientState.reviews
+                    };
+                    const jsonBlob = new Blob([JSON.stringify(dataToSubmit, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(jsonBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${filename.replace(/\s+/g, '_')}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+
+                    this.showNotification('File downloaded! Now send it on WhatsApp.');
+
+                    // NOTE: Replace YOUR_WHATSAPP_NUMBER_HERE with your actual WhatsApp number
+                    const whatsappNumber = "YOUR_WHATSAPP_NUMBER_HERE"; 
+                    this.showInfoModal(
+                        'Submission Instructions',
+                        `<div class="text-center space-y-4">
+                            <p>Your review file (<strong class="text-green-400">${a.download}</strong>) has been downloaded successfully.</p>
+                            <p class="font-bold text-lg">Next Step: Please send this file to us on WhatsApp.</p>
+                            <a href="https://wa.me/${whatsappNumber}" target="_blank" class="inline-block bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-lg text-lg">
+                                Open WhatsApp
+                            </a>
+                            <p class="text-sm text-gray-400">(You will need to manually attach the downloaded file in the chat.)</p>
+                        </div>`
+                    );
+
+                    // Reset the client view after submission
+                    this.state.clientState = { link: '', reviews: [] };
+                    this.render();
                 },
 
                 processBulkReviews() {
@@ -1003,6 +1033,7 @@
                     } finally {
                         this.state.ownerState.isAiGenerating = false;
                         this.render();
+                        setTimeout(() => this.initializeOwnerViewMaps(), 0);
                     }
                 },
 
@@ -1149,4 +1180,4 @@
         });
     </script>
 </body>
-</ht
+</html>
