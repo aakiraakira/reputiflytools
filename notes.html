@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
     <script src="https://unpkg.com/vis-network@9.1.2/dist/vis-network.min.js"></script>
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/lunr/lunr.min.js"></script>
     
 
     <script>
@@ -286,6 +287,12 @@
           0%, 100% { opacity: 1; }
           50% { opacity: .6; }
         }
+        
+        #tag-list-container .tag-filter-item.active {
+            background-color: var(--accent-primary);
+            color: white;
+            font-weight: 600;
+        }
 
         @media (max-width: 768px) {
             #notes-list-pane {
@@ -341,6 +348,11 @@
                 </header>
                 <div id="collections-list-container" class="flex-grow p-2 overflow-y-auto"></div>
                 
+                <div id="tag-panel" class="p-2 border-t border-border-color flex-shrink-0">
+                    <h3 class="font-bold text-sm uppercase tracking-wider px-2 py-1 text-text-secondary">Tags</h3>
+                    <div id="tag-list-container" class="mt-1 space-y-1 max-h-32 overflow-y-auto"></div>
+                </div>
+
                 <footer class="p-2 border-t border-border-color flex-shrink-0">
                     <button id="theme-toggle" class="settings-footer-item">
                        <i data-feather="star" id="theme-reputify-icon" class="hidden w-5 h-5"></i>
@@ -572,6 +584,7 @@
                 containers: {
                     app: document.getElementById('app-container'),
                     collectionsList: document.getElementById('collections-list-container'),
+                    tagList: document.getElementById('tag-list-container'),
                     kanbanBoard: document.getElementById('kanban-board'),
                     notesListContent: document.getElementById('notes-list-content'),
                     noteEditor: document.getElementById('note-editor-view'),
@@ -687,12 +700,13 @@
             let editorSelectionRange = null;
             let speechRecognizer = null;
             let isDictating = false;
+            let lunrIndex;
 
             const defaultState = {
                 collections: [
                     { id: 'c1', name: 'Product Design', type: 'folder', children: [
-                        { id: 'n1', name: 'UI/UX Principles', type: 'note', content: '<h1>Hick\'s Law</h1><p>The time it takes to make a decision increases with the number and complexity of choices. [[Inspiration]] It is a fundamental principle in user interface design that helps simplify user choices. By reducing the number of options, designers can significantly improve usability and reduce cognitive load on the user, leading to a faster and more satisfying user experience.</p><p>Link to a non-existent note: [[Meeting Notes]]</p>', links: ['Inspiration', 'Meeting Notes'], status: 'col1', pinned: true, createdAt: new Date(Date.now() - 86400000 * 2).toISOString(), modifiedAt: new Date(Date.now() - 86400000 * 2).toISOString() },
-                        { id: 'n2', name: 'Inspiration', type: 'note', content: 'Check out Dribbble, Awwwards, and Behance for design inspiration.', links: [], status: 'col2', pinned: false, createdAt: new Date(Date.now() - 86400000).toISOString(), modifiedAt: new Date().toISOString() },
+                        { id: 'n1', name: 'UI/UX Principles', type: 'note', content: '<h1>Hick\'s Law</h1><p>The time it takes to make a decision increases with the number and complexity of choices. [[Inspiration]] It is a fundamental principle in user interface design. #design', links: ['Inspiration', 'Meeting Notes'], tags:['design'], status: 'col1', pinned: true, createdAt: new Date(Date.now() - 86400000 * 2).toISOString(), modifiedAt: new Date(Date.now() - 86400000 * 2).toISOString() },
+                        { id: 'n2', name: 'Inspiration', type: 'note', content: 'Check out Dribbble, Awwwards, and Behance for #design inspiration.', links: [], tags:['design'], status: 'col2', pinned: false, createdAt: new Date(Date.now() - 86400000).toISOString(), modifiedAt: new Date().toISOString() },
                     ], expanded: true },
                     { id: 'c2', name: 'Marketing', type: 'folder', children: [], expanded: false },
                     { id: 'c3', name: 'Development', type: 'folder', children: [
@@ -700,15 +714,16 @@
                             id: 'n4',
                             name: 'Code Snippet Example',
                             type: 'note',
-                            content: '## JavaScript Code Highlighting\nHere is an example of a JavaScript code block:\n\n```js\nfunction sayHello(name) {\n  console.log(`Hello, ${name}!`);\n}\n\nsayHello("World");\n```\n\nThe code above should be syntax-highlighted in the preview mode.',
+                            content: '## JavaScript Code Highlighting\nHere is an example of a JavaScript code block:\n\n```js\nfunction sayHello(name) {\n  console.log(`Hello, ${name}!`);\n}\n\nsayHello("World");\n```\n\nThe code above should be syntax-highlighted in the preview mode. #javascript #example',
                             links: [],
+                            tags: ['javascript', 'example'],
                             status: null,
                             pinned: false,
                             createdAt: new Date().toISOString(),
                             modifiedAt: new Date().toISOString()
                         }
                     ], expanded: false },
-                    { id: 'n3', name: 'Standalone Note', type: 'note', content: 'A standalone note, not in any project.', links: [], status: null, pinned: false, createdAt: new Date(Date.now() - 86400000 * 3).toISOString(), modifiedAt: new Date(Date.now() - 86400000).toISOString() },
+                    { id: 'n3', name: 'Standalone Note', type: 'note', content: 'A standalone note, not in any project. #misc', links: [], tags:['misc'], status: null, pinned: false, createdAt: new Date(Date.now() - 86400000 * 3).toISOString(), modifiedAt: new Date(Date.now() - 86400000).toISOString() },
                 ],
                 settings: {
                     theme: 'reputify',
@@ -719,6 +734,7 @@
                     activeView: 'board',
                     listSortOrder: 'modifiedAt-desc',
                     editorMode: 'editor',
+                    activeTag: null,
                 },
                 kanbanColumns: {
                     'c1': [ { id: 'col1', title: 'To Do' }, { id: 'col2', title: 'In Progress' } ],
@@ -730,7 +746,7 @@
 
             function saveState() {
                 try {
-                    localStorage.setItem('codex-notes-appState-v3', JSON.stringify(state));
+                    localStorage.setItem('codex-notes-appState-v4', JSON.stringify(state));
                 } catch (error) {
                     console.error("Failed to save state:", error);
                     showToast("Error saving data. Storage might be full.", 'error');
@@ -742,6 +758,7 @@
                     if (node.type === 'note') {
                         if (typeof node.pinned === 'undefined') node.pinned = false;
                         if (typeof node.links === 'undefined') node.links = [];
+                        if (typeof node.tags === 'undefined') node.tags = [];
                         const now = new Date().toISOString();
                         if (typeof node.createdAt === 'undefined') node.createdAt = now;
                         if (typeof node.modifiedAt === 'undefined') node.modifiedAt = node.createdAt;
@@ -749,12 +766,9 @@
                     if (node.children) node.children.forEach(migrateNode);
                 };
                 if (!loadedState.settings) loadedState.settings = {};
-                if (typeof loadedState.settings.sidebarCollapsed === 'undefined') {
-                    loadedState.settings.sidebarCollapsed = false;
-                }
-                if (typeof loadedState.settings.paneWidth === 'undefined') {
-                    loadedState.settings.paneWidth = 280;
-                }
+                if (typeof loadedState.settings.sidebarCollapsed === 'undefined') loadedState.settings.sidebarCollapsed = false;
+                if (typeof loadedState.settings.paneWidth === 'undefined') loadedState.settings.paneWidth = 280;
+                if (typeof loadedState.settings.activeTag === 'undefined') loadedState.settings.activeTag = null;
                 if (!loadedState.settings.listSortOrder) loadedState.settings.listSortOrder = 'modifiedAt-desc';
                 if (!loadedState.settings.editorMode) loadedState.settings.editorMode = 'editor';
                 if (!loadedState.collections) loadedState.collections = [];
@@ -766,7 +780,7 @@
             }
 
             function loadState() {
-                const savedState = localStorage.getItem('codex-notes-appState-v3');
+                const savedState = localStorage.getItem('codex-notes-appState-v4');
                 let parsedState = savedState ? JSON.parse(savedState) : JSON.parse(JSON.stringify(defaultState));
                 state = migrateState(parsedState);
                 state.settings.theme = localStorage.getItem('codex-notes-theme') || 'reputify';
@@ -775,6 +789,7 @@
             const generateId = (prefix = 'id') => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             
             function findItem(itemId, tree = state.collections) {
+                if (!itemId) return null;
                 for (let i = 0; i < tree.length; i++) {
                     const item = tree[i];
                     if (item.id === itemId) return {item, parent: tree, index: i};
@@ -855,13 +870,6 @@
                          }
                     });
                 }
-            };
-
-            const highlightText = (text, query) => {
-                if (!query || !text) return text;
-                const escapedQuery = query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-                const regex = new RegExp(`(${escapedQuery})`, 'gi');
-                return text.replace(regex, `<mark>$1</mark>`);
             };
             
             const formatDateTime = (isoString) => {
@@ -1021,6 +1029,7 @@
                 renderTheme();
                 renderSidebarState();
                 renderCollectionsList();
+                renderTagList();
                 renderMainView();
                 renderMobileControls();
                 
@@ -1076,7 +1085,8 @@
 
             function renderCollectionsList(collections = state.collections, level = 0) {
                 const createItemHTML = (item, currentLevel) => {
-                    const isActive = item.id === state.settings.activeCollectionId || item.id === state.settings.activeNoteId;
+                    const isActive = item.id === state.settings.activeCollectionId;
+                    const isNoteActive = item.id === state.settings.activeNoteId;
                     const isFolder = item.type === 'folder';
                     
                     if (isFolder && item.children) {
@@ -1088,7 +1098,7 @@
 
                     return `
                         <li data-id="${item.id}" draggable="true" class="collection-item-wrapper rounded-md">
-                            <a href="#" class="collection-item flex items-center gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
+                            <a href="#" class="collection-item flex items-center gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
                                 ${isFolder ? `<i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i>` : ''}
                                 <i data-feather="${isFolder ? 'folder' : (item.pinned ? 'paperclip' : 'file-text')}" class="w-4 h-4 flex-shrink-0 text-text-secondary ${item.pinned ? 'text-accent-primary': ''}"></i>
                                 <span class="truncate flex-grow">${item.name}</span>
@@ -1109,6 +1119,21 @@
                 }
                 return listHTML;
             }
+            
+            function renderTagList() {
+                const allNotes = getAllNotes(state.collections);
+                const allTags = new Set(allNotes.flatMap(note => note.tags || []));
+                const sortedTags = Array.from(allTags).sort();
+                
+                if (sortedTags.length === 0) {
+                    app.containers.tagList.innerHTML = `<p class="px-2 text-xs text-text-tertiary">No tags found.</p>`;
+                    return;
+                }
+
+                app.containers.tagList.innerHTML = sortedTags.map(tag => `
+                    <a href="#" class="tag-filter-item block text-sm p-1 px-2 rounded-md text-text-secondary hover:bg-bg-pane-dark hover:text-text-primary ${state.settings.activeTag === tag ? 'active' : ''}" data-tag="${tag}">#${tag}</a>
+                `).join('');
+            }
 
             function parseInternalLinks(htmlContent) {
                 if (!htmlContent) return '';
@@ -1124,9 +1149,17 @@
                 });
             }
 
+            function updateNoteTags(note) {
+                if (!note || typeof note.content !== 'string') return;
+                const plainText = note.content.replace(/<[^>]*>?/gm, '');
+                const matches = plainText.match(/#(\w+)/g) || [];
+                note.tags = [...new Set(matches.map(tag => tag.substring(1)))];
+            }
+
             function updateNoteLinks(note) {
                 if (!note || typeof note.content !== 'string') return;
-                const matches = note.content.matchAll(/\[\[(.*?)\]\]/g);
+                const plainText = note.content.replace(/<[^>]*>?/gm, '');
+                const matches = plainText.matchAll(/\[\[(.*?)\]\]/g);
                 note.links = [...matches].map(match => match[1].trim());
             }
 
@@ -1138,31 +1171,36 @@
                     return;
                 }
                 
-                const activeCollection = findItem(state.settings.activeCollectionId)?.item;
-                app.elements.currentViewTitle.textContent = activeCollection?.name || "All Notes";
                 const isNoteActive = !!state.settings.activeNoteId;
-                
-                const showListControls = !isNoteActive && (state.settings.activeView === 'list' || !activeCollection);
+                const isTagActive = !!state.settings.activeTag;
+                const activeCollection = findItem(state.settings.activeCollectionId)?.item;
 
-                app.elements.viewSwitcher.style.display = isNoteActive || !activeCollection ? 'none' : 'flex';
+                if (isTagActive) {
+                    app.elements.currentViewTitle.textContent = `Tag: #${state.settings.activeTag}`;
+                } else {
+                    app.elements.currentViewTitle.textContent = activeCollection?.name || "All Notes";
+                }
+                
+                const showListControls = !isNoteActive && (state.settings.activeView === 'list' || !activeCollection || isTagActive);
+
+                app.elements.viewSwitcher.style.display = isNoteActive || !activeCollection || isTagActive ? 'none' : 'flex';
                 app.elements.listViewControls.style.display = showListControls ? 'flex' : 'none';
                 
 
                 if (isNoteActive) {
                     renderNoteEditor();
+                } else if (isTagActive) {
+                    renderListView();
                 } else if (activeCollection) {
                      document.querySelectorAll('#view-switcher-container .view-btn').forEach(b => b.classList.remove('active'));
                      document.querySelector(`#view-switcher-container .view-btn[data-view="${state.settings.activeView}"]`)?.classList.add('active');
                     
                     if (state.settings.activeView === 'board') {
-                        app.views.board.classList.remove('hidden');
                         renderKanbanView();
                     } else {
-                        app.views.list.classList.remove('hidden');
                         renderListView();
                     }
                 } else {
-                     app.views.list.classList.remove('hidden');
                      renderListView();
                 }
             }
@@ -1270,11 +1308,19 @@
 
             function renderListView() {
                  app.views.list.classList.remove('hidden');
-                 const collectionId = state.settings.activeCollectionId;
-                 const collection = findItem(collectionId)?.item;
-                 const notes = collection 
-                    ? collection.children.filter(c => c.type === 'note') 
-                    : getAllNotes(state.collections);
+                 let notes = [];
+                 const activeTag = state.settings.activeTag;
+                 
+                 if (activeTag) {
+                     notes = getAllNotes(state.collections).filter(note => (note.tags || []).includes(activeTag));
+                 } else {
+                     const collectionId = state.settings.activeCollectionId;
+                     const collection = findItem(collectionId)?.item;
+                     notes = collection 
+                        ? collection.children.filter(c => c.type === 'note') 
+                        : getAllNotes(state.collections);
+                 }
+
 
                  if (notes.length === 0) {
                      app.containers.notesListContent.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="inbox" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">No Notes Here</h3><p>Create a new note to get started.</p></div>`;
@@ -1359,50 +1405,38 @@
                     return;
                 }
                 
-                const escapedQuery = query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-                const queryRegex = new RegExp(escapedQuery, 'i');
+                const results = lunrIndex.search(query);
+                const resultNotes = results.map(res => findItem(res.ref)?.item).filter(Boolean);
 
-                const results = [];
-                const searchPool = (items, parentName = null) => {
-                    for (const item of items) {
-                        if (item.type === 'note') {
-                            const noteName = item.name || '';
-                            const noteContent = item.content || '';
-                            const plainContent = noteContent.replace(/<[^>]*>?/gm, '');
-                            
-                            if (queryRegex.test(noteName) || queryRegex.test(plainContent)) {
-                                const excerptMatch = plainContent.match(new RegExp(`.{0,50}${escapedQuery}.{0,50}`, 'i'));
-                                const excerpt = excerptMatch ? `...${highlightText(excerptMatch[0], query)}...` : highlightText(plainContent.substring(0, 100) + '...', query);
-                                results.push({
-                                    noteId: item.id,
-                                    projectName: parentName,
-                                    noteName: noteName,
-                                    excerpt: excerpt
-                                });
-                            }
-                        }
-                        if (item.type === 'folder' && item.children) {
-                            searchPool(item.children, item.name);
-                        }
-                    }
-                };
-
-                searchPool(state.collections);
-                
-                if(results.length === 0) {
+                if(resultNotes.length === 0) {
                      app.containers.searchResultsList.innerHTML = `<p class="text-text-secondary text-center"><i data-feather="x-circle" class="w-12 h-12 mx-auto mb-4"></i><br>No results found for "${query}".</p>`;
                      feather.replace();
                      return;
                 }
+                
+                const highlightText = (text, query) => {
+                    if (!query || !text) return text;
+                    const escapedQuery = query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                    const regex = new RegExp(`(${escapedQuery})`, 'gi');
+                    return text.replace(regex, `<mark>$1</mark>`);
+                };
 
-                app.containers.searchResultsList.innerHTML = results.map(res => `
-                    <div class="search-result-item p-4 mb-3 rounded-lg hover:bg-bg-pane-dark cursor-pointer border border-border-color" data-note-id="${res.noteId}">
-                        <div class="font-semibold text-text-secondary text-sm">
-                            ${res.projectName ? `${highlightText(res.projectName, query)} / ` : ''}<span class="text-text-primary">${highlightText(res.noteName, query)}</span>
+                app.containers.searchResultsList.innerHTML = resultNotes.map(note => {
+                    const parent = findItem(note.id)?.parent;
+                    const parentName = parent && !Array.isArray(parent) ? parent.name : null;
+                    const plainContent = note.content.replace(/<[^>]*>?/gm, '');
+                    const excerptMatch = plainContent.match(new RegExp(`.{0,50}${query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}.{0,50}`, 'i'));
+                    const excerpt = excerptMatch ? `...${highlightText(excerptMatch[0], query)}...` : highlightText(plainContent.substring(0, 100) + '...', query);
+
+                    return `
+                        <div class="search-result-item p-4 mb-3 rounded-lg hover:bg-bg-pane-dark cursor-pointer border border-border-color" data-note-id="${note.id}">
+                            <div class="font-semibold text-text-secondary text-sm">
+                                ${parentName ? `${highlightText(parentName, query)} / ` : ''}<span class="text-text-primary">${highlightText(note.name, query)}</span>
+                            </div>
+                            <p class="text-text-primary mt-2">${excerpt}</p>
                         </div>
-                        <p class="text-text-primary mt-2">${res.excerpt}</p>
-                    </div>
-                `).join('');
+                    `
+                }).join('');
             }
             
             function renderChatHistory() {
@@ -1450,17 +1484,19 @@
                     createdAt: now,
                     modifiedAt: now,
                     pinned: false,
-                    links: []
+                    links: [],
+                    tags: []
                 };
 
                 if (initialContent) {
                    updateNoteLinks(newNote);
+                   updateNoteTags(newNote);
                    const titleMatch = initialContent.match(/<h1>(.*?)<\/h1>/);
                    if (titleMatch && titleMatch[1]) {
                        newNote.name = titleMatch[1];
                    } else {
                        // Try to find title from markdown
-                       const mdTitleMatch = initialContent.match(/^# (.*)/);
+                       const mdTitleMatch = initialContent.match(/^# (.*)/m);
                        if(mdTitleMatch && mdTitleMatch[1]) {
                            newNote.name = mdTitleMatch[1];
                        }
@@ -1471,9 +1507,11 @@
                 
                 if(andSwitchToIt) {
                     state.settings.activeNoteId = newNote.id;
+                    state.settings.activeTag = null;
                 }
                 
                 saveState();
+                buildLunrIndex();
                 render();
                 return newNote;
             };
@@ -1518,12 +1556,7 @@
                     const encodedData = window.location.hash.substring(6);
                     const data = JSON.parse(decodeURIComponent(encodedData));
                     
-                    const clippedContent = `
-                        <h1>${data.title}</h1>
-                        <p><em>Source: <a href="${data.url}" target="_blank">${data.url}</a></em></p>
-                        <hr>
-                        <blockquote>${data.clip.replace(/\n/g, '<br>')}</blockquote>
-                    `;
+                    let clippedContent = `<h1>${data.title}</h1>\n<p><em>Source: <a href="${data.url}" target="_blank">${data.url}</a></em></p>\n<hr>\n<blockquote>${data.clip.replace(/\n/g, '<br>')}</blockquote>`;
 
                     const newNote = createNewNote(true, clippedContent);
                     showToast(`Clipped content saved to "${newNote.name}"`, 'success');
@@ -1536,9 +1569,29 @@
                     history.pushState("", document.title, window.location.pathname + window.location.search);
                 }
             }
+            
+            function buildLunrIndex() {
+                const allNotes = getAllNotes(state.collections);
+                lunrIndex = lunr(function () {
+                    this.ref('id');
+                    this.field('name');
+                    this.field('content');
+                    this.field('tags');
+                    
+                    allNotes.forEach(note => {
+                        this.add({
+                            id: note.id,
+                            name: note.name,
+                            content: note.content.replace(/<[^>]*>?/gm, ''), // Index plain text
+                            tags: note.tags ? note.tags.join(' ') : ''
+                        });
+                    });
+                });
+            }
 
             function init() {
                 loadState();
+                buildLunrIndex();
                 
                 initSpeechRecognition();
                 initClipper();
@@ -1641,6 +1694,8 @@
                     const wrapper = itemLink.closest('.collection-item-wrapper');
                     const id = wrapper.dataset.id;
                     const { item } = findItem(id);
+                    
+                    state.settings.activeTag = null; // Deactivate tag filter
 
                     if (item.type === 'folder') {
                         state.settings.activeCollectionId = id;
@@ -1654,6 +1709,24 @@
                              toggleMobileSidebar(false);
                          }
                     }
+                    saveState();
+                    render();
+                });
+                
+                app.containers.tagList.addEventListener('click', e => {
+                    e.preventDefault();
+                    const tagItem = e.target.closest('.tag-filter-item');
+                    if (!tagItem) return;
+
+                    const tagName = tagItem.dataset.tag;
+                    if (state.settings.activeTag === tagName) {
+                        state.settings.activeTag = null; // Toggle off
+                    } else {
+                        state.settings.activeTag = tagName;
+                    }
+
+                    state.settings.activeNoteId = null;
+                    state.settings.activeCollectionId = null;
                     saveState();
                     render();
                 });
@@ -1927,6 +2000,7 @@
                         state.settings.activeNoteId = card.dataset.noteId;
                         const { parent } = findItem(state.settings.activeNoteId);
                         state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+                        state.settings.activeTag = null;
                         saveState();
                         render();
                         return;
@@ -1940,6 +2014,7 @@
                             state.settings.activeNoteId = noteId;
                             const { parent } = findItem(noteId);
                             state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+                            state.settings.activeTag = null;
                             saveState();
                             render();
                             showToast(`Mapsd to "${internalLink.textContent}"`);
@@ -1966,8 +2041,11 @@
                             note.content = newContent;
                             note.modifiedAt = new Date().toISOString();
                             updateNoteLinks(note);
+                            updateNoteTags(note);
                             saveState();
+                            buildLunrIndex();
                             renderCollectionsList(); // Just re-render the list for efficiency
+                            renderTagList();
                         }
                     }
                 }, 500);
@@ -2484,7 +2562,7 @@
                         const now = new Date().toISOString();
                         const newItem = {
                             id: generateId(type[0]), name, type,
-                            ...(type === 'note' && { content: '', status: null, createdAt: now, modifiedAt: now, pinned: false, links: [] }),
+                            ...(type === 'note' && { content: '', status: null, createdAt: now, modifiedAt: now, pinned: false, links: [], tags: [] }),
                             ...(type === 'folder' && { children: [], expanded: true })
                         };
 
@@ -2530,6 +2608,7 @@
                                if (state.settings.activeNoteId === id) state.settings.activeNoteId = null;
                                if (state.settings.activeCollectionId === id) state.settings.activeCollectionId = null;
                                saveState();
+                               buildLunrIndex();
                                render();
                             }
                             break;
@@ -2538,6 +2617,7 @@
                             if (newName) {
                                 targetItem.name = newName;
                                 saveState();
+                                buildLunrIndex();
                                 render();
                             }
                             break;
@@ -2555,6 +2635,7 @@
                             parentArray.splice(findResult.index + 1, 0, newItem);
                             showToast(`Duplicated "${targetItem.name}"`);
                             saveState();
+                            buildLunrIndex();
                             render();
                             break;
                     }
@@ -2567,7 +2648,7 @@
                 };
                 
                 document.getElementById('bookmarklet-info-btn').addEventListener('click', () => {
-                    const code = `javascript:(()=>{const data=JSON.stringify({url:location.href,title:document.title,clip:window.getSelection().toString()});window.open('${window.location.href.split('#')[0]}#clip='+encodeURIComponent(data),'_blank');})();`;
+                    const code = `javascript:(()=>{const data=JSON.stringify({url:location.href,title:document.title,clip:window.getSelection().toString()});window.open('${window.location.origin + window.location.pathname}#clip='+encodeURIComponent(data),'_blank');})();`;
                     app.modals.bookmarkletLink.href = code;
                     openModal(app.modals.bookmarklet);
                     feather.replace();
