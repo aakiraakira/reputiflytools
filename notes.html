@@ -155,7 +155,7 @@
         .kanban-card.pinned:hover { transform: scale(1.02) translateY(-4px); }
         
         .drop-target-column { background-color: var(--bg-pane-dark) !important; opacity: 0.5; }
-        .drop-indicator { height: 2px; background-color: var(--accent-primary); margin: 2px 0; pointer-events: none; }
+        .drop-indicator { height: 2px; background-color: var(--accent-primary); margin: 0; padding: 0; pointer-events: none; }
         
         .context-menu, .dropdown-menu { transition: opacity 100ms ease, transform 100ms ease; }
         
@@ -197,20 +197,22 @@
             margin: 0.5em 0;
             cursor: default;
         }
-        #markdown-preview blockquote, #summary-content blockquote, .chat-bubble blockquote, .ai-summary blockquote {
+        #note-editor-body blockquote, #markdown-preview blockquote, #summary-content blockquote, .chat-bubble blockquote, .ai-summary blockquote {
             border-left: 4px solid var(--border-color);
             padding-left: 1em;
             margin-left: 0;
             color: var(--text-secondary);
         }
         
-        /* Default code block styles */
-        #markdown-preview code {
+        /* Inline code and Monospace */
+        #note-editor-body code, #markdown-preview code, #note-editor-body span.monospace {
             background-color: var(--bg-pane-dark);
             padding: 2px 5px;
             border-radius: 4px;
-            font-family: monospace;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+            font-size: 0.9em;
         }
+        
         #markdown-preview pre {
             background-color: var(--bg-pane-dark);
             padding: 1em;
@@ -222,14 +224,15 @@
             background-color: transparent;
         }
         
-        /* New Custom Code Block Styles */
-        .code-block-wrapper {
-            background-color: #211F30; /* Matches dark theme pane dark */
+        /* Editor Code Block Styles */
+        #note-editor-body .code-block-wrapper, #markdown-preview .code-block-wrapper {
+            background-color: #211F30;
             border-radius: 8px;
             margin: 1.5em 0;
             border: 1px solid var(--border-color);
+            overflow: hidden;
         }
-        html.light .code-block-wrapper, html.dark .code-block-wrapper {
+        html.light #note-editor-body .code-block-wrapper, html.dark #note-editor-body .code-block-wrapper {
              background-color: #1f2937; /* A consistent dark background */
         }
         .code-block-header {
@@ -238,8 +241,6 @@
             align-items: center;
             background-color: rgba(0,0,0,0.2);
             padding: 0.5rem 1rem;
-            border-top-left-radius: 8px;
-            border-top-right-radius: 8px;
             color: var(--text-secondary);
             font-size: 0.8rem;
             text-transform: uppercase;
@@ -260,10 +261,18 @@
             background-color: var(--bg-pane-light);
             color: var(--text-primary);
         }
-        .code-block-wrapper pre {
-            margin: 0;
-            padding: 1em;
+        #note-editor-body .code-block-wrapper pre, #markdown-preview .code-block-wrapper pre {
+            margin: 0 !important;
+            padding: 1em !important;
             background-color: transparent !important;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        #note-editor-body .code-block-wrapper pre code, #markdown-preview .code-block-wrapper pre code {
+            padding: 0 !important;
+            background-color: transparent !important;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace !important;
+            font-size: 1em !important;
         }
 
         .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -602,6 +611,9 @@
         <button data-command="createLink" class="p-2 hover:bg-bg-main rounded"><i data-feather="link" class="w-4 h-4"></i></button>
         <button data-command="insertImage" class="p-2 hover:bg-bg-main rounded"><i data-feather="image" class="w-4 h-4"></i></button>
         <button data-command="insertUnorderedList" class="p-2 hover:bg-bg-main rounded"><i data-feather="list" class="w-4 h-4"></i></button>
+        <button data-command="formatBlock" data-value="code" class="p-2 hover:bg-bg-main rounded" title="Code Block"><i data-feather="code" class="w-4 h-4"></i></button>
+        <button data-command="formatBlock" data-value="blockquote" class="p-2 hover:bg-bg-main rounded" title="Quote"><strong>&ldquo;</strong></button>
+        <button data-command="monospace" class="p-2 hover:bg-bg-main rounded font-mono font-bold" title="Monospace">M</button>
         <div class="w-px h-5 bg-border-color mx-1"></div>
         <button data-command="formatBlock" data-value="h1" class="p-2 hover:bg-bg-main rounded font-bold text-sm">H1</button>
         <button data-command="formatBlock" data-value="h2" class="p-2 hover:bg-bg-main rounded font-bold text-sm">H2</button>
@@ -761,7 +773,7 @@
                             id: 'n4',
                             name: 'Code Snippet Example',
                             type: 'note',
-                            content: '## JavaScript Code Highlighting\nHere is an example of a JavaScript code block:\n\n```javascript\nfunction sayHello(name) {\n  console.log(`Hello, ${name}!`);\n}\n\nsayHello("World");\n```\n\nThe code above should be syntax-highlighted in the preview mode. #javascript #example',
+                            content: '<h2>JavaScript Code Example</h2><div class="code-block-wrapper"><div class="code-block-header"><span class="lang-name">javascript</span><button class="copy-code-btn"><i data-feather="copy" class="w-4 h-4"></i><span>Copy</span></button></div><pre><code>function sayHello(name) {\n  console.log(`Hello, ${name}!`);\n}\n\nsayHello("World");</code></pre></div><p>The code above is a sample. #javascript #example</p>',
                             links: [],
                             tags: ['javascript', 'example'],
                             status: null,
@@ -843,9 +855,8 @@
                     if (item.children) {
                         const result = findItem(itemId, item.children);
                         if(result) {
-                           // This ensures the parent is always the folder object, not its children array
-                           const parent = Array.isArray(result.parent) ? item : result.parent;
-                           return { ...result, parent };
+                           const parentObject = tree.find(parentItem => parentItem.children === result.parent);
+                           return { ...result, parent: parentObject || tree };
                         }
                     }
                 }
@@ -1365,7 +1376,7 @@
                      const collectionId = state.settings.activeCollectionId;
                      const collection = findItem(collectionId)?.item;
                      notes = collection 
-                        ? collection.children.filter(c => c.type === 'note') 
+                        ? (collection.children || []).filter(c => c.type === 'note') 
                         : getAllNotes(state.collections);
                  }
 
@@ -1385,7 +1396,7 @@
                      if(key === 'name') {
                          return direction === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
                      } else {
-                         return direction === 'desc' ? new Date(valB) - new Date(valA) : new Date(valA) - new Date(valB);
+                         return direction === 'desc' ? new Date(valB) - new Date(valA) : new Date(valA) - new Date(b);
                      }
                  });
 
@@ -1431,20 +1442,19 @@
                 if(state.settings.editorMode === 'preview') {
                     app.elements.noteEditorBody.classList.add('hidden');
                     app.elements.markdownPreview.classList.remove('hidden');
-                    let html = marked.parse(note.content || '');
+                    
+                    let contentForMarked = (note.content || '')
+                        .replace(/<div class="code-block-wrapper".*?<span class="lang-name">(.*?)<\/span>.*?<pre><code>([\s\S]*?)<\/code><\/pre><\/div>/g, (match, lang, code) => {
+                            const decodedCode = new DOMParser().parseFromString(code, 'text/html').documentElement.textContent;
+                            return '\n```' + lang + '\n' + decodedCode + '\n```\n';
+                        });
+
+                    let html = marked.parse(contentForMarked);
                     html = parseInternalLinks(html);
                     app.elements.markdownPreview.innerHTML = html;
                     app.toolbar.editorModeToggle.classList.add('active');
-                    // Add listeners for copy buttons after rendering
-                    app.elements.markdownPreview.querySelectorAll('.copy-code-btn').forEach(button => {
-                        button.addEventListener('click', () => {
-                            const code = button.closest('.code-block-wrapper').querySelector('pre code').innerText;
-                            navigator.clipboard.writeText(code)
-                                .then(() => showToast('Code copied!', 'success'))
-                                .catch(err => showToast('Failed to copy code', 'error'));
-                        });
-                    });
-                    feather.replace(); // To render icons inside the new code blocks
+                    
+                    feather.replace();
                 } else {
                     app.elements.noteEditorBody.classList.remove('hidden');
                     app.elements.markdownPreview.classList.add('hidden');
@@ -1480,7 +1490,8 @@
                 };
 
                 app.containers.searchResultsList.innerHTML = resultNotes.map(note => {
-                    const parent = findItem(note.id)?.parent;
+                    const parentResult = findItem(note.id);
+                    const parent = parentResult ? parentResult.parent : null;
                     const parentName = parent && !Array.isArray(parent) ? parent.name : null;
                     const plainContent = note.content.replace(/<[^>]*>?/gm, '');
                     const excerptMatch = plainContent.match(new RegExp(`.{0,50}${query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}.{0,50}`, 'i'));
@@ -1522,9 +1533,9 @@
                     parentCollection = parentResult.item;
                     targetArray = parentCollection.children;
                 } else if(parentResult) {
-                    const parentOfNote = findItem(parentResult.parent.id);
-                    parentId = parentOfNote ? parentOfNote.item.id : null;
-                    parentCollection = parentOfNote ? parentOfNote.item : null;
+                    const parentOfNoteResult = findItem(parentResult.parent.id);
+                    parentId = parentOfNoteResult ? parentOfNoteResult.item.id : null;
+                    parentCollection = parentOfNoteResult ? parentOfNoteResult.item : null;
                     targetArray = parentCollection ? parentCollection.children : state.collections;
                 } else {
                     parentId = null;
@@ -1553,7 +1564,6 @@
                    if (titleMatch && titleMatch[1]) {
                        newNote.name = titleMatch[1];
                    } else {
-                       // Try to find title from markdown
                        const mdTitleMatch = initialContent.match(/^# (.*)/m);
                        if(mdTitleMatch && mdTitleMatch[1]) {
                            newNote.name = mdTitleMatch[1];
@@ -1566,7 +1576,6 @@
                 if(andSwitchToIt) {
                     state.settings.activeNoteId = newNote.id;
                     state.settings.activeTag = null;
-                    // Switch to editor mode when creating a new note
                     state.settings.editorMode = 'editor';
                 }
                 
@@ -1598,7 +1607,7 @@
 
                 speechRecognizer.onend = () => {
                     if (isDictating) {
-                        speechRecognizer.start(); // Keep listening if it stops unexpectedly
+                        speechRecognizer.start();
                     }
                 };
                  speechRecognizer.onerror = (event) => {
@@ -1625,7 +1634,6 @@
                     console.error('Error parsing clipped data:', e);
                     showToast('Could not import clipped content.', 'error');
                 } finally {
-                    // Clear the hash
                     history.pushState("", document.title, window.location.pathname + window.location.search);
                 }
             }
@@ -1642,7 +1650,7 @@
                         this.add({
                             id: note.id,
                             name: note.name,
-                            content: note.content.replace(/<[^>]*>?/gm, ''), // Index plain text
+                            content: note.content.replace(/<[^>]*>?/gm, ''),
                             tags: note.tags ? note.tags.join(' ') : ''
                         });
                     });
@@ -1656,7 +1664,6 @@
                 initSpeechRecognition();
                 initClipper();
                 
-                // Configure Marked and Highlight.js with custom renderer
                 const renderer = new marked.Renderer();
                 renderer.code = function(code, language) {
                     const validLang = language && hljs.getLanguage(language) ? language : 'plaintext';
@@ -1665,7 +1672,7 @@
                         <div class="code-block-wrapper">
                             <div class="code-block-header">
                                 <span class="lang-name">${validLang}</span>
-                                <button class="copy-code-btn">
+                                <button class="copy-code-btn" data-lang="${validLang}">
                                     <i data-feather="copy" class="w-4 h-4"></i>
                                     <span>Copy</span>
                                 </button>
@@ -1770,7 +1777,7 @@
                     const id = wrapper.dataset.id;
                     const { item } = findItem(id);
                     
-                    state.settings.activeTag = null; // Deactivate tag filter
+                    state.settings.activeTag = null;
 
                     if (item.type === 'folder') {
                         state.settings.activeCollectionId = id;
@@ -1778,7 +1785,8 @@
                         item.expanded = !item.expanded;
                     } else if (item.type === 'note') {
                          state.settings.activeNoteId = id;
-                         const { parent } = findItem(id);
+                         const result = findItem(id);
+                         const parent = result.parent;
                          state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
                          if (window.innerWidth < 768) {
                              toggleMobileSidebar(false);
@@ -1795,7 +1803,7 @@
 
                     const tagName = tagItem.dataset.tag;
                     if (state.settings.activeTag === tagName) {
-                        state.settings.activeTag = null; // Toggle off
+                        state.settings.activeTag = null;
                     } else {
                         state.settings.activeTag = tagName;
                     }
@@ -1830,14 +1838,14 @@
                     indicator.className = 'drop-indicator';
 
                     if (targetItem.type === 'folder') {
-                        targetWrapper.classList.add('drop-target-folder');
+                        targetWrapper.querySelector('.collection-item').classList.add('drop-target-folder');
                     }
                     
                     const rect = targetWrapper.getBoundingClientRect();
                     const isAfter = e.clientY > rect.top + rect.height / 2;
                     targetWrapper.insertAdjacentElement(isAfter ? 'afterend' : 'beforebegin', indicator);
                 });
-
+                
                 app.containers.collectionsList.addEventListener('dragend', (e) => {
                     document.querySelectorAll('.collection-item-wrapper.opacity-50').forEach(el => el.classList.remove('opacity-50'));
                      document.querySelectorAll('.drop-indicator, .drop-target-folder').forEach(el => {
@@ -1852,7 +1860,6 @@
                     const droppedOnElement = e.target;
                     if (!draggedItemId) return;
 
-                    // Clean up UI hints
                     document.querySelectorAll('.drop-indicator, .drop-target-folder').forEach(el => {
                         el.classList.remove('drop-target-folder');
                         if (el.classList.contains('drop-indicator')) el.remove();
@@ -1861,31 +1868,28 @@
                     const dragResult = findItem(draggedItemId);
                     if (!dragResult) return;
                     
-                    // Remove the item from its original position
                     const sourceArray = Array.isArray(dragResult.parent) ? dragResult.parent : dragResult.parent.children;
                     const [draggedItem] = sourceArray.splice(dragResult.index, 1);
                     
                     const dropWrapper = droppedOnElement.closest('.collection-item-wrapper');
                     
-                    if (dropWrapper) { // Dropped on an item
+                    if (dropWrapper) { 
                         const dropId = dropWrapper.dataset.id;
-                        if (dropId === draggedItem.id) { // Dropped on itself, revert
+                        if (dropId === draggedItem.id) { 
                             sourceArray.splice(dragResult.index, 0, draggedItem);
                             return;
                         }
                         
                         const dropResult = findItem(dropId);
-                        if (!dropResult) return; // Should not happen
+                        if (!dropResult) return; 
                         
-                        const dropTargetIsFolder = dropResult.item.type === 'folder' && dropWrapper.classList.contains('drop-target-folder');
+                        const dropTargetIsFolder = dropResult.item.type === 'folder' && droppedOnElement.closest('.collection-item').classList.contains('drop-target-folder');
 
                         if (dropTargetIsFolder) {
-                            // Dropping inside a folder
                             if (!dropResult.item.children) dropResult.item.children = [];
                             dropResult.item.children.unshift(draggedItem);
                             dropResult.item.expanded = true;
                         } else {
-                            // Dropping between items
                             const targetArray = Array.isArray(dropResult.parent) ? dropResult.parent : dropResult.parent.children;
                             let targetIndex = dropResult.index;
                             
@@ -1895,13 +1899,14 @@
 
                             targetArray.splice(targetIndex, 0, draggedItem);
                         }
-                    } else { // Dropped in an empty space in the main list
+                    } else { 
                         state.collections.push(draggedItem);
                     }
                     
                     if (draggedItem.type === 'note') {
                          const newParentResult = findItem(draggedItem.id);
-                         const newParentId = newParentResult.parent?.id || null;
+                         const newParent = newParentResult ? newParentResult.parent : null;
+                         const newParentId = newParent && !Array.isArray(newParent) ? newParent.id : null;
                          const newProjectColumns = newParentId ? state.kanbanColumns[newParentId] : null;
                          if (newProjectColumns && newProjectColumns.length > 0) {
                              draggedItem.status = newProjectColumns[0].id;
@@ -2087,10 +2092,22 @@
                         return;
                     }
                     
+                    const copyBtn = e.target.closest('.copy-code-btn');
+                    if (copyBtn) {
+                         const codeBlock = copyBtn.closest('.code-block-wrapper, .hljs').querySelector('pre, code');
+                         if(codeBlock) {
+                            const code = codeBlock.innerText;
+                            navigator.clipboard.writeText(code)
+                                .then(() => showToast('Code copied!', 'success'))
+                                .catch(err => showToast('Failed to copy code', 'error'));
+                         }
+                        return;
+                    }
+
                     const card = e.target.closest('.kanban-card, .list-note-item, .search-result-item');
                     if (card) {
                         if (isSearchActive) {
-                            closeSearch(true); // Don't re-render immediately
+                            closeSearch(true);
                         }
                         state.settings.activeNoteId = card.dataset.noteId;
                         const { parent } = findItem(state.settings.activeNoteId);
@@ -2139,7 +2156,7 @@
                             updateNoteTags(note);
                             saveState();
                             buildLunrIndex();
-                            renderCollectionsList(); // Just re-render the list for efficiency
+                            renderCollectionsList();
                             renderTagList();
                         }
                     }
@@ -2240,7 +2257,6 @@
                         const nodes = new vis.DataSet([{ id: currentNote.id, label: currentNote.name, color: getComputedStyle(document.documentElement).getPropertyValue('--accent-primary') }]);
                         const edges = new vis.DataSet();
 
-                        // Links from current note
                         (currentNote.links || []).forEach(linkName => {
                             const targetNote = allNotes.find(n => n.name.toLowerCase() === linkName.toLowerCase());
                             if (targetNote && targetNote.id !== currentNote.id) {
@@ -2251,7 +2267,6 @@
                             }
                         });
 
-                        // Links to current note (backlinks)
                         allNotes.forEach(note => {
                             if (note.id !== currentNote.id && (note.links || []).some(link => link.toLowerCase() === currentNote.name.toLowerCase())) {
                                  if (!nodes.get(note.id)) {
@@ -2521,9 +2536,44 @@
                            editorSelectionRange = window.getSelection().getRangeAt(0).cloneRange();
                         }
                     };
+                    
+                    if (command === 'monospace') {
+                        restoreSelectionAndExec(() => document.execCommand('insertHTML', false, `<code>${window.getSelection().toString()}</code>`));
+                        return;
+                    }
+
+                    if (command === 'formatBlock' && value === 'code') {
+                         restoreSelectionAndExec(() => {
+                            const selection = window.getSelection();
+                            const selectedText = selection.toString();
+                            
+                            let lang = 'plaintext';
+                            if (/<[a-z][\s\S]*>/i.test(selectedText)) lang = 'html';
+                            else if (/\b(function|const|let|var|import|export)\b/.test(selectedText)) lang = 'javascript';
+                            else if (/\b(def|import|class|for|while)\b/.test(selectedText)) lang = 'python';
+
+                            const escapedCode = selectedText.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                            
+                            const codeBlockHTML = `
+                                <div class="code-block-wrapper" contenteditable="false">
+                                    <div class="code-block-header">
+                                        <span class="lang-name">${lang}</span>
+                                        <button class="copy-code-btn" data-lang="${lang}">
+                                            <i data-feather="copy" class="w-4 h-4"></i>
+                                            <span>Copy</span>
+                                        </button>
+                                    </div>
+                                    <pre contenteditable="true"><code>${escapedCode}</code></pre>
+                                </div>
+                                <p><br></p>`;
+                            
+                            document.execCommand('insertHTML', false, codeBlockHTML);
+                            feather.replace();
+                        });
+                        return;
+                    }
 
                     if (command === 'createLink') {
-                        // We must first restore the selection to see if we're inside an existing link.
                         app.elements.noteEditorBody.focus();
                         if (editorSelectionRange) {
                             const selection = window.getSelection();
@@ -2535,25 +2585,18 @@
                         const parentEl = selection.anchorNode?.parentNode.closest('a');
 
                         if(parentEl) {
-                            // Already a link, so we just unlink. This is a synchronous action.
-                            // We can wrap it in `restoreSelectionAndExec` to handle saving etc.
                             restoreSelectionAndExec(() => {
                                 document.execCommand('unlink');
                             });
                         } else {
-                            // Not a link, so we'll create one. This is async.
-                            // First, save the selected text because the prompt will clear the selection.
                             const selectedText = selection.toString().trim();
-                            // Now, get the URL.
                             const url = await showPrompt({ title: 'Insert Link', message: 'Enter the URL:', placeholder: 'https://example.com' });
                             if (url) {
-                                // Now that we have the URL, restore the selection again and insert the link.
                                 restoreSelectionAndExec(() => {
                                     let finalUrl = url;
                                     if (!/^(https?:\/\/|mailto:|ftp:\/\/)/i.test(finalUrl)) {
                                         finalUrl = 'https://' + finalUrl;
                                     }
-                                    // Use the text we saved before the prompt.
                                     const linkHTML = `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${selectedText || finalUrl}</a>`;
                                     document.execCommand('insertHTML', false, linkHTML);
                                 });
@@ -2569,8 +2612,10 @@
                             const selection = window.getSelection();
                             let parentEl = selection.getRangeAt(0).commonAncestorContainer;
                             parentEl = parentEl.nodeType === 3 ? parentEl.parentNode : parentEl;
-                            const currentTag = parentEl.closest('h1, h2, h3');
-                            if (currentTag && currentTag.tagName.toLowerCase() === value) {
+                            
+                            const isAlreadyBlock = parentEl.closest(value) || (value === 'blockquote' && parentEl.closest('blockquote'));
+                            
+                            if (isAlreadyBlock) {
                                 document.execCommand('formatBlock', false, 'p');
                             } else {
                                 document.execCommand(command, false, value);
@@ -2671,7 +2716,7 @@
                                 parentFolder = targetItem;
                             } else {
                                 destinationArray = parentArray;
-                                parentFolder = parent;
+                                parentFolder = Array.isArray(parent) ? null : parent;
                             }
                         }
                         
