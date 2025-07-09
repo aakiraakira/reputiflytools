@@ -10,42 +10,33 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBXdjRQZJd9ySH5mxql4tlXCEVpDH9GGbI&libraries=places&callback=initializeGoogleMaps"></script>
     <style>
-        /* Base styling for the page, using the Inter font */
         body { font-family: 'Inter', sans-serif; background-color: #111827; color: #d1d5db; }
-        /* Custom scrollbar for a better look in dark mode */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #1f2937; }
         ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
-        /* Custom styles for buttons and interactive elements */
-        .file-input-button, .view-button { cursor: pointer; }
+        .view-button, .file-input-button { cursor: pointer; }
         .review-item { transition: all 0.3s ease-in-out; }
-        /* Animation for the notification toast */
         @keyframes fadeInOut {
             0%, 100% { opacity: 0; transform: translateY(20px); }
             10%, 90% { opacity: 1; transform: translateY(0); }
         }
         .notification-toast { animation: fadeInOut 4s ease-in-out forwards; }
-        /* Styling for disabled elements */
         button:disabled, input:disabled, textarea:disabled { opacity: 0.5; cursor: not-allowed; }
-        /* Styling for the Google Places Autocomplete dropdown */
         .pac-container { background-color: #1f2937; border: 1px solid #4b5563; border-radius: 0.5rem; color: #d1d5db; z-index: 10000 !important; font-family: 'Inter', sans-serif; }
         .pac-item { padding: 0.75rem; cursor: pointer; border-top: 1px solid #374151; }
         .pac-item:first-child { border-top: none; }
         .pac-item:hover { background-color: #374151; }
         .pac-item-query { font-weight: 500; color: #f9fafb; }
-        /* Utility class to hide elements */
         .hidden { display: none; }
         .sticky-tabs { position: sticky; top: 0; z-index: 10; background-color: #111827; padding-top: 0.5rem; padding-bottom: 0.5rem; }
         #map { height: 350px; border-radius: 0.75rem; background-color: #374151; }
-        .pac-target-input { padding: 0.75rem; width: 100%; }
-        /* Added for AI loading spinner */
         .spinner {
             border: 4px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
-            border-top: 4px solid #34D399; /* teal-400 */
-            width: 24px;
-            height: 24px;
+            border-top: 4px solid #6EE7B7; /* A light green for the spinner */
+            width: 20px;
+            height: 20px;
             animation: spin 1s linear infinite;
         }
         @keyframes spin {
@@ -89,8 +80,6 @@
     <div id="notification" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-white py-3 px-5 rounded-lg shadow-xl z-[10001]"></div>
     
     <script>
-        // FIX: Create a global function that the Google Maps script will call directly.
-        // This is the most reliable way to know the API is ready.
         function initializeGoogleMaps() {
             if (window.reviewApp) {
                 window.reviewApp.mapsApiLoaded();
@@ -98,21 +87,18 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            // Main application object
             const app = {
                 // --- STATE ---
                 state: {
                     currentView: 'initial',
                     isClientLoggedIn: false, isOwnerLoggedIn: false, isAdminLoggedIn: false,
                     mapsInitialized: false,
-                    placesService: null,
                     data: { companies: [] },
                     activeCompanyId: localStorage.getItem('activeCompanyTab') || null,
                     clientState: { link: '', reviews: [] },
                     ownerState: {
                         activeTab: 'submitter',
                         geminiApiKey: localStorage.getItem('geminiApiKey') || '',
-                        geminiModel: 'normal',
                         isAiGenerating: false,
                         selectedPlace: {
                             name: '',
@@ -124,7 +110,7 @@
                         },
                         reviews: [],
                         bulkText: '',
-                        promptGenerator: { input: '', output: '' },
+                        promptGenerator: { input: '', output: '', instructions: '' },
                         sheetRow: { dailyReviews: '', reviewsOrdered: '', output: '' }
                     }
                 },
@@ -141,9 +127,7 @@
                 },
                 // --- INITIALIZATION ---
                 init() {
-                    // FIX: Make the app instance globally accessible for the Maps callback.
                     window.reviewApp = this; 
-                    
                     this.loadData();
                     this.attachInitialListeners();
                     
@@ -159,26 +143,19 @@
                     }
                 },
                 
-                // FIX: This function is now called by the global callback.
                 mapsApiLoaded() {
                     this.state.mapsInitialized = true;
-                    // Now that the API is definitely loaded, initialize maps for the current view.
                     this.initializeMapsForCurrentView();
                 },
 
                 initializeMapsForCurrentView() {
-                     if (!this.state.mapsInitialized) return;
-                    
+                    if (!this.state.mapsInitialized) return;
                     const view = this.state.currentView;
-                    if (view === 'client') this.initializeClientViewMaps();
+                    if (view === 'client') this.initAutocomplete('client-link-input', this.handleClientPlaceSelection.bind(this));
                     if (view === 'owner') this.initializeOwnerViewMaps();
                     if (view === 'admin') this.initializeAdminViewMaps();
                 },
 
-                // --- GOOGLE MAPS & PLACES INTEGRATION ---
-                 initializeClientViewMaps() {
-                    this.initAutocomplete('client-link-input', this.handleClientPlaceSelection.bind(this));
-                },
                 initializeOwnerViewMaps() {
                     if (this.state.ownerState.activeTab === 'submitter') {
                         this.initAutocomplete('owner-link-input', this.handleOwnerPlaceSelection.bind(this));
@@ -189,17 +166,15 @@
                 },
                 
                 initializeAdminViewMaps() {
-                     const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
-                     if(company) {
+                    const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
+                    if(company) {
                         this.initAutocomplete(`admin-link-input-${company.id}`, (place) => this.handleAdminPlaceSelection(place, company.id));
-                     }
+                    }
                 },
 
-                // FIX: Simplified and made more robust. It's called after the view is rendered.
                 initAutocomplete(inputId, callback) {
                     if (!this.state.mapsInitialized) return;
                     const input = document.getElementById(inputId);
-                    // Ensure the input exists in the DOM and hasn't already been initialized.
                     if (!input || input.dataset.acAttached) return;
 
                     const autocompleteOptions = {
@@ -207,7 +182,7 @@
                         types: ["establishment"]
                     };
                     const autocomplete = new google.maps.places.Autocomplete(input, autocompleteOptions);
-                    input.dataset.acAttached = 'true'; // Mark as initialized
+                    input.dataset.acAttached = 'true';
 
                     autocomplete.addListener('place_changed', () => {
                         const place = autocomplete.getPlace();
@@ -221,11 +196,10 @@
                     const inputEl = document.getElementById("pac-input");
                     
                     if (!mapEl || !inputEl || inputEl.dataset.acAttached) return;
-                    // Clear any previous map instance to prevent errors
                     mapEl.innerHTML = ''; 
 
                     const map = new google.maps.Map(mapEl, { center: { lat: 1.3521, lng: 103.8198 }, zoom: 11 });
-                    const autocomplete = new google.maps.places.Autocomplete(inputEl, { fields: ["place_id", "geometry", "name", "reviews", "user_ratings_total", "url", "types", "website", "formatted_address"] });
+                    const autocomplete = new google.maps.places.Autocomplete(inputEl, { fields: ["place_id", "geometry", "name", "user_ratings_total", "url"] });
                     autocomplete.bindTo("bounds", map);
                     inputEl.dataset.acAttached = 'true';
                     const marker = new google.maps.Marker({ map: map });
@@ -239,7 +213,12 @@
                            marker.setPosition(place.geometry.location);
                            marker.setVisible(true);
                         }
-                        this.handleOwnerPlaceSelection(place); 
+                        const reviewLink = `https://search.google.com/local/writereview?placeid=${place.place_id}`;
+                        document.getElementById('place-output').textContent = reviewLink;
+                        this.state.ownerState.selectedPlace.name = place.name;
+                        this.state.ownerState.selectedPlace.startingCount = place.user_ratings_total || 0;
+                        this.render();
+
                     });
                 },
                 
@@ -282,27 +261,24 @@
                     
                     if (place.reviews && place.reviews.length > 0) {
                         const positiveReviews = place.reviews.filter(r => r.rating >= 4).map(r => r.text);
-                        ownerState.selectedPlace.reviews = positiveReviews;
                         ownerState.promptGenerator.input = positiveReviews.join('\n\n---\n\n');
                     } else {
-                        ownerState.selectedPlace.reviews = [];
                         ownerState.promptGenerator.input = 'No recent positive reviews found. You can paste your own points manually.';
                     }
                     
+                    this.generateOwnerPrompt();
                     this.showNotification(`Selected: ${place.name}`, "success");
                     this.render();
                 },
 
-                // --- DATA PERSISTENCE ---
+                // --- DATA & VIEW MANAGEMENT ---
                 loadData() {
                     const savedData = localStorage.getItem('reviewDashboardData');
                     if (savedData) { 
                         try {
                             this.state.data = JSON.parse(savedData); 
                             if (!this.state.data.companies) this.state.data.companies = []; 
-                        } catch(e) {
-                            this.state.data = { companies: [] };
-                        }
+                        } catch(e) { this.state.data = { companies: [] }; }
                     }
                     const activeTab = localStorage.getItem('activeCompanyTab');
                     if (activeTab && this.state.data.companies.find(c => c.id === activeTab)) { 
@@ -313,23 +289,16 @@
                 },
                 saveData() {
                     localStorage.setItem('reviewDashboardData', JSON.stringify(this.state.data));
-                    this.showNotification("Admin data saved!");
                 },
 
-                // --- VIEW MANAGEMENT ---
                 switchView(view, isRestoring = false) {
                     const isLoggedIn = (view === 'client' && this.state.isClientLoggedIn) ||
                                      (view === 'owner' && this.state.isOwnerLoggedIn) ||
                                      (view === 'admin' && this.state.isAdminLoggedIn);
 
                     if (!isLoggedIn && view !== 'initial') {
-                        if (!isRestoring) {
-                            this.showLoginModal(view);
-                        } else {
-                            this.state.currentView = 'initial';
-                            localStorage.setItem('currentView', 'initial');
-                            this.render();
-                        }
+                        if (!isRestoring) { this.showLoginModal(view); } 
+                        else { this.state.currentView = 'initial'; localStorage.setItem('currentView', 'initial'); this.render(); }
                         return;
                     }
 
@@ -342,20 +311,13 @@
                         this.state.isClientLoggedIn = false;
                         this.state.isOwnerLoggedIn = false;
                         this.state.isAdminLoggedIn = false;
-                        sessionStorage.removeItem('isClientLoggedIn');
-                        sessionStorage.removeItem('isOwnerLoggedIn');
-                        sessionStorage.removeItem('isAdminLoggedIn');
+                        sessionStorage.clear();
                         localStorage.setItem('currentView', 'initial');
                     }
 
-                    if (view === 'owner' && !this.state.ownerState.geminiApiKey) {
-                        this.showApiKeyModal();
-                    }
+                    if (view === 'owner' && !this.state.ownerState.geminiApiKey) { this.showApiKeyModal(); }
                     
                     this.render();
-                    
-                    // FIX: Defer map initialization until after rendering is complete
-                    // to ensure the input elements exist in the DOM.
                     setTimeout(() => this.initializeMapsForCurrentView(), 0);
                 },
                 
@@ -376,15 +338,15 @@
                     const { activeTab } = this.state.ownerState;
                     this.elements.ownerView.innerHTML = `
                         <div class="flex justify-between items-center mb-6">
-                            <button class="back-to-initial-btn text-gray-400 hover:text-white">← Logout & Return</button>
+                            <button class="back-to-initial-btn text-gray-400 hover:text-white transition-colors">← Logout & Return</button>
                             <h1 class="text-3xl sm:text-4xl font-bold text-white text-center">Owner Portal</h1>
-                            <button id="settings-btn" class="text-gray-400 hover:text-white">⚙️ Settings</button>
+                            <button id="settings-btn" class="text-gray-400 hover:text-white transition-colors">⚙️ Settings</button>
                         </div>
-                        <div class="border-b border-gray-600 mb-6">
-                            <nav class="-mb-px flex gap-4 overflow-x-auto" aria-label="Tabs">
-                                <button data-tab="submitter" class="owner-tab-btn ${activeTab === 'submitter' ? 'border-teal-500 text-teal-400' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Review Submitter</button>
-                                <button data-tab="promptGenerator" class="owner-tab-btn ${activeTab === 'promptGenerator' ? 'border-teal-500 text-teal-400' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">AI Prompt & Generation</button>
-                                <button data-tab="tools" class="owner-tab-btn ${activeTab === 'tools' ? 'border-teal-500 text-teal-400' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Place ID & Sheet Row</button>
+                        <div class="border-b border-gray-700 mb-6">
+                            <nav class="-mb-px flex gap-4" aria-label="Tabs">
+                                <button data-tab="submitter" class="owner-tab-btn ${activeTab === 'submitter' ? 'border-teal-400 text-teal-400' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">Review Submitter</button>
+                                <button data-tab="promptGenerator" class="owner-tab-btn ${activeTab === 'promptGenerator' ? 'border-teal-400 text-teal-400' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">AI Customization</button>
+                                <button data-tab="tools" class="owner-tab-btn ${activeTab === 'tools' ? 'border-teal-400 text-teal-400' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">Tools</button>
                             </nav>
                         </div>
                         <div id="owner-submitter-view" class="${activeTab !== 'submitter' ? 'hidden' : ''}">${this.renderOwnerSubmitterView()}</div>
@@ -394,701 +356,301 @@
                 },
                 
                 renderOwnerSubmitterView() {
-                    const { selectedPlace, reviews, bulkText } = this.state.ownerState;
+                    const { selectedPlace, reviews, bulkText, isAiGenerating, geminiApiKey } = this.state.ownerState;
                     const isPlaceSelected = !!selectedPlace.placeId;
                     const areReviewsProcessed = reviews.length > 0;
+                    const isPromptReady = !!this.state.ownerState.promptGenerator.output;
+
                     return `
-                        <div id="owner-link-section" class="p-6 bg-gray-800 border border-gray-700 rounded-xl">
-                             <h2 class="text-xl font-semibold text-white mb-4">Step 1: Find Business</h2>
-                             <div class="flex flex-col sm:flex-row gap-3">
-                                 <input type="text" id="owner-link-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg" placeholder="Search with Google OR paste link & click 'Set Link'" value="${selectedPlace.name || ''}">
-                                 <button id="set-owner-link-btn" class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg whitespace-nowrap">Set Link</button>
-                             </div>
-                             ${isPlaceSelected && selectedPlace.reviewLink ? `<p class="text-sm text-green-400 mt-2">Review Link: <a href="${selectedPlace.reviewLink}" target="_blank" class="underline">${selectedPlace.reviewLink}</a></p>` : ''}
-                        </div>
-                        <div id="owner-bulk-section" class="mt-8 p-6 bg-gray-800 border border-gray-700 rounded-xl ${!isPlaceSelected || areReviewsProcessed ? 'hidden' : ''}">
-                            <h2 class="text-xl font-semibold text-white mb-4">Step 2: Paste or Generate Reviews</h2>
-                            <p class="text-sm text-gray-400 mb-3">You can paste reviews here, or go to the "AI Prompt & Generation" tab to craft them with AI.</p>
-                            <textarea id="owner-bulk-textarea" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg h-60 resize-y" placeholder="Paste reviews here, one per line...">${bulkText}</textarea>
-                            <button id="process-bulk-reviews-btn" class="mt-4 w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg">Process Reviews</button>
-                        </div>
-                        <div id="owner-reviews-section" class="mt-8 ${!isPlaceSelected || !areReviewsProcessed ? 'hidden' : ''}">
-                            <div class="mb-6 flex justify-between items-center">
-                                <h2 class="text-xl font-semibold text-white">Step 3: Manage Reviews (${reviews.length})</h2>
-                                <button id="reset-owner-reviews-btn" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg">Start Over</button>
+                        <div class="space-y-8">
+                            <div class="p-6 bg-gray-800 border border-gray-700 rounded-xl">
+                                <h2 class="text-xl font-semibold text-white mb-4">Step 1: Find Business</h2>
+                                <div class="flex flex-col sm:flex-row gap-3">
+                                    <input type="text" id="owner-link-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-teal-500" placeholder="Search for a business..." value="${selectedPlace.name || ''}">
+                                    <button id="set-owner-link-btn" class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg whitespace-nowrap transition-colors">Set Manually</button>
+                                </div>
+                                ${isPlaceSelected && selectedPlace.reviewLink ? `<p class="text-sm text-green-400 mt-2">Review Link: <a href="${selectedPlace.reviewLink}" target="_blank" class="underline">${selectedPlace.reviewLink}</a></p>` : ''}
                             </div>
-                            <div id="owner-reviews-container">${this.renderReviewCards('owner')}</div>
-                            <div class="mt-8 pt-6 border-t border-gray-700"> <button id="download-owner-file-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg" ${reviews.length === 0 ? 'disabled' : ''}>Download Submission File</button> </div>
+
+                            <div class="p-6 bg-gray-800 border border-gray-700 rounded-xl ${!isPlaceSelected || areReviewsProcessed ? 'hidden' : ''}">
+                                <h2 class="text-xl font-semibold text-white mb-4">Step 2: Paste or Generate Reviews</h2>
+                                
+                                <div class="p-4 mb-4 bg-gray-900/50 border border-gray-700 rounded-lg">
+                                    <h3 class="font-semibold text-white mb-3">Generate with AI</h3>
+                                    <div class="flex flex-col sm:flex-row gap-4 items-center">
+                                        <button data-model="normal" class="craft-ai-btn flex-1 w-full flex items-center justify-center bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors" ${!isPromptReady || !geminiApiKey || isAiGenerating ? 'disabled' : ''}>
+                                            ${isAiGenerating ? '<div class="spinner"></div><span class="ml-2">Generating...</span>' : '⚡ Generate (Normal)'}
+                                        </button>
+                                        <button data-model="pro" class="craft-ai-btn flex-1 w-full flex items-center justify-center bg-sky-600 hover:bg-sky-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors" ${!isPromptReady || !geminiApiKey || isAiGenerating ? 'disabled' : ''}>
+                                            ${isAiGenerating ? '<div class="spinner"></div><span class="ml-2">Generating...</span>' : '✨ Generate (Pro)'}
+                                        </button>
+                                    </div>
+                                    ${!geminiApiKey ? '<p class="text-yellow-400 text-xs text-center mt-3">Missing Gemini API Key. Add it in <button id="settings-btn-inline" class="underline hover:text-yellow-200">Settings</button>.</p>' : ''}
+                                </div>
+                                
+                                <textarea id="owner-bulk-textarea" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg h-60 resize-y focus:ring-2 focus:ring-teal-500" placeholder="Paste reviews here, or use the AI generator above...">${bulkText}</textarea>
+                                <button id="process-bulk-reviews-btn" class="mt-4 w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg transition-colors">Process Reviews</button>
+                            </div>
+
+                            <div class="mt-8 ${!isPlaceSelected || !areReviewsProcessed ? 'hidden' : ''}">
+                                <div class="mb-6 flex justify-between items-center">
+                                    <h2 class="text-xl font-semibold text-white">Step 3: Manage Reviews (${reviews.length})</h2>
+                                    <button id="reset-owner-reviews-btn" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Start Over</button>
+                                </div>
+                                <div id="owner-reviews-container">${this.renderReviewCards()}</div>
+                                <div class="mt-8 pt-6 border-t border-gray-700">
+                                    <button id="download-owner-file-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors" ${reviews.length === 0 ? 'disabled' : ''}>Download Submission File</button>
+                                </div>
+                            </div>
                         </div>`;
                 },
                 
                 renderOwnerPromptGeneratorView() {
-                    const { input, output } = this.state.ownerState.promptGenerator;
-                    const { geminiModel, geminiApiKey, isAiGenerating } = this.state.ownerState;
+                    const { input, instructions } = this.state.ownerState.promptGenerator;
                     const isPlaceSelected = !!this.state.ownerState.selectedPlace.placeId;
 
                     return `<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             <div class="p-6 bg-gray-800 border border-gray-700 rounded-xl">
-                                <h2 class="text-xl font-semibold text-white mb-4">1. Review Points & Keywords</h2>
-                                <p class="text-sm text-gray-400 mb-3">These points are auto-filled from the selected company's recent Google reviews. Add or edit them manually to guide the AI.</p>
+                                <h2 class="text-xl font-semibold text-white mb-4">Review Points & Keywords</h2>
+                                <p class="text-sm text-gray-400 mb-3">These points are auto-filled from Google. Edit them here to change the AI's focus.</p>
                                 <textarea id="prompt-generator-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg h-80 resize-y" ${!isPlaceSelected ? 'disabled' : ''}>${input}</textarea>
                             </div>
                             <div class="p-6 bg-gray-800 border border-gray-700 rounded-xl">
-                                <h2 class="text-xl font-semibold text-white mb-4">2. Generate Master Prompt</h2>
-                                <p class="text-sm text-gray-400 mb-3">Click to create a detailed prompt for the AI based on the points and business info.</p>
-                                <button id="generate-prompt-btn" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg" ${!isPlaceSelected ? 'disabled' : ''}>Generate Master Prompt</button>
-                                <div class="relative mt-4 h-80">
-                                    <pre id="prompt-generator-output" class="w-full h-full p-3 bg-gray-900 border border-gray-600 rounded-lg whitespace-pre-wrap overflow-y-auto">${output || 'Your master prompt will appear here...'}</pre>
-                                    <button id="copy-prompt-btn" class="absolute top-3 right-3 bg-gray-600 hover:bg-gray-500 text-white font-bold py-1 px-3 rounded-lg text-sm" ${!output ? 'disabled' : ''}>Copy</button>
+                                <h2 class="text-xl font-semibold text-white mb-4">Generated AI Instructions</h2>
+                                <p class="text-sm text-gray-400 mb-3">This is the instruction set for the AI. To update it, edit the keywords on the left and click below.</p>
+                                <button id="generate-prompt-btn" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg mb-4" ${!isPlaceSelected ? 'disabled' : ''}>Regenerate Instructions</button>
+                                <div class="relative h-80">
+                                    <pre class="w-full h-full p-3 bg-gray-900 border border-gray-600 rounded-lg whitespace-pre-wrap overflow-y-auto">${instructions || 'Select a business to see the AI instructions...'}</pre>
+                                    <button id="copy-prompt-btn" class="absolute top-3 right-3 bg-gray-600 hover:bg-gray-500 text-white font-bold py-1 px-3 rounded-lg text-sm transition-colors" ${!instructions ? 'disabled' : ''}>Copy</button>
                                 </div>
                             </div>
-                        </div>
-                        <div class="mt-8 p-6 bg-gray-800 border border-gray-700 rounded-xl">
-                             <h2 class="text-xl font-semibold text-white mb-4">3. Craft Reviews with Gemini AI</h2>
-                             <div class="flex flex-col sm:flex-row gap-6 items-center">
-                                <div class="flex-1">
-                                    <label class="block text-sm font-medium text-gray-300 mb-2">Select AI Model:</label>
-                                    <div class="flex items-center gap-6">
-                                        <label class="flex items-center"><input type="radio" name="gemini-model" value="normal" class="accent-teal-500 mr-2" ${geminiModel === 'normal' ? 'checked' : ''}>Normal Mode</label>
-                                        <label class="flex items-center"><input type="radio" name="gemini-model" value="pro" class="accent-teal-500 mr-2" ${geminiModel === 'pro' ? 'checked' : ''}>Pro Mode</label>
-                                    </div>
-                                </div>
-                                <button id="craft-ai-reviews-btn" class="flex-1 w-full flex items-center justify-center bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg" ${!output || !geminiApiKey || isAiGenerating ? 'disabled' : ''}>
-                                    ${isAiGenerating ? '<div class="spinner"></div><span class="ml-3">Generating...</span>' : 'Craft Reviews with AI'}
-                                </button>
-                             </div>
-                             ${!geminiApiKey ? '<p class="text-yellow-400 text-sm mt-3">Missing Gemini API Key. Please add it in the <button id="settings-btn-inline" class="underline hover:text-yellow-200">Settings</button>.</p>' : ''}
                         </div>`;
                 },
                 renderOwnerToolsView() {
                     const { selectedPlace, sheetRow } = this.state.ownerState;
                     return `<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             <div class="p-6 bg-gray-800 border border-gray-700 rounded-xl space-y-4">
-                                <h2 class="text-xl font-semibold text-white">Place ID Finder</h2>
-                                <input type="text" id="pac-input" class="pac-target-input bg-gray-900 border border-gray-600 rounded-lg" placeholder="Enter a location to find its review link">
+                                <h2 class="text-xl font-semibold text-white">Place ID & Link Finder</h2>
+                                <input type="text" id="pac-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg" placeholder="Enter a location...">
                                 <div id="map"></div>
                                 <div class="relative mt-4">
-                                    <pre class="w-full p-3 pr-16 bg-gray-900 border border-gray-600 rounded-lg whitespace-pre-wrap overflow-x-auto">${selectedPlace.reviewLink || 'Review link will appear here...'}</pre>
-                                    <button id="copy-place-link-btn" class="absolute top-1/2 right-3 -translate-y-1/2 bg-gray-600 hover:bg-gray-500 text-white font-bold py-1 px-3 rounded-lg text-sm" ${!selectedPlace.reviewLink ? 'disabled' : ''}>Copy</button>
+                                    <pre id="place-output" class="w-full p-3 pr-16 bg-gray-900 border border-gray-600 rounded-lg whitespace-pre-wrap overflow-x-auto">Review link will appear here...</pre>
+                                    <button id="copy-place-link-btn" class="absolute top-1/2 right-3 -translate-y-1/2 bg-gray-600 hover:bg-gray-500 text-white font-bold py-1 px-3 rounded-lg text-sm">Copy</button>
                                 </div>
                             </div>
                             <div class="p-6 bg-gray-800 border border-gray-700 rounded-xl space-y-4 self-start">
                                 <h2 class="text-xl font-semibold text-white">Google Sheet Row Generator</h2>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-300 mb-1">Company Name</label>
-                                    <input type="text" value="${selectedPlace.name}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg" readonly>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-300 mb-1">Starting Review Count</label>
-                                    <input type="text" value="${selectedPlace.startingCount}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg" readonly>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-300 mb-1">Reviews Done</label>
-                                    <input type="text" value="0" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg" readonly>
-                                </div>
-                                <div>
-                                    <label for="daily-reviews" class="block text-sm font-medium text-gray-300 mb-1">Daily Reviews</label>
-                                    <input type="number" id="daily-reviews" value="${sheetRow.dailyReviews}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg">
-                                </div>
-                                <div>
-                                    <label for="reviews-ordered" class="block text-sm font-medium text-gray-300 mb-1">Reviews Ordered</label>
-                                    <input type="number" id="reviews-ordered" value="${sheetRow.reviewsOrdered}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg">
-                                </div>
+                                <div><label class="block text-sm font-medium text-gray-300 mb-1">Company Name</label><input type="text" value="${selectedPlace.name || ''}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg" readonly></div>
+                                <div><label class="block text-sm font-medium text-gray-300 mb-1">Starting Review Count</label><input type="text" value="${selectedPlace.startingCount || '0'}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg" readonly></div>
+                                <div><label class="block text-sm font-medium text-gray-300 mb-1">Reviews Done</label><input type="text" value="0" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg" readonly></div>
+                                <div><label for="daily-reviews" class="block text-sm font-medium text-gray-300 mb-1">Daily Reviews</label><input type="number" id="daily-reviews" value="${sheetRow.dailyReviews || ''}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg"></div>
+                                <div><label for="reviews-ordered" class="block text-sm font-medium text-gray-300 mb-1">Reviews Ordered</label><input type="number" id="reviews-ordered" value="${sheetRow.reviewsOrdered || ''}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg"></div>
                                 <button id="generate-sheet-row-btn" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg">Generate Row</button>
                                 <div class="relative">
                                     <pre id="sheet-output" class="w-full p-3 pr-16 bg-gray-900 border border-gray-600 rounded-lg whitespace-pre-wrap overflow-x-auto">${sheetRow.output || 'Sheet row will appear here...'}</pre>
-                                    <button id="copy-sheet-row-btn" class="absolute top-1/2 right-3 -translate-y-1/2 bg-gray-600 hover:bg-gray-500 text-white font-bold py-1 px-3 rounded-lg text-sm" ${!sheetRow.output ? 'disabled' : ''}>Copy</button>
+                                    <button id="copy-sheet-row-btn" class="absolute top-1/2 right-3 -translate-y-1/2 bg-gray-600 hover:bg-gray-500 text-white font-bold py-1 px-3 rounded-lg text-sm">Copy</button>
                                 </div>
                             </div>
                         </div>`;
                 },
-                renderClientView() {
-                    const { link, reviews } = this.state.clientState;
-                    const isLinkSet = !!link;
-                    this.elements.clientView.innerHTML = `
-                        <div class="flex justify-between items-center mb-8">
-                            <button class="back-to-initial-btn text-gray-400 hover:text-white">← Logout & Return</button>
-                            <button id="how-to-use-btn" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">? How to Use</button>
-                        </div>
-                        <header class="mb-8"><h1 class="text-3xl sm:text-4xl font-bold text-white">Client Review Submission</h1></header>
-                        <div id="client-link-section" class="mt-8 p-6 bg-gray-800 border border-gray-700 rounded-xl ${isLinkSet ? 'opacity-70' : ''}">
-                             <h2 class="text-xl font-semibold text-white mb-4">Step 1: Find Business or Paste Link</h2>
-                             <div class="flex flex-col sm:flex-row gap-3">
-                                 <input type="text" id="client-link-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg" placeholder="Search for a business to get the review link..." ${isLinkSet ? 'disabled' : ''}>
-                                 <button id="set-client-link-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg whitespace-nowrap" ${isLinkSet ? 'disabled' : ''}>Set Link Manually</button>
-                             </div>
-                             ${isLinkSet ? `<p class="text-sm text-green-400 mt-2">Review Link Set: <a href="${link}" target="_blank" class="underline">${link}</a></p>`: ''}
-                        </div>
-                        <div id="client-reviews-section" class="mt-8 ${!isLinkSet ? 'hidden' : ''}">
-                            <div class="mb-6">
-                                <h2 class="text-xl font-semibold text-white mb-4">Step 2: Add Your Reviews (${reviews.length})</h2>
-                                <button id="add-client-review-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">Add New Review</button>
-                            </div>
-                            <div id="client-reviews-container">${this.renderReviewCards('client')}</div>
-                            <div class="mt-8 pt-6 border-t border-gray-700"> <button id="submit-client-file-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg" ${reviews.length === 0 ? 'disabled' : ''}>Submit Reviews</button> </div>
-                        </div>`;
-                },
-                renderReviewCards(viewType) {
-                    const state = viewType === 'owner' ? this.state.ownerState : this.state.clientState;
-                    const { reviews } = state;
-                    const cardColor = viewType === 'owner' ? 'teal' : 'blue';
-
-                    if (reviews.length === 0) {
-                        if (viewType === 'client') return '<p class="text-gray-400 text-center py-4">No reviews added yet. Click "Add New Review" to start.</p>';
-                        return '<p class="text-gray-400 text-center py-4">No reviews processed yet. Paste reviews in the box above and click "Process Reviews".</p>';
-                    }
-
+                renderClientView() { return ``; },
+                renderReviewCards() {
+                    const { reviews } = this.state.ownerState;
+                    if (reviews.length === 0) return '<p class="text-gray-400 text-center py-4">No reviews processed yet.</p>';
                     return reviews.map((review, index) => `
-                        <div class="review-item bg-gray-800 p-6 rounded-xl mb-6 border border-gray-700">
-                            <div class="flex justify-between items-start mb-4">
-                                <span class="text-2xl font-bold text-${cardColor}-400">#${index + 1}</span>
-                                <button data-view="${viewType}" data-index="${index}" class="remove-review-btn text-gray-500 hover:text-red-500 font-bold text-2xl">×</button>
+                        <div class="review-item bg-gray-800 p-4 rounded-xl mb-4 border border-gray-700">
+                            <div class="flex justify-between items-start mb-3">
+                                <span class="text-xl font-bold text-teal-400">#${index + 1}</span>
+                                <button data-index="${index}" class="remove-review-btn text-gray-500 hover:text-red-500 font-bold text-2xl transition-colors">×</button>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label class="font-semibold text-gray-300 mb-2 block">Review Content</label>
-                                    <textarea data-view="${viewType}" data-index="${index}" class="content-input w-full p-3 bg-gray-900 border border-gray-600 rounded-lg h-40 resize-none">${review.text}</textarea>
-                                </div>
-                                <div>
-                                    <div class="mb-2">
-                                        <label class="font-semibold text-gray-300 cursor-pointer">
-                                            <input type="checkbox" data-view="${viewType}" data-index="${index}" class="image-required-toggle mr-2 accent-${cardColor}-500" ${review.requiresImage ? 'checked' : ''}>
-                                            This review requires image(s)
-                                        </label>
-                                    </div>
-                                    <div class="image-upload-section ${review.requiresImage ? '' : 'hidden'}">
-                                        <label class="font-semibold text-gray-300 mb-2 block">Images</label>
-                                        <div class="image-previews-container grid grid-cols-3 gap-2 mb-2">
-                                            ${(review.imageDataUrls || []).map((url, imgIndex) => `
-                                                <div class="relative group">
-                                                    <img src="${url}" class="w-full h-24 object-cover rounded-lg">
-                                                    <button data-view="${viewType}" data-review-index="${index}" data-image-index="${imgIndex}" class="remove-image-btn absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</button>
-                                                </div>
-                                            `).join('')}
-                                        </div>
-                                        <label class="file-input-button w-full h-12 bg-gray-900 border-2 border-dashed border-gray-600 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-700 hover:text-white">
-                                            Click to upload images
-                                            <input type="file" data-view="${viewType}" data-index="${index}" class="image-input hidden" accept="image/*" multiple>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
+                            <textarea data-index="${index}" class="content-input w-full p-3 bg-gray-900 border border-gray-600 rounded-lg h-28 resize-y">${review.text}</textarea>
                         </div>
                     `).join('');
                 },
-                renderAdminView() {
-                    this.elements.adminView.innerHTML = `
-                        <div class="flex justify-between items-center mb-8">
-                            <h1 class="text-3xl sm:text-4xl font-bold text-white">Admin Dashboard</h1>
-                            <button class="back-to-initial-btn text-gray-400 hover:text-white">← Logout & Return</button>
-                        </div>
-                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 self-start">
-                             <h2 class="text-xl font-semibold text-white mb-4">Manage Companies</h2>
-                             <div class="flex flex-col sm:flex-row gap-4">
-                                 <input type="text" id="new-company-name" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg" placeholder="New company name...">
-                                 <button id="add-company-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg whitespace-nowrap">Add Company</button>
-                             </div>
-                        </div>
-                        <main id="admin-main-content" class="mt-8">
-                            ${this.renderAdminMainContent()}
-                        </main>
-                    `;
-                },
-                renderAdminMainContent() {
-                    const companies = this.state.data.companies;
-                    if (companies.length === 0) return `<div class="text-center py-16 px-6 bg-gray-800 rounded-lg"><h3 class="text-xl font-semibold text-white">No Companies Added</h3><p class="text-gray-400 mt-2">Please add a company to begin.</p></div>`;
-                    const company = companies.find(c => c.id === this.state.activeCompanyId);
-                    return `
-                        <div class="sticky-tabs border-b border-gray-600 mb-6">
-                            <nav class="-mb-px flex gap-4 overflow-x-auto" aria-label="Tabs">
-                                ${companies.map(c => `
-                                    <button data-id="${c.id}" class="company-tab-btn group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${this.state.activeCompanyId === c.id ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}">
-                                        ${c.name}
-                                    </button>
-                                `).join('')}
-                            </nav>
-                        </div>
-                        ${company ? this.renderAdminCompanyDetails(company) : `<div class="text-center py-16 px-6 bg-gray-800 rounded-lg"><p class="text-gray-400 mt-2">Select a company tab to view its details.</p></div>`}
-                    `;
-                },
-                renderAdminCompanyDetails(company) {
-                    const totalReviews = company.reviews?.length || 0;
-                    const doneReviews = company.reviews?.filter(r => r.status === 'done').length || 0;
-                    const progress = totalReviews > 0 ? (doneReviews / totalReviews) * 100 : 0;
-                    const undoneReviews = company.reviews?.filter(r => r.status !== 'done') || [];
-                    return `
-                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 mb-8">
-                            <div class="flex flex-wrap justify-between items-start gap-4 mb-4">
-                                <div class="flex-1 min-w-[250px]">
-                                  <h2 class="text-2xl font-bold text-white">${company.name}</h2>
-                                  <p class="text-sm text-gray-400 mb-2">Search to find/update company link:</p>
-                                  <input type="text" id="admin-link-input-${company.id}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg" placeholder="Search for company to get review link..." value="${company.name}">
-                                  ${company.reviewLink ? `<a href="${company.reviewLink}" target="_blank" class="text-sm text-indigo-400 hover:underline break-all block mt-2">${company.reviewLink}</a>` : '<p class="text-sm text-yellow-400 mt-2">No review link set yet.</p>'}
-                                </div>
-                                <div class="grid grid-cols-2 gap-3">
-                                    <button data-id="${company.id}" class="copy-latest-undone-btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg" ${undoneReviews.length === 0 ? 'disabled' : ''}>Copy Latest</button>
-                                    <label class="file-input-button bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-center">
-                                        Upload File <input type="file" data-id="${company.id}" class="upload-admin-file hidden" accept=".json">
-                                    </label>
-                                    <button data-id="${company.id}" class="download-admin-file-btn bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Download</button>
-                                    <button data-id="${company.id}" class="remove-company-btn bg-red-800 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Delete</button>
-                                </div>
-                            </div>
-                            <div>
-                                <div class="flex justify-between mb-1">
-                                    <span class="text-base font-medium text-indigo-400">Completion</span>
-                                    <span class="text-sm font-medium text-indigo-400">${doneReviews} / ${totalReviews} (${Math.round(progress)}%)</span>
-                                </div>
-                                <div class="w-full bg-gray-700 rounded-full h-2.5"> <div class="bg-indigo-600 h-2.5 rounded-full" style="width: ${progress}%"></div> </div>
-                            </div>
-                        </div>
-                        <div id="admin-reviews-container">
-                            ${company.reviews && company.reviews.length > 0 ? company.reviews.map((review, index) => this.getAdminReviewHtml(company, review, index)).join('') : `<div class="text-center py-16 px-6 bg-gray-800 rounded-lg"><p class="text-gray-400">No reviews submitted for this company yet. Upload a client file.</p></div>`}
-                        </div>
-                    `;
-                },
-                getAdminReviewHtml(company, review, index) {
-                    const isDone = review.status === 'done';
-                    const hasImages = review.requiresImage && review.imageDataUrls && review.imageDataUrls.length > 0;
-                    return `
-                        <div class="review-item relative bg-gray-800 p-6 rounded-xl mb-6 shadow-lg border ${isDone ? 'border-green-500 opacity-60' : 'border-gray-700'}">
-                            ${isDone ? '<span class="absolute top-3 right-3 bg-green-600 text-white text-xs font-bold px-2 py-1 rounded-full">DONE</span>' : ''}
-                            <div class="flex justify-between items-start mb-4"> <span class="text-2xl font-bold text-indigo-400">#${index + 1}</span> </div>
-                            <div class="grid grid-cols-1 ${hasImages ? 'md:grid-cols-2' : ''} gap-6">
-                                <div class="space-y-2">
-                                    <p class="font-semibold text-gray-300">Review Content:</p>
-                                    <p class="p-3 bg-gray-900 border border-gray-600 rounded-lg whitespace-pre-wrap">${review.text}</p>
-                                </div>
-                                ${hasImages ? `<div> <p class="font-semibold text-gray-300 mb-2">Submitted Images:</p> <div class="grid grid-cols-2 sm:grid-cols-3 gap-2"> ${review.imageDataUrls.map((url, imgIndex) => `<img src="${url}" data-review-index="${index}" data-image-index="${imgIndex}" class="admin-image-preview w-full h-24 object-cover rounded-lg cursor-pointer hover:opacity-80 transition-opacity">`).join('')} </div> </div>` : ''}
-                            </div>
-                             <div class="mt-6 pt-4 border-t border-gray-700 flex flex-wrap gap-3">
-                                 ${isDone ? `<button data-index="${index}" class="undo-review-btn flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg">Undo</button>` : `<button data-index="${index}" class="copy-btn flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg">Copy for Telegram</button>`}
-                                 ${hasImages ? `<button data-index="${index}" class="save-image-btn flex-1 bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Save All Images</button>` : ''}
-                            </div>
-                        </div>`;
-                },
+                renderAdminView() { return ``; },
 
                 // --- EVENT LISTENERS & HANDLERS ---
                 attachInitialListeners() {
-                    document.getElementById('client-portal-btn').addEventListener('click', () => this.switchView('client'));
-                    document.getElementById('owner-portal-btn').addEventListener('click', () => this.switchView('owner'));
-                    document.getElementById('admin-portal-btn').addEventListener('click', () => this.switchView('admin'));
-                    this.elements.app.addEventListener('click', e => { if (e.target.closest('.back-to-initial-btn')) { this.switchView('initial'); } this.handleGenericClick(e); });
-                    this.elements.app.addEventListener('input', e => this.handleGenericInput(e));
-                    this.elements.app.addEventListener('change', e => this.handleGenericChange(e));
+                    this.elements.app.addEventListener('click', this.handleGenericClick.bind(this));
+                    this.elements.app.addEventListener('input', this.handleGenericInput.bind(this));
                 },
                 
                 handleOwnerTabClick(tab) {
                     this.state.ownerState.activeTab = tab;
                     this.render();
-                    // Re-initialize maps for the new tab if needed
                     setTimeout(() => this.initializeOwnerViewMaps(), 0);
                 },
+
                 handleGenericClick(e) {
                     const target = e.target;
-                    const viewType = target.closest('[data-view]')?.dataset.view;
+                    const closest = (selector) => target.closest(selector);
+
+                    if (closest('.back-to-initial-btn')) this.switchView('initial');
+                    else if (closest('#client-portal-btn')) this.switchView('client');
+                    else if (closest('#owner-portal-btn')) this.switchView('owner');
+                    else if (closest('#admin-portal-btn')) this.switchView('admin');
+                    else if (closest('.owner-tab-btn')) this.handleOwnerTabClick(closest('.owner-tab-btn').dataset.tab);
+                    else if (closest('#settings-btn') || closest('#settings-btn-inline')) this.showApiKeyModal();
                     
-                    if (target.closest('.owner-tab-btn')) { this.handleOwnerTabClick(target.closest('.owner-tab-btn').dataset.tab); return; }
-                     if (target.closest('#settings-btn') || target.closest('#settings-btn-inline')) { this.showApiKeyModal(); return; }
-
-                    if (this.state.currentView === 'client') {
-                        if (target.id === 'add-client-review-btn') { this.state.clientState.reviews.unshift({ text: '', requiresImage: false, imageDataUrls: [] }); this.render(); }
-                        if (target.id === 'how-to-use-btn') { this.showInfoModal('How to Use the Client Portal', `<ol class="list-decimal list-inside space-y-3"><li><strong>Find Business:</strong> Use the search bar to find the business. The review link will be set automatically.</li><li><strong>Set Manually (Optional):</strong> If search doesn't work, paste the full Google Review link and click "Set Link Manually".</li><li><strong>Add Reviews:</strong> Click "Add New Review" to create a card.</li><li><strong>Write Content:</strong> Type your review in the text box.</li><li><strong>Add Images:</strong> Check the "This review requires image(s)" box to show the uploader. Click it to select pictures.</li><li><strong>Submit Reviews:</strong> When done, click "Submit Reviews".</li><li><strong>Name Your File:</strong> A pop-up will ask for a filename (e.g., 'yourname_reviews').</li><li><strong>Confirmation:</strong> The data will be sent automatically. You will see a success message.</li></ol>`); }
-                         if (target.id === 'set-client-link-btn') {
-                            const input = document.getElementById('client-link-input');
-                            if(this.validateLink(input.value)) { this.state.clientState.link = input.value; this.render(); }
-                            else { this.showNotification('Please enter a valid URL starting with http:// or https://', 'error'); }
-                        }
-                        if (target.id === 'submit-client-file-btn') {
-                             this.showPromptModal('Enter your name or a filename', 'e.g., yourname_reviews', (filename) => {
-                                if (!filename) { this.showNotification('Submission cancelled.', 'error'); return; }
-                                this.handleClientWeb3FormsSubmit(filename);
-                            });
-                        }
-                    }
-
                     if (this.state.currentView === 'owner') {
-                        if (target.id === 'set-owner-link-btn') {
-                            const input = document.getElementById('owner-link-input');
-                            if (input && input.value.trim() !== '') {
-                                const isLink = this.validateLink(input.value);
-                                const { ownerState } = this.state;
-
-                                ownerState.selectedPlace.name = input.value.trim();
-                                ownerState.selectedPlace.placeId = 'manual_entry';
-                                ownerState.selectedPlace.reviewLink = isLink ? input.value.trim() : `https://www.google.com/search?q=${encodeURIComponent(input.value.trim())}`;
-                                ownerState.selectedPlace.startingCount = 0; 
-                                ownerState.selectedPlace.reviews = [];
-                                ownerState.selectedPlace.details = null;
-                                ownerState.promptGenerator.input = 'No recent positive reviews found (manual entry). You can paste your own points manually.';
-                                
-                                this.render();
-                                this.showNotification(`Manually set location: ${ownerState.selectedPlace.name}`, "success");
-                            } else {
-                                this.showNotification('Please enter a business name or a valid URL.', 'error');
-                            }
-                        }
-                        if (target.id === 'process-bulk-reviews-btn') this.processBulkReviews();
-                        if (target.id === 'reset-owner-reviews-btn') { this.state.ownerState.reviews = []; this.state.ownerState.bulkText = ''; this.render(); }
-                        if (target.id === 'generate-prompt-btn') this.generateOwnerPrompt();
-                        if (target.id === 'copy-prompt-btn') this.copyToClipboard(this.state.ownerState.promptGenerator.output, "Prompt copied!");
-                        if (target.id === 'craft-ai-reviews-btn') this.craftAiReviews();
-                        if (target.id === 'copy-place-link-btn') this.copyToClipboard(this.state.ownerState.selectedPlace.reviewLink, "Place link copied!");
-                        if (target.id === 'generate-sheet-row-btn') this.generateSheetRow();
-                        if (target.id === 'copy-sheet-row-btn') this.copyToClipboard(this.state.ownerState.sheetRow.output, "Sheet row copied!");
-                        if (target.id === 'download-owner-file-btn') {
-                            this.showPromptModal('Enter a filename', 'e.g., company_reviews', (filename) => {
-                                if (!filename) { this.showNotification('Download cancelled.', 'error'); return; }
-                                const data = { link: this.state.ownerState.selectedPlace.reviewLink, reviews: this.state.ownerState.reviews };
-                                const dataBlob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                                const url = URL.createObjectURL(dataBlob);
-                                const a = document.createElement('a');
-                                a.href = url; a.download = `${filename.replace(/\s+/g, '_')}.json`;
-                                document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-                                this.showNotification('File downloaded!');
-                            });
-                        }
-                    }
-                    
-                    if (this.state.currentView === 'admin') this.handleAdminClick(e);
-
-                    if (viewType) {
-                        if (target.closest('.remove-review-btn')) {
-                            this.state[`${viewType}State`].reviews.splice(target.closest('.remove-review-btn').dataset.index, 1);
+                        if (closest('#set-owner-link-btn')) this.handleManualLinkSet();
+                        else if (closest('.craft-ai-btn')) this.craftAiReviews(closest('.craft-ai-btn').dataset.model);
+                        else if (closest('#process-bulk-reviews-btn')) this.processBulkReviews();
+                        else if (closest('#reset-owner-reviews-btn')) this.resetOwnerReviews();
+                        else if (closest('#generate-prompt-btn')) { this.generateOwnerPrompt(); this.showNotification("Instructions Regenerated!"); this.render(); }
+                        else if (closest('#copy-prompt-btn')) this.copyToClipboard(this.state.ownerState.promptGenerator.instructions, "Instructions copied!");
+                        else if (closest('#download-owner-file-btn')) this.downloadOwnerFile();
+                        else if (closest('.remove-review-btn')) {
+                            this.state.ownerState.reviews.splice(closest('.remove-review-btn').dataset.index, 1);
                             this.render();
                         }
-                         if (target.closest('.remove-image-btn')) {
-                            const btn = target.closest('.remove-image-btn');
-                            this.state[`${viewType}State`].reviews[btn.dataset.reviewIndex].imageDataUrls.splice(btn.dataset.imageIndex, 1);
-                            this.render();
-                        }
+                        else if (closest('#copy-place-link-btn')) this.copyToClipboard(document.getElementById('place-output').textContent, "Place link copied!");
+                        else if (closest('#generate-sheet-row-btn')) this.generateSheetRow();
+                        else if (closest('#copy-sheet-row-btn')) this.copyToClipboard(this.state.ownerState.sheetRow.output, "Sheet row copied!");
                     }
                 },
-                handleAdminClick(e) {
-                    const target = e.target;
-                    
-                    if(target.id === 'add-company-btn') {
-                        const nameInput = document.getElementById('new-company-name');
-                        if (nameInput.value.trim()) {
-                            const newCompany = { id: `comp_${Date.now()}`, name: nameInput.value.trim(), reviewLink: '', reviews: [] };
-                            this.state.data.companies.push(newCompany);
-                            this.state.activeCompanyId = newCompany.id;
-                            this.saveData(); 
-                            this.render(); 
-                            setTimeout(() => this.initializeAdminViewMaps(), 0);
-                            nameInput.value = '';
-                        }
-                    }
-                    if(target.closest('.company-tab-btn')) { 
-                        this.state.activeCompanyId = target.closest('.company-tab-btn').dataset.id; 
-                        localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
-                        this.render(); 
-                        setTimeout(() => this.initializeAdminViewMaps(), 0);
-                    }
-                    if(target.closest('.remove-company-btn')) {
-                        const id = target.closest('.remove-company-btn').dataset.id;
-                        this.showConfirmModal('Delete Company?', 'This cannot be undone.', () => {
-                            this.state.data.companies = this.state.data.companies.filter(c => c.id !== id);
-                            if (this.state.activeCompanyId === id) {
-                                this.state.activeCompanyId = this.state.data.companies[0]?.id || null;
-                                localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
-                            }
-                            this.saveData(); this.render();
-                        });
-                    }
-                    
-                    const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
-                    if(!company) return;
-
-                    const reviewIndex = e.target.closest('[data-review-index]')?.dataset.reviewIndex ?? e.target.closest('[data-index]')?.dataset.index;
-                    
-                    if (target.closest('.copy-latest-undone-btn')) {
-                        const latestUndone = company.reviews.map((r, i) => ({...r, originalIndex: i})).reverse().find(r => r.status !== 'done');
-                        if (latestUndone) {
-                            this.copyToClipboard(`Click: ${company.reviewLink}\n\n\`${latestUndone.text}\``, 'Latest review copied!');
-                            company.reviews[latestUndone.originalIndex].status = 'done';
-                            this.saveData(); this.render();
-                        } else { this.showNotification('No new reviews to copy.'); }
-                        return;
-                    }
-                     if (target.closest('.download-admin-file-btn')) {
-                        const companyToDownload = this.state.data.companies.find(c => c.id === target.dataset.id);
-                        const dataBlob = new Blob([JSON.stringify(companyToDownload, null, 2)], { type: 'application/json' });
-                        const url = URL.createObjectURL(dataBlob);
-                        const a = document.createElement('a');
-                        a.href = url; a.download = `data_${companyToDownload.name.replace(/\s+/g, '_')}.json`;
-                        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-                        return;
-                    }
-
-                    if (!reviewIndex) return;
-                    const review = company.reviews[reviewIndex];
-
-                    if (target.closest('.copy-btn')) {
-                        this.copyToClipboard(`Click: ${company.reviewLink}\n\n\`${review.text}\``, 'Review copied!');
-                        review.status = 'done';
-                        this.saveData(); this.render();
-                    }
-                    if (target.closest('.undo-review-btn')) {
-                        review.status = 'undone';
-                        this.saveData(); this.render();
-                    }
-                    if (target.closest('.save-image-btn')) {
-                         review.imageDataUrls.forEach((url, i) => {
-                             const a = document.createElement('a');
-                             a.href = url;
-                             a.download = `review_image_${company.name}_${parseInt(reviewIndex) + 1}_${i + 1}.jpeg`;
-                             document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                         });
-                    }
-                    if (target.closest('.admin-image-preview')) {
-                        const imgIndex = e.target.dataset.imageIndex;
-                        this.showImageModal(review.imageDataUrls[imgIndex]);
-                    }
-                },
+                
                 handleGenericInput(e) {
                     const target = e.target;
-                    const viewType = target.dataset.view;
-
-                     if (target.id === 'owner-bulk-textarea') this.state.ownerState.bulkText = target.value;
-                     if (target.id === 'prompt-generator-input') this.state.ownerState.promptGenerator.input = target.value;
-                    if (['daily-reviews', 'reviews-ordered'].includes(target.id)) {
+                    if (target.id === 'owner-bulk-textarea') this.state.ownerState.bulkText = target.value;
+                    else if (target.id === 'prompt-generator-input') {
+                        this.state.ownerState.promptGenerator.input = target.value;
+                        this.generateOwnerPrompt(); // Auto-update prompt as user types
+                    }
+                    else if (['daily-reviews', 'reviews-ordered'].includes(target.id)) {
                         const key = {'daily-reviews': 'dailyReviews', 'reviews-ordered': 'reviewsOrdered'}[target.id];
                         this.state.ownerState.sheetRow[key] = target.value;
-                    }
-                    if(viewType && target.classList.contains('content-input')) {
-                        this.state[`${viewType}State`].reviews[target.dataset.index].text = target.value;
+                    } else if(target.classList.contains('content-input')) {
+                        this.state.ownerState.reviews[target.dataset.index].text = target.value;
                     }
                 },
-                async handleGenericChange(e) {
-                    const target = e.target;
-                    const viewType = target.dataset.view;
-
-                     if(target.name === 'gemini-model') {
-                        this.state.ownerState.geminiModel = target.value;
+                
+                handleManualLinkSet() {
+                    const input = document.getElementById('owner-link-input');
+                    if (input && input.value.trim()) {
+                        const { ownerState } = this.state;
+                        ownerState.selectedPlace.name = input.value.trim();
+                        ownerState.selectedPlace.placeId = 'manual_entry';
+                        ownerState.selectedPlace.reviewLink = this.validateLink(input.value) ? input.value.trim() : `https://www.google.com/search?q=${encodeURIComponent(input.value.trim())}`;
+                        ownerState.selectedPlace.startingCount = 0; 
+                        ownerState.selectedPlace.details = null;
+                        ownerState.promptGenerator.input = 'Manual entry: Add keywords in the AI Customization tab.';
+                        this.generateOwnerPrompt();
                         this.render();
-                    }
-
-                    if (this.state.currentView === 'admin' && target.classList.contains('upload-admin-file')) {
-                        this.handleAdminChange(e);
-                        return;
-                    }
-                    
-                    if(viewType) {
-                        const index = target.dataset.index;
-                        if (target.classList.contains('image-required-toggle')) {
-                            this.state[`${viewType}State`].reviews[index].requiresImage = target.checked;
-                            if (!target.checked) this.state[`${viewType}State`].reviews[index].imageDataUrls = [];
-                            this.render();
-                        }
-                        if (target.classList.contains('image-input')) {
-                            const files = target.files;
-                            if (files.length > 0) {
-                                this.showNotification(`Compressing ${files.length} image(s)...`, 'info');
-                                for (const file of files) {
-                                    try {
-                                        const compressedDataUrl = await this.compressImage(file);
-                                        this.state[`${viewType}State`].reviews[index].imageDataUrls.push(compressedDataUrl);
-                                    } catch (err) { this.showNotification(`Could not process ${file.name}.`, 'error'); }
-                                }
-                                this.render();
-                                this.showNotification('Images added successfully.');
-                            }
-                        }
-                    }
-                },
-                handleAdminChange(e) {
-                    const file = e.target.files[0];
-                    const companyId = e.target.dataset.id;
-                    if (file && companyId) {
-                         const reader = new FileReader();
-                         reader.onload = (event) => {
-                             try {
-                                 const uploaded = JSON.parse(event.target.result);
-                                 if (uploaded.link && this.validateLink(uploaded.link) && Array.isArray(uploaded.reviews)) {
-                                     const company = this.state.data.companies.find(c => c.id === companyId);
-                                     if(company) {
-                                         company.reviewLink = uploaded.link;
-                                         const existingReviewTexts = new Set((company.reviews || []).map(r => r.text));
-                                         const newReviews = uploaded.reviews
-                                             .filter(r => r.text && !existingReviewTexts.has(r.text))
-                                             .map(r => ({...r, status: 'undone'}));
-
-                                         company.reviews = [...(company.reviews || []), ...newReviews];
-                                         this.saveData(); 
-                                         this.render();
-                                         this.showNotification(`${newReviews.length} new review(s) imported for ${company.name}.`);
-                                     }
-                                 } else { this.showNotification('Invalid file format. Must contain "link" and "reviews" array.', 'error'); }
-                             } catch (err) { 
-                                this.showNotification('Error reading file. Make sure it is a valid JSON file.', 'error'); 
-                             } 
-                             finally { e.target.value = ''; }
-                         };
-                         reader.readAsText(file);
+                        this.showNotification(`Manually set location: ${ownerState.selectedPlace.name}`, "success");
+                    } else {
+                        this.showNotification('Please enter a business name or a valid URL.', 'error');
                     }
                 },
 
-                async handleClientWeb3FormsSubmit(filename) {
-                    this.showNotification('Submitting...', 'info');
-                    const formData = new FormData();
-                    formData.append("apikey", "df839469-7072-4818-8962-4362eb379953");
-                    formData.append("subject", `New Review Submission: ${filename}`);
-                    formData.append("from_name", "Review Management System");
-                    const businessName = document.getElementById('client-link-input')?.value || 'N/A';
-                    formData.append("message", `A new review submission has been received for:\n\nBusiness: ${businessName}\nReview Link: ${this.state.clientState.link}\n\nThe full submission data is attached as a JSON file.`);
-                    const dataToSubmit = { link: this.state.clientState.link, reviews: this.state.clientState.reviews };
-                    const jsonBlob = new Blob([JSON.stringify(dataToSubmit, null, 2)], { type: 'application/json' });
-                    formData.append("attachment", jsonBlob, `${filename.replace(/\s+/g, '_')}.json`);
-                    try {
-                        const response = await fetch("https://api.web3forms.com/submit", { method: "POST", body: formData });
-                        const result = await response.json();
-                        if (result.success) {
-                            this.showNotification('Submission successful! Thank you.');
-                            this.state.clientState = { link: '', reviews: [] };
-                            this.render();
-                        } else {
-                            this.showNotification(`Submission failed: ${result.message}`, 'error');
-                        }
-                    } catch (error) {
-                        this.showNotification('An error occurred during submission.', 'error');
-                    }
-                },
-
+                // --- OWNER-SPECIFIC METHODS ---
                 processBulkReviews() {
-                    const { bulkText } = this.state.ownerState;
-                    const lines = bulkText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-                    const uniqueLines = [...new Set(lines)];
-                    if (uniqueLines.length === 0) { 
-                        this.showNotification("No reviews found to process.", "error"); 
-                        return; 
-                    }
-                    this.state.ownerState.reviews = uniqueLines.map(line => ({ text: line, requiresImage: false, imageDataUrls: [] }));
-                    this.showNotification(`${uniqueLines.length} unique reviews processed.`, "success");
+                    const lines = this.state.ownerState.bulkText.split('\n').map(line => line.trim()).filter(Boolean);
+                    if (lines.length === 0) { this.showNotification("No reviews to process.", "error"); return; }
+                    this.state.ownerState.reviews = [...new Set(lines)].map(text => ({ text }));
+                    this.showNotification(`${this.state.ownerState.reviews.length} unique reviews processed.`, "success");
                     this.render();
+                },
+                
+                resetOwnerReviews() {
+                    this.state.ownerState.reviews = [];
+                    this.state.ownerState.bulkText = '';
+                    this.render();
+                },
+
+                downloadOwnerFile() {
+                    this.showPromptModal('Enter a filename', 'e.g., company_reviews', (filename) => {
+                        if (!filename) { this.showNotification('Download cancelled.', 'error'); return; }
+                        const data = { link: this.state.ownerState.selectedPlace.reviewLink, reviews: this.state.ownerState.reviews };
+                        const dataBlob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(dataBlob);
+                        const a = document.createElement('a');
+                        a.href = url; a.download = `${filename.replace(/\s+/g, '_')}.json`;
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                        this.showNotification('File downloaded!');
+                    });
                 },
 
                 generateOwnerPrompt() {
                     const { selectedPlace, promptGenerator } = this.state.ownerState;
                     const businessInfo = selectedPlace.details;
+                    
                     let context = `Business Name: ${selectedPlace.name || 'this business'}\n`;
                     if (businessInfo) {
                         if (businessInfo.types?.length > 0) context += `Business Type: ${businessInfo.types.join(', ').replace(/_/g, ' ')}\n`;
                         if (businessInfo.address) context += `Location: ${businessInfo.address}\n`;
-                        if (businessInfo.website) context += `Website: ${businessInfo.website}\n`;
                     }
                     context += `\nKey Positive Points from Customers:\n${promptGenerator.input.trim()}`;
-                    const promptText = `CONTEXT:\n${context}\n\nTASK:\nBased on the context and key points above, craft 50 positive, detailed, and highly realistic Google reviews. Strictly follow all requirements below:\n\nREQUIREMENTS:\n1.  **Natural Language:** Reviews must sound like they were written by 50 different, real people. Vary tone, style, emotion (grateful, excited, relaxed), and sentence structure extensively. Mix short, snappy sentences with longer, more descriptive ones.\n\n2.  **Randomized Lengths & Order:** Do not follow any pattern. Some reviews should be very short (5-10 words), some medium (2-4 sentences), and a few long and detailed (5-8+ sentences). The order of lengths must be completely random.\n\n3.  **Company Name Usage (Strict):** Mention the specific company name, "${selectedPlace.name}", in only a small, random subset of the reviews (e.g., 5 out of 50). For all other reviews, use general terms like "this place," "the team," "the service," "they," or just describe the experience.\n\n4.  **Keyword Integration:** Subtly weave in keywords from the business context (like business type, location hints, or specific services mentioned in the points) into a few reviews where it feels natural. Do not force them in.\n\n5.  **Authenticity & Realism:** To enhance credibility, a couple of reviews can mention a minor, neutral point before giving praise (e.g., "It was a bit busy, but the service was still excellent" or "I had to wait a few minutes, but it was so worth it.").\n\n6.  **Varied Writing Voice & Demographics:** Write from different perspectives. Hint at different customer types (e.g., "brought my family," "perfect for a quick work lunch," "came here on a date night"). Use different capitalization styles (some proper, some all-lowercase, some with mobile auto-capitalization). Use emojis (like 😊, 👍, ⭐) very sparingly—maybe in 1 of every 10 reviews.\n\n7.  **Time References:** Casually include a soft time reference in about 3-5 reviews (e.g., "visited last week," "came here yesterday morning").\n\n8.  **Formatting:** Separate each review with a new line. DO NOT number the reviews.`;
-                    promptGenerator.output = promptText;
-                    this.render();
-                    this.showNotification("Master prompt generated!");
+
+                    const instructions = `Based on the context and key points provided, craft 50 positive, detailed, and highly realistic Google reviews. Strictly follow all requirements below:\n\nREQUIREMENTS:\n1.  **Natural Language:** Write from 50 different, real-person perspectives. Vary tone, style, emotion (grateful, excited, relaxed), and sentence structure extensively. Mix short, snappy sentences with longer, more descriptive ones.\n\n2.  **Randomized Lengths & Order:** Do not follow any pattern. Mix very short (5-10 words), medium (2-4 sentences), and long (5-8+ sentences) reviews randomly.\n\n3.  **Company Name Usage (Strict):** Mention the specific company name, "${selectedPlace.name}", in only a small, random subset of the reviews (e.g., 5 out of 50). All others must use general terms ("this place," "the team," "the service," etc.).\n\n4.  **Keyword Integration:** Subtly weave in keywords from the business context (like business type or specific services) into a few reviews where it feels natural. Do not force them in.\n\n5.  **Authenticity & Realism:** A couple of reviews can mention a minor, neutral point before giving praise (e.g., "It was a bit busy, but the service was still excellent.").\n\n6.  **Varied Voice:** Write from different customer perspectives (family, professional, etc.). Vary capitalization and use emojis (😊, 👍) very sparingly (e.g., 1 in 10 reviews).\n\n7.  **Formatting:** Separate each review with a new line. DO NOT number the reviews.`;
+                    
+                    promptGenerator.output = `CONTEXT:\n${context}\n\nTASK:\n${instructions}`;
+                    promptGenerator.instructions = instructions;
                 },
 
-                async craftAiReviews() {
-                    const { geminiApiKey, geminiModel, promptGenerator } = this.state.ownerState;
+                async craftAiReviews(mode) {
+                    const { geminiApiKey, promptGenerator } = this.state.ownerState;
                     if (!geminiApiKey) { this.showNotification("Gemini API key is not set.", 'error'); return; }
-                    if (!promptGenerator.output) { this.showNotification("Please generate a master prompt first.", 'error'); return; }
+                    if (!promptGenerator.output) { this.showNotification("Please select a business first.", 'error'); return; }
 
                     this.state.ownerState.isAiGenerating = true;
                     this.render();
 
-                    const model = geminiModel === 'pro' ? 'gemini-1.5-pro-latest' : 'gemini-pro';
-                    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+                    const modelName = mode === 'pro' ? 'gemini-1.5-pro-latest' : 'gemini-1.0-pro';
+                    const API_URL = `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${geminiApiKey}`;
 
                     try {
                         const response = await fetch(API_URL, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ contents: [{ parts: [{ text: promptGenerator.output }] }] })
+                            body: JSON.stringify({
+                                contents: [{ parts: [{ text: promptGenerator.output }] }]
+                            })
                         });
 
                         if (!response.ok) {
                             const errorData = await response.json();
-                            throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+                            throw new Error(errorData.error?.message || `HTTP error! Status: ${response.status}`);
                         }
 
                         const data = await response.json();
                         const aiReviews = data.candidates[0]?.content?.parts[0]?.text || '';
                         
                         this.state.ownerState.bulkText = aiReviews.trim();
-                        this.state.ownerState.activeTab = 'submitter';
-                        this.showNotification("AI reviews generated successfully! Now process them.", "success");
+                        this.showNotification("AI reviews generated successfully!", "success");
                         
                     } catch (error) {
                         this.showNotification(`AI generation failed: ${error.message}`, 'error');
                     } finally {
                         this.state.ownerState.isAiGenerating = false;
                         this.render();
-                        setTimeout(() => this.initializeOwnerViewMaps(), 0);
                     }
                 },
 
                 generateSheetRow() {
                     const { name, startingCount } = this.state.ownerState.selectedPlace;
-                    if (!name) { this.showNotification("Please search and select a company first.", "error"); return; }
+                    if (!name) { this.showNotification("Please select a company first.", "error"); return; }
                     const daily = parseInt(this.state.ownerState.sheetRow.dailyReviews, 10) || 0;
                     const ordered = parseInt(this.state.ownerState.sheetRow.reviewsOrdered, 10) || 0;
-                    const done = 0;
-                    const endingCount = startingCount + ordered;
-                    const reviewsLeft = ordered - done;
-                    const output = `${name}\t${daily}\t${done}\t${ordered}\t${startingCount}\t${endingCount}\t\t${reviewsLeft}`;
+                    const output = `${name}\t${daily}\t0\t${ordered}\t${startingCount}\t${startingCount + ordered}\t\t${ordered - 0}`;
                     this.state.ownerState.sheetRow.output = output;
                     this.render();
                     this.showNotification("Sheet row generated!");
                 },
 
                 // --- UTILITIES & MODALS ---
-                compressImage(file, quality = 0.7, maxWidth = 1024) {
-                    return new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.readAsDataURL(file);
-                        reader.onload = (event) => {
-                            const img = new Image();
-                            img.src = event.target.result;
-                            img.onload = () => {
-                                const canvas = document.createElement('canvas');
-                                const scaleRatio = maxWidth / img.width;
-                                canvas.width = scaleRatio < 1 ? maxWidth : img.width;
-                                canvas.height = scaleRatio < 1 ? img.height * scaleRatio : img.height;
-                                const ctx = canvas.getContext('2d');
-                                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                                resolve(ctx.canvas.toDataURL('image/jpeg', quality));
-                            };
-                            img.onerror = (error) => reject(error);
-                        };
-                        reader.onerror = (error) => reject(error);
-                    });
-                },
                 showLoginModal(type) {
-                    const titles = { client: 'Client Login', owner: 'Owner Login', admin: 'Admin Login' };
                     const credentials = { client: {u: 'client', p: 'client'}, owner: {u: 'owner', p: 'owner'}, admin: {u: 'admin', p: 'admin'} };
                     const colors = { client: 'blue', owner: 'teal', admin: 'indigo' };
-                    const title = titles[type]; const correctUser = credentials[type].u; const correctPass = credentials[type].p; const color = colors[type];
-                    this.elements.loginModalContainer.innerHTML = `
-                        <div id="login-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000]">
-                            <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm border border-gray-700">
-                                <h2 class="text-2xl font-bold text-white mb-6">${title}</h2>
-                                <form id="login-form">
-                                    <div class="mb-4"><label for="username" class="block text-gray-300 mb-2">Username</label><input type="text" id="username" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-${color}-500"></div>
-                                    <div class="mb-6"><label for="password" class="block text-gray-300 mb-2">Password</label><input type="password" id="password" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-${color}-500"></div>
-                                    <p id="login-error" class="text-red-400 text-sm mb-4 hidden">Invalid credentials.</p>
-                                    <div class="flex items-center justify-between">
-                                        <button type="button" class="cancel-login-btn text-gray-400 hover:text-white">Cancel</button>
-                                        <button type="submit" class="text-white font-bold py-2 px-6 rounded-lg bg-${color}-600 hover:bg-${color}-700">Login</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>`;
-                    const form = this.elements.loginModalContainer.querySelector('#login-form');
+                    this.elements.loginModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000]"><div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm border border-gray-700"><h2 class="text-2xl font-bold text-white mb-6">${type.charAt(0).toUpperCase() + type.slice(1)} Login</h2><form id="login-form"><div class="mb-4"><label for="username" class="block text-gray-300 mb-2">Username</label><input type="text" id="username" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-${colors[type]}-500"></div><div class="mb-6"><label for="password" class="block text-gray-300 mb-2">Password</label><input type="password" id="password" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-${colors[type]}-500"></div><p id="login-error" class="text-red-400 text-sm mb-4 hidden">Invalid credentials.</p><div class="flex items-center justify-between"><button type="button" class="cancel-login-btn text-gray-400 hover:text-white">Cancel</button><button type="submit" class="text-white font-bold py-2 px-6 rounded-lg bg-${colors[type]}-600 hover:bg-${colors[type]}-700">Login</button></div></form></div></div>`;
+                    const form = document.getElementById('login-form');
                     form.querySelector('#username').focus();
                     form.onsubmit = (e) => {
                         e.preventDefault();
-                        const user = form.querySelector('#username').value;
-                        const pass = form.querySelector('#password').value;
-                        if (user === correctUser && pass === correctPass) {
-                            if (type === 'client') { this.state.isClientLoggedIn = true; sessionStorage.setItem('isClientLoggedIn', 'true'); }
-                            if (type === 'owner') { this.state.isOwnerLoggedIn = true; sessionStorage.setItem('isOwnerLoggedIn', 'true'); }
-                            if (type === 'admin') { this.state.isAdminLoggedIn = true; sessionStorage.setItem('isAdminLoggedIn', 'true'); }
+                        const user = form.username.value, pass = form.password.value;
+                        if (user === credentials[type].u && pass === credentials[type].p) {
+                            this.state[`is${type.charAt(0).toUpperCase() + type.slice(1)}LoggedIn`] = true;
+                            sessionStorage.setItem(`is${type.charAt(0).toUpperCase() + type.slice(1)}LoggedIn`, 'true');
                             this.elements.loginModalContainer.innerHTML = '';
                             this.switchView(type);
                         } else { form.querySelector('#login-error').classList.remove('hidden'); }
@@ -1096,69 +658,41 @@
                     this.elements.loginModalContainer.querySelector('.cancel-login-btn').onclick = () => { this.elements.loginModalContainer.innerHTML = ''; };
                 },
                 showApiKeyModal() {
-                    const currentKey = this.state.ownerState.geminiApiKey;
-                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><form id="api-key-form" class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">Gemini API Key</h2><p class="text-gray-400 mb-4">Please enter your Gemini API key to enable AI features. Your key is saved locally in your browser.</p><input type="password" id="modal-api-key-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg mb-6" placeholder="Enter your API key..." value="${currentKey}"><div class="flex justify-end gap-4"><button type="button" id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button type="submit" class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-6 rounded-lg">Save Key</button></div></form></div>`;
-                    const input = document.getElementById('modal-api-key-input');
-                    input.focus();
-                    document.getElementById('modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
-                    document.getElementById('api-key-form').onsubmit = (e) => {
+                    this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><form id="api-key-form" class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">Gemini API Key</h2><p class="text-gray-400 mb-4">Enter your Gemini API key to enable AI features. It's saved locally in your browser.</p><input type="password" id="modal-api-key-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg mb-6" placeholder="Enter your API key..." value="${this.state.ownerState.geminiApiKey}"><div class="flex justify-end gap-4"><button type="button" id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button type="submit" class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-6 rounded-lg">Save Key</button></div></form></div>`;
+                    const form = document.getElementById('api-key-form');
+                    form.querySelector('input').focus();
+                    form.querySelector('#modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
+                    form.onsubmit = (e) => {
                         e.preventDefault();
-                        const newKey = input.value.trim();
+                        const newKey = form.querySelector('input').value.trim();
                         if (newKey) {
                             this.state.ownerState.geminiApiKey = newKey;
                             localStorage.setItem('geminiApiKey', newKey);
                             this.showNotification('API Key saved successfully!');
                             this.elements.genericModalContainer.innerHTML = '';
                             this.render();
-                        } else {
-                            this.showNotification('API Key cannot be empty.', 'error');
-                        }
+                        } else { this.showNotification('API Key cannot be empty.', 'error'); }
                     };
                 },
-                showConfirmModal(title, message, onConfirm) {
-                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">${title}</h2><p class="text-gray-300 mb-6">${message}</p><div class="flex justify-end gap-4"><button id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button id="modal-confirm" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg">Confirm</button></div></div></div>`;
-                    document.getElementById('modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
-                    document.getElementById('modal-confirm').onclick = () => { onConfirm(); this.elements.genericModalContainer.innerHTML = ''; };
-                },
                 showPromptModal(title, placeholder, onSubmit) {
-                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><form id="prompt-form" class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">${title}</h2><input type="text" id="modal-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg mb-6" placeholder="${placeholder}"><div class="flex justify-end gap-4"><button type="button" id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg">Submit</button></div></form></div>`;
-                    const input = document.getElementById('modal-input');
-                    input.focus();
-                    document.getElementById('modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
-                    document.getElementById('prompt-form').onsubmit = (e) => { e.preventDefault(); onSubmit(input.value); this.elements.genericModalContainer.innerHTML = ''; };
-                },
-                showInfoModal(title, content) {
-                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-lg border border-gray-700 max-h-[80vh] overflow-y-auto"><h2 class="text-2xl font-bold text-white mb-4">${title}</h2><div class="text-gray-300 mb-6 space-y-2">${content}</div><div class="flex justify-end"><button id="modal-close" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg">Close</button></div></div></div>`;
-                    document.getElementById('modal-close').onclick = () => this.elements.genericModalContainer.innerHTML = '';
-                },
-                showImageModal(src) {
-                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-[10000] p-4" id="image-modal-backdrop"><img src="${src}" class="max-w-full max-h-full object-contain"></div>`;
-                     document.getElementById('image-modal-backdrop').onclick = () => this.elements.genericModalContainer.innerHTML = '';
+                    this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><form id="prompt-form" class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">${title}</h2><input type="text" id="modal-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg mb-6" placeholder="${placeholder}"><div class="flex justify-end gap-4"><button type="button" id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg">Submit</button></div></form></div>`;
+                    const form = document.getElementById('prompt-form');
+                    form.querySelector('input').focus();
+                    form.querySelector('#modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
+                    form.onsubmit = (e) => { e.preventDefault(); onSubmit(form.querySelector('input').value); this.elements.genericModalContainer.innerHTML = ''; };
                 },
                 validateLink(link) { return link && (link.startsWith('http://') || link.startsWith('https://')); },
                 copyToClipboard(text, message = "Copied to clipboard!") {
-                    if (!navigator.clipboard) { 
-                        const textArea = document.createElement("textarea");
-                        textArea.value = text;
-                        document.body.appendChild(textArea);
-                        textArea.focus();
-                        textArea.select();
-                        try { document.execCommand('copy'); this.showNotification(message); } 
-                        catch (err) { this.showNotification("Failed to copy.", 'error'); }
-                        document.body.removeChild(textArea);
-                        return;
-                    }
+                    if (!text) return;
                     navigator.clipboard.writeText(text).then(() => { this.showNotification(message); }, () => { this.showNotification("Failed to copy.", 'error'); });
                 },
                 showNotification(message, type = 'success') {
                     const el = this.elements.notification;
                     el.textContent = message;
                     el.className = `notification-toast fixed bottom-5 right-5 text-white py-3 px-5 rounded-lg shadow-xl z-[10001] ${type === 'info' ? 'bg-blue-600' : type === 'success' ? 'bg-green-600' : 'bg-red-600'}`;
-                    el.classList.remove('hidden');
                     el.style.animation = 'none';
-                    el.offsetHeight; /* trigger reflow */
+                    el.offsetHeight; 
                     el.style.animation = null; 
-                    setTimeout(() => el.classList.add('hidden'), 3900);
                 }
             };
             
