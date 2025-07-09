@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- The Google Maps script with the API key and callback -->
+    <!-- The Google Maps script with the API key and a single, global callback -->
     <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBXdjRQZJd9ySH5mxql4tlXCEVpDH9GGbI&libraries=places&callback=initializeGoogleMaps"></script>
     <style>
         /* Base styling for the page, using the Inter font */
@@ -90,13 +90,19 @@
     <div id="notification" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-white py-3 px-5 rounded-lg shadow-xl z-[10001]"></div>
     
     <script>
-        // --- FINAL ROBUST FIX FOR RACE CONDITION ---
-        // Global callback for the Google Maps API script.
+        // --- ROBUST INITIALIZATION LOGIC ---
+        
+        // This global flag will be true once the Google Maps script has loaded and run its callback.
+        let isGoogleMapsApiReady = false;
+
+        // The single global callback function for the Google Maps API script.
+        // This function is the ONLY place where Google Maps objects are created.
         function initializeGoogleMaps() {
+            isGoogleMapsApiReady = true;
+            
+            // If the main application object exists, tell it to try initializing its map components.
             if (window.reviewApp) {
-                window.reviewApp.mapsApiLoaded();
-            } else {
-                window.googleMapsReady = true;
+                window.reviewApp.initializeMapsForCurrentView();
             }
         }
 
@@ -106,7 +112,6 @@
                 state: {
                     currentView: 'initial',
                     isClientLoggedIn: false, isOwnerLoggedIn: false, isAdminLoggedIn: false,
-                    mapsInitialized: false, // This is our master "API is ready" flag
                     data: { companies: [] },
                     activeCompanyId: localStorage.getItem('activeCompanyTab') || null,
                     clientState: { link: '', reviews: [] },
@@ -122,9 +127,6 @@
                         sheetRow: { dailyReviews: '', reviewsOrdered: '', output: '' }
                     }
                 },
-                // --- NEW: API ACTION QUEUE ---
-                mapsApiQueue: [], // Holds functions that need the Maps API
-
                 // --- DOM ELEMENTS ---
                 elements: {
                     app: document.getElementById('app'),
@@ -143,8 +145,10 @@
                     this.loadData();
                     this.attachInitialListeners();
                     
-                    if (window.googleMapsReady && !this.state.mapsInitialized) {
-                        this.mapsApiLoaded();
+                    // If the Google Maps API finished loading *before* the app was ready,
+                    // we need to trigger the map initialization now.
+                    if (isGoogleMapsApiReady) {
+                        this.initializeMapsForCurrentView();
                     }
                     
                     this.state.isClientLoggedIn = sessionStorage.getItem('isClientLoggedIn') === 'true';
@@ -159,33 +163,36 @@
                     }
                 },
                 
-                // --- NEW: QUEUE PROCESSING LOGIC ---
-                // This is the single entry point when the API is confirmed to be ready.
-                mapsApiLoaded() {
-                    if (this.state.mapsInitialized) return;
-                    this.state.mapsInitialized = true;
+                // This function is the central point for setting up map features.
+                // It's safe to call multiple times. It checks if the API is ready
+                // and which view is active.
+                initializeMapsForCurrentView() {
+                    if (!isGoogleMapsApiReady) return; // Guard: Don't run if the API script isn't ready.
                     
-                    // Execute all waiting actions.
-                    this.mapsApiQueue.forEach(action => action());
-                    // Clear the queue.
-                    this.mapsApiQueue = [];
-                },
-
-                // This method safely handles actions that depend on the Maps API.
-                queueMapApiAction(action) {
-                    if (this.state.mapsInitialized) {
-                        // If API is already ready, run it immediately.
-                        action();
-                    } else {
-                        // Otherwise, add it to the queue to be run later.
-                        this.mapsApiQueue.push(action);
+                    const view = this.state.currentView;
+                    if (view === 'client') {
+                        this.initAutocomplete('client-link-input', this.handleClientPlaceSelection.bind(this));
+                    }
+                    if (view === 'owner') {
+                        if (this.state.ownerState.activeTab === 'submitter') {
+                            this.initAutocomplete('owner-link-input', this.handleOwnerPlaceSelection.bind(this));
+                        }
+                        if (this.state.ownerState.activeTab === 'tools') {
+                            this.initPlaceIdFinderMap();
+                        }
+                    }
+                    if (view === 'admin') {
+                         const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
+                         if(company) {
+                            this.initAutocomplete(`admin-link-input-${company.id}`, (place) => this.handleAdminPlaceSelection(place, company.id));
+                         }
                     }
                 },
 
                 // --- GOOGLE MAPS & PLACES INTEGRATION ---
                 initAutocomplete(inputId, callback) {
-                    // This function is now only called when we know the API is ready.
                     const input = document.getElementById(inputId);
+                    // Guard: Exit if the input element doesn't exist in the DOM yet, or if it's already initialized.
                     if (!input || input.dataset.acAttached) return;
 
                     const autocompleteOptions = {
@@ -193,7 +200,7 @@
                         types: ["establishment"]
                     };
                     const autocomplete = new google.maps.places.Autocomplete(input, autocompleteOptions);
-                    input.dataset.acAttached = 'true';
+                    input.dataset.acAttached = 'true'; // Mark as initialized to prevent re-attaching.
 
                     autocomplete.addListener('place_changed', () => {
                         const place = autocomplete.getPlace();
@@ -202,7 +209,6 @@
                 },
                 
                 initPlaceIdFinderMap() {
-                    // This function is also only called when the API is ready.
                     const mapEl = document.getElementById("map");
                     const inputEl = document.getElementById("pac-input");
                     
@@ -351,6 +357,10 @@
                     if (this.state.currentView === 'client') this.renderClientView();
                     if (this.state.currentView === 'owner') this.renderOwnerView();
                     if (this.state.currentView === 'admin') this.renderAdminView();
+
+                    // After every render, try to initialize maps. This ensures that if the API
+                    // is ready, any newly visible inputs will get the autocomplete feature.
+                    this.initializeMapsForCurrentView();
                 },
                 
                 renderOwnerView() {
@@ -379,11 +389,6 @@
                     const isPlaceSelected = !!selectedPlace.placeId;
                     const areReviewsProcessed = reviews.length > 0;
                     
-                    // Queue the autocomplete initialization for this input.
-                    this.queueMapApiAction(() => {
-                        this.initAutocomplete('owner-link-input', this.handleOwnerPlaceSelection.bind(this));
-                    });
-
                     return `
                         <div id="owner-link-section" class="p-6 bg-gray-800 border border-gray-700 rounded-xl">
                              <h2 class="text-xl font-semibold text-white mb-4">Step 1: Find Business</h2>
@@ -450,11 +455,6 @@
                 renderOwnerToolsView() {
                     const { selectedPlace, sheetRow } = this.state.ownerState;
 
-                    // Queue the map initialization for this view.
-                    this.queueMapApiAction(() => {
-                        this.initPlaceIdFinderMap();
-                    });
-
                     return `<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             <div class="p-6 bg-gray-800 border border-gray-700 rounded-xl space-y-4">
                                 <h2 class="text-xl font-semibold text-white">Place ID Finder</h2>
@@ -498,11 +498,6 @@
                 renderClientView() {
                     const { link, reviews } = this.state.clientState;
                     const isLinkSet = !!link;
-
-                    // Queue the autocomplete initialization for this input.
-                    this.queueMapApiAction(() => {
-                        this.initAutocomplete('client-link-input', this.handleClientPlaceSelection.bind(this));
-                    });
 
                     this.elements.clientView.innerHTML = `
                         <div class="flex justify-between items-center mb-8">
@@ -615,11 +610,6 @@
                     const doneReviews = company.reviews?.filter(r => r.status === 'done').length || 0;
                     const progress = totalReviews > 0 ? (doneReviews / totalReviews) * 100 : 0;
                     const undoneReviews = company.reviews?.filter(r => r.status !== 'done') || [];
-
-                    // Queue the autocomplete initialization for this company's input.
-                    this.queueMapApiAction(() => {
-                        this.initAutocomplete(`admin-link-input-${company.id}`, (place) => this.handleAdminPlaceSelection(place, company.id));
-                    });
 
                     return `
                         <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 mb-8">
@@ -777,7 +767,6 @@
                             this.state.activeCompanyId = newCompany.id;
                             this.saveData(); 
                             this.render(); 
-                            nameInput.value = '';
                         }
                     }
                     if(target.closest('.company-tab-btn')) { 
@@ -1160,4 +1149,4 @@
         });
     </script>
 </body>
-</html>
+</ht
