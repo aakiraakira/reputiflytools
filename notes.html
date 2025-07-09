@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reputifly Notes | AI Powered</title>
+    <title>Codex Notes Pro</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
 
@@ -1996,23 +1996,42 @@
                     };
 
                     if (command === 'createLink') {
-                        restoreSelectionAndExec(async () => {
+                        // We must first restore the selection to see if we're inside an existing link.
+                        app.elements.noteEditorBody.focus();
+                        if (editorSelectionRange) {
                             const selection = window.getSelection();
-                            const parentEl = selection.anchorNode?.parentNode.closest('a');
-                            if(parentEl) {
+                            selection.removeAllRanges();
+                            selection.addRange(editorSelectionRange);
+                        }
+
+                        const selection = window.getSelection();
+                        const parentEl = selection.anchorNode?.parentNode.closest('a');
+
+                        if(parentEl) {
+                            // Already a link, so we just unlink. This is a synchronous action.
+                            // We can wrap it in `restoreSelectionAndExec` to handle saving etc.
+                            restoreSelectionAndExec(() => {
                                 document.execCommand('unlink');
-                            } else {
-                                let url = await showPrompt({ title: 'Insert Link', message: 'Enter the URL:', placeholder: 'example.com' });
-                                if (url) {
-                                    if (!/^(https?:\/\/|mailto:|ftp:\/\/)/i.test(url)) {
-                                        url = 'https://' + url;
+                            });
+                        } else {
+                            // Not a link, so we'll create one. This is async.
+                            // First, save the selected text because the prompt will clear the selection.
+                            const selectedText = selection.toString().trim();
+                            // Now, get the URL.
+                            const url = await showPrompt({ title: 'Insert Link', message: 'Enter the URL:', placeholder: 'https://example.com' });
+                            if (url) {
+                                // Now that we have the URL, restore the selection again and insert the link.
+                                restoreSelectionAndExec(() => {
+                                    let finalUrl = url;
+                                    if (!/^(https?:\/\/|mailto:|ftp:\/\/)/i.test(finalUrl)) {
+                                        finalUrl = 'https://' + finalUrl;
                                     }
-                                    const selectedText = window.getSelection().toString().trim();
-                                    const linkHTML = `<a href="${url}" target="_blank" rel="noopener noreferrer">${selectedText || url}</a>`;
+                                    // Use the text we saved before the prompt.
+                                    const linkHTML = `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${selectedText || finalUrl}</a>`;
                                     document.execCommand('insertHTML', false, linkHTML);
-                                }
+                                });
                             }
-                        });
+                        }
                     } else if (command === 'insertImage') {
                         const url = await showPrompt({ title: 'Insert Image', message: 'Enter the image URL:', placeholder: 'https://example.com/image.png' });
                         if (url) {
