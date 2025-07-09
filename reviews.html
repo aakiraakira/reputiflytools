@@ -89,7 +89,7 @@
     <div id="notification" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-white py-3 px-5 rounded-lg shadow-xl z-[10001]"></div>
     
     <script>
-        // FIX: Create a global function that the Google Maps script will call directly.
+        // Create a global function that the Google Maps script will call directly.
         // This is the most reliable way to know the API is ready.
         function initializeGoogleMaps() {
             if (window.reviewApp) {
@@ -141,7 +141,7 @@
                 },
                 // --- INITIALIZATION ---
                 init() {
-                    // FIX: Make the app instance globally accessible for the Maps callback.
+                    // Make the app instance globally accessible for the Maps callback.
                     window.reviewApp = this; 
                     
                     this.loadData();
@@ -159,7 +159,7 @@
                     }
                 },
                 
-                // FIX: This function is now called by the global callback.
+                // This function is now called by the global callback.
                 mapsApiLoaded() {
                     this.state.mapsInitialized = true;
                     // Now that the API is definitely loaded, initialize maps for the current view.
@@ -195,7 +195,7 @@
                      }
                 },
 
-                // FIX: Simplified and made more robust. It's called after the view is rendered.
+                // Simplified and made more robust. It's called after the view is rendered.
                 initAutocomplete(inputId, callback) {
                     if (!this.state.mapsInitialized) return;
                     const input = document.getElementById(inputId);
@@ -354,9 +354,11 @@
                     
                     this.render();
                     
-                    // FIX: Defer map initialization until after rendering is complete
-                    // to ensure the input elements exist in the DOM.
-                    setTimeout(() => this.initializeMapsForCurrentView(), 0);
+                    // FIX: On page load (isRestoring = true), map initialization must wait for the API callback.
+                    // For user-triggered navigation, we can initialize it right away.
+                    if (!isRestoring) {
+                        setTimeout(() => this.initializeMapsForCurrentView(), 0);
+                    }
                 },
                 
                 // --- RENDERING ---
@@ -682,7 +684,9 @@
                     this.state.ownerState.activeTab = tab;
                     this.render();
                     // Re-initialize maps for the new tab if needed
-                    setTimeout(() => this.initializeOwnerViewMaps(), 0);
+                    if (this.state.mapsInitialized) {
+                       this.initializeOwnerViewMaps();
+                    }
                 },
                 handleGenericClick(e) {
                     const target = e.target;
@@ -775,7 +779,9 @@
                             this.state.activeCompanyId = newCompany.id;
                             this.saveData(); 
                             this.render(); 
-                            setTimeout(() => this.initializeAdminViewMaps(), 0);
+                            if (this.state.mapsInitialized) {
+                                this.initializeAdminViewMaps();
+                            }
                             nameInput.value = '';
                         }
                     }
@@ -783,7 +789,9 @@
                         this.state.activeCompanyId = target.closest('.company-tab-btn').dataset.id; 
                         localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
                         this.render(); 
-                        setTimeout(() => this.initializeAdminViewMaps(), 0);
+                        if (this.state.mapsInitialized) {
+                            this.initializeAdminViewMaps();
+                        }
                     }
                     if(target.closest('.remove-company-btn')) {
                         const id = target.closest('.remove-company-btn').dataset.id;
@@ -970,11 +978,14 @@
 
                 generateOwnerPrompt() {
                     const { selectedPlace, promptGenerator } = this.state.ownerState;
-                    
-                    // FIX: Removed business details (type, location, website) from the context as requested.
-                    // The business name is still passed to the AI via the "Company Name Usage" requirement.
-                    let context = `Key Positive Points from Customers:\n${promptGenerator.input.trim()}`;
-                    
+                    const businessInfo = selectedPlace.details;
+                    let context = `Business Name: ${selectedPlace.name || 'this business'}\n`;
+                    if (businessInfo) {
+                        if (businessInfo.types?.length > 0) context += `Business Type: ${businessInfo.types.join(', ').replace(/_/g, ' ')}\n`;
+                        if (businessInfo.address) context += `Location: ${businessInfo.address}\n`;
+                        if (businessInfo.website) context += `Website: ${businessInfo.website}\n`;
+                    }
+                    context += `\nKey Positive Points from Customers:\n${promptGenerator.input.trim()}`;
                     const promptText = `CONTEXT:\n${context}\n\nTASK:\nBased on the context and key points above, craft 50 positive, detailed, and highly realistic Google reviews. Strictly follow all requirements below:\n\nREQUIREMENTS:\n1.  **Natural Language:** Reviews must sound like they were written by 50 different, real people. Vary tone, style, emotion (grateful, excited, relaxed), and sentence structure extensively. Mix short, snappy sentences with longer, more descriptive ones.\n\n2.  **Randomized Lengths & Order:** Do not follow any pattern. Some reviews should be very short (5-10 words), some medium (2-4 sentences), and a few long and detailed (5-8+ sentences). The order of lengths must be completely random.\n\n3.  **Company Name Usage (Strict):** Mention the specific company name, "${selectedPlace.name}", in only a small, random subset of the reviews (e.g., 5 out of 50). For all other reviews, use general terms like "this place," "the team," "the service," "they," or just describe the experience.\n\n4.  **Keyword Integration:** Subtly weave in keywords from the business context (like business type, location hints, or specific services mentioned in the points) into a few reviews where it feels natural. Do not force them in.\n\n5.  **Authenticity & Realism:** To enhance credibility, a couple of reviews can mention a minor, neutral point before giving praise (e.g., "It was a bit busy, but the service was still excellent" or "I had to wait a few minutes, but it was so worth it.").\n\n6.  **Varied Writing Voice & Demographics:** Write from different perspectives. Hint at different customer types (e.g., "brought my family," "perfect for a quick work lunch," "came here on a date night"). Use different capitalization styles (some proper, some all-lowercase, some with mobile auto-capitalization). Use emojis (like 😊, 👍, ⭐) very sparingly—maybe in 1 of every 10 reviews.\n\n7.  **Time References:** Casually include a soft time reference in about 3-5 reviews (e.g., "visited last week," "came here yesterday morning").\n\n8.  **Formatting:** Separate each review with a new line. DO NOT number the reviews.`;
                     promptGenerator.output = promptText;
                     this.render();
@@ -989,14 +1000,17 @@
                     this.state.ownerState.isAiGenerating = true;
                     this.render();
 
-                    // FIX: Use a more robust model for 'normal' mode to prevent compatibility issues.
+                    // FIX: Use latest, compatible models and send API key in the header.
                     const model = geminiModel === 'pro' ? 'gemini-1.5-pro-latest' : 'gemini-1.5-flash-latest';
-                    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+                    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
                     try {
                         const response = await fetch(API_URL, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'x-goog-api-key': geminiApiKey
+                            },
                             body: JSON.stringify({ contents: [{ parts: [{ text: promptGenerator.output }] }] })
                         });
 
