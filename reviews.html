@@ -90,17 +90,14 @@
     <div id="notification" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-white py-3 px-5 rounded-lg shadow-xl z-[10001]"></div>
     
     <script>
-        // --- FIX FOR RACE CONDITION ---
-        // This is the global callback function for the Google Maps API script.
-        // It's designed to handle the race condition between the script loading and the app initializing.
+        // --- ROBUST FIX FOR RACE CONDITION ---
+        // This global function is the callback for the Google Maps API script.
         function initializeGoogleMaps() {
-            // Scenario A: The app has already initialized and created the global `reviewApp` object.
-            // We can safely call the method on the app to let it know the API is ready.
+            // If the app has already initialized, call its method directly.
             if (window.reviewApp) {
                 window.reviewApp.mapsApiLoaded();
             } 
-            // Scenario B: The Maps script has finished loading *before* the DOM is ready and the app has initialized.
-            // We set a global flag. The app's `init()` method will check for this flag.
+            // If the Maps script loads first, set a global flag. The app will check for this.
             else {
                 window.googleMapsReady = true;
             }
@@ -150,15 +147,13 @@
                 },
                 // --- INITIALIZATION ---
                 init() {
-                    // Make the app instance globally accessible for the Maps callback.
+                    // Make the app instance globally accessible.
                     window.reviewApp = this; 
                     
                     this.loadData();
                     this.attachInitialListeners();
                     
-                    // --- FIX FOR RACE CONDITION ---
-                    // Check if the global flag was set by `initializeGoogleMaps`.
-                    // This handles Scenario B, where the Maps API was ready before the app was.
+                    // Check if the Maps API finished loading before the app was ready.
                     if (window.googleMapsReady && !this.state.mapsInitialized) {
                         this.mapsApiLoaded();
                     }
@@ -175,19 +170,19 @@
                     }
                 },
                 
-                // This function is the single entry point for initializing map features.
-                // It's called either by the Maps callback or by the app's own init logic.
+                // This is the single, reliable entry point for map initialization.
+                // It's called when the API is confirmed to be ready.
                 mapsApiLoaded() {
-                    // Guard against being called more than once.
-                    if (this.state.mapsInitialized) {
-                        return;
-                    }
+                    if (this.state.mapsInitialized) return; // Prevent multiple initializations
                     this.state.mapsInitialized = true;
                     
-                    // Now that we know the API is loaded, initialize maps for the currently active view.
+                    // CRITICAL FIX: Now that the API is ready, immediately try to initialize
+                    // maps for the current view. This ensures it works on refresh.
                     this.initializeMapsForCurrentView();
                 },
 
+                // This function attempts to set up maps for the currently rendered view.
+                // It's safe to call anytime because it checks the mapsInitialized flag.
                 initializeMapsForCurrentView() {
                      if (!this.state.mapsInitialized) return;
                     
@@ -373,8 +368,8 @@
                     
                     this.render();
                     
-                    // Defer map initialization until after rendering is complete
-                    // to ensure the input elements exist in the DOM.
+                    // Defer map initialization to ensure the DOM is rendered.
+                    // It's safe to call because it will only run if maps are truly ready.
                     setTimeout(() => this.initializeMapsForCurrentView(), 0);
                 },
                 
