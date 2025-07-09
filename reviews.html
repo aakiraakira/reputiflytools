@@ -90,28 +90,23 @@
     <div id="notification" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-white py-3 px-5 rounded-lg shadow-xl z-[10001]"></div>
     
     <script>
-        // --- ROBUST FIX FOR RACE CONDITION ---
-        // This global function is the callback for the Google Maps API script.
+        // --- FINAL ROBUST FIX FOR RACE CONDITION ---
+        // Global callback for the Google Maps API script.
         function initializeGoogleMaps() {
-            // If the app has already initialized, call its method directly.
             if (window.reviewApp) {
                 window.reviewApp.mapsApiLoaded();
-            } 
-            // If the Maps script loads first, set a global flag. The app will check for this.
-            else {
+            } else {
                 window.googleMapsReady = true;
             }
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            // Main application object
             const app = {
                 // --- STATE ---
                 state: {
                     currentView: 'initial',
                     isClientLoggedIn: false, isOwnerLoggedIn: false, isAdminLoggedIn: false,
-                    mapsInitialized: false,
-                    placesService: null,
+                    mapsInitialized: false, // This is our master "API is ready" flag
                     data: { companies: [] },
                     activeCompanyId: localStorage.getItem('activeCompanyTab') || null,
                     clientState: { link: '', reviews: [] },
@@ -120,20 +115,16 @@
                         geminiApiKey: localStorage.getItem('geminiApiKey') || '',
                         geminiModel: 'normal',
                         isAiGenerating: false,
-                        selectedPlace: {
-                            name: '',
-                            reviewLink: '',
-                            startingCount: 0,
-                            reviews: [],
-                            placeId: '',
-                            details: null 
-                        },
+                        selectedPlace: { name: '', reviewLink: '', startingCount: 0, reviews: [], placeId: '', details: null },
                         reviews: [],
                         bulkText: '',
                         promptGenerator: { input: '', output: '' },
                         sheetRow: { dailyReviews: '', reviewsOrdered: '', output: '' }
                     }
                 },
+                // --- NEW: API ACTION QUEUE ---
+                mapsApiQueue: [], // Holds functions that need the Maps API
+
                 // --- DOM ELEMENTS ---
                 elements: {
                     app: document.getElementById('app'),
@@ -145,15 +136,13 @@
                     genericModalContainer: document.getElementById('generic-modal-container'),
                     notification: document.getElementById('notification'),
                 },
+                
                 // --- INITIALIZATION ---
                 init() {
-                    // Make the app instance globally accessible.
                     window.reviewApp = this; 
-                    
                     this.loadData();
                     this.attachInitialListeners();
                     
-                    // Check if the Maps API finished loading before the app was ready.
                     if (window.googleMapsReady && !this.state.mapsInitialized) {
                         this.mapsApiLoaded();
                     }
@@ -170,50 +159,32 @@
                     }
                 },
                 
-                // This is the single, reliable entry point for map initialization.
-                // It's called when the API is confirmed to be ready.
+                // --- NEW: QUEUE PROCESSING LOGIC ---
+                // This is the single entry point when the API is confirmed to be ready.
                 mapsApiLoaded() {
-                    if (this.state.mapsInitialized) return; // Prevent multiple initializations
+                    if (this.state.mapsInitialized) return;
                     this.state.mapsInitialized = true;
                     
-                    // CRITICAL FIX: Now that the API is ready, immediately try to initialize
-                    // maps for the current view. This ensures it works on refresh.
-                    this.initializeMapsForCurrentView();
+                    // Execute all waiting actions.
+                    this.mapsApiQueue.forEach(action => action());
+                    // Clear the queue.
+                    this.mapsApiQueue = [];
                 },
 
-                // This function attempts to set up maps for the currently rendered view.
-                // It's safe to call anytime because it checks the mapsInitialized flag.
-                initializeMapsForCurrentView() {
-                     if (!this.state.mapsInitialized) return;
-                    
-                    const view = this.state.currentView;
-                    if (view === 'client') this.initializeClientViewMaps();
-                    if (view === 'owner') this.initializeOwnerViewMaps();
-                    if (view === 'admin') this.initializeAdminViewMaps();
+                // This method safely handles actions that depend on the Maps API.
+                queueMapApiAction(action) {
+                    if (this.state.mapsInitialized) {
+                        // If API is already ready, run it immediately.
+                        action();
+                    } else {
+                        // Otherwise, add it to the queue to be run later.
+                        this.mapsApiQueue.push(action);
+                    }
                 },
 
                 // --- GOOGLE MAPS & PLACES INTEGRATION ---
-                 initializeClientViewMaps() {
-                    this.initAutocomplete('client-link-input', this.handleClientPlaceSelection.bind(this));
-                },
-                initializeOwnerViewMaps() {
-                    if (this.state.ownerState.activeTab === 'submitter') {
-                        this.initAutocomplete('owner-link-input', this.handleOwnerPlaceSelection.bind(this));
-                    }
-                    if (this.state.ownerState.activeTab === 'tools') {
-                        this.initPlaceIdFinderMap();
-                    }
-                },
-                
-                initializeAdminViewMaps() {
-                     const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
-                     if(company) {
-                        this.initAutocomplete(`admin-link-input-${company.id}`, (place) => this.handleAdminPlaceSelection(place, company.id));
-                     }
-                },
-
                 initAutocomplete(inputId, callback) {
-                    if (!this.state.mapsInitialized) return;
+                    // This function is now only called when we know the API is ready.
                     const input = document.getElementById(inputId);
                     if (!input || input.dataset.acAttached) return;
 
@@ -222,7 +193,7 @@
                         types: ["establishment"]
                     };
                     const autocomplete = new google.maps.places.Autocomplete(input, autocompleteOptions);
-                    input.dataset.acAttached = 'true'; // Mark as initialized
+                    input.dataset.acAttached = 'true';
 
                     autocomplete.addListener('place_changed', () => {
                         const place = autocomplete.getPlace();
@@ -231,7 +202,7 @@
                 },
                 
                 initPlaceIdFinderMap() {
-                    if (!this.state.mapsInitialized) return;
+                    // This function is also only called when the API is ready.
                     const mapEl = document.getElementById("map");
                     const inputEl = document.getElementById("pac-input");
                     
@@ -367,10 +338,6 @@
                     }
                     
                     this.render();
-                    
-                    // Defer map initialization to ensure the DOM is rendered.
-                    // It's safe to call because it will only run if maps are truly ready.
-                    setTimeout(() => this.initializeMapsForCurrentView(), 0);
                 },
                 
                 // --- RENDERING ---
@@ -411,6 +378,12 @@
                     const { selectedPlace, reviews, bulkText } = this.state.ownerState;
                     const isPlaceSelected = !!selectedPlace.placeId;
                     const areReviewsProcessed = reviews.length > 0;
+                    
+                    // Queue the autocomplete initialization for this input.
+                    this.queueMapApiAction(() => {
+                        this.initAutocomplete('owner-link-input', this.handleOwnerPlaceSelection.bind(this));
+                    });
+
                     return `
                         <div id="owner-link-section" class="p-6 bg-gray-800 border border-gray-700 rounded-xl">
                              <h2 class="text-xl font-semibold text-white mb-4">Step 1: Find Business</h2>
@@ -476,6 +449,12 @@
                 },
                 renderOwnerToolsView() {
                     const { selectedPlace, sheetRow } = this.state.ownerState;
+
+                    // Queue the map initialization for this view.
+                    this.queueMapApiAction(() => {
+                        this.initPlaceIdFinderMap();
+                    });
+
                     return `<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             <div class="p-6 bg-gray-800 border border-gray-700 rounded-xl space-y-4">
                                 <h2 class="text-xl font-semibold text-white">Place ID Finder</h2>
@@ -519,6 +498,12 @@
                 renderClientView() {
                     const { link, reviews } = this.state.clientState;
                     const isLinkSet = !!link;
+
+                    // Queue the autocomplete initialization for this input.
+                    this.queueMapApiAction(() => {
+                        this.initAutocomplete('client-link-input', this.handleClientPlaceSelection.bind(this));
+                    });
+
                     this.elements.clientView.innerHTML = `
                         <div class="flex justify-between items-center mb-8">
                             <button class="back-to-initial-btn text-gray-400 hover:text-white">← Logout & Return</button>
@@ -630,6 +615,12 @@
                     const doneReviews = company.reviews?.filter(r => r.status === 'done').length || 0;
                     const progress = totalReviews > 0 ? (doneReviews / totalReviews) * 100 : 0;
                     const undoneReviews = company.reviews?.filter(r => r.status !== 'done') || [];
+
+                    // Queue the autocomplete initialization for this company's input.
+                    this.queueMapApiAction(() => {
+                        this.initAutocomplete(`admin-link-input-${company.id}`, (place) => this.handleAdminPlaceSelection(place, company.id));
+                    });
+
                     return `
                         <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 mb-8">
                             <div class="flex flex-wrap justify-between items-start gap-4 mb-4">
@@ -695,8 +686,6 @@
                 handleOwnerTabClick(tab) {
                     this.state.ownerState.activeTab = tab;
                     this.render();
-                    // Re-initialize maps for the new tab if needed
-                    setTimeout(() => this.initializeOwnerViewMaps(), 0);
                 },
                 handleGenericClick(e) {
                     const target = e.target;
@@ -788,7 +777,6 @@
                             this.state.activeCompanyId = newCompany.id;
                             this.saveData(); 
                             this.render(); 
-                            setTimeout(() => this.initializeAdminViewMaps(), 0);
                             nameInput.value = '';
                         }
                     }
@@ -796,7 +784,6 @@
                         this.state.activeCompanyId = target.closest('.company-tab-btn').dataset.id; 
                         localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
                         this.render(); 
-                        setTimeout(() => this.initializeAdminViewMaps(), 0);
                     }
                     if(target.closest('.remove-company-btn')) {
                         const id = target.closest('.remove-company-btn').dataset.id;
@@ -1027,7 +1014,6 @@
                     } finally {
                         this.state.ownerState.isAiGenerating = false;
                         this.render();
-                        setTimeout(() => this.initializeOwnerViewMaps(), 0);
                     }
                 },
 
