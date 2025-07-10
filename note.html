@@ -416,12 +416,10 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
     getAuth,
-    createUserWithEmailAndPassword,
-    signInWithEmailAndPassword,
     onAuthStateChanged,
-    signOut
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFunctions } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
   // Your web app's Firebase configuration
   const firebaseConfig = {
@@ -439,6 +437,8 @@
   // CORRECTED PART: Make auth and db globally available
   window.auth = getAuth(app);
   window.db = getFirestore(app);
+   window.functions = getFunctions(app);
+    
 
   // This is our new entry point!
   onAuthStateChanged(window.auth, (user) => {
@@ -448,50 +448,54 @@
     const chatbotFab = document.getElementById('chatbot-fab');
 
     if (user) {
-      // User is signed in.
-      console.log('User is logged in:', user.uid);
-      if (authContainer) authContainer.style.display = 'none';
-      if (appContainer) appContainer.style.display = 'flex';
-      if (mobileFab) mobileFab.style.display = 'flex';
-      if (chatbotFab) chatbotFab.style.display = 'flex';
-      
-      // --- START: NEW PROFILE LOGIC ---
-      const userInitial = document.getElementById('user-initial');
-      const userEmailDisplay = document.getElementById('user-email-display');
-      const profileButton = document.getElementById('profile-button');
-      const profileDropdown = document.getElementById('profile-dropdown');
-      const signOutLink = document.getElementById('sign-out-link');
+          // User is signed in.
+          console.log('User is logged in:', user.uid);
+          if (authContainer) authContainer.style.display = 'none';
+          if (appContainer) appContainer.style.display = 'flex';
+          
+          // --- START: PROFILE LOGIC ---
+          const userInitial = document.getElementById('user-initial');
+          const userEmailDisplay = document.getElementById('user-email-display');
+          const profileButton = document.getElementById('profile-button');
+          const profileDropdown = document.getElementById('profile-dropdown');
+          const signOutLink = document.getElementById('sign-out-link');
 
-      if (user.email) {
-          userInitial.textContent = user.email.charAt(0).toUpperCase();
-          userEmailDisplay.textContent = user.email;
-          userEmailDisplay.title = user.email;
-      }
-
-      profileButton.addEventListener('click', (e) => {
-          e.stopPropagation();
-          profileDropdown.classList.toggle('hidden');
-          // Re-render icons if the dropdown is shown
-          if (!profileDropdown.classList.contains('hidden')) {
-            feather.replace();
+          if (user.email) {
+              userInitial.textContent = user.email.charAt(0).toUpperCase();
+              userEmailDisplay.textContent = user.email;
+              userEmailDisplay.title = user.email;
           }
-      });
 
-      signOutLink.addEventListener('click', async (e) => {
-          e.preventDefault();
-          try {
-              await signOut(window.auth);
-          } catch (error) {
-              console.error('Sign out error:', error);
+          if(profileButton) { // Check if button exists before adding listener
+            profileButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if(profileDropdown) profileDropdown.classList.toggle('hidden');
+                // Re-render icons if the dropdown is shown
+                if (profileDropdown && !profileDropdown.classList.contains('hidden')) {
+                  feather.replace();
+                }
+            });
           }
-      });
-      
-      // Make sure init() is defined before calling it
-      if (window.appInit) {
-          window.appInit();
-      }
 
-    } else {
+          if(signOutLink) { // Check if link exists
+            signOutLink.addEventListener('click', async (e) => {
+                e.preventDefault();
+                try {
+                    // We need to import signOut here to use it
+                    const { signOut } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
+                    await signOut(window.auth);
+                } catch (error) {
+                    console.error('Sign out error:', error);
+                }
+            });
+          }
+          // --- END: PROFILE LOGIC ---
+          
+          // Make sure init() is defined before calling it
+          if (window.appInit) {
+              window.appInit();
+          }
+      } else {
       // User is signed out.
       console.log('User is logged out.');
       if (authContainer) authContainer.style.display = 'flex';
@@ -808,6 +812,7 @@
 
             // ADD THIS NEW LINE:
             const { doc, setDoc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
 
             const authContainer = document.getElementById('auth-container');
             const loginForm = document.getElementById('login-form');
@@ -1253,43 +1258,28 @@
             };
             
             async function callGeminiAPI(payload, elementForError) {
-                const apiKey = localStorage.getItem(API_KEY_STORAGE_ITEM);
-
-                if (!apiKey) {
-                    const errorMsg = 'Gemini API key is not set. Please set it via the chatbot.';
-                    if (elementForError) elementForError.textContent = errorMsg;
-                    else showToast(errorMsg, 'error');
-                    openModal(app.modals.apiKey);
-                    return null;
-                }
+                // Clear any previous errors
+                if (elementForError) elementForError.textContent = '';
 
                 try {
-                    const res = await fetch(GEMINI_API_URL, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-goog-api-key': apiKey
-                        },
-                        body: JSON.stringify(payload)
-                    });
+                    // Create a reference to our deployed Cloud Function
+                    const callGeminiFunction = httpsCallable(window.functions, 'callGemini');
+                    
+                    // Call the function with our prompt.
+                    // The Firebase SDK automatically handles sending the user's auth token.
+                    const response = await callGeminiFunction({ prompt: payload.contents[0].parts[0].text });
 
-                    if (!res.ok) {
-                        let errorDetails = `${res.status} ${res.statusText}`;
-                        try {
-                           const errorData = await res.json();
-                           errorDetails = errorData.error?.message || errorDetails;
-                        } catch (e) { /* ignore parsing error */ }
-                        throw new Error(errorDetails);
+                    // The actual result from our function is in response.data.result
+                    const generatedText = response.data.result;
+
+                    if (!generatedText) {
+                        throw new Error('Cloud function returned an empty response.');
                     }
-
-                    const data = await res.json();
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if (!text) throw new Error('AI returned an empty response.');
-                    return text;
+                    return generatedText;
 
                 } catch (err) {
-                    console.error("Gemini API Error:", err);
-                    const errorMsg = `API Error: ${err.message}`;
+                    console.error("Error calling Cloud Function:", err);
+                    const errorMsg = `AI Error: ${err.message}`;
                     if (elementForError) elementForError.textContent = errorMsg;
                     else showToast(errorMsg, 'error');
                     return null;
