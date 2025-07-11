@@ -94,10 +94,20 @@
         }
 
         .brand-button {
-            background-image: linear-gradient(to right, var(--brand-grad-from), var(--brand-grad-to));
-            color: white;
-            border: none;
-        }
+    background-image: linear-gradient(to right, var(--brand-grad-from), var(--brand-grad-to));
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem; /* 8px top/bottom, 16px left/right */
+    border-radius: 0.375rem; /* 6px rounded corners */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    transition: opacity 0.2s;
+}
+.brand-button:hover {
+    opacity: 0.9;
+}
         
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -249,7 +259,8 @@
         #note-editor-body ul, #markdown-preview ul, #summary-content ul, .chat-bubble ul, .ai-summary ul { list-style: disc; padding-left: 2rem; margin-top: 0.5rem; margin-bottom: 0.5rem; }
         #note-editor-body ol, #markdown-preview ol, #summary-content ol, .chat-bubble ol, .ai-summary ol { list-style: decimal; padding-left: 2rem; margin-top: 0.5rem; margin-bottom: 0.5rem; }
         #note-editor-body h1, #note-editor-body h2, #note-editor-body h3,
-        #markdown-preview h1, #markdown-preview h2, #markdown-preview h3 {
+        #markdown-preview h1, #markdown-preview h2, #markdown-preview h3 #public-note-content h1, #public-note-content h2, #public-note-content h3 {
+
              font-weight: 700;
              line-height: 1.2;
              margin-top: 1em;
@@ -1485,7 +1496,7 @@ const handleFileUpload = async (file) => {
                                         <div class="file-name">${escapedFileName}</div>
                                         <div class="file-size">${formatBytes(file.size)}</div>
                                     </div>
-                                    <a href="${downloadURL}" target="_blank" class="download-btn" download>Download</a>
+                                    <a href="${downloadURL}" target="_blank" class="brand-button p-2" download title="Download ${escapedFileName}"><i data-feather="download" class="w-5 h-5"></i></a>
                                 </div>`;
                 }
                 
@@ -2099,44 +2110,72 @@ const handleFileUpload = async (file) => {
                 app.elements.charCount.textContent = charCount;
                 app.elements.wordCount.textContent = wordCount;
             }
-            
+            function createAttachmentWidgetHTML(data) {
+    if (data.isImage) {
+        return `<p><img src="${data.downloadURL}" alt="${data.fileName}" style="max-width: 100%; height: auto; border-radius: 8px;" contenteditable="false" /></p>`;
+    } else {
+        return `<div class="file-attachment-widget" contenteditable="false">
+                    <i data-feather="file-text" class="w-6 h-6 text-text-secondary flex-shrink-0"></i>
+                    <div class="file-info">
+                        <div class="file-name">${data.fileName}</div>
+                        <div class="file-size">${formatBytes(data.fileSize)}</div>
+                    </div>
+                    <a href="${data.downloadURL}" target="_blank" class="brand-button p-2" download title="Download ${data.fileName}"><i data-feather="download" class="w-5 h-5"></i></a>
+                </div>`;
+    }
+}
             function renderNoteEditor() {
-                app.containers.noteEditor.classList.remove('hidden');
-                
-                const note = findItem(state.settings.activeNoteId)?.item;
-                if (!note) {
-                    state.settings.activeNoteId = null;
-                    renderMainView();
-                    return;
-                }
+    app.containers.noteEditor.classList.remove('hidden');
 
-                app.elements.noteEditorTitle.value = note.name;
+    const note = findItem(state.settings.activeNoteId)?.item;
+    if (!note) {
+        state.settings.activeNoteId = null;
+        renderMainView();
+        return;
+    }
 
-                if(state.settings.editorMode === 'preview') {
-                    app.elements.noteEditorBody.classList.add('hidden');
-                    app.elements.markdownPreview.classList.remove('hidden');
-                    
-                    // Convert basic editor HTML to markdown-like syntax for better parsing
-                    let contentForMarked = (note.content || '')
-                        .replace(/<div class="code-block-wrapper".*?<span class="lang-name">(.*?)<\/span>.*?<pre><code>([\s\S]*?)<\/code><\/pre><\/div>/g, (match, lang, code) => {
-                            const decodedCode = new DOMParser().parseFromString(code, 'text/html').documentElement.textContent;
-                            return '\n```' + lang + '\n' + decodedCode + '\n```\n';
-                        });
+    app.elements.noteEditorTitle.value = note.name;
 
-                    let html = marked.parse(contentForMarked);
-                    html = parseInternalLinks(html);
-                    app.elements.markdownPreview.innerHTML = html;
-                    app.toolbar.editorModeToggle.classList.add('active');
-                    
-                    feather.replace(); // To render icons inside the new code blocks
-                } else {
-                    app.elements.noteEditorBody.classList.remove('hidden');
-                    app.elements.markdownPreview.classList.add('hidden');
-                    app.elements.noteEditorBody.innerHTML = note.content || '';
-                    app.toolbar.editorModeToggle.classList.remove('active');
-                }
-                updateEditorStats();
+    // Start with the raw content from the database
+    let processedContent = note.content || '';
+
+    // Find all our attachment placeholders and replace them with the real widget HTML
+    processedContent = processedContent.replace(/<div.*?data-attachment='(.*?)'.*?>.*?<\/div>/g, (match, jsonString) => {
+        try {
+            // The JSON string might have HTML entities, so we need to decode them
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = jsonString;
+            const decodedJson = tempDiv.textContent || tempDiv.innerText || "";
+
+            const data = JSON.parse(decodedJson);
+            if (data.isAttachment) {
+                return createAttachmentWidgetHTML(data);
             }
+        } catch (e) {
+            console.error("Failed to parse attachment data:", e);
+            return '[Error loading attachment]';
+        }
+        return match; // Return the original match if it's not our attachment
+    });
+
+    // The rest of the function handles the markdown preview
+    if(state.settings.editorMode === 'preview') {
+        app.elements.noteEditorBody.classList.add('hidden');
+        app.elements.markdownPreview.classList.remove('hidden');
+        let html = marked.parse(processedContent);
+        html = parseInternalLinks(html);
+        app.elements.markdownPreview.innerHTML = html;
+        app.toolbar.editorModeToggle.classList.add('active');
+    } else {
+        app.elements.noteEditorBody.classList.remove('hidden');
+        app.elements.markdownPreview.classList.add('hidden');
+        app.elements.noteEditorBody.innerHTML = processedContent;
+        app.toolbar.editorModeToggle.classList.remove('active');
+    }
+
+    updateEditorStats();
+    feather.replace(); // Important to render new icons
+}
             
             function renderSearchResults(query) {
     app.views.searchResults.classList.remove('hidden');
