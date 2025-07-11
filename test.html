@@ -1,0 +1,3377 @@
+<!DOCTYPE html>
+<html lang="en" class="reputify-theme">
+<head>
+    
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reputifly | AI Note Taker</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script src="https://unpkg.com/feather-icons"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
+    <script src="https://unpkg.com/vis-network@9.1.2/dist/vis-network.min.js"></script>
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/lunr/lunr.min.js"></script>
+    
+
+    <script>
+      // Initialize Tailwind CSS custom theme
+      
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'accent-primary': 'var(--accent-primary)',
+              'accent-primary-dark': 'var(--accent-primary-dark)',
+              'bg-main': 'var(--bg-main)',
+              'bg-pane-light': 'var(--bg-pane-light)',
+              'bg-pane-dark': 'var(--bg-pane-dark)',
+              'text-primary': 'var(--text-primary)',
+              'text-secondary': 'var(--text-secondary)',
+              'text-tertiary': 'var(--text-tertiary)',
+              'border-color': 'var(--border-color)',
+            }
+          }
+        }
+      }
+    </script>
+
+    <style type="text/tailwindcss">
+        /* --- Base & Color Variables --- */
+        :root {
+            --bg-main: #FFFFFF;
+            --bg-pane-light: #F9F9F9;
+            --bg-pane-dark: #F4F4F4;
+            --text-primary: #1a1a1a;
+            --text-secondary: #555555;
+            --text-tertiary: #888888;
+            --accent-primary: #007aff;
+            --accent-primary-dark: #007aff;
+            --border-color: #EAEAEA;
+            --shadow-color: rgba(0, 0, 0, 0.05);
+            --brand-grad-from: #007aff;
+            --brand-grad-to: #007aff;
+        }
+        
+
+        .dark {
+            --bg-main: #111827;
+            --bg-pane-light: #1f2937;
+            --bg-pane-dark: #374151;
+            --text-primary: #f9fafb;
+            --text-secondary: #d1d5db;
+            --text-tertiary: #9ca3af;
+            --accent-primary: #3898ff;
+            --accent-primary-dark: #007aff;
+            --border-color: #374151;
+            --shadow-color: rgba(0, 0, 0, 0.2);
+            --brand-grad-from: #3898ff;
+            --brand-grad-to: #3898ff;
+        }
+
+        .reputify-theme {
+            --bg-main: #100F1B;
+            --bg-pane-light: #181624;
+            --bg-pane-dark: #211F30;
+            --text-primary: #F0F0F0;
+            --text-secondary: #A0A0B8;
+            --text-tertiary: #6C6A7E;
+            --accent-primary: #E6397F;
+            --accent-primary-dark: #FF8A00;
+            --border-color: #2A2837;
+            --shadow-color: rgba(0, 0, 0, 0.2);
+            --brand-grad-from: #E6397F;
+            --brand-grad-to: #FF8A00;
+        }
+
+        .brand-button {
+            background-image: linear-gradient(to right, var(--brand-grad-from), var(--brand-grad-to));
+            color: white;
+            border: none;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        
+        /* --- UI Polish & Animations --- */
+        #notes-list-pane {
+            transition: width 300ms ease-in-out, transform 300ms ease-in-out;
+            overflow: hidden;
+        }
+        
+        #notes-list-pane .sidebar-content-wrapper {
+            transition: opacity 150ms ease-in-out;
+        }
+        #notes-list-pane.collapsed {
+            width: 0px !important;
+            border-right-width: 0px;
+        }
+        #notes-list-pane.collapsed .sidebar-content-wrapper {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #sidebar-toggle-btn {
+            transition: left 300ms ease-in-out, background-color 0.2s ease;
+        }
+        #sidebar-toggle-btn .feather-chevron-left {
+            transition: transform 0.3s ease;
+        }
+        #sidebar-toggle-btn:hover {
+            background-color: var(--accent-primary);
+            color: white;
+        }
+        body.sidebar-collapsed #sidebar-toggle-btn .feather-chevron-left {
+            transform: rotate(180deg);
+        }
+
+        .collection-item .chevron { transition: transform 0.15s ease; }
+        .collection-item.open > .chevron { transform: rotate(90deg); }
+        .collection-item-wrapper.drop-target-folder { background-color: rgba(230, 57, 127, 0.1); border: 1px dashed var(--accent-primary); }
+        
+        .kanban-card {
+            background-color: var(--bg-main);
+            height: 140px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .kanban-card:hover { transform: translateY(-4px); box-shadow: 0 10px 15px -3px var(--shadow-color), 0 4px 6px -4px var(--shadow-color); }
+        .kanban-card.dragging { opacity: 0.5; transform: rotate(3deg); }
+
+        .kanban-card.pinned, .list-note-item.pinned {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 8px -2px var(--accent-primary);
+        }
+        .kanban-card.pinned { transform: scale(1.02); }
+        .kanban-card.pinned:hover { transform: scale(1.02) translateY(-4px); }
+        
+        .drop-target-column { background-color: var(--bg-pane-dark) !important; opacity: 0.5; }
+        .drop-indicator { height: 2px; background-color: var(--accent-primary); margin: 0; padding: 0; pointer-events: none; }
+        
+        .context-menu, .dropdown-menu { transition: opacity 100ms ease, transform 100ms ease; }
+        
+        #note-editor-body:empty:before {
+            content: attr(data-placeholder);
+            color: var(--text-tertiary);
+            pointer-events: none;
+            display: block;
+        }
+        #note-editor-body a, #markdown-preview a, #summary-content a, .chat-bubble a {
+            color: var(--accent-primary);
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        .internal-link-broken {
+            color: #ef4444; /* red-500 */
+            text-decoration: underline;
+            text-decoration-style: dotted;
+            cursor: help;
+        }
+        #note-editor-body ul, #markdown-preview ul, #summary-content ul, .chat-bubble ul, .ai-summary ul { list-style: disc; padding-left: 2rem; margin-top: 0.5rem; margin-bottom: 0.5rem; }
+        #note-editor-body ol, #markdown-preview ol, #summary-content ol, .chat-bubble ol, .ai-summary ol { list-style: decimal; padding-left: 2rem; margin-top: 0.5rem; margin-bottom: 0.5rem; }
+        #note-editor-body h1, #note-editor-body h2, #note-editor-body h3,
+        #markdown-preview h1, #markdown-preview h2, #markdown-preview h3 {
+             font-weight: 700;
+             line-height: 1.2;
+             margin-top: 1em;
+             margin-bottom: 0.5em;
+             padding-bottom: 0.3em;
+             border-bottom: 1px solid var(--border-color);
+        }
+        #note-editor-body h1, #markdown-preview h1 { font-size: 2.25rem; }
+        #note-editor-body h2, #markdown-preview h2 { font-size: 1.875rem; }
+        #note-editor-body h3, #markdown-preview h3 { font-size: 1.5rem; }
+        #note-editor-body img, #markdown-preview img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin: 0.5em 0;
+            cursor: default;
+        }
+        #note-editor-body blockquote, #markdown-preview blockquote, #summary-content blockquote, .chat-bubble blockquote, .ai-summary blockquote {
+            border-left: 4px solid var(--border-color);
+            padding-left: 1em;
+            margin-left: 0;
+            color: var(--text-secondary);
+        }
+        
+        /* Inline code and Monospace */
+        #note-editor-body code, #markdown-preview code {
+            background-color: var(--bg-pane-dark);
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+            font-size: 0.9em;
+        }
+
+        #note-editor-body pre code, #markdown-preview pre code {
+            background-color: transparent;
+            padding: 0;
+            border-radius: 0;
+            font-size: 1em;
+        }
+        
+        #markdown-preview pre {
+            background-color: var(--bg-pane-dark);
+            padding: 1em;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        #markdown-preview pre code.hljs {
+            padding: 0;
+            background-color: transparent;
+        }
+        
+        /* Editor Code Block Styles */
+        #note-editor-body .code-block-wrapper, #markdown-preview .code-block-wrapper {
+            background-color: #211F30;
+            border-radius: 8px;
+            margin: 1.5em 0;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+        html.light #note-editor-body .code-block-wrapper, html.dark #note-editor-body .code-block-wrapper {
+             background-color: #1f2937; /* A consistent dark background */
+        }
+        .code-block-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: rgba(0,0,0,0.2);
+            padding: 0.5rem 1rem;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+        }
+        .copy-code-btn, .delete-block-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            border-radius: 5px;
+            transition: background-color 0.2s, color 0.2s;
+        }
+        .copy-code-btn:hover, .delete-block-btn:hover {
+            background-color: var(--bg-pane-light);
+        }
+        .copy-code-btn:hover { color: var(--text-primary); }
+        .delete-block-btn:hover { color: #ef4444; }
+
+        #note-editor-body .code-block-wrapper pre, #markdown-preview .code-block-wrapper pre {
+            margin: 0 !important;
+            padding: 1em !important;
+            background-color: transparent !important;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        #note-editor-body .code-block-wrapper pre code, #markdown-preview .code-block-wrapper pre code {
+            padding: 0 !important;
+            background-color: transparent !important;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace !important;
+            font-size: 1em !important;
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        #search-results-view mark {
+            background-color: var(--accent-primary-dark);
+            border-radius: 3px;
+            padding: 1px 2px;
+            color: var(--bg-main);
+        }
+        
+        .column-header:hover .delete-column-btn { opacity: 1; }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .summarize-btn {
+    transition: opacity 0.2s ease-in-out;
+}
+        .list-note-item:hover .summarize-btn { opacity: 1; }
+
+        .chat-bubble { max-width: 80%; }
+        .chat-bubble.user { background-image: linear-gradient(to right, var(--brand-grad-from), var(--brand-grad-to)); color: white; }
+        .chat-bubble.model { background-color: var(--bg-pane-dark); }
+        .chat-bubble.thinking {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: .5; }
+        }
+
+        .truncate-multiline {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .kanban-card .card-content { -webkit-line-clamp: 3; }
+        .list-note-item .card-content { -webkit-line-clamp: 2; }
+        
+        .view-btn {
+             color: var(--text-secondary);
+             transition: all 0.2s ease-in-out;
+        }
+        .view-btn.active {
+             background-color: var(--bg-main);
+             color: var(--text-primary);
+             box-shadow: 0 1px 3px 0 var(--shadow-color);
+        }
+        .reputify-theme .view-btn.active {
+             box-shadow: 0 1px 5px 0 rgba(0,0,0,0.2);
+        }
+
+        .settings-footer-item {
+            @apply w-full text-left px-3 py-2 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-3 text-text-secondary hover:text-text-primary;
+        }
+        
+        #dictate-btn.recording {
+            color: #ef4444; /* red-500 */
+            animation: pulse-red 1.5s infinite;
+        }
+        @keyframes pulse-red {
+          0%, 100% { opacity: 1; }
+          50% { opacity: .6; }
+        }
+        
+        #tag-list-container .tag-filter-item.active {
+            background-color: var(--accent-primary);
+            color: white;
+            font-weight: 600;
+        }
+
+        /* Mobile-specific overrides */
+        @media (max-width: 767px) {
+            #notes-list-pane {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                z-index: 40; /* Higher z-index for mobile overlay */
+                transform: translateX(-100%);
+                width: 280px !important; /* Fixed width for mobile overlay */
+                border-right-width: 1px;
+            }
+            #main-header {
+           @apply z-10; /* Ensures the header stays above the content area */
+        }
+
+        #notes-list-pane .sidebar-content-wrapper {
+            transition: opacity 150ms ease-in-out;
+        }
+            #notes-list-pane.open {
+                transform: translateX(0);
+                box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            }
+            #pane-resizer, #sidebar-toggle-btn { display: none; }
+            #mobile-menu-button { display: block; }
+            #desktop-new-note-btn { display: none; }
+            #mobile-new-note-fab { display: flex; }
+            #desktop-header-controls { display: none; }
+            #mobile-header-controls { display: flex; }
+            #chatbot-fab { 
+    display: flex; 
+    bottom: 5.5rem; 
+}
+        }
+
+        #app-container {
+    display: none; /* Hide the main app by default */
+}
+    </style>
+    
+    <script>
+      try {
+        const defaultTheme = 'reputify';
+        const theme = localStorage.getItem('codex-notes-theme') || defaultTheme;
+        if (theme === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else if (theme === 'reputify') {
+           document.documentElement.classList.add('reputify-theme');
+        }
+      } catch (e) {}
+    </script>
+    <script type="module">
+  // Import the functions you need from the SDKs
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getAuth,
+    onAuthStateChanged,
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFunctions } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+
+  // Your web app's Firebase configuration
+  const firebaseConfig = {
+  apiKey: "AIzaSyB5GkZzQaHF9WLBpHIzgTbUDshtb0-TsFM",
+  authDomain: "reputifly-notes.firebaseapp.com",
+  projectId: "reputifly-notes",
+  storageBucket: "reputifly-notes.firebasestorage.app",
+  messagingSenderId: "1085743658227",
+  appId: "1:1085743658227:web:d90ba48b3b2df9fe1d3386"
+};
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  
+  // CORRECTED PART: Make auth and db globally available
+  window.auth = getAuth(app);
+  window.db = getFirestore(app);
+   window.functions = getFunctions(app);
+    
+
+  // This is our new entry point!
+  onAuthStateChanged(window.auth, (user) => {
+    const authContainer = document.getElementById('auth-container');
+    const appContainer = document.getElementById('app-container');
+    const mobileFab = document.getElementById('mobile-new-note-fab');
+    const chatbotFab = document.getElementById('chatbot-fab');
+
+    if (user) {
+          // User is signed in.
+          console.log('User is logged in:', user.uid);
+          if (authContainer) authContainer.style.display = 'none';
+          if (appContainer) appContainer.style.display = 'flex';
+          
+          // --- START: PROFILE LOGIC ---
+          const userInitial = document.getElementById('user-initial');
+          const userEmailDisplay = document.getElementById('user-email-display');
+          const profileButton = document.getElementById('profile-button');
+          const profileDropdown = document.getElementById('profile-dropdown');
+          const signOutLink = document.getElementById('sign-out-link');
+
+          if (user.email) {
+              userInitial.textContent = user.email.charAt(0).toUpperCase();
+              userEmailDisplay.textContent = user.email;
+              userEmailDisplay.title = user.email;
+          }
+
+          if(profileButton) { // Check if button exists before adding listener
+            profileButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if(profileDropdown) profileDropdown.classList.toggle('hidden');
+                // Re-render icons if the dropdown is shown
+                if (profileDropdown && !profileDropdown.classList.contains('hidden')) {
+                  feather.replace();
+                }
+            });
+          }
+
+          if(signOutLink) { // Check if link exists
+            signOutLink.addEventListener('click', async (e) => {
+                e.preventDefault();
+                try {
+                    // We need to import signOut here to use it
+                    const { signOut } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
+                    await signOut(window.auth);
+                } catch (error) {
+                    console.error('Sign out error:', error);
+                }
+            });
+          }
+          // --- END: PROFILE LOGIC ---
+          
+          // Make sure init() is defined before calling it
+          if (window.appInit) {
+              window.appInit();
+          }
+      } else {
+      // User is signed out.
+      console.log('User is logged out.');
+      if (authContainer) authContainer.style.display = 'flex';
+      if (appContainer) appContainer.style.display = 'none';
+      if (mobileFab) mobileFab.style.display = 'none';
+      if (chatbotFab) chatbotFab.style.display = 'none';
+    }
+  });
+</script>
+</head>
+<body class="overflow-hidden">
+    <div id="auth-container" class="flex items-center justify-center h-screen bg-bg-main">
+    <div class="w-full max-w-sm p-8 space-y-6 bg-bg-pane-light rounded-lg shadow-xl">
+        <div>
+            <h2 id="auth-title" class="text-2xl font-bold text-center text-text-primary">Login to Your Notes</h2>
+        </div>
+        <form id="login-form" class="space-y-4">
+            <div>
+                <label for="login-email" class="text-sm font-medium text-text-secondary">Email address</label>
+                <input id="login-email" name="email" type="email" required class="w-full px-3 py-2 mt-1 bg-bg-pane-dark border border-border-color rounded-md focus:outline-none focus:ring-2 focus:ring-accent-primary">
+            </div>
+            <div>
+                <label for="login-password" class="text-sm font-medium text-text-secondary">Password</label>
+                <input id="login-password" name="password" type="password" required class="w-full px-3 py-2 mt-1 bg-bg-pane-dark border border-border-color rounded-md focus:outline-none focus:ring-2 focus:ring-accent-primary">
+            </div>
+            <p id="auth-error" class="text-sm text-red-500 h-5"></p>
+            <button type="submit" class="w-full brand-button text-white font-semibold py-2 rounded-lg hover:opacity-90 transition-opacity">Login</button>
+        </form>
+        <p class="text-sm text-center text-text-secondary">
+            <span id="login-text-link">Don't have an account? <a href="#" id="show-signup" class="font-medium text-accent-primary hover:underline">Sign up</a></span>
+            <span id="signup-text-link" class="hidden">Already have an account? <a href="#" id="show-login" class="font-medium text-accent-primary hover:underline">Login</a></span>
+        </p>
+    </div>
+</div>
+
+    <div id="app-container" class="flex h-screen relative">
+
+        <aside id="notes-list-pane" class="w-[280px] bg-bg-pane-light border-r border-border-color flex flex-col flex-shrink-0">
+            <div class="sidebar-content-wrapper flex flex-col h-full min-w-[280px]">
+                <header class="flex justify-between items-center p-4 border-b border-border-color flex-shrink-0 gap-2">
+                    <div id="profile-section" class="relative">
+                        <button id="profile-button" title="Account Settings" class="w-8 h-8 rounded-full brand-button flex items-center justify-center font-bold text-white hover:opacity-90 transition-opacity">
+                            <div id="user-initial">R</div>
+                        </button>
+                        <div id="profile-dropdown" class="dropdown-menu hidden absolute top-full left-0 mt-2 w-52 bg-bg-pane-light shadow-2xl rounded-md p-1 border border-border-color origin-top-left z-20">
+                            <div class="px-2 py-2 border-b border-border-color">
+                                <p class="text-sm font-semibold text-text-primary">Signed in as</p>
+                                <p id="user-email-display" class="text-sm text-text-secondary truncate" title="user-email"></p>
+                            </div>
+                            <div class="p-1">
+                                <a href="#" id="sign-out-link" class="w-full text-left px-2 py-1.5 text-sm hover:bg-bg-pane-dark text-red-500 rounded flex items-center gap-2">
+                                    <i data-feather="log-out" class="w-4 h-4"></i>
+                                    <span>Sign Out</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <div id="view-switcher-container" class="view-switcher bg-bg-pane-dark p-1 rounded-lg flex">
+                          <button class="view-btn px-2.5 py-1 rounded" title="Board View" data-view="board"><i data-feather="trello" class="w-4 h-4"></i></button>
+                          <button class="view-btn px-2.5 py-1 rounded" title="List View" data-view="list"><i data-feather="list" class="w-4 h-4"></i></button>
+                        </div>
+                        <button id="new-collection-btn" class="text-text-secondary hover:text-accent-primary transition-colors flex-shrink-0"><i data-feather="plus"></i></button>
+                    </div>
+                </header>
+                <div id="collections-list-container" class="flex-grow p-2 overflow-y-auto"></div>
+                
+                <div id="tag-panel" class="p-2 border-t border-border-color flex-shrink-0">
+                    <h3 class="font-bold text-sm uppercase tracking-wider px-2 py-1 text-text-secondary">Tags</h3>
+                    <div id="tag-list-container" class="mt-1 space-y-1 max-h-32 overflow-y-auto"></div>
+                </div>
+
+                <footer class="p-2 border-t border-border-color flex-shrink-0">
+                    <button id="theme-toggle" class="settings-footer-item">
+                       <i data-feather="star" id="theme-reputify-icon" class="hidden w-5 h-5"></i>
+                       <i data-feather="sun" id="theme-sun-icon" class="hidden w-5 h-5"></i>
+                       <i data-feather="moon" id="theme-moon-icon" class="hidden w-5 h-5"></i>
+                       <span id="theme-text">Reputify Theme</span>
+                    </button>
+                    <button data-action="import" class="settings-footer-item">
+                        <i data-feather="upload" class="w-5 h-5"></i>
+                        <span>Import Data</span>
+                    </button>
+                    <button data-action="export" class="settings-footer-item">
+                        <i data-feather="download" class="w-5 h-5"></i>
+                        <span>Export Data</span>
+                    </button>
+                    <button id="bookmarklet-info-btn" class="settings-footer-item">
+                        <i data-feather="book" class="w-5 h-5"></i>
+                        <span>Web Clipper</span>
+                    </button>
+                    <input type="file" id="import-file-input" class="hidden" accept=".json">
+                </footer>
+            </div>
+        </aside>
+        
+        <div id="pane-resizer" class="w-1.5 h-full cursor-col-resize z-10 bg-transparent hover:bg-accent-primary hidden md:block"></div>
+        
+        <button id="sidebar-toggle-btn" title="Toggle Sidebar" class="absolute top-1/2 -translate-y-1/2 w-6 h-12 bg-bg-pane-dark text-text-secondary flex items-center justify-center rounded-r-lg z-20 hidden md:flex">
+            <i data-feather="chevron-left" class="w-5 h-5"></i>
+        </button>
+
+        <main id="editor-pane" class="flex-grow bg-bg-main flex flex-col">
+           <header id="main-header" class="flex justify-between items-center p-2 md:p-4 border-b border-border-color flex-shrink-0 relative">
+              
+              <div id="header-main-content" class="flex justify-between items-center w-full transition-opacity duration-200">
+                  <div class="flex items-center gap-2">
+                    <button id="mobile-menu-button" class="md:hidden p-1 -ml-1 hidden"><i data-feather="menu" class="w-6 h-6"></i></button>
+                    <h2 id="current-view-title" class="text-lg font-semibold truncate"></h2>
+                  </div>
+                  
+                  <div id="desktop-header-controls" class="hidden md:flex items-center gap-4">
+                      <div class="flex-grow"></div>
+                      <div class="flex items-center gap-2">
+                          <button id="header-search-icon" class="p-2 hover:bg-bg-pane-dark rounded-lg text-text-secondary" title="Search (Cmd+F)"><i data-feather="search" class="w-4 h-4"></i></button>
+                          <div id="list-view-controls" class="hidden items-center gap-2">
+                            <label for="sort-order" class="text-sm text-text-secondary">Sort by:</label>
+                            <select id="sort-order" class="bg-bg-pane-dark text-text-primary text-sm rounded-md p-1 border-0 focus:ring-2 focus:ring-accent-primary">
+                                <option value="modifiedAt-desc">Last Modified</option>
+                                <option value="createdAt-desc">Date Created</option>
+                                <option value="name-asc">Title (A-Z)</option>
+                            </select>
+                          </div>
+                          <div class="editor-toolbar flex items-center bg-bg-pane-dark p-1 rounded-lg">
+                              <button id="dictate-btn" class="p-2 hover:bg-bg-main rounded-l-md" title="Dictate Text"><i data-feather="mic" class="w-4 h-4"></i></button>
+                              <button id="graph-btn" class="p-2 hover:bg-bg-main" title="Show Note Graph"><i data-feather="git-merge" class="w-4 h-4"></i></button>
+                              <button id="editor-mode-toggle" class="p-2 hover:bg-bg-main disabled:opacity-50 disabled:cursor-not-allowed" title="Toggle Markdown Preview"><i data-feather="eye" class="w-4 h-4"></i></button>
+                              <button data-command="ocr" class="p-2 hover:bg-bg-main rounded-r-md" title="Scan Image for Text"><i data-feather="camera" class="w-4 h-4"></i></button>
+                              <input type="file" id="ocr-file-input" class="hidden" accept="image/*">
+                          </div>
+                          <button id="desktop-new-note-btn" class="brand-button text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 hover:opacity-90 transition-opacity" title="New Note (Cmd+N)">New Note <i data-feather="plus" class="w-4 h-4"></i></button>
+                      </div>
+                  </div>
+
+                  <div id="mobile-header-controls" class="hidden items-center gap-2 relative">
+                    <button id="mobile-search-icon" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="search" class="w-5 h-5"></i></button>
+                    <button id="mobile-more-button" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="more-vertical" class="w-5 h-5"></i></button>
+                    <div id="mobile-controls-dropdown" class="dropdown-menu hidden absolute top-full right-0 mt-2 w-48 bg-bg-pane-light shadow-2xl rounded-md p-2 border-border-color origin-top-right scale-95 opacity-0 z-10">
+                    </div>
+                  </div>
+              </div>
+
+               <div id="search-bar-container" class="hidden md:absolute md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 z-10 w-full md:w-[95%] md:max-w-[500px]">
+                    <div class="bg-bg-pane-dark rounded-full shadow-lg flex items-center px-4 w-full">
+                        <i data-feather="search" class="text-text-tertiary"></i>
+                        <input id="search-input" type="text" placeholder="Search notes and folders..." class="w-full bg-transparent p-3 focus:outline-none text-text-primary">
+                        <button id="search-close-btn" class="p-2 -mr-2 rounded-full text-text-tertiary hover:bg-bg-main">
+                           <i data-feather="x" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                </div>
+           </header>
+           
+           <div id="main-content-area" class="flex-grow overflow-y-auto relative flex flex-col">
+                <div id="board-view" class="notes-view active flex-grow p-4 md:p-5 overflow-x-auto no-scrollbar h-full">
+                    <div id="kanban-board" class="flex gap-4 min-h-full"></div>
+                </div>
+                <div id="list-view" class="notes-view hidden flex-grow p-4 md:p-5">
+                    <div id="notes-list-content" class="space-y-3"></div>
+                </div>
+                <div id="note-editor-view" class="notes-view hidden flex-grow flex flex-col overflow-y-auto">
+                    <div class="p-4 md:p-8 md:pb-4 flex-shrink-0">
+                        <input id="note-editor-title" type="text" placeholder="Untitled Note" class="text-3xl md:text-4xl font-bold bg-transparent focus:outline-none mb-4 w-full">
+                    </div>
+                    <div id="note-editor-body" contenteditable="true" class="flex-grow text-lg leading-relaxed focus:outline-none px-4 md:px-8 pt-2 md:pt-4 pb-4 md:pb-8" data-placeholder="Start writing or drop an image..."></div>
+                    <div id="markdown-preview" class="hidden flex-grow text-lg leading-relaxed focus:outline-none p-4 md:p-8 prose"></div>
+                    <div id="editor-footer" class="p-4 text-xs text-text-tertiary text-left border-t border-border-color flex-shrink-0">
+                       <span id="word-count">0</span> Words | <span id="char-count">0</span> Characters
+                    </div>
+                </div>
+                <div id="search-results-view" class="notes-view hidden p-4 md:p-8">
+                    <h2 class="text-2xl font-bold mb-6">Search Results</h2>
+                    <div id="search-results-list"></div>
+                </div>
+           </div>
+        </main>
+    </div>
+    
+    <button id="chatbot-fab" title="Ask Chatbot" class="brand-button fixed bottom-6 right-6 text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-20 hover:opacity-90 transition-opacity">
+        <i data-feather="message-square" class="w-7 h-7"></i>
+    </button>
+    <button id="mobile-new-note-fab" class="hidden fixed bottom-6 right-6 brand-button text-white w-14 h-14 rounded-full shadow-lg items-center justify-center z-20 hover:opacity-90 transition-opacity">
+        <i data-feather="plus" class="w-8 h-8"></i>
+    </button>
+    
+    <div id="modal-backdrop" class="fixed inset-0 bg-black/50 z-40 transition-opacity duration-300 opacity-0 pointer-events-none"></div>
+    <div id="mobile-sidebar-overlay" class="fixed inset-0 bg-black/30 z-30 hidden md:hidden transition-opacity duration-300 opacity-0 pointer-events-none"></div>
+    
+    <div id="api-key-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-md z-50 transition-all duration-300 transform scale-95 opacity-100">
+        <h3 class="text-lg font-semibold mb-2">Gemini API Key Required</h3>
+        <p class="text-sm text-text-secondary mb-4">Please enter your Gemini API key to enable AI features. Your key is stored only in your browser's local storage.</p>
+        <label for="api-key-input" class="text-xs font-semibold text-text-secondary">API Key</label>
+        <input id="api-key-input" type="password" class="w-full text-sm bg-bg-pane-dark border border-border-color rounded-md py-1 px-2 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="Enter your key here...">
+        <p id="api-key-error" class="text-red-500 text-sm mt-1 h-5"></p>
+        <div class="flex justify-end gap-3 mt-4">
+            <button id="api-key-confirm-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Save and Continue</button>
+        </div>
+    </div>
+    
+    <div id="prompt-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-md z-50 transition-all duration-300 transform scale-95 opacity-0">
+        <h3 id="prompt-title" class="text-lg font-semibold mb-4">Input Required</h3>
+        <p id="prompt-message" class="text-sm text-text-secondary mb-3"></p>
+        <input id="prompt-input" type="text" class="w-full bg-bg-pane-dark border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none">
+        <p id="prompt-error" class="text-red-500 text-sm mt-1 h-5"></p>
+        <div class="flex justify-end gap-3 mt-4">
+            <button id="prompt-cancel-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Cancel</button>
+            <button id="prompt-confirm-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Confirm</button>
+        </div>
+    </div>
+    <div id="confirm-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-md z-50 transition-all duration-300 transform scale-95 opacity-0">
+        <h3 id="confirm-title" class="text-lg font-semibold mb-4">Are you sure?</h3>
+        <p id="confirm-message" class="text-sm text-text-secondary mb-6"></p>
+        <div class="flex justify-end gap-3 mt-4">
+            <button id="confirm-cancel-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Cancel</button>
+            <button id="confirm-confirm-btn" class="px-4 py-2 rounded-md bg-red-600 text-white hover:opacity-90">Delete</button>
+        </div>
+    </div>
+    <div id="bookmarklet-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-lg z-50 transition-all duration-300 transform scale-95 opacity-0">
+        <h3 class="text-lg font-semibold mb-2 flex items-center gap-2"><i data-feather="book" class="w-5 h-5 text-accent-primary"></i>Web Clipper Bookmarklet</h3>
+        <p class="text-sm text-text-secondary mb-4">Drag the link below to your browser's bookmarks bar to create a web clipper. When you're on any website, click the bookmarklet to clip selected text into a new note.</p>
+        <a id="bookmarklet-link" href="#" class="inline-block brand-button text-white font-semibold px-4 py-2 rounded-lg text-sm">Clip to Codex Notes</a>
+        <div class="mt-4 flex justify-end">
+            <button id="bookmarklet-close-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Close</button>
+        </div>
+    </div>
+    <div id="graph-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-4 rounded-lg shadow-2xl w-[90vw] max-w-3xl h-[60vh] z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+        <header class="flex justify-between items-center mb-2 flex-shrink-0">
+            <h3 class="text-lg font-semibold flex items-center gap-2"><i data-feather="git-merge" class="w-5 h-5 text-accent-primary"></i>Note Graph</h3>
+            <button id="graph-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+        </header>
+        <div id="graph-container" class="border border-border-color rounded-md flex-grow bg-bg-main"></div>
+    </div>
+    <div id="ai-prompt-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-lg z-50 transition-all duration-300 transform scale-95 opacity-0">
+        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><i data-feather="sparkles" class="w-5 h-5 text-accent-primary"></i>Ask AI</h3>
+        <p class="text-sm text-text-secondary mb-3">Enter your prompt below. The AI-generated content will be inserted into your note.</p>
+        <textarea id="ai-prompt-input" rows="4" class="w-full bg-bg-pane-dark border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="e.g., 'Write a short poem about the moon'"></textarea>
+        <p id="ai-prompt-error" class="text-red-500 text-sm mt-1 h-5"></p>
+        <div class="flex justify-end gap-3 mt-4">
+            <button id="ai-cancel-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Cancel</button>
+            <button id="ai-generate-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90 flex items-center gap-2">
+                <i data-feather="play" class="w-4 h-4"></i>
+                <span id="ai-generate-btn-text">Generate</span>
+            </button>
+        </div>
+    </div>
+    <div id="summary-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-xl z-50 transition-all duration-300 transform scale-95 opacity-0">
+        <h3 class="text-lg font-semibold mb-2 flex items-center gap-2"><i data-feather="align-left" class="w-5 h-5 text-accent-primary"></i>AI Summary</h3>
+        <div id="summary-content" class="text-sm text-text-secondary mb-4 bg-bg-pane-dark p-4 rounded-md max-h-[50vh] overflow-y-auto"></div>
+        <div class="flex justify-end gap-3 mt-4">
+            <button id="summary-close-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Close</button>
+        </div>
+    </div>
+    <div id="chatbot-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light rounded-lg shadow-2xl w-[90vw] max-w-2xl h-[70vh] z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+        <header class="p-4 border-b border-border-color flex justify-between items-center flex-shrink-0">
+            <h3 class="text-lg font-semibold flex items-center gap-2"><i data-feather="message-square" class="w-5 h-5 text-accent-primary"></i>Chat with AI</h3>
+            <div class="flex items-center">
+                <button id="chatbot-clear-btn" class="p-2 rounded-full hover:bg-bg-pane-dark" title="Clear Chat History"><i data-feather="trash-2" class="w-5 h-5"></i></button>
+                <button id="chatbot-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+            </div>
+        </header>
+        <div id="chatbot-history" class="flex-grow p-4 space-y-4 overflow-y-auto">
+        </div>
+        <footer class="p-4 border-t border-border-color flex-shrink-0">
+            <div id="chatbot-error" class="text-red-500 text-sm mb-2 h-5"></div>
+            <div class="flex items-center gap-2">
+                <input id="chatbot-input" type="text" class="w-full bg-bg-pane-dark border border-border-color rounded-full py-2 px-4 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="Ask anything...">
+                <button id="chatbot-send-btn" class="brand-button text-white rounded-full w-10 h-10 flex-shrink-0 flex items-center justify-center hover:opacity-90">
+                    <i data-feather="arrow-up" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </footer>
+    </div>
+    
+    <div id="toast-container" class="fixed top-4 left-1/2 -translate-x-1/2 z-[100] transition-all duration-300 ease-in-out origin-top flex flex-col items-center gap-2" style="pointer-events: none;"></div>
+    
+    <div id="inline-toolbar" class="absolute z-30 bg-bg-pane-dark p-1 rounded-lg shadow-md flex items-center gap-1 transition-all duration-150 transform scale-95 opacity-0" style="pointer-events: none;">
+        <button data-command="bold" class="p-2 hover:bg-bg-main rounded"><i data-feather="bold" class="w-4 h-4"></i></button>
+        <button data-command="italic" class="p-2 hover:bg-bg-main rounded"><i data-feather="italic" class="w-4 h-4"></i></button>
+        <button data-command="createLink" class="p-2 hover:bg-bg-main rounded"><i data-feather="link" class="w-4 h-4"></i></button>
+        <button data-command="insertImage" class="p-2 hover:bg-bg-main rounded"><i data-feather="image" class="w-4 h-4"></i></button>
+        <button data-command="formatBlock" data-value="code" class="p-2 hover:bg-bg-main rounded" title="Code Block"><i data-feather="code" class="w-4 h-4"></i></button>
+        <button data-command="formatBlock" data-value="blockquote" class="p-2 hover:bg-bg-main rounded" title="Quote"><strong>&ldquo;</strong></button>
+        <button data-command="monospace" class="p-2 hover:bg-bg-main rounded font-mono font-bold" title="Monospace">M</button>
+        <div class="w-px h-5 bg-border-color mx-1"></div>
+        <button data-command="formatBlock" data-value="h1" class="p-2 hover:bg-bg-main rounded font-bold text-sm">H1</button>
+        <button data-command="formatBlock" data-value="h2" class="p-2 hover:bg-bg-main rounded font-bold text-sm">H2</button>
+        <button data-command="formatBlock" data-value="h3" class="p-2 hover:bg-bg-main rounded font-bold text-sm">H3</button>
+    </div>
+
+    <div id="context-menu" class="context-menu fixed z-50 bg-bg-pane-light shadow-2xl rounded-md p-2 w-48 border border-border-color hidden origin-top-left scale-95 opacity-0">
+        <button data-action="new-note" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="file-plus" class="w-4 h-4"></i>New Note</button>
+        <button data-action="new-folder" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="folder-plus" class="w-4 h-4"></i>New Folder</button>
+        <hr class="my-1 border-border-color">
+        <button data-action="toggle-pin" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="paperclip" class="w-4 h-4"></i><span id="pin-action-text">Pin</span></button>
+        <button data-action="duplicate" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="copy" class="w-4 h-4"></i>Duplicate</button>
+        <button data-action="rename" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="edit-2" class="w-4 h-4"></i>Rename</button>
+        <button data-action="delete" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark text-red-500 rounded flex items-center gap-2"><i data-feather="trash-2" class="w-4 h-4"></i>Delete</button>
+    </div>
+
+
+    <script type="module">
+        feather.replace();
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            
+            // --- START: FINAL AUTHENTICATION LOGIC ---
+
+            // Import the functions we need at the top of the module.
+            const {
+                createUserWithEmailAndPassword,
+                signInWithEmailAndPassword,
+                sendEmailVerification
+            } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
+
+            // ADD THIS NEW LINE:
+            const { doc, setDoc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
+
+            const authContainer = document.getElementById('auth-container');
+            const loginForm = document.getElementById('login-form');
+            const authTitle = document.getElementById('auth-title');
+            const authError = document.getElementById('auth-error');
+            const showSignup = document.getElementById('show-signup');
+            const showLogin = document.getElementById('show-login');
+            const loginTextLink = document.getElementById('login-text-link');
+            const signupTextLink = document.getElementById('signup-text-link');
+
+            // Function to toggle between login and signup views
+            const setAuthView = (isLoginView) => {
+                authError.textContent = '';
+                if (isLoginView) {
+                    authTitle.textContent = 'Login to Your Notes';
+                    loginForm.dataset.authMode = 'login';
+                    loginForm.querySelector('button').textContent = 'Login';
+                    loginTextLink.classList.remove('hidden');
+                    signupTextLink.classList.add('hidden');
+                } else {
+                    authTitle.textContent = 'Create an Account';
+                    loginForm.dataset.authMode = 'signup';
+                    loginForm.querySelector('button').textContent = 'Sign Up';
+                    loginTextLink.classList.add('hidden');
+                    signupTextLink.classList.remove('hidden');
+                }
+            };
+            
+            showSignup.addEventListener('click', (e) => {
+                e.preventDefault();
+                setAuthView(false);
+            });
+
+            showLogin.addEventListener('click', (e) => {
+                e.preventDefault();
+                setAuthView(true);
+            });
+
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                authError.textContent = '';
+                const email = loginForm['login-email'].value;
+                const password = loginForm['login-password'].value;
+                const mode = loginForm.dataset.authMode || 'login';
+
+                try {
+                    if (mode === 'signup') {
+    // Use the globally available 'window.auth'
+    const userCredential = await createUserWithEmailAndPassword(window.auth, email, password);
+    await sendEmailVerification(userCredential.user); // ADD THIS LINE
+    console.log('Sign up successful! Verification email sent.');
+} else {
+                        await signInWithEmailAndPassword(window.auth, email, password);
+                        console.log('Login successful!');
+                    }
+                } catch (error) {
+                    console.error('Authentication error:', error.code, error.message);
+                    // Provide a more user-friendly error message
+                    switch (error.code) {
+                        case 'auth/weak-password':
+                            authError.textContent = 'Password should be at least 6 characters.';
+                            break;
+                        case 'auth/email-already-in-use':
+                            authError.textContent = 'This email is already in use. Please login.';
+                            break;
+                        case 'auth/invalid-credential':
+                             authError.textContent = 'Invalid email or password.';
+                             break;
+                        default:
+                            authError.textContent = 'An error occurred. Please try again.';
+                            break;
+                    }
+                }
+            });
+
+            // We need to expose the init function to the global scope so our module script can call it
+            window.appInit = init;
+            
+            // --- END: FINAL AUTHENTICATION LOGIC ---
+
+            const app = {
+                containers: {
+                    app: document.getElementById('app-container'),
+                    collectionsList: document.getElementById('collections-list-container'),
+                    tagList: document.getElementById('tag-list-container'),
+                    kanbanBoard: document.getElementById('kanban-board'),
+                    notesListContent: document.getElementById('notes-list-content'),
+                    noteEditor: document.getElementById('note-editor-view'),
+                    toast: document.getElementById('toast-container'),
+                    mainContentArea: document.getElementById('main-content-area'),
+                    searchResultsList: document.getElementById('search-results-list'),
+                    mobileControlsDropdown: document.getElementById('mobile-controls-dropdown'),
+                    desktopHeaderControls: document.getElementById('desktop-header-controls'),
+                },
+                elements: {
+                    body: document.body,
+                    notesListPane: document.getElementById('notes-list-pane'),
+                    paneResizer: document.getElementById('pane-resizer'),
+                    sidebarToggleBtn: document.getElementById('sidebar-toggle-btn'),
+                    themeToggle: document.getElementById('theme-toggle'),
+                    themeReputifyIcon: document.getElementById('theme-reputify-icon'),
+                    themeSunIcon: document.getElementById('theme-sun-icon'),
+                    themeMoonIcon: document.getElementById('theme-moon-icon'),
+                    themeText: document.getElementById('theme-text'),
+                    newCollectionBtn: document.getElementById('new-collection-btn'),
+                    desktopNewNoteBtn: document.getElementById('desktop-new-note-btn'),
+                    mobileNewNoteFab: document.getElementById('mobile-new-note-fab'),
+                    chatbotFab: document.getElementById('chatbot-fab'),
+                    currentViewTitle: document.getElementById('current-view-title'),
+                    noteEditorTitle: document.getElementById('note-editor-title'),
+                    noteEditorBody: document.getElementById('note-editor-body'),
+                    markdownPreview: document.getElementById('markdown-preview'),
+                    wordCount: document.getElementById('word-count'),
+                    charCount: document.getElementById('char-count'),
+                    mobileMenuBtn: document.getElementById('mobile-menu-button'),
+                    mobileSidebarOverlay: document.getElementById('mobile-sidebar-overlay'),
+                    sortOrderSelect: document.getElementById('sort-order'),
+                    listViewControls: document.getElementById('list-view-controls'),
+                    viewSwitcher: document.getElementById('view-switcher-container'),
+                    importFileInput: document.getElementById('import-file-input'),
+                    mobileMoreButton: document.getElementById('mobile-more-button'),
+                    headerMainContent: document.getElementById('header-main-content'),
+                },
+                modals: {
+                    backdrop: document.getElementById('modal-backdrop'),
+                    apiKey: document.getElementById('api-key-modal'),
+                    apiKeyInput: document.getElementById('api-key-input'),
+                    apiKeyConfirmBtn: document.getElementById('api-key-confirm-btn'),
+                    apiKeyError: document.getElementById('api-key-error'),
+                    prompt: document.getElementById('prompt-modal'),
+                    promptTitle: document.getElementById('prompt-title'),
+                    promptMessage: document.getElementById('prompt-message'),
+                    promptInput: document.getElementById('prompt-input'),
+                    promptError: document.getElementById('prompt-error'),
+                    promptConfirmBtn: document.getElementById('prompt-confirm-btn'),
+                    promptCancelBtn: document.getElementById('prompt-cancel-btn'),
+                    confirm: document.getElementById('confirm-modal'),
+                    confirmTitle: document.getElementById('confirm-title'),
+                    confirmMessage: document.getElementById('confirm-message'),
+                    confirmConfirmBtn: document.getElementById('confirm-confirm-btn'),
+                    confirmCancelBtn: document.getElementById('confirm-cancel-btn'),
+                    bookmarklet: document.getElementById('bookmarklet-modal'),
+                    bookmarkletLink: document.getElementById('bookmarklet-link'),
+                    bookmarkletCloseBtn: document.getElementById('bookmarklet-close-btn'),
+                    graph: document.getElementById('graph-modal'),
+                    graphContainer: document.getElementById('graph-container'),
+                    graphCloseBtn: document.getElementById('graph-close-btn'),
+                    aiPrompt: document.getElementById('ai-prompt-modal'),
+                    aiPromptInput: document.getElementById('ai-prompt-input'),
+                    aiPromptError: document.getElementById('ai-prompt-error'),
+                    aiGenerateBtn: document.getElementById('ai-generate-btn'),
+                    aiCancelBtn: document.getElementById('ai-cancel-btn'),
+                    aiGenerateBtnText: document.getElementById('ai-generate-btn-text'),
+                    summary: document.getElementById('summary-modal'),
+                    summaryContent: document.getElementById('summary-content'),
+                    summaryCloseBtn: document.getElementById('summary-close-btn'),
+                    chatbot: document.getElementById('chatbot-modal'),
+                    chatbotHistory: document.getElementById('chatbot-history'),
+                    chatbotInput: document.getElementById('chatbot-input'),
+                    chatbotSendBtn: document.getElementById('chatbot-send-btn'),
+                    chatbotCloseBtn: document.getElementById('chatbot-close-btn'),
+                    chatbotClearBtn: document.getElementById('chatbot-clear-btn'),
+                    chatbotError: document.getElementById('chatbot-error'),
+                },
+                search: {
+                    icon: document.getElementById('header-search-icon'),
+                    mobileIcon: document.getElementById('mobile-search-icon'),
+                    container: document.getElementById('search-bar-container'),
+                    input: document.getElementById('search-input'),
+                    closeBtn: document.getElementById('search-close-btn'),
+                },
+                toolbar: {
+                    inline: document.getElementById('inline-toolbar'),
+                    editorModeToggle: document.getElementById('editor-mode-toggle'),
+                    ocrBtn: document.querySelector('[data-command="ocr"]'),
+                    ocrFileInput: document.getElementById('ocr-file-input'),
+                    dictateBtn: document.getElementById('dictate-btn'),
+                    graphBtn: document.getElementById('graph-btn'),
+                },
+                views: {
+                    board: document.getElementById('board-view'),
+                    list: document.getElementById('list-view'),
+                    searchResults: document.getElementById('search-results-view'),
+                },
+                contextMenu: {
+                    menu: document.getElementById('context-menu'),
+                    targetId: null,
+                    targetIsContainer: false,
+                    pinActionText: document.getElementById('pin-action-text'),
+                    togglePinBtn: document.querySelector('[data-action="toggle-pin"]'),
+                    renameBtn: document.querySelector('[data-action="rename"]'),
+                    deleteBtn: document.querySelector('[data-action="delete"]'),
+                    duplicateBtn: document.querySelector('[data-action="duplicate"]'),
+                }
+            };
+
+            let state = {};
+            let isSearchActive = false;
+            let editorSelectionRange = null;
+            let speechRecognizer = null;
+            let isDictating = false;
+            let lunrIndex;
+
+            const defaultState = {
+                collections: [
+                    { id: 'c1', name: 'Product Design', type: 'folder', children: [
+                        { id: 'n1', name: 'UI/UX Principles', type: 'note', content: '<h1>Hick\'s Law</h1><p>The time it takes to make a decision increases with the number and complexity of choices. [[Inspiration]] It is a fundamental principle in user interface design. #design', links: ['Inspiration', 'Meeting Notes'], tags:['design'], status: 'col1', pinned: true, createdAt: new Date(Date.now() - 86400000 * 2).toISOString(), modifiedAt: new Date(Date.now() - 86400000 * 2).toISOString() },
+                        { id: 'n2', name: 'Inspiration', type: 'note', content: 'Check out Dribbble, Awwwards, and Behance for #design inspiration.', links: [], tags:['design'], status: 'col2', pinned: false, createdAt: new Date(Date.now() - 86400000).toISOString(), modifiedAt: new Date().toISOString() },
+                    ], expanded: true },
+                    { id: 'c2', name: 'Marketing', type: 'folder', children: [], expanded: false },
+                    { id: 'c3', name: 'Development', type: 'folder', children: [
+                        {
+                            id: 'n4',
+                            name: 'Code Snippet Example',
+                            type: 'note',
+                            content: '<h2>JavaScript Code Example</h2><div class="code-block-wrapper"><div class="code-block-header"><span>javascript</span><button class="copy-code-btn"><i data-feather="copy" class="w-4 h-4"></i><span>Copy</span></button></div><pre><code>function sayHello(name) {\n  console.log(`Hello, ${name}!`);\n}\n\nsayHello("World");</code></pre></div><p>The code above is a sample. #javascript #example</p>',
+                            links: [],
+                            tags: ['javascript', 'example'],
+                            status: null,
+                            pinned: false,
+                            createdAt: new Date().toISOString(),
+                            modifiedAt: new Date().toISOString()
+                        }
+                    ], expanded: false },
+                    { id: 'n3', name: 'Standalone Note', type: 'note', content: 'A standalone note, not in any project. #misc', links: [], tags:['misc'], status: null, pinned: false, createdAt: new Date(Date.now() - 86400000 * 3).toISOString(), modifiedAt: new Date(Date.now() - 86400000).toISOString() },
+                ],
+                settings: {
+                    theme: 'reputify',
+                    activeCollectionId: 'c1',
+                    activeNoteId: null,
+                    paneWidth: 280,
+                    sidebarCollapsed: false,
+                    activeView: 'board',
+                    listSortOrder: 'modifiedAt-desc',
+                    editorMode: 'editor',
+                    activeTag: null,
+                },
+                kanbanColumns: {
+                    'c1': [ { id: 'col1', title: 'To Do' }, { id: 'col2', title: 'In Progress' } ],
+                    'c2': [ { id: 'ideas', title: 'Ideas' } ],
+                    'c3': [ { id: 'col_dev_1', title: 'Backlog'}]
+                },
+                chatHistory: []
+            };
+
+            async function saveState() {
+                // Get the current user from Firebase Auth
+                const user = window.auth.currentUser;
+
+                // If no user is logged in, do nothing.
+                if (!user) return;
+
+                try {
+                    // Create a reference to a specific document in Firestore.
+                    // The path is /users/{the_user's_ID}/data/appState
+                    // This ensures every user has their own private data document.
+                    const userDocRef = doc(window.db, "users", user.uid, "data", "appState");
+
+                    // Save the entire state object to that document.
+                    await setDoc(userDocRef, state);
+
+                } catch (error) {
+                    console.error("Failed to save state to Firestore:", error);
+                    showToast("Error saving data to the cloud.", 'error');
+                }
+            }
+            
+            function migrateState(loadedState) {
+    // This function ensures that data loaded from the cloud has all the necessary properties,
+    // preventing errors if the data structure is old or incomplete.
+
+    const migrateNode = (node) => {
+        if (node.type === 'note') {
+            if (typeof node.pinned === 'undefined') node.pinned = false;
+            if (!Array.isArray(node.links)) node.links = [];
+            if (!Array.isArray(node.tags)) node.tags = [];
+            const now = new Date().toISOString();
+            if (typeof node.createdAt === 'undefined') node.createdAt = now;
+            if (typeof node.modifiedAt === 'undefined') node.modifiedAt = node.createdAt;
+        }
+        if (node.children) {
+            // Ensure children is an array before trying to loop through it
+            if (Array.isArray(node.children)) {
+                node.children.forEach(migrateNode);
+            } else {
+                node.children = [];
+            }
+        }
+    };
+
+    if (!loadedState) loadedState = {};
+    if (!loadedState.settings) loadedState.settings = {};
+
+    // THIS IS THE KEY FIX: Ensure .collections is always an array.
+    if (!Array.isArray(loadedState.collections)) {
+        loadedState.collections = [];
+    }
+
+    if (!loadedState.kanbanColumns) loadedState.kanbanColumns = {};
+    if (!Array.isArray(loadedState.chatHistory)) loadedState.chatHistory = [];
+
+    // Now that we've confirmed .collections is an array, we can safely loop through it.
+    loadedState.collections.forEach(migrateNode);
+
+    // Set default settings if they are missing
+    if (typeof loadedState.settings.sidebarCollapsed === 'undefined') loadedState.settings.sidebarCollapsed = false;
+    if (typeof loadedState.settings.paneWidth === 'undefined') loadedState.settings.paneWidth = 280;
+    if (typeof loadedState.settings.activeTag === 'undefined') loadedState.settings.activeTag = null;
+    if (!loadedState.settings.listSortOrder) loadedState.settings.listSortOrder = 'modifiedAt-desc';
+    if (!loadedState.settings.editorMode) loadedState.settings.editorMode = 'editor';
+
+    return loadedState;
+}
+
+            async function loadState() {
+                const user = window.auth.currentUser;
+                if (!user) return; // Should not happen if called correctly, but good practice
+
+                const toastId = showToast('Loading notes from cloud...', 'loading');
+
+                // The same path we used to save the data
+                const userDocRef = doc(window.db, "users", user.uid, "data", "appState");
+
+                try {
+                    const docSnap = await getDoc(userDocRef);
+
+                    if (docSnap.exists()) {
+                        // If the user has data in the cloud, load it
+                        const loadedState = docSnap.data();
+                        state = migrateState(loadedState);
+                        console.log("Successfully loaded state from Firestore.");
+                    } else {
+                        // This is a new user, so give them the default notes
+                        console.log("No data in cloud, loading default state for new user.");
+                        state = JSON.parse(JSON.stringify(defaultState));
+                        // IMPORTANT: Immediately save this default state to their new account
+                        await saveState();
+                    }
+                } catch (error) {
+                    console.error("Error loading state from Firestore:", error);
+                    showToast("Could not load cloud data.", 'error');
+                    // Fallback to default state on error
+                    state = JSON.parse(JSON.stringify(defaultState));
+                } finally {
+                    dismissToast(toastId);
+                    // This was in the old function, let's keep it
+                    state.settings.theme = localStorage.getItem('codex-notes-theme') || 'reputify';
+                }
+            }
+
+            const generateId = (prefix = 'id') => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            function findItem(itemId, tree = state.collections) {
+                if (!itemId) return null;
+                for (let i = 0; i < tree.length; i++) {
+                    const item = tree[i];
+                    if (item.id === itemId) return {item, parent: tree, index: i};
+                    if (item.children) {
+                        const result = findItem(itemId, item.children);
+                        if(result) {
+                           // Find the actual parent folder object instead of just its children array
+                           const parentObject = tree.find(parentItem => parentItem.children === result.parent);
+                           return { ...result, parent: parentObject || tree };
+                        }
+                    }
+                }
+                return null;
+            }
+            
+            const getAllNotes = (items) => {
+                let notes = [];
+                for (const item of items) {
+                    if (item.type === 'note') {
+                        notes.push(item);
+                    }
+                    if (item.type === 'folder' && item.children) {
+                        notes = notes.concat(getAllNotes(item.children));
+                    }
+                }
+                return notes;
+            };
+
+            const debounce = (func, delay) => {
+                let timeout;
+                return (...args) => {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(this, args), delay);
+                };
+            };
+            
+            const showToast = (message, type = 'info') => {
+                const id = generateId('toast');
+                const toast = document.createElement('div');
+                const colors = {
+                    info: 'bg-bg-pane-dark text-text-primary',
+                    success: 'bg-green-500 text-white',
+                    error: 'bg-red-500 text-white',
+                    loading: 'bg-blue-500 text-white animate-pulse'
+                }
+                toast.id = id;
+                toast.className = `toast-item ${colors[type]} rounded-full px-4 py-2 text-sm shadow-lg transition-all duration-300 transform translate-y-[-20px] opacity-0`;
+                toast.textContent = message;
+                
+                app.containers.toast.appendChild(toast);
+                app.containers.toast.style.pointerEvents = 'auto';
+
+                setTimeout(() => {
+                    toast.classList.remove('translate-y-[-20px]', 'opacity-0');
+                }, 10);
+                
+                if (type !== 'loading') {
+                    setTimeout(() => {
+                        toast.classList.add('opacity-0', 'scale-90');
+                        toast.addEventListener('transitionend', () => {
+                             if(toast.parentElement) toast.parentElement.removeChild(toast);
+                             if (app.containers.toast.childElementCount === 0) {
+                                app.containers.toast.style.pointerEvents = 'none';
+                             }
+                        });
+                    }, 3000);
+                }
+                return id;
+            };
+            
+            const dismissToast = (toastId) => {
+                const toast = document.getElementById(toastId);
+                if (toast) {
+                    toast.classList.add('opacity-0', 'scale-90');
+                    toast.addEventListener('transitionend', () => {
+                         if(toast.parentElement) toast.parentElement.removeChild(toast);
+                         if (app.containers.toast.childElementCount === 0) {
+                            app.containers.toast.style.pointerEvents = 'none';
+                         }
+                    });
+                }
+            };
+            
+            const formatDateTime = (isoString) => {
+                 return new Date(isoString).toLocaleString(undefined, {
+                    year: 'numeric', month: 'short', day: 'numeric',
+                    hour: 'numeric', minute: '2-digit', hour12: true
+                 }).replace(/, /g, ', ');
+            };
+            
+            async function callGeminiAPI(payload, elementForError) {
+                // Clear any previous errors
+                if (elementForError) elementForError.textContent = '';
+
+                try {
+                    // Create a reference to our deployed Cloud Function
+                    const callGeminiFunction = httpsCallable(window.functions, 'callGemini');
+                    
+                    // Call the function with our prompt.
+                    // The Firebase SDK automatically handles sending the user's auth token.
+                    const response = await callGeminiFunction({ prompt: payload.contents[0].parts[0].text });
+
+                    // The actual result from our function is in response.data.result
+                    const generatedText = response.data.result;
+
+                    if (!generatedText) {
+                        throw new Error('Cloud function returned an empty response.');
+                    }
+                    return generatedText;
+
+                } catch (err) {
+                    console.error("Error calling Cloud Function:", err);
+                    const errorMsg = `AI Error: ${err.message}`;
+                    if (elementForError) elementForError.textContent = errorMsg;
+                    else showToast(errorMsg, 'error');
+                    return null;
+                }
+            }
+
+            const openModal = (modal, isBlocking = false) => {
+                const backdrop = app.modals.backdrop;
+                backdrop.style.pointerEvents = 'auto';
+                if (isBlocking) {
+                    backdrop.classList.add('bg-black/50');
+                    backdrop.classList.remove('bg-black/30');
+                } else {
+                    backdrop.classList.add('bg-black/30');
+                    backdrop.classList.remove('bg-black/50');
+                }
+                backdrop.style.opacity = '1';
+                modal.classList.remove('hidden');
+                setTimeout(() => {
+                    modal.classList.remove('scale-95', 'opacity-0');
+                }, 10);
+            };
+
+            const closeModal = (modal) => {
+                const backdrop = app.modals.backdrop;
+                backdrop.style.opacity = '0';
+                backdrop.style.pointerEvents = 'none';
+
+                modal.classList.add('scale-95', 'opacity-0');
+                setTimeout(() => {
+                    modal.classList.add('hidden');
+                }, 300);
+            };
+
+            const showPrompt = ({ title, message, initialValue = '', placeholder = '' }) => {
+                return new Promise((resolve) => {
+                    app.modals.promptTitle.textContent = title;
+                    app.modals.promptMessage.textContent = message;
+                    app.modals.promptInput.value = initialValue;
+                    app.modals.promptInput.placeholder = placeholder;
+                    app.modals.promptError.textContent = '';
+                    
+                    openModal(app.modals.prompt);
+                    app.modals.promptInput.focus();
+                    app.modals.promptInput.select();
+
+                    const confirmHandler = () => {
+                        const value = app.modals.promptInput.value.trim();
+                        if (value) {
+                            cleanup();
+                            resolve(value);
+                        } else {
+                            app.modals.promptError.textContent = 'Input cannot be empty.';
+                        }
+                    };
+
+                    const cancelHandler = () => {
+                        cleanup();
+                        resolve(null);
+                    };
+
+                    const cleanup = () => {
+                        app.modals.promptConfirmBtn.removeEventListener('click', confirmHandler);
+                        app.modals.promptCancelBtn.removeEventListener('click', cancelHandler);
+                        app.modals.backdrop.removeEventListener('click', backdropHandler);
+                        closeModal(app.modals.prompt);
+                    };
+                    
+                    const backdropHandler = () => cancelHandler();
+
+                    app.modals.promptConfirmBtn.addEventListener('click', confirmHandler);
+                    app.modals.promptCancelBtn.addEventListener('click', cancelHandler);
+                    app.modals.backdrop.addEventListener('click', backdropHandler);
+                });
+            };
+            
+            const showConfirm = ({ title, message, confirmText = 'Confirm', confirmClass = 'bg-red-600' }) => {
+                 return new Promise((resolve) => {
+                    app.modals.confirmTitle.textContent = title;
+                    app.modals.confirmMessage.innerHTML = message;
+                    app.modals.confirmConfirmBtn.textContent = confirmText;
+                    
+                    app.modals.confirmConfirmBtn.className = "px-4 py-2 rounded-md text-white hover:opacity-90";
+                    if (state.settings.theme === 'reputify' && confirmClass.includes('red')) {
+                        app.modals.confirmConfirmBtn.classList.add('bg-red-600');
+                    } else {
+                        app.modals.confirmConfirmBtn.classList.add('brand-button');
+                    }
+
+                    openModal(app.modals.confirm);
+
+                    const confirmHandler = () => { cleanup(); resolve(true); };
+                    const cancelHandler = () => { cleanup(); resolve(false); };
+                    const backdropHandler = () => cancelHandler();
+
+                    const cleanup = () => {
+                        app.modals.confirmConfirmBtn.removeEventListener('click', confirmHandler);
+                        app.modals.confirmCancelBtn.removeEventListener('click', cancelHandler);
+                        app.modals.backdrop.removeEventListener('click', backdropHandler);
+                        closeModal(app.modals.confirm);
+                    };
+
+                    app.modals.confirmConfirmBtn.addEventListener('click', confirmHandler);
+                    app.modals.confirmCancelBtn.addEventListener('click', cancelHandler);
+                    app.modals.backdrop.addEventListener('click', backdropHandler);
+                });
+            };
+            
+            function render() {
+                renderTheme();
+                renderSidebarState();
+                renderCollectionsList();
+                renderTagList();
+                renderMainView();
+                renderMobileControls();
+                
+                const noteActive = !!state.settings.activeNoteId;
+                app.toolbar.editorModeToggle.disabled = !noteActive;
+                app.toolbar.dictateBtn.disabled = !noteActive || !speechRecognizer;
+                app.toolbar.graphBtn.disabled = !noteActive;
+                
+                feather.replace(); 
+            }
+            
+            function renderTheme() {
+                const docEl = document.documentElement;
+                docEl.classList.remove('reputify-theme', 'dark', 'light');
+                app.elements.themeReputifyIcon.classList.add('hidden');
+                app.elements.themeSunIcon.classList.add('hidden');
+                app.elements.themeMoonIcon.classList.add('hidden');
+
+                if (state.settings.theme === 'dark') {
+                    docEl.classList.add('dark');
+                    app.elements.themeMoonIcon.classList.remove('hidden');
+                    app.elements.themeText.textContent = 'Dark Theme';
+                } else if (state.settings.theme === 'reputify') {
+                    docEl.classList.add('reputify-theme');
+                    app.elements.themeReputifyIcon.classList.remove('hidden');
+                    app.elements.themeText.textContent = 'Reputify Theme';
+                } else {
+                    docEl.classList.add('light');
+                    app.elements.themeSunIcon.classList.remove('hidden');
+                    app.elements.themeText.textContent = 'Light Theme';
+                }
+            }
+            
+            function renderSidebarState() {
+                const pane = app.elements.notesListPane;
+                const resizer = app.elements.paneResizer;
+                const body = app.elements.body;
+                const toggleBtn = app.elements.sidebarToggleBtn;
+
+                if (state.settings.sidebarCollapsed) {
+                    pane.classList.add('collapsed');
+                    resizer.classList.add('hidden');
+                    body.classList.add('sidebar-collapsed');
+                    toggleBtn.style.left = '0px';
+                } else {
+                    pane.classList.remove('collapsed');
+                    pane.style.width = `${state.settings.paneWidth}px`;
+                    resizer.classList.remove('hidden');
+                    body.classList.remove('sidebar-collapsed');
+                    toggleBtn.style.left = `${state.settings.paneWidth}px`;
+                }
+            }
+
+            function renderCollectionsList(collections = state.collections, level = 0) {
+                const createItemHTML = (item, currentLevel) => {
+                    const isActive = item.id === state.settings.activeCollectionId;
+                    const isNoteActive = item.id === state.settings.activeNoteId;
+                    const isFolder = item.type === 'folder';
+                    
+                    if (isFolder && item.children) {
+                        item.children.sort((a, b) => {
+                            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+                            return a.name.localeCompare(b.name);
+                        });
+                    }
+
+                    return `
+                        <li data-id="${item.id}" draggable="true" class="collection-item-wrapper rounded-md">
+                            <a href="#" class="collection-item flex items-center gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
+                                ${isFolder ? `<i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i>` : ''}
+                                <i data-feather="${isFolder ? 'folder' : (item.pinned ? 'paperclip' : 'file-text')}" class="w-4 h-4 flex-shrink-0 text-text-secondary ${item.pinned ? 'text-accent-primary': ''}"></i>
+                                <span class="truncate flex-grow">${item.name}</span>
+                            </a>
+                            ${isFolder && item.expanded && item.children ? `<ul class="collection-children">${renderCollectionsList(item.children, currentLevel + 1)}</ul>` : ''}
+                        </li>
+                    `;
+                };
+                
+                collections.sort((a, b) => {
+                    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+                    return a.name.localeCompare(b.name);
+                });
+                const listHTML = collections.map(item => createItemHTML(item, level)).join('');
+                
+                if (level === 0) {
+                    app.containers.collectionsList.innerHTML = `<ul class="space-y-1">${listHTML}</ul>`;
+                }
+                return listHTML;
+            }
+            
+            function renderTagList() {
+                const allNotes = getAllNotes(state.collections);
+                const allTags = new Set(allNotes.flatMap(note => note.tags || []));
+                const sortedTags = Array.from(allTags).sort();
+                
+                if (sortedTags.length === 0) {
+                    app.containers.tagList.innerHTML = `<p class="px-2 text-xs text-text-tertiary">No tags found.</p>`;
+                    return;
+                }
+
+                app.containers.tagList.innerHTML = sortedTags.map(tag => `
+                    <a href="#" class="tag-filter-item block text-sm p-1 px-2 rounded-md text-text-secondary hover:bg-bg-pane-dark hover:text-text-primary ${state.settings.activeTag === tag ? 'active' : ''}" data-tag="${tag}">#${tag}</a>
+                `).join('');
+            }
+
+            function parseInternalLinks(htmlContent) {
+                if (!htmlContent) return '';
+                const allNotes = getAllNotes(state.collections);
+                return htmlContent.replace(/\[\[(.*?)\]\]/g, (match, noteName) => {
+                    const trimmedName = noteName.trim();
+                    const foundNote = allNotes.find(n => n.name.toLowerCase() === trimmedName.toLowerCase());
+                    if (foundNote) {
+                        return `<a href="#" class="internal-link" title="Link to '${foundNote.name}'" data-note-id="${foundNote.id}">${trimmedName}</a>`;
+                    } else {
+                        return `<span class="internal-link-broken" title="Note not found: '${trimmedName}'">${trimmedName}</span>`;
+                    }
+                });
+            }
+
+            function updateNoteTags(note) {
+                if (!note || typeof note.content !== 'string') return;
+                const plainText = note.content.replace(/<[^>]*>?/gm, '');
+                const matches = plainText.match(/#(\w+)/g) || [];
+                note.tags = [...new Set(matches.map(tag => tag.substring(1)))];
+            }
+
+            function updateNoteLinks(note) {
+                if (!note || typeof note.content !== 'string') return;
+                const plainText = note.content.replace(/<[^>]*>?/gm, '');
+                const matches = plainText.matchAll(/\[\[(.*?)\]\]/g);
+                note.links = [...matches].map(match => match[1].trim());
+            }
+
+            function renderMainView() {
+                document.querySelectorAll('.notes-view').forEach(v => v.classList.add('hidden'));
+
+                if (isSearchActive) {
+                    renderSearchResults(app.search.input.value);
+                    return;
+                }
+                
+                const isNoteActive = !!state.settings.activeNoteId;
+                const isTagActive = !!state.settings.activeTag;
+                const activeCollection = findItem(state.settings.activeCollectionId)?.item;
+
+                if (isTagActive) {
+                    app.elements.currentViewTitle.textContent = `Tag: #${state.settings.activeTag}`;
+                } else {
+                    app.elements.currentViewTitle.textContent = activeCollection?.name || "All Notes";
+                }
+                
+                const showListControls = !isNoteActive && (state.settings.activeView === 'list' || !activeCollection || isTagActive);
+
+                app.elements.viewSwitcher.style.display = isNoteActive || !activeCollection || isTagActive ? 'none' : 'flex';
+                app.elements.listViewControls.style.display = showListControls ? 'flex' : 'none';
+                
+
+                if (isNoteActive) {
+                    renderNoteEditor();
+                } else if (isTagActive) {
+                    renderListView();
+                } else if (activeCollection) {
+                     document.querySelectorAll('#view-switcher-container .view-btn').forEach(b => b.classList.remove('active'));
+                     document.querySelector(`#view-switcher-container .view-btn[data-view="${state.settings.activeView}"]`)?.classList.add('active');
+                    
+                    if (state.settings.activeView === 'board') {
+                        renderKanbanView();
+                    } else {
+                        renderListView();
+                    }
+                } else {
+                     renderListView();
+                }
+            }
+            
+            function renderMobileControls() {
+                const activeCollection = findItem(state.settings.activeCollectionId)?.item;
+                const isNoteActive = !!state.settings.activeNoteId;
+
+                let controlsHTML = '';
+                if (!isNoteActive && activeCollection) {
+                    controlsHTML += `
+                        <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">View</div>
+                        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="board"><i data-feather="trello" class="w-4 h-4"></i>Board</button>
+                        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="list"><i data-feather="list" class="w-4 h-4"></i>List</button>
+                    `;
+                    if (state.settings.activeView === 'list') {
+                        controlsHTML += `<hr class="my-1 border-border-color">
+                            <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">Sort By</div>
+                            <select id="sort-order-mobile" class="w-full bg-transparent text-text-primary text-sm rounded-md p-2 border-0 focus:ring-0">
+                                <option value="modifiedAt-desc">Last Modified</option>
+                                <option value="createdAt-desc">Date Created</option>
+                                <option value="name-asc">Title (A-Z)</option>
+                            </select>
+                        `;
+                    }
+                } else {
+                    controlsHTML = `<div class="px-3 py-2 text-sm text-text-secondary">No options available</div>`;
+                }
+
+                app.containers.mobileControlsDropdown.innerHTML = controlsHTML;
+                
+                const mobileSortSelect = document.getElementById('sort-order-mobile');
+                if (mobileSortSelect) {
+                    mobileSortSelect.value = state.settings.listSortOrder;
+                    mobileSortSelect.addEventListener('change', (e) => {
+                        state.settings.listSortOrder = e.target.value;
+                        app.elements.sortOrderSelect.value = e.target.value;
+                        saveState();
+                        renderListView();
+                        feather.replace();
+                    });
+                }
+
+                document.querySelectorAll('.view-btn-mobile').forEach(btn => {
+                    if (btn.dataset.view === state.settings.activeView) {
+                        btn.classList.add('bg-bg-pane-dark', 'font-semibold');
+                    }
+                });
+                feather.replace();
+            }
+
+            function renderKanbanView() {
+                app.views.board.classList.remove('hidden');
+                const collectionId = state.settings.activeCollectionId;
+                const collection = findItem(collectionId)?.item;
+
+                if (!collection || collection.type !== 'folder') {
+                    app.containers.kanbanBoard.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="trello" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">Board View</h3><p>This view is only available for project folders.</p></div>`;
+                    feather.replace();
+                    return;
+                }
+                
+                const columns = state.kanbanColumns[collectionId] || [];
+                const notesInCollection = collection.children.filter(c => c.type === 'note') || [];
+                
+                const columnsHTML = columns.map(column => {
+                    const notesInColumn = [...notesInCollection]
+                        .filter(note => note.status === column.id)
+                        .sort((a,b) => notesInCollection.indexOf(a) - notesInCollection.indexOf(b));
+                        
+                    const cardsHTML = notesInColumn.map(note => {
+                            const date = formatDateTime(note.modifiedAt);
+                            const pinnedClass = note.pinned ? 'pinned' : '';
+                            return `
+                                <div class="kanban-card p-3 rounded-md shadow-sm border border-border-color mb-3 cursor-pointer hover:shadow-lg transition-all ${pinnedClass}" draggable="true" data-note-id="${note.id}">
+                                    <div class="pointer-events-none flex-grow overflow-hidden">
+                                        <h4 class="font-semibold pointer-events-none truncate">${note.name}</h4>
+                                        <p class="text-sm text-text-secondary mt-1 pointer-events-none truncate-multiline card-content">${note.content.replace(/<[^>]*>?/gm, '')}</p>
+                                    </div>
+                                    <div class="text-xs text-text-tertiary mt-2 pointer-events-none flex-shrink-0">Modified: ${date}</div>
+                                </div>
+                            `;
+                        }).join('');
+
+                    return `
+                        <div class="kanban-column w-[280px] md:w-[300px] flex-shrink-0 bg-bg-pane-dark p-3 rounded-lg" data-column-id="${column.id}">
+                            <div class="column-header flex justify-between items-center font-semibold mb-3 text-text-primary">
+                                <span class="rename-column-btn cursor-pointer flex-grow p-1">${column.title}</span>
+                                <button class="delete-column-btn text-text-tertiary hover:text-red-500 opacity-0 transition-opacity p-1"><i data-feather="x" class="w-4 h-4"></i></button>
+                            </div>
+                            <div class="cards-container min-h-[100px]">${cardsHTML}</div>
+                        </div>
+                    `;
+                }).join('');
+                
+                const addColumnBtnHTML = columns.length < 5 ? `
+                     <div class="w-[280px] md:w-[300px] flex-shrink-0">
+                        <button id="add-column-btn" class="w-full bg-bg-pane-light p-3 rounded-lg text-text-secondary hover:bg-main hover:text-accent-primary transition-colors">
+                            <i data-feather="plus" class="inline-block mr-2"></i>Add Column
+                        </button>
+                    </div>` : '';
+
+                app.containers.kanbanBoard.innerHTML = columnsHTML + addColumnBtnHTML;
+            }
+
+            function renderListView() {
+                 app.views.list.classList.remove('hidden');
+                 let notes = [];
+                 const activeTag = state.settings.activeTag;
+                 
+                 if (activeTag) {
+                     notes = getAllNotes(state.collections).filter(note => (note.tags || []).includes(activeTag));
+                 } else {
+                     const collectionId = state.settings.activeCollectionId;
+                     const collection = findItem(collectionId)?.item;
+                     notes = collection 
+                        ? (collection.children || []).filter(c => c.type === 'note') 
+                        : getAllNotes(state.collections);
+                 }
+
+
+                 if (notes.length === 0) {
+                     app.containers.notesListContent.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="inbox" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">No Notes Here</h3><p>Create a new note to get started.</p></div>`;
+                     feather.replace();
+                     return;
+                 }
+                 
+                 const sortOrder = state.settings.listSortOrder;
+                 const [key, direction] = sortOrder.split('-');
+
+                 notes.sort((a,b) => {
+                     let valA = a[key];
+                     let valB = b[key];
+                     if(key === 'name') {
+                         return direction === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                     } else {
+                         return direction === 'desc' ? new Date(valB) - new Date(valA) : new Date(valA) - new Date(valB);
+                     }
+                 });
+
+                 app.containers.notesListContent.innerHTML = notes.map(note => {
+                    const date = formatDateTime(note.modifiedAt);
+                    const pinnedClass = note.pinned ? 'pinned' : '';
+                    return `
+                        <div class="list-note-item bg-bg-pane-light p-4 rounded-lg shadow-sm border border-border-color cursor-pointer hover:shadow-md transition-all relative ${pinnedClass}" data-note-id="${note.id}">
+                            <div class="flex justify-between items-start">
+                                <div class="flex-grow min-w-0">
+                                    <h3 class="font-semibold text-lg truncate">${note.name}</h3>
+                                    <p class="text-sm text-text-secondary mt-1 truncate-multiline card-content">${note.content.replace(/<[^>]*>?/gm, '')}</p>
+                                    <p class="text-xs text-text-tertiary mt-3">Last Modified: ${date}</p>
+                                </div>
+                                <button class="summarize-btn flex-shrink-0 ml-4 p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note with AI" data-note-id="${note.id}">
+                                    <i data-feather="zap" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>`
+                 }).join('');
+            }
+            
+            function updateEditorStats() {
+                const text = app.elements.noteEditorBody.innerText || '';
+                const charCount = text.length;
+                const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+                app.elements.charCount.textContent = charCount;
+                app.elements.wordCount.textContent = wordCount;
+            }
+            
+            function renderNoteEditor() {
+                app.containers.noteEditor.classList.remove('hidden');
+                
+                const note = findItem(state.settings.activeNoteId)?.item;
+                if (!note) {
+                    state.settings.activeNoteId = null;
+                    renderMainView();
+                    return;
+                }
+
+                app.elements.noteEditorTitle.value = note.name;
+
+                if(state.settings.editorMode === 'preview') {
+                    app.elements.noteEditorBody.classList.add('hidden');
+                    app.elements.markdownPreview.classList.remove('hidden');
+                    
+                    // Convert basic editor HTML to markdown-like syntax for better parsing
+                    let contentForMarked = (note.content || '')
+                        .replace(/<div class="code-block-wrapper".*?<span class="lang-name">(.*?)<\/span>.*?<pre><code>([\s\S]*?)<\/code><\/pre><\/div>/g, (match, lang, code) => {
+                            const decodedCode = new DOMParser().parseFromString(code, 'text/html').documentElement.textContent;
+                            return '\n```' + lang + '\n' + decodedCode + '\n```\n';
+                        });
+
+                    let html = marked.parse(contentForMarked);
+                    html = parseInternalLinks(html);
+                    app.elements.markdownPreview.innerHTML = html;
+                    app.toolbar.editorModeToggle.classList.add('active');
+                    
+                    feather.replace(); // To render icons inside the new code blocks
+                } else {
+                    app.elements.noteEditorBody.classList.remove('hidden');
+                    app.elements.markdownPreview.classList.add('hidden');
+                    app.elements.noteEditorBody.innerHTML = note.content || '';
+                    app.toolbar.editorModeToggle.classList.remove('active');
+                }
+                updateEditorStats();
+            }
+            
+            function renderSearchResults(query) {
+                app.views.searchResults.classList.remove('hidden');
+
+                if (!query) {
+                    app.containers.searchResultsList.innerHTML = `<p class="text-text-secondary text-center"><i data-feather="search" class="w-12 h-12 mx-auto mb-4"></i><br>Start typing to search for notes.</p>`;
+                    feather.replace();
+                    return;
+                }
+                
+                const results = lunrIndex.search(query);
+                const resultNotes = results.map(res => findItem(res.ref)?.item).filter(Boolean);
+
+                if(resultNotes.length === 0) {
+                     app.containers.searchResultsList.innerHTML = `<p class="text-text-secondary text-center"><i data-feather="x-circle" class="w-12 h-12 mx-auto mb-4"></i><br>No results found for "${query}".</p>`;
+                     feather.replace();
+                     return;
+                }
+                
+                const highlightText = (text, query) => {
+                    if (!query || !text) return text;
+                    const escapedQuery = query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                    const regex = new RegExp(`(${escapedQuery})`, 'gi');
+                    return text.replace(regex, `<mark>$1</mark>`);
+                };
+
+                app.containers.searchResultsList.innerHTML = resultNotes.map(note => {
+                    const parentResult = findItem(note.id);
+                    const parent = parentResult ? parentResult.parent : null;
+                    const parentName = parent && !Array.isArray(parent) ? parent.name : null;
+                    const plainContent = note.content.replace(/<[^>]*>?/gm, '');
+                    const excerptMatch = plainContent.match(new RegExp(`.{0,50}${query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}.{0,50}`, 'i'));
+                    const excerpt = excerptMatch ? `...${highlightText(excerptMatch[0], query)}...` : highlightText(plainContent.substring(0, 100) + '...', query);
+
+                    return `
+                        <div class="search-result-item p-4 mb-3 rounded-lg hover:bg-bg-pane-dark cursor-pointer border border-border-color" data-note-id="${note.id}">
+                            <div class="font-semibold text-text-secondary text-sm">
+                                ${parentName ? `${highlightText(parentName, query)} / ` : ''}<span class="text-text-primary">${highlightText(note.name, query)}</span>
+                            </div>
+                            <p class="text-text-primary mt-2">${excerpt}</p>
+                        </div>
+                    `
+                }).join('');
+            }
+            
+            function renderChatHistory() {
+                app.modals.chatbotHistory.innerHTML = state.chatHistory.map(msg => {
+                    const bubbleClass = msg.role === 'user'
+                        ? 'user'
+                        : 'model';
+                    const formattedHtml = marked.parse(msg.text);
+                    return `
+                        <div class="chat-bubble w-fit rounded-lg px-3 py-2 self-${msg.role === 'user' ? 'end' : 'start'} ${bubbleClass}">
+                            ${formattedHtml}
+                        </div>`;
+                }).join('');
+                app.modals.chatbotHistory.scrollTop = app.modals.chatbotHistory.scrollHeight;
+            }
+            
+            const createNewNote = (andSwitchToIt = true, initialContent = '') => {
+                let parentCollection;
+                let targetArray;
+                let parentId = state.settings.activeCollectionId;
+
+                const parentResult = findItem(parentId);
+
+                if (parentResult && parentResult.item.type === 'folder') {
+                    parentCollection = parentResult.item;
+                    targetArray = parentCollection.children;
+                } else if(parentResult) {
+                    const parentOfNoteResult = findItem(parentResult.parent.id);
+                    parentId = parentOfNoteResult ? parentOfNoteResult.item.id : null;
+                    parentCollection = parentOfNoteResult ? parentOfNoteResult.item : null;
+                    targetArray = parentCollection ? parentCollection.children : state.collections;
+                } else {
+                    parentId = null;
+                    targetArray = state.collections;
+                }
+                
+                if (parentCollection) {
+                    parentCollection.expanded = true;
+                }
+
+                const now = new Date().toISOString();
+                const newNote = {
+                    id: generateId('n'), name: 'Untitled Note', type: 'note', content: initialContent,
+                    status: parentId ? state.kanbanColumns[parentId]?.[0]?.id || null : null,
+                    createdAt: now,
+                    modifiedAt: now,
+                    pinned: false,
+                    links: [],
+                    tags: []
+                };
+
+                if (initialContent) {
+                   updateNoteLinks(newNote);
+                   updateNoteTags(newNote);
+                   const titleMatch = initialContent.match(/<h1>(.*?)<\/h1>/);
+                   if (titleMatch && titleMatch[1]) {
+                       newNote.name = titleMatch[1];
+                   } else {
+                       // Try to find title from markdown
+                       const mdTitleMatch = initialContent.match(/^# (.*)/m);
+                       if(mdTitleMatch && mdTitleMatch[1]) {
+                           newNote.name = mdTitleMatch[1];
+                       }
+                   }
+                }
+                
+                targetArray.unshift(newNote);
+                
+                if(andSwitchToIt) {
+                    state.settings.activeNoteId = newNote.id;
+                    state.settings.activeTag = null;
+                    // Switch to editor mode when creating a new note
+                    state.settings.editorMode = 'editor';
+                }
+                
+                saveState();
+                buildLunrIndex();
+                render();
+                return newNote;
+            };
+
+            function initSpeechRecognition() {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SpeechRecognition) {
+                    showToast('Speech recognition is not supported in this browser.', 'error');
+                    return;
+                }
+                
+                speechRecognizer = new SpeechRecognition();
+                speechRecognizer.continuous = true;
+                speechRecognizer.interimResults = false;
+
+                speechRecognizer.onresult = (event) => {
+                    const last = event.results.length - 1;
+                    const text = event.results[last][0].transcript;
+                    
+                    app.elements.noteEditorBody.focus();
+                    document.execCommand('insertText', false, text.trim() + ' ');
+                    saveNoteContent();
+                };
+
+                speechRecognizer.onend = () => {
+                    if (isDictating) {
+                        speechRecognizer.start(); // Keep listening if it stops unexpectedly
+                    }
+                };
+                 speechRecognizer.onerror = (event) => {
+                    console.error('Speech recognition error', event.error);
+                    showToast(`Speech recognition error: ${event.error}`, 'error');
+                    isDictating = false;
+                    app.toolbar.dictateBtn.classList.remove('recording');
+                };
+            }
+
+            function initClipper() {
+                if (!window.location.hash.startsWith('#clip=')) return;
+
+                try {
+                    const encodedData = window.location.hash.substring(6);
+                    const data = JSON.parse(decodeURIComponent(encodedData));
+                    
+                    let clippedContent = `<h1>${data.title}</h1>\n<p><em>Source: <a href="${data.url}" target="_blank">${data.url}</a></em></p>\n<hr>\n<blockquote>${data.clip.replace(/\n/g, '<br>')}</blockquote>`;
+
+                    const newNote = createNewNote(true, clippedContent);
+                    showToast(`Clipped content saved to "${newNote.name}"`, 'success');
+
+                } catch (e) {
+                    console.error('Error parsing clipped data:', e);
+                    showToast('Could not import clipped content.', 'error');
+                } finally {
+                    // Clear the hash
+                    history.pushState("", document.title, window.location.pathname + window.location.search);
+                }
+            }
+            
+            function buildLunrIndex() {
+                const allNotes = getAllNotes(state.collections);
+                lunrIndex = lunr(function () {
+                    this.ref('id');
+                    this.field('name');
+                    this.field('content');
+                    this.field('tags');
+                    
+                    allNotes.forEach(note => {
+                        this.add({
+                            id: note.id,
+                            name: note.name,
+                            content: note.content.replace(/<[^>]*>?/gm, ''), // Index plain text
+                            tags: note.tags ? note.tags.join(' ') : ''
+                        });
+                    });
+                });
+            }
+
+            async function init() {
+                await loadState();
+                buildLunrIndex();
+                
+                initSpeechRecognition();
+                initClipper();
+                
+                const renderer = new marked.Renderer();
+                renderer.code = function(code, language) {
+                    const validLang = language && hljs.getLanguage(language) ? language : 'plaintext';
+                    const highlightedCode = hljs.highlight(code, { language: validLang, ignoreIllegals: true }).value;
+                    return `
+                        <div class="code-block-wrapper">
+                            <div class="code-block-header">
+                                <span class="lang-name">${validLang}</span>
+                                <div class="flex items-center gap-1">
+                                    <button class="copy-code-btn" title="Copy Code">
+                                        <i data-feather="copy" class="w-4 h-4"></i>
+                                        <span>Copy</span>
+                                    </button>
+                                    <button class="delete-block-btn" title="Delete Block">
+                                        <i data-feather="trash-2" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <pre><code class="hljs language-${validLang}">${highlightedCode}</code></pre>
+                        </div>
+                    `;
+                };
+
+                marked.setOptions({
+                    renderer: renderer,
+                    gfm: true,
+                    breaks: true,
+                });
+
+                
+
+                app.elements.sortOrderSelect.value = state.settings.listSortOrder;
+                
+                app.elements.themeToggle.addEventListener('click', () => {
+                    // ADD THIS NEW EVENT LISTENER for the profile dropdown
+                const profileButton = document.getElementById('profile-button');
+                const profileDropdown = document.getElementById('profile-dropdown');
+                const signOutLink = document.getElementById('sign-out-link');
+
+                if (profileButton && profileDropdown) {
+                    profileButton.addEventListener('click', (e) => {
+                        e.stopPropagation(); // Prevents the document click from firing immediately
+                        profileDropdown.classList.toggle('hidden');
+                    });
+                }
+                
+                if(signOutLink) {
+                    signOutLink.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        try {
+                            await signOut(window.auth);
+                            console.log('User signed out successfully.');
+                            // onAuthStateChanged will handle hiding the app and showing the login form.
+                        } catch (error) {
+                            console.error('Sign out error:', error);
+                            showToast('Error signing out.', 'error');
+                        }
+                    });
+                }
+
+                // Hides dropdown if you click anywhere else
+                document.addEventListener('click', (e) => {
+                    if (profileButton && !profileButton.contains(e.target) && profileDropdown && !profileDropdown.classList.contains('hidden')) {
+                        profileDropdown.classList.add('hidden');
+                    }
+                });
+                    const themes = ['reputify', 'light', 'dark'];
+                    const currentThemeIndex = themes.indexOf(state.settings.theme);
+                    state.settings.theme = themes[(currentThemeIndex + 1) % themes.length];
+                    localStorage.setItem('codex-notes-theme', state.settings.theme); 
+                    saveState();
+                    renderTheme();
+                    feather.replace();
+                });
+                
+                app.elements.sidebarToggleBtn.addEventListener('click', () => {
+                    state.settings.sidebarCollapsed = !state.settings.sidebarCollapsed;
+                    saveState();
+                    renderSidebarState();
+                });
+                
+                app.elements.paneResizer.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    document.body.style.cursor = 'col-resize';
+                    const startX = e.clientX;
+                    const startWidth = app.elements.notesListPane.offsetWidth;
+                    const doDrag = (e) => {
+                        let newWidth = startWidth + e.clientX - startX;
+                        newWidth = Math.max(240, Math.min(newWidth, 500)); 
+                        app.elements.notesListPane.style.width = `${newWidth}px`;
+                        app.elements.sidebarToggleBtn.style.left = `${newWidth}px`;
+                    };
+                    const stopDrag = () => {
+                        document.body.style.cursor = 'default';
+                        state.settings.paneWidth = app.elements.notesListPane.offsetWidth;
+                        saveState();
+                        document.removeEventListener('mousemove', doDrag);
+                        document.removeEventListener('mouseup', stopDrag);
+                    };
+                    document.addEventListener('mousemove', doDrag);
+                    document.addEventListener('mouseup', stopDrag);
+                });
+
+                const toggleMobileSidebar = (open) => {
+                    const overlay = app.elements.mobileSidebarOverlay;
+                    if (open) {
+                        app.elements.notesListPane.classList.add('open');
+                        overlay.classList.remove('hidden');
+                        overlay.style.pointerEvents = 'auto';
+                        setTimeout(() => overlay.style.opacity = '1', 10);
+                    } else {
+                        app.elements.notesListPane.classList.remove('open');
+                        overlay.style.opacity = '0';
+                        setTimeout(() => {
+                           overlay.classList.add('hidden');
+                           overlay.style.pointerEvents = 'none';
+                        }, 300);
+                    }
+                };
+                
+                app.elements.mobileMenuBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleMobileSidebar(true);
+                });
+                
+                app.elements.mobileSidebarOverlay.addEventListener('click', () => toggleMobileSidebar(false));
+
+                app.containers.collectionsList.addEventListener('click', (e) => {
+                    const itemLink = e.target.closest('.collection-item');
+                    if (!itemLink) return;
+                    e.preventDefault();
+
+                    const wrapper = itemLink.closest('.collection-item-wrapper');
+                    const id = wrapper.dataset.id;
+                    const { item } = findItem(id);
+                    
+                    state.settings.activeTag = null; // Deactivate tag filter
+
+                    if (item.type === 'folder') {
+                        state.settings.activeCollectionId = id;
+                        state.settings.activeNoteId = null;
+                        item.expanded = !item.expanded;
+                    } else if (item.type === 'note') {
+                         state.settings.activeNoteId = id;
+                         const result = findItem(id);
+                         const parent = result.parent;
+                         state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+                         if (window.innerWidth < 768) {
+                             toggleMobileSidebar(false);
+                         }
+                    }
+                    saveState();
+                    render();
+                });
+                
+                app.containers.tagList.addEventListener('click', e => {
+                    e.preventDefault();
+                    const tagItem = e.target.closest('.tag-filter-item');
+                    if (!tagItem) return;
+
+                    const tagName = tagItem.dataset.tag;
+                    if (state.settings.activeTag === tagName) {
+                        state.settings.activeTag = null; // Toggle off
+                    } else {
+                        state.settings.activeTag = tagName;
+                    }
+
+                    state.settings.activeNoteId = null;
+                    state.settings.activeCollectionId = null;
+                    saveState();
+                    render();
+                });
+
+                let draggedItemId = null;
+                app.containers.collectionsList.addEventListener('dragstart', (e) => {
+                    const wrapper = e.target.closest('.collection-item-wrapper');
+                    if(wrapper) {
+                        draggedItemId = wrapper.dataset.id;
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('text/plain', draggedItemId);
+                        setTimeout(() => wrapper.classList.add('opacity-50'), 0);
+                    }
+                });
+
+                app.containers.collectionsList.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    document.querySelectorAll('.drop-target-folder').forEach(el => el.classList.remove('drop-target-folder'));
+                    document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
+
+                    const targetWrapper = e.target.closest('.collection-item-wrapper');
+                    if (!targetWrapper || targetWrapper.dataset.id === draggedItemId) return;
+                    
+                    const { item: targetItem } = findItem(targetWrapper.dataset.id);
+                    const indicator = document.createElement('div');
+                    indicator.className = 'drop-indicator';
+
+                    if (targetItem.type === 'folder') {
+                        targetWrapper.querySelector('.collection-item').classList.add('drop-target-folder');
+                    }
+                    
+                    const rect = targetWrapper.getBoundingClientRect();
+                    const isAfter = e.clientY > rect.top + rect.height / 2;
+                    targetWrapper.insertAdjacentElement(isAfter ? 'afterend' : 'beforebegin', indicator);
+                });
+                
+                app.containers.collectionsList.addEventListener('dragend', (e) => {
+                    document.querySelectorAll('.collection-item-wrapper.opacity-50').forEach(el => el.classList.remove('opacity-50'));
+                     document.querySelectorAll('.drop-indicator, .drop-target-folder').forEach(el => {
+                        el.classList.remove('drop-target-folder');
+                        if (el.classList.contains('drop-indicator')) el.remove();
+                    });
+                    draggedItemId = null;
+                });
+
+                app.containers.collectionsList.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const droppedOnElement = e.target;
+                    if (!draggedItemId) return;
+
+                    document.querySelectorAll('.drop-indicator, .drop-target-folder').forEach(el => {
+                        el.classList.remove('drop-target-folder');
+                        if (el.classList.contains('drop-indicator')) el.remove();
+                    });
+
+                    const dragResult = findItem(draggedItemId);
+                    if (!dragResult) return;
+                    
+                    const sourceArray = Array.isArray(dragResult.parent) ? dragResult.parent : dragResult.parent.children;
+                    const [draggedItem] = sourceArray.splice(dragResult.index, 1);
+                    
+                    const dropWrapper = droppedOnElement.closest('.collection-item-wrapper');
+                    
+                    if (dropWrapper) { 
+                        const dropId = dropWrapper.dataset.id;
+                        if (dropId === draggedItem.id) { 
+                            sourceArray.splice(dragResult.index, 0, draggedItem);
+                            return;
+                        }
+                        
+                        const dropResult = findItem(dropId);
+                        if (!dropResult) return; 
+                        
+                        const dropTargetIsFolder = dropResult.item.type === 'folder' && droppedOnElement.closest('.collection-item').classList.contains('drop-target-folder');
+
+                        if (dropTargetIsFolder) {
+                            if (!dropResult.item.children) dropResult.item.children = [];
+                            dropResult.item.children.unshift(draggedItem);
+                            dropResult.item.expanded = true;
+                        } else {
+                            const targetArray = Array.isArray(dropResult.parent) ? dropResult.parent : dropResult.parent.children;
+                            let targetIndex = dropResult.index;
+                            
+                            const rect = dropWrapper.getBoundingClientRect();
+                            const isAfter = e.clientY > rect.top + rect.height / 2;
+                            if (isAfter) targetIndex++;
+
+                            targetArray.splice(targetIndex, 0, draggedItem);
+                        }
+                    } else { 
+                        state.collections.push(draggedItem);
+                    }
+                    
+                    if (draggedItem.type === 'note') {
+                         const newParentResult = findItem(draggedItem.id);
+                         const newParent = newParentResult ? newParentResult.parent : null;
+                         const newParentId = newParent && !Array.isArray(newParent) ? newParent.id : null;
+                         const newProjectColumns = newParentId ? state.kanbanColumns[newParentId] : null;
+                         if (newProjectColumns && newProjectColumns.length > 0) {
+                             draggedItem.status = newProjectColumns[0].id;
+                         } else {
+                             draggedItem.status = null;
+                         }
+                    }
+
+                    saveState();
+                    render();
+                });
+
+                app.containers.kanbanBoard.addEventListener('click', async e => {
+                    const addBtn = e.target.closest('#add-column-btn');
+                    const renameBtn = e.target.closest('.rename-column-btn');
+                    const deleteBtn = e.target.closest('.delete-column-btn');
+
+                    const collectionId = state.settings.activeCollectionId;
+                    if (!collectionId) return;
+
+                    if (addBtn) {
+                        const newName = await showPrompt({ title: 'New Column', message: 'Enter a name for the new column:', placeholder: 'e.g. Done' });
+                        if (newName) {
+                            if(!state.kanbanColumns[collectionId]) state.kanbanColumns[collectionId] = [];
+                            state.kanbanColumns[collectionId].push({ id: generateId('col'), title: newName });
+                            saveState();
+                            render();
+                        }
+                    } else if (renameBtn) {
+                        const columnEl = renameBtn.closest('.kanban-column');
+                        const columnId = columnEl.dataset.columnId;
+                        const column = state.kanbanColumns[collectionId].find(c => c.id === columnId);
+                        const newName = await showPrompt({ title: 'Rename Column', message: `Enter a new name for "${column.title}":`, initialValue: column.title });
+                        if(newName) {
+                            column.title = newName;
+                            saveState();
+                            render();
+                        }
+                    } else if (deleteBtn) {
+                        const columnEl = deleteBtn.closest('.kanban-column');
+                        const columnId = columnEl.dataset.columnId;
+                        const confirmed = await showConfirm({ title: 'Delete Column', message: 'Are you sure you want to delete this column? Notes inside will be moved to the first column.', confirmText: 'Delete' });
+                        if (confirmed) {
+                            const columns = state.kanbanColumns[collectionId];
+                            const columnIndex = columns.findIndex(c => c.id === columnId);
+                            const notesToMove = findItem(collectionId).item.children.filter(n => n.status === columnId);
+                            
+                            columns.splice(columnIndex, 1);
+
+                            if(columns.length > 0) {
+                                notesToMove.forEach(n => n.status = columns[0].id);
+                            } else {
+                                notesToMove.forEach(n => n.status = null);
+                            }
+
+                            saveState();
+                            render();
+                        }
+                    }
+                });
+                
+                let draggedKanbanNoteId = null;
+                app.containers.kanbanBoard.addEventListener('dragstart', (e) => {
+                    if (e.target.classList.contains('kanban-card')) {
+                        draggedKanbanNoteId = e.target.dataset.noteId;
+                        e.dataTransfer.setData('text/plain', draggedKanbanNoteId);
+                        setTimeout(() => e.target.classList.add('dragging'), 0);
+                    }
+                });
+
+                app.containers.kanbanBoard.addEventListener('dragend', (e) => {
+                    if (e.target.classList.contains('kanban-card')) {
+                        e.target.classList.remove('dragging');
+                    }
+                    document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
+                    draggedKanbanNoteId = null;
+                });
+
+                app.containers.kanbanBoard.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    const column = e.target.closest('.kanban-column');
+                    if (column) {
+                        document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
+
+                        const cardsContainer = column.querySelector('.cards-container');
+                        const afterElement = [...cardsContainer.querySelectorAll('.kanban-card:not(.dragging)')].reduce((closest, child) => {
+                            const box = child.getBoundingClientRect();
+                            const offset = e.clientY - box.top - box.height / 2;
+                            if (offset < 0 && offset > closest.offset) {
+                                return { offset: offset, element: child };
+                            } else {
+                                return closest;
+                            }
+                        }, { offset: Number.NEGATIVE_INFINITY }).element;
+                        
+                        const indicator = document.createElement('div');
+                        indicator.className = 'drop-indicator';
+
+                        if (afterElement == null) {
+                            cardsContainer.appendChild(indicator);
+                        } else {
+                            cardsContainer.insertBefore(indicator, afterElement);
+                        }
+                    }
+                });
+                
+                app.containers.kanbanBoard.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const columnEl = e.target.closest('.kanban-column');
+                    if (columnEl && draggedKanbanNoteId) {
+                        const newColumnId = columnEl.dataset.columnId;
+                        const collectionId = state.settings.activeCollectionId;
+                        const collectionResult = findItem(collectionId);
+                        const collectionNotes = collectionResult.item.children;
+
+                        const dragResult = findItem(draggedKanbanNoteId);
+                        const [draggedNote] = collectionNotes.splice(collectionNotes.indexOf(dragResult.item), 1);
+                        draggedNote.status = newColumnId;
+                        
+                        const dropIndicator = columnEl.querySelector('.drop-indicator');
+                        if (dropIndicator) {
+                            const nextCard = dropIndicator.nextElementSibling;
+                            if (nextCard) {
+                                const nextNoteId = nextCard.dataset.noteId;
+                                const nextNote = findItem(nextNoteId).item;
+                                const targetIndex = collectionNotes.indexOf(nextNote);
+                                collectionNotes.splice(targetIndex, 0, draggedNote);
+                            } else {
+                                collectionNotes.push(draggedNote);
+                            }
+                            dropIndicator.remove();
+                        } else {
+                            collectionNotes.push(draggedNote);
+                        }
+                        
+                        saveState();
+                        renderKanbanView();
+                        feather.replace();
+                    }
+                });
+                
+                app.elements.viewSwitcher.addEventListener('click', (e) => {
+                    const button = e.target.closest('.view-btn');
+                    if(button && !button.classList.contains('active')) {
+                        state.settings.activeView = button.dataset.view;
+                        saveState();
+                        renderMainView();
+                        feather.replace();
+                    }
+                });
+
+                app.containers.mobileControlsDropdown.addEventListener('click', (e) => {
+                    const button = e.target.closest('.view-btn-mobile');
+                    if (button) {
+                        state.settings.activeView = button.dataset.view;
+                        saveState();
+                        renderMainView();
+                        renderMobileControls();
+                    }
+                });
+                
+                app.elements.sortOrderSelect.addEventListener('change', (e) => {
+                    state.settings.listSortOrder = e.target.value;
+                    saveState();
+                    renderListView();
+                    feather.replace();
+                });
+                
+                app.containers.mainContentArea.addEventListener('click', (e) => {
+                    const deleteBlockBtn = e.target.closest('.delete-block-btn');
+                    if (deleteBlockBtn) {
+                        const wrapper = deleteBlockBtn.closest('.code-block-wrapper');
+                        if(wrapper) {
+                            const nextEl = wrapper.nextElementSibling;
+                            if(nextEl && nextEl.tagName === 'P' && (nextEl.innerHTML === '<br>' || nextEl.innerHTML === '')) {
+                                nextEl.remove();
+                            }
+                            wrapper.remove();
+                            saveNoteContent();
+                            showToast('Code block deleted', 'info');
+                        }
+                        return;
+                    }
+                    
+                    const summarizeBtn = e.target.closest('.summarize-btn');
+                    if (summarizeBtn) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const noteId = summarizeBtn.dataset.noteId;
+                        const { item: note } = findItem(noteId);
+                        const noteItemEl = summarizeBtn.closest('.list-note-item');
+                        const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
+                        if (!plainContent) {
+                            showToast("Note is empty, nothing to summarize.", "info");
+                            return;
+                        }
+                        handleSummarize(plainContent, noteItemEl);
+                        return;
+                    }
+                    
+                    const copyBtn = e.target.closest('.copy-code-btn');
+                    if (copyBtn) {
+                         const codeBlock = copyBtn.closest('.code-block-wrapper, .hljs').querySelector('pre, code');
+                         if(codeBlock) {
+                            const code = codeBlock.innerText;
+                            navigator.clipboard.writeText(code)
+                                .then(() => showToast('Code copied!', 'success'))
+                                .catch(err => showToast('Failed to copy code', 'error'));
+                         }
+                        return;
+                    }
+
+                    const card = e.target.closest('.kanban-card, .list-note-item, .search-result-item');
+                    if (card) {
+                        if (isSearchActive) {
+                            closeSearch(true); // Don't re-render immediately
+                        }
+                        state.settings.activeNoteId = card.dataset.noteId;
+                        const { parent } = findItem(state.settings.activeNoteId);
+                        state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+                        state.settings.activeTag = null;
+                        saveState();
+                        render();
+                        return;
+                    }
+                    
+                    const internalLink = e.target.closest('a.internal-link');
+                    if (internalLink) {
+                        e.preventDefault();
+                        const noteId = internalLink.dataset.noteId;
+                        if(noteId) {
+                            state.settings.activeNoteId = noteId;
+                            const { parent } = findItem(noteId);
+                            state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+                            state.settings.activeTag = null;
+                            saveState();
+                            render();
+                            showToast(`Mapsd to "${internalLink.textContent}"`);
+                        }
+                        return;
+                    }
+                    
+                    const link = e.target.closest('a');
+                    if (link && link.href && (app.elements.noteEditorBody.contains(link) || app.elements.markdownPreview.contains(link))) {
+                        e.preventDefault();
+                        window.open(link.href, '_blank');
+                    }
+                });
+
+                const saveNoteContent = debounce(() => {
+                    if (!state.settings.activeNoteId) return;
+                    const {item: note} = findItem(state.settings.activeNoteId);
+                    if(note) {
+                        const newName = app.elements.noteEditorTitle.value;
+                        const newContent = app.elements.noteEditorBody.innerHTML;
+                        
+                        if(note.name !== newName || note.content !== newContent) {
+                            note.name = newName;
+                            note.content = newContent;
+                            note.modifiedAt = new Date().toISOString();
+                            updateNoteLinks(note);
+                            updateNoteTags(note);
+                            saveState();
+                            buildLunrIndex();
+                            renderCollectionsList(); // Just re-render the list for efficiency
+                            renderTagList();
+                        }
+                    }
+                }, 500);
+
+                const updateStatsDebounced = debounce(updateEditorStats, 250);
+
+                app.elements.noteEditorTitle.addEventListener('input', saveNoteContent);
+                app.elements.noteEditorBody.addEventListener('input', () => {
+                    saveNoteContent();
+                    updateStatsDebounced();
+                });
+
+                app.elements.noteEditorBody.addEventListener('keydown', (e) => {
+                    const selection = window.getSelection();
+                    if (!selection.rangeCount) return;
+
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        let container = selection.anchorNode;
+                        container = container.nodeType === 3 ? container.parentNode : container;
+                        
+                        const blockquote = container.closest('blockquote');
+                        
+                        if (blockquote && container.textContent.trim() === '' && container.matches('p, div') && container.parentNode === blockquote) {
+                            const isLastNode = !container.nextSibling && (container.innerHTML === '' || container.innerHTML === '<br>');
+                            if(isLastNode) {
+                                e.preventDefault();
+                                
+                                const newP = document.createElement('p');
+                                newP.innerHTML = '<br>';
+                                blockquote.after(newP);
+                                container.remove();
+                                
+                                if (!blockquote.textContent.trim()) {
+                                    blockquote.remove();
+                                }
+
+                                const range = document.createRange();
+                                range.setStart(newP, 0);
+                                range.collapse(true);
+                                selection.removeAllRanges();
+                                selection.addRange(range);
+                                
+                                saveNoteContent();
+                                return;
+                            }
+                        }
+                    }
+                    
+                    if (e.key === 'Backspace') {
+                        const range = selection.getRangeAt(0);
+                        if (range.collapsed && range.startOffset === 0) {
+                            const pre = selection.anchorNode.closest('pre');
+                            if (pre && pre.textContent.length === 0) {
+                                const wrapper = pre.closest('.code-block-wrapper');
+                                if (wrapper) {
+                                    e.preventDefault();
+                                    wrapper.remove();
+                                    saveNoteContent();
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                });
+                
+                const handleImageFile = (file) => {
+                    if (file.type.startsWith('image/')) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const imgHTML = `<img src="${e.target.result}" alt="Pasted image">`;
+                            document.execCommand('insertHTML', false, imgHTML);
+                            saveNoteContent();
+                        };
+                        reader.readAsDataURL(file);
+                        return true;
+                    }
+                    return false;
+                };
+
+                app.elements.noteEditorBody.addEventListener('paste', (e) => {
+                    const files = e.clipboardData.files;
+                    for (const file of files) {
+                        if (handleImageFile(file)) {
+                            e.preventDefault();
+                        }
+                    }
+                });
+
+                app.elements.noteEditorBody.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const files = e.dataTransfer.files;
+                    for (const file of files) {
+                        handleImageFile(file);
+                    }
+                });
+                
+                app.elements.noteEditorBody.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                });
+                
+                app.toolbar.ocrBtn.addEventListener('click', () => app.toolbar.ocrFileInput.click());
+                app.toolbar.ocrFileInput.addEventListener('change', async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    if (!state.settings.activeNoteId) {
+                        createNewNote();
+                    }
+                    
+                    const toastId = showToast('Recognizing text...', 'loading');
+                    try {
+                        const { data: { text } } = await Tesseract.recognize(file, 'eng');
+                        const formattedText = `<p>${text.replace(/\n/g, '</p><p>')}</p>`;
+                        app.elements.noteEditorBody.focus();
+                        document.execCommand('insertHTML', false, formattedText);
+                        saveNoteContent();
+                        showToast('Text inserted!', 'success');
+                    } catch (err) {
+                        console.error(err);
+                        showToast('Could not recognize text.', 'error');
+                    } finally {
+                        dismissToast(toastId);
+                        app.toolbar.ocrFileInput.value = '';
+                    }
+                });
+                
+                app.toolbar.dictateBtn.addEventListener('click', () => {
+                    if (!speechRecognizer) return;
+                    if (isDictating) {
+                        speechRecognizer.stop();
+                        isDictating = false;
+                        app.toolbar.dictateBtn.classList.remove('recording');
+                        showToast('Dictation stopped.', 'info');
+                    } else {
+                        speechRecognizer.start();
+                        isDictating = true;
+                        app.toolbar.dictateBtn.classList.add('recording');
+                        showToast('Listening...', 'info');
+                    }
+                });
+
+                app.toolbar.graphBtn.addEventListener('click', () => {
+                    const noteId = state.settings.activeNoteId;
+                    if (!noteId) return;
+
+                    try {
+                        const allNotes = getAllNotes(state.collections);
+                        const { item: currentNote } = findItem(noteId);
+
+                        const nodes = new vis.DataSet([{ id: currentNote.id, label: currentNote.name, color: getComputedStyle(document.documentElement).getPropertyValue('--accent-primary') }]);
+                        const edges = new vis.DataSet();
+
+                        // Links from current note
+                        (currentNote.links || []).forEach(linkName => {
+                            const targetNote = allNotes.find(n => n.name.toLowerCase() === linkName.toLowerCase());
+                            if (targetNote && targetNote.id !== currentNote.id) {
+                                if (!nodes.get(targetNote.id)) {
+                                    nodes.add({ id: targetNote.id, label: targetNote.name });
+                                }
+                                edges.add({ from: currentNote.id, to: targetNote.id, arrows: 'to' });
+                            }
+                        });
+
+                        // Links to current note (backlinks)
+                        allNotes.forEach(note => {
+                            if (note.id !== currentNote.id && (note.links || []).some(link => link.toLowerCase() === currentNote.name.toLowerCase())) {
+                                 if (!nodes.get(note.id)) {
+                                    nodes.add({ id: note.id, label: note.name });
+                                }
+                                edges.add({ from: note.id, to: currentNote.id, arrows: 'to' });
+                            }
+                        });
+                        
+                        const computedStyles = getComputedStyle(document.documentElement);
+
+                        const options = {
+                            nodes: {
+                                shape: 'box',
+                                color: computedStyles.getPropertyValue('--bg-pane-dark').trim(),
+                                font: { color: computedStyles.getPropertyValue('--text-primary').trim() },
+                                borderWidth: 1,
+                            },
+                            edges: {
+                                color: {
+                                    color: computedStyles.getPropertyValue('--text-tertiary').trim(),
+                                    highlight: computedStyles.getPropertyValue('--accent-primary').trim(),
+                                }
+                            },
+                            physics: {
+                                enabled: true,
+                                solver: 'barnesHut',
+                                barnesHut: {
+                                    gravitationalConstant: -4000,
+                                    centralGravity: 0.1,
+                                    springLength: 150,
+                                }
+                            },
+                            interaction: {
+                                dragNodes: true,
+                                dragView: true,
+                                zoomView: true
+                            }
+                        };
+                        new vis.Network(app.modals.graphContainer, { nodes, edges }, options);
+                        openModal(app.modals.graph);
+
+                    } catch(err) {
+                        console.error("Error creating note graph:", err);
+                        showToast('Could not create note graph.', 'error');
+                    }
+                });
+                app.modals.graphCloseBtn.addEventListener('click', () => closeModal(app.modals.graph));
+                
+                app.modals.aiCancelBtn.addEventListener('click', () => closeModal(app.modals.aiPrompt));
+                app.modals.aiGenerateBtn.addEventListener('click', async () => {
+                    const prompt = app.modals.aiPromptInput.value.trim();
+                    if (!prompt) {
+                        app.modals.aiPromptError.textContent = 'Please enter a prompt.';
+                        return;
+                    }
+                    
+                    if (!state.settings.activeNoteId) {
+                        createNewNote();
+                    }
+                    
+                    app.modals.aiGenerateBtn.disabled = true;
+                    app.modals.aiGenerateBtnText.textContent = 'Generating...';
+
+                    const payload = { contents: [{ parts: [{ text: prompt }] }] };
+                    const generatedText = await callGeminiAPI(payload, app.modals.aiPromptError);
+
+                    if (generatedText) {
+                        app.elements.noteEditorBody.focus();
+                        if (editorSelectionRange) {
+                            const selection = window.getSelection();
+                            selection.removeAllRanges();
+                            selection.addRange(editorSelectionRange);
+                        }
+                        const formattedHtml = marked.parse(generatedText).trim();
+                        document.execCommand('insertHTML', false, formattedHtml);
+                        saveNoteContent();
+                        closeModal(app.modals.aiPrompt);
+                        showToast('AI content inserted!', 'success');
+                    }
+                    
+                    app.modals.aiGenerateBtn.disabled = false;
+                    app.modals.aiGenerateBtnText.textContent = 'Generate';
+                });
+
+                const handleSummarize = async (noteContent, noteItemEl) => {
+                    const toastId = showToast('Summarizing...', 'loading');
+                    const prompt = `Summarize the following text into a single, concise paragraph:\n\n---\n\n${noteContent}`;
+                    const payload = { contents: [{ parts: [{ text: prompt }] }] };
+                    const summaryText = await callGeminiAPI(payload);
+
+                    dismissToast(toastId);
+                    if (summaryText && noteItemEl) {
+                        const existingSummary = noteItemEl.querySelector('.ai-summary');
+                        if (existingSummary) existingSummary.remove();
+
+                        const summaryEl = document.createElement('div');
+                        summaryEl.className = 'ai-summary mt-3 p-3 bg-bg-pane-dark rounded-md border border-border-color text-sm text-text-secondary';
+                        summaryEl.innerHTML = marked.parse(summaryText).trim();
+                        noteItemEl.appendChild(summaryEl);
+                        showToast('Summary generated!', 'success');
+                    } else if (!summaryText) {
+                         showToast('Could not generate summary.', 'error');
+                    }
+                };
+                app.modals.summaryCloseBtn.addEventListener('click', () => closeModal(app.modals.summary));
+
+                app.elements.chatbotFab.addEventListener('click', () => {
+                    renderChatHistory();
+                    openModal(app.modals.chatbot);
+                    app.modals.chatbotInput.focus();
+                    feather.replace();
+                });
+                app.modals.chatbotCloseBtn.addEventListener('click', () => closeModal(app.modals.chatbot));
+                app.modals.chatbotClearBtn.addEventListener('click', async () => {
+                    const confirmed = await showConfirm({
+                        title: 'Clear Chat History',
+                        message: 'Are you sure you want to delete the entire conversation?',
+                        confirmText: 'Clear',
+                        confirmClass: 'bg-red-500'
+                    });
+                    if (confirmed) {
+                        state.chatHistory = [];
+                        saveState();
+                        renderChatHistory();
+                        showToast('Chat history cleared', 'success');
+                    }
+                });
+
+                const handleChatSubmit = async () => {
+                    const userInput = app.modals.chatbotInput.value.trim();
+                    if (!userInput) return;
+                    
+                    app.modals.chatbotError.textContent = '';
+                    app.modals.chatbotInput.value = '';
+                    app.modals.chatbotSendBtn.disabled = true;
+
+                    state.chatHistory.push({ role: 'user', text: userInput });
+                    renderChatHistory();
+                    
+                    const thinkingBubble = document.createElement('div');
+                    thinkingBubble.className = 'chat-bubble thinking w-fit rounded-lg px-3 py-2 self-start model';
+                    thinkingBubble.innerHTML = '● ● ●';
+                    app.modals.chatbotHistory.appendChild(thinkingBubble);
+                    app.modals.chatbotHistory.scrollTop = app.modals.chatbotHistory.scrollHeight;
+
+                    const payload = {
+                        contents: state.chatHistory.map(msg => ({
+                            role: msg.role === 'user' ? 'user' : 'model',
+                            parts: [{ text: msg.text }]
+                        }))
+                    };
+
+                    const modelResponse = await callGeminiAPI(payload, app.modals.chatbotError);
+                    
+                    thinkingBubble.remove();
+
+                    if (modelResponse) {
+                        state.chatHistory.push({ role: 'model', text: modelResponse });
+                        renderChatHistory();
+                    }
+                    saveState();
+                    app.modals.chatbotSendBtn.disabled = false;
+                    app.modals.chatbotInput.focus();
+                };
+
+                app.modals.chatbotSendBtn.addEventListener('click', handleChatSubmit);
+                app.modals.chatbotInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleChatSubmit();
+                    }
+                });
+
+                app.elements.newCollectionBtn.addEventListener('click', async () => {
+                    const name = await showPrompt({ title: 'New Collection', message: 'Enter a name for your new collection:', placeholder: 'e.g. Project Phoenix' });
+                    if (name) {
+                        const newCollection = {
+                            id: generateId('c'), name, type: 'folder', children: [], expanded: true
+                        };
+                        state.collections.push(newCollection);
+                        state.kanbanColumns[newCollection.id] = [{ id: generateId('col'), title: 'To Do' }];
+                        state.settings.activeCollectionId = newCollection.id;
+                        saveState();
+                        render();
+                    }
+                });
+
+                app.elements.desktopNewNoteBtn.addEventListener('click', () => createNewNote());
+                app.elements.mobileNewNoteFab.addEventListener('click', () => createNewNote());
+
+                const openSearch = () => {
+                    if (window.innerWidth < 768) {
+                        app.elements.headerMainContent.classList.add('hidden');
+                        app.search.container.classList.remove('hidden');
+                    } else {
+                        app.elements.headerMainContent.classList.add('opacity-0', 'pointer-events-none');
+                        app.search.container.classList.remove('hidden');
+                    }
+                    isSearchActive = true;
+                    app.search.input.focus();
+                    renderMainView();
+                };
+
+                const closeSearch = (skipRender = false) => {
+                    if (window.innerWidth < 768) {
+                        app.elements.headerMainContent.classList.remove('hidden');
+                        app.search.container.classList.add('hidden');
+                    } else {
+                        app.elements.headerMainContent.classList.remove('opacity-0', 'pointer-events-none');
+                        app.search.container.classList.add('hidden');
+                    }
+                    app.search.input.value = '';
+                    isSearchActive = false;
+                    if (!skipRender) render();
+                };
+
+                app.search.icon.addEventListener('click', openSearch);
+                app.search.mobileIcon.addEventListener('click', openSearch);
+                app.search.closeBtn.addEventListener('click', () => closeSearch());
+                app.search.input.addEventListener('input', () => {
+                    renderSearchResults(app.search.input.value);
+                });
+
+                app.toolbar.editorModeToggle.addEventListener('click', () => {
+                    if (!state.settings.activeNoteId) return;
+                    state.settings.editorMode = state.settings.editorMode === 'editor' ? 'preview' : 'editor';
+                    saveState();
+                    renderNoteEditor();
+                });
+
+                document.addEventListener('selectionchange', () => {
+                    if (document.activeElement !== app.elements.noteEditorBody) {
+                        app.toolbar.inline.style.opacity = '0';
+                        app.toolbar.inline.style.pointerEvents = 'none';
+                        return;
+                    }
+                    const selection = window.getSelection();
+
+                    if (selection.isCollapsed) {
+                        app.toolbar.inline.style.opacity = '0';
+                        app.toolbar.inline.style.pointerEvents = 'none';
+                        return;
+                    }
+
+                    if (selection.rangeCount > 0) {
+                        editorSelectionRange = selection.getRangeAt(0).cloneRange();
+                    }
+
+                    const range = selection.getRangeAt(0);
+                    const rect = range.getBoundingClientRect();
+                    const toolbarRect = app.toolbar.inline.getBoundingClientRect();
+                    app.toolbar.inline.style.top = `${window.scrollY + rect.top - toolbarRect.height - 8}px`;
+                    app.toolbar.inline.style.left = `${window.scrollX + rect.left + (rect.width / 2) - (toolbarRect.width / 2)}px`;
+                    app.toolbar.inline.style.opacity = '1';
+                    app.toolbar.inline.style.transform = 'scale(1)';
+                    app.toolbar.inline.style.pointerEvents = 'auto';
+                });
+                
+                app.toolbar.inline.addEventListener('mousedown', async (e) => {
+                    e.preventDefault();
+                    const button = e.target.closest('button');
+                    if(!button) return;
+                    
+                    const command = button.dataset.command;
+                    const value = button.dataset.value;
+
+                    const restoreSelectionAndExec = (execFn) => {
+                        app.elements.noteEditorBody.focus();
+                        if (editorSelectionRange) {
+                            const selection = window.getSelection();
+                            selection.removeAllRanges();
+                            selection.addRange(editorSelectionRange);
+                        }
+                        execFn();
+                        saveNoteContent();
+                        if (window.getSelection().rangeCount > 0) {
+                           editorSelectionRange = window.getSelection().getRangeAt(0).cloneRange();
+                        }
+                    };
+                    
+                    if (command === 'monospace') {
+                        restoreSelectionAndExec(() => {
+                            const selection = window.getSelection();
+                            if (!selection.rangeCount) return;
+
+                            let parent = selection.getRangeAt(0).commonAncestorContainer;
+                            parent = parent.nodeType === 3 ? parent.parentNode : parent;
+                            const codeTag = parent.closest('code:not(pre code)');
+
+                            if (codeTag) {
+                                const content = document.createDocumentFragment();
+                                while(codeTag.firstChild) {
+                                    content.appendChild(codeTag.firstChild);
+                                }
+                                codeTag.parentNode.replaceChild(content, codeTag);
+                            } else {
+                                const selectedText = selection.toString();
+                                if (selectedText) {
+                                    document.execCommand('insertHTML', false, `<code>${selectedText}</code>`);
+                                }
+                            }
+                        });
+                        return;
+                    }
+
+                    if (command === 'formatBlock' && value === 'code') {
+                         restoreSelectionAndExec(() => {
+                            const selection = window.getSelection();
+                            const selectedText = selection.toString();
+                            
+                            let lang = 'plaintext';
+                            if (/<[a-z][\s\S]*>/i.test(selectedText)) lang = 'html';
+                            else if (/\b(function|const|let|var|import|export)\b/.test(selectedText)) lang = 'javascript';
+                            else if (/\b(def|import|class|for|while)\b/.test(selectedText)) lang = 'python';
+
+                            const escapedCode = selectedText.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                            
+                            const codeBlockHTML = `
+                                <div class="code-block-wrapper" contenteditable="false">
+                                    <div class="code-block-header">
+                                        <span class="lang-name">${lang}</span>
+                                        <div class="flex items-center gap-1">
+                                            <button class="copy-code-btn" title="Copy Code">
+                                                <i data-feather="copy" class="w-4 h-4"></i>
+                                                <span>Copy</span>
+                                            </button>
+                                            <button class="delete-block-btn" title="Delete Block">
+                                                <i data-feather="trash-2" class="w-4 h-4"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <pre contenteditable="true"><code>${escapedCode}</code></pre>
+                                </div>
+                                <p><br></p>`;
+                            
+                            document.execCommand('insertHTML', false, codeBlockHTML);
+                            feather.replace();
+                        });
+                        return;
+                    }
+
+                    if (command === 'createLink') {
+                        app.elements.noteEditorBody.focus();
+                        if (editorSelectionRange) {
+                            const selection = window.getSelection();
+                            selection.removeAllRanges();
+                            selection.addRange(editorSelectionRange);
+                        }
+
+                        const selection = window.getSelection();
+                        const parentEl = selection.anchorNode?.parentNode.closest('a');
+
+                        if(parentEl) {
+                            restoreSelectionAndExec(() => {
+                                document.execCommand('unlink');
+                            });
+                        } else {
+                            const selectedText = selection.toString().trim();
+                            const url = await showPrompt({ title: 'Insert Link', message: 'Enter the URL:', placeholder: 'https://example.com' });
+                            if (url) {
+                                restoreSelectionAndExec(() => {
+                                    let finalUrl = url;
+                                    if (!/^(https?:\/\/|mailto:|ftp:\/\/)/i.test(finalUrl)) {
+                                        finalUrl = 'https://' + finalUrl;
+                                    }
+                                    const linkHTML = `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${selectedText || finalUrl}</a>`;
+                                    document.execCommand('insertHTML', false, linkHTML);
+                                });
+                            }
+                        }
+                    } else if (command === 'insertImage') {
+                        const url = await showPrompt({ title: 'Insert Image', message: 'Enter the image URL:', placeholder: 'https://example.com/image.png' });
+                        if (url) {
+                           restoreSelectionAndExec(() => document.execCommand('insertHTML', false, `<img src="${url}" alt="Image">`));
+                        }
+                    } else if (command === 'formatBlock') {
+                         restoreSelectionAndExec(() => {
+                            const selection = window.getSelection();
+                            let parentEl = selection.getRangeAt(0).commonAncestorContainer;
+                            parentEl = parentEl.nodeType === 3 ? parentEl.parentNode : parentEl;
+                            
+                            const isAlreadyBlock = parentEl.closest(value) || (value === 'blockquote' && parentEl.closest('blockquote'));
+                            
+                            if (isAlreadyBlock) {
+                                document.execCommand('formatBlock', false, 'p'); // Revert to paragraph
+                            } else {
+                                document.execCommand(command, false, value);
+                            }
+                        });
+                    } else {
+                        restoreSelectionAndExec(() => document.execCommand(command, false, null));
+                    }
+                });
+
+                app.containers.collectionsList.addEventListener('contextmenu', e => {
+                    const itemWrapper = e.target.closest('.collection-item-wrapper');
+                    
+                    app.contextMenu.togglePinBtn.style.display = 'none';
+                    app.contextMenu.renameBtn.style.display = 'none';
+                    app.contextMenu.deleteBtn.style.display = 'none';
+                    app.contextMenu.duplicateBtn.style.display = 'none';
+
+                    if (!itemWrapper && e.target.closest('#collections-list-container')) {
+                        app.contextMenu.targetId = null;
+                        app.contextMenu.targetIsContainer = true;
+                    } else if (itemWrapper) {
+                        e.preventDefault();
+                        app.contextMenu.targetId = itemWrapper.dataset.id;
+                        app.contextMenu.targetIsContainer = false;
+                        const { item } = findItem(app.contextMenu.targetId);
+                        
+                        app.contextMenu.renameBtn.style.display = 'flex';
+                        app.contextMenu.deleteBtn.style.display = 'flex';
+                        app.contextMenu.duplicateBtn.style.display = 'flex';
+
+                        if (item && item.type === 'note') {
+                            app.contextMenu.togglePinBtn.style.display = 'flex';
+                            app.contextMenu.pinActionText.textContent = item.pinned ? 'Unpin' : 'Pin';
+                        }
+                    } else {
+                        return;
+                    }
+
+                    app.contextMenu.menu.style.top = `${e.clientY}px`;
+                    app.contextMenu.menu.style.left = `${e.clientX}px`;
+                    app.contextMenu.menu.classList.remove('hidden');
+                    setTimeout(() => app.contextMenu.menu.classList.remove('scale-95', 'opacity-0'), 10);
+                    feather.replace();
+                });
+                // --- START: MOBILE LONG-PRESS FOR CONTEXT MENU ---
+                let longPressTimer;
+                app.containers.collectionsList.addEventListener('touchstart', e => {
+                    const itemWrapper = e.target.closest('.collection-item-wrapper');
+                    if (!itemWrapper) return;
+
+                    longPressTimer = setTimeout(() => {
+                        // Prevent the default touch behavior (like scrolling)
+                        e.preventDefault();
+                        
+                        // Clear any other open menus
+                        closeContextMenu();
+
+                        // Get the touch position
+                        const touch = e.touches[0];
+                        
+                        // Reuse the existing context menu logic
+                        app.contextMenu.targetId = itemWrapper.dataset.id;
+                        app.contextMenu.targetIsContainer = false;
+                        const { item } = findItem(app.contextMenu.targetId);
+                        
+                        app.contextMenu.renameBtn.style.display = 'flex';
+                        app.contextMenu.deleteBtn.style.display = 'flex';
+                        app.contextMenu.duplicateBtn.style.display = 'flex';
+
+                        if (item && item.type === 'note') {
+                            app.contextMenu.togglePinBtn.style.display = 'flex';
+                            app.contextMenu.pinActionText.textContent = item.pinned ? 'Unpin' : 'Pin';
+                        } else {
+                            app.contextMenu.togglePinBtn.style.display = 'none';
+                        }
+                        
+                        // Show the menu at the touch location
+                        app.contextMenu.menu.style.top = `${touch.clientY}px`;
+                        app.contextMenu.menu.style.left = `${touch.clientX}px`;
+                        app.contextMenu.menu.classList.remove('hidden');
+                        setTimeout(() => app.contextMenu.menu.classList.remove('scale-95', 'opacity-0'), 10);
+                        feather.replace();
+
+                    }, 500); // 500ms for a long press
+                });
+
+                const cancelLongPress = () => clearTimeout(longPressTimer);
+                app.containers.collectionsList.addEventListener('touchend', cancelLongPress);
+                app.containers.collectionsList.addEventListener('touchmove', cancelLongPress);
+                // --- END: MOBILE LONG-PRESS ---
+
+                const duplicateItem = (sourceItem) => {
+                    const newItem = JSON.parse(JSON.stringify(sourceItem));
+                    newItem.id = generateId(sourceItem.type[0]);
+                    newItem.name = `${sourceItem.name} (copy)`;
+                    
+                    const now = new Date().toISOString();
+                    if (newItem.type === 'note') {
+                        newItem.createdAt = now;
+                        newItem.modifiedAt = now;
+                    }
+
+                    if (newItem.type === 'folder' && newItem.children) {
+                        newItem.children = newItem.children.map(child => duplicateItem(child));
+                        if (state.kanbanColumns[sourceItem.id]) {
+                            state.kanbanColumns[newItem.id] = JSON.parse(JSON.stringify(state.kanbanColumns[sourceItem.id]));
+                        }
+                    }
+                    return newItem;
+                };
+
+                app.contextMenu.menu.addEventListener('click', async e => {
+                    const button = e.target.closest('button');
+                    if (!button) return;
+                    const action = button.dataset.action;
+                    const id = app.contextMenu.targetId;
+                    
+                    let findResult, targetItem, parent, parentArray;
+
+                    if (id) {
+                        findResult = findItem(id);
+                        targetItem = findResult.item;
+                        parent = findResult.parent;
+                        parentArray = Array.isArray(parent) ? parent : parent.children;
+                    }
+
+                    const createNewItem = (type) => {
+                        const name = type === 'note' ? 'Untitled Note' : 'New Folder';
+                        const now = new Date().toISOString();
+                        const newItem = {
+                            id: generateId(type[0]), name, type,
+                            ...(type === 'note' && { content: '', status: null, createdAt: now, modifiedAt: now, pinned: false, links: [], tags: [] }),
+                            ...(type === 'folder' && { children: [], expanded: true })
+                        };
+
+                        let destinationArray = state.collections;
+                        let parentFolder = null;
+                        
+                        if (targetItem) {
+                            if (targetItem.type === 'folder') {
+                                destinationArray = targetItem.children;
+                                targetItem.expanded = true;
+                                parentFolder = targetItem;
+                            } else {
+                                destinationArray = parentArray;
+                                parentFolder = Array.isArray(parent) ? null : parent;
+                            }
+                        }
+                        
+                        if (newItem.type === 'note' && parentFolder?.id) {
+                            newItem.status = state.kanbanColumns[parentFolder.id]?.[0]?.id || null;
+                        }
+                        
+                        destinationArray.unshift(newItem);
+                        
+                        if (type === 'note') {
+                            state.settings.activeNoteId = newItem.id;
+                        } else {
+                           state.kanbanColumns[newItem.id] = [{ id: generateId('col'), title: 'To Do' }];
+                        }
+                        
+                        saveState();
+                        render();
+                    };
+
+                    switch(action) {
+                        case 'new-note': createNewItem('note'); break;
+                        case 'new-folder': createNewItem('folder'); break;
+                        case 'delete':
+                            const confirmed = await showConfirm({ title: `Delete "${targetItem.name}"`, message: 'This action cannot be undone.', confirmText: 'Delete', confirmClass: 'bg-red-600' });
+                            if (confirmed) {
+                               const index = parentArray.findIndex(i => i.id === id);
+                               parentArray.splice(index, 1);
+                               showToast(`"${targetItem.name}" deleted.`);
+                               if (state.settings.activeNoteId === id) state.settings.activeNoteId = null;
+                               if (state.settings.activeCollectionId === id) state.settings.activeCollectionId = null;
+                               saveState();
+                               buildLunrIndex();
+                               render();
+                            }
+                            break;
+                        case 'rename':
+                            const newName = await showPrompt({ title: 'Rename', message: `Enter a new name for "${targetItem.name}":`, initialValue: targetItem.name });
+                            if (newName) {
+                                targetItem.name = newName;
+                                saveState();
+                                buildLunrIndex();
+                                render();
+                            }
+                            break;
+                        case 'toggle-pin':
+                            if(targetItem && targetItem.type === 'note') {
+                                targetItem.pinned = !targetItem.pinned;
+                                showToast(targetItem.pinned ? `Pinned "${targetItem.name}"` : `Unpinned "${targetItem.name}"`);
+                                saveState();
+                                render();
+                            }
+                            break;
+                        case 'duplicate':
+                            if (!targetItem) return;
+                            const newItem = duplicateItem(targetItem);
+                            parentArray.splice(findResult.index + 1, 0, newItem);
+                            showToast(`Duplicated "${targetItem.name}"`);
+                            saveState();
+                            buildLunrIndex();
+                            render();
+                            break;
+                    }
+                    closeContextMenu();
+                });
+                
+                const closeContextMenu = () => {
+                    app.contextMenu.menu.classList.add('scale-95', 'opacity-0');
+                    setTimeout(() => app.contextMenu.menu.classList.add('hidden'), 100);
+                };
+                
+                document.getElementById('bookmarklet-info-btn').addEventListener('click', () => {
+                    const code = `javascript:(()=>{const data=JSON.stringify({url:location.href,title:document.title,clip:window.getSelection().toString()});window.open('${window.location.origin + window.location.pathname}#clip='+encodeURIComponent(data),'_blank');})();`;
+                    app.modals.bookmarkletLink.href = code;
+                    openModal(app.modals.bookmarklet);
+                    feather.replace();
+                });
+                app.modals.bookmarkletCloseBtn.addEventListener('click', () => closeModal(app.modals.bookmarklet));
+
+                app.elements.notesListPane.addEventListener('click', async e => {
+                    const button = e.target.closest('button[data-action]');
+                    if (!button) return;
+                    const action = button.dataset.action;
+
+                    if (action === 'export') {
+                        const dataStr = JSON.stringify(state, null, 2);
+                        const dataBlob = new Blob([dataStr], {type: "application/json"});
+                        const url = URL.createObjectURL(dataBlob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `codex-notes-backup-${new Date().toISOString().split('T')[0]}.json`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        showToast('Data exported successfully!', 'success');
+                    } else if (action === 'import') {
+                        app.elements.importFileInput.click();
+                    }
+                });
+
+                app.elements.importFileInput.addEventListener('change', async e => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    const confirmed = await showConfirm({
+                        title: 'Import Data',
+                        message: 'This will <strong>overwrite all current data</strong> in the app. Are you sure you want to continue?',
+                        confirmText: 'Overwrite and Import',
+                        confirmClass: 'bg-orange-500'
+                    });
+                    if (!confirmed) return;
+
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            const importedState = JSON.parse(event.target.result);
+                            state = migrateState(importedState);
+                            saveState();
+                            showToast('Data imported successfully!', 'success');
+                            location.reload();
+                        } catch (err) {
+                            console.error("Import error:", err);
+                            showToast('Invalid or corrupted data file.', 'error');
+                        }
+                    };
+                    reader.readAsText(file);
+                    app.elements.importFileInput.value = '';
+                });
+                
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
+                        if (isSearchActive) {
+                            closeSearch();
+                        }
+                        closeContextMenu();
+                        if (app.elements.notesListPane.classList.contains('open')) {
+                            toggleMobileSidebar(false);
+                        }
+                    }
+                    if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
+                        if (e.key === 'f') { e.preventDefault(); openSearch(); }
+                        if (e.key === 'n') { e.preventDefault(); createNewNote(); }
+                    }
+                });
+                
+                document.addEventListener('click', (e) => {
+                    if(!app.contextMenu.menu.contains(e.target)) closeContextMenu();
+                    if(!app.containers.mobileControlsDropdown.contains(e.target) && !app.elements.mobileMoreButton.contains(e.target)) {
+                        const dropdown = app.containers.mobileControlsDropdown;
+                        dropdown.classList.add('scale-95', 'opacity-0');
+                        setTimeout(() => dropdown.classList.add('hidden'), 100);
+                    }
+                });
+                
+                app.elements.mobileMoreButton.addEventListener('click', () => {
+                    const dropdown = app.containers.mobileControlsDropdown;
+                    const isHidden = dropdown.classList.contains('hidden');
+                    if (isHidden) {
+                        dropdown.classList.remove('hidden');
+                        setTimeout(() => dropdown.classList.remove('scale-95', 'opacity-0'), 10);
+                    } else {
+                        dropdown.classList.add('scale-95', 'opacity-0');
+                        setTimeout(() => dropdown.classList.add('hidden'), 100);
+                    }
+                });
+
+                render();
+            }
+
+            
+        });
+    </script>
+
+</body>
+</html>
