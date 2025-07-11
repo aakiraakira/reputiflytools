@@ -145,7 +145,68 @@
         .collection-item .chevron { transition: transform 0.15s ease; }
         .collection-item.open > .chevron { transform: rotate(90deg); }
         .collection-item-wrapper.drop-target-folder { background-color: rgba(230, 57, 127, 0.1); border: 1px dashed var(--accent-primary); }
-        
+        .file-attachment-widget {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background-color: var(--bg-pane-dark);
+    border: 1px solid var(--border-color);
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    margin: 1em 0;
+}
+.file-attachment-widget .file-info {
+    flex-grow: 1;
+    min-width: 0;
+}
+.file-attachment-widget .file-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.file-attachment-widget .file-size {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+}
+.file-attachment-widget .download-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background-color: var(--accent-primary);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: opacity 0.2s;
+}
+.file-attachment-widget .download-btn:hover {
+    opacity: 0.8;
+}
+.file-attachment-widget {
+    position: relative; /* Needed for the delete button */
+}
+.attachment-delete-btn {
+    position: absolute;
+    top: 0.25rem; /* 4px */
+    right: 0.25rem; /* 4px */
+    padding: 0.125rem; /* 2px */
+    border-radius: 9999px;
+    background-color: var(--bg-pane-light);
+    color: var(--text-tertiary);
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+    cursor: pointer;
+}
+.file-attachment-widget:hover .attachment-delete-btn {
+    opacity: 1;
+}
+.attachment-delete-btn:hover {
+    color: #ef4444; /* A standard red color */
+}
         .kanban-card {
             background-color: var(--bg-main);
             height: 140px;
@@ -659,6 +720,8 @@
          </div>
      </div>
 </header>
+<input type="file" id="file-upload-input" class="hidden" />
+
            
            <div id="main-content-area" class="flex-grow overflow-y-auto relative flex flex-col">
                 <div id="board-view" class="notes-view active flex-grow p-4 md:p-5 overflow-x-auto no-scrollbar h-full">
@@ -813,6 +876,7 @@
         <button data-command="italic" class="p-2 hover:bg-bg-main rounded"><i data-feather="italic" class="w-4 h-4"></i></button>
         <button data-command="createLink" class="p-2 hover:bg-bg-main rounded"><i data-feather="link" class="w-4 h-4"></i></button>
         <button data-command="insertImage" class="p-2 hover:bg-bg-main rounded"><i data-feather="image" class="w-4 h-4"></i></button>
+        <button id="attach-file-btn" class="p-2 hover:bg-bg-main rounded" title="Attach File"><i data-feather="paperclip" class="w-4 h-4"></i></button>
         <button data-command="formatBlock" data-value="code" class="p-2 hover:bg-bg-main rounded" title="Code Block"><i data-feather="code" class="w-4 h-4"></i></button>
         <button data-command="formatBlock" data-value="blockquote" class="p-2 hover:bg-bg-main rounded" title="Quote"><strong>&ldquo;</strong></button>
         <button data-command="monospace" class="p-2 hover:bg-bg-main rounded font-mono font-bold" title="Monospace">M</button>
@@ -1365,7 +1429,78 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
             }
 
             const generateId = (prefix = 'id') => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            
+            function formatBytes(bytes, decimals = 2) {
+    if (!+bytes) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
+
+const handleFileUpload = async (file) => {
+    const user = window.auth.currentUser;
+    if (!file || !user) return;
+
+    const maxSize = 5 * 1024 * 1024; // 5MB limit
+    if (file.size > maxSize) {
+        showToast('File is too large. Max size is 5MB.', 'error');
+        return;
+    }
+
+    const toastId = showToast(`Uploading ${file.name}... 0%`, 'loading');
+
+    try {
+        const { getStorage, ref, uploadBytesResumable, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js");
+        const storage = getStorage();
+        const storageRef = ref(storage, `users/${user.uid}/${Date.now()}-${file.name}`);
+        const uploadTask = uploadBytesResumable(storageRef, file);
+
+        uploadTask.on('state_changed',
+            (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                const toastElement = document.getElementById(toastId);
+                if (toastElement) toastElement.textContent = `Uploading ${file.name}... ${Math.round(progress)}%`;
+            },
+            (error) => {
+                dismissToast(toastId);
+                showToast(`Upload failed: ${error.code}`, 'error');
+            },
+            async () => {
+                dismissToast(toastId);
+                showToast('Upload complete!', 'success');
+                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                const escapedFileName = file.name.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                let fileHTML = '';
+
+                if (file.type.startsWith('image/')) {
+                    // Make the image non-editable so it can be deleted as a single block
+                    fileHTML = `<p><img src="${downloadURL}" alt="${escapedFileName}" style="max-width: 100%; height: auto; border-radius: 8px;" contenteditable="false" /></p>`;
+                } else {
+                    // This new widget is non-editable, making it easy to delete with backspace.
+                    // The download button now only contains text.
+                    fileHTML = `<div class="file-attachment-widget" contenteditable="false">
+                                    <i data-feather="file-text" class="w-6 h-6 text-text-secondary flex-shrink-0"></i>
+                                    <div class="file-info">
+                                        <div class="file-name">${escapedFileName}</div>
+                                        <div class="file-size">${formatBytes(file.size)}</div>
+                                    </div>
+                                    <a href="${downloadURL}" target="_blank" class="download-btn" download>Download</a>
+                                </div>`;
+                }
+                
+                app.elements.noteEditorBody.focus();
+                // We add a paragraph after the widget to ensure you can place your cursor after it.
+                document.execCommand('insertHTML', false, fileHTML + "<p><br></p>");
+                feather.replace(); 
+                saveNoteContent();
+            }
+        );
+    } catch (error) {
+        dismissToast(toastId);
+        showToast('An error occurred during upload.', 'error');
+    }
+};
             
             
 
@@ -1789,6 +1924,9 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
             </button>
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-share">
     <i data-feather="share-2" class="w-4 h-4"></i>Share Note
+</button>
+<button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-upload">
+    <i data-feather="upload-cloud" class="w-4 h-4"></i>Upload File
 </button>
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-pin">
                 <i data-feather="paperclip" class="w-4 h-4"></i>${pinText}
@@ -2278,6 +2416,23 @@ const handleGenerateQuiz = async (noteContent) => {
 };
 
             async function init() {
+                
+                // --- Logic for File Attachments ---
+const attachFileBtn = document.getElementById('attach-file-btn');
+const fileUploadInput = document.getElementById('file-upload-input');
+
+attachFileBtn.addEventListener('click', () => {
+    fileUploadInput.click();
+});
+
+fileUploadInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        handleFileUpload(file);
+    }
+    // Reset the input so you can upload the same file again if needed
+    e.target.value = '';
+});
                 document.getElementById('header-share-btn').addEventListener('click', handleShareNote);
                 await loadState();
                 buildLunrIndex();
@@ -2791,6 +2946,9 @@ headerQuizBtn.addEventListener('click', () => handleHeaderAIAction('quiz'));
                 break;
                 case 'mobile-share':
     handleShareNote();
+    break;
+    case 'mobile-upload':
+    document.getElementById('file-upload-input').click();
     break;
         }
     } 
@@ -3728,6 +3886,11 @@ app.modals.quizContent.addEventListener('change', e => {
                 });
                 
                 document.addEventListener('keydown', (e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'u') {
+    e.preventDefault();
+    document.getElementById('file-upload-input').click();
+}
+
                     if (e.key === 'Escape') {
                         if (isSearchActive) {
                             closeSearch();
