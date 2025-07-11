@@ -796,13 +796,23 @@
         <button data-action="rename" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="edit-2" class="w-4 h-4"></i>Rename</button>
         <button data-action="delete" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark text-red-500 rounded flex items-center gap-2"><i data-feather="trash-2" class="w-4 h-4"></i>Delete</button>
     </div>
+    <div id="quiz-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-2xl z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-4 flex-shrink-0">
+        <h3 class="text-lg font-semibold flex items-center gap-2"><i data-feather="help-circle" class="w-5 h-5 text-accent-primary"></i>MCQ Quiz</h3>
+        <button id="quiz-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    <div id="quiz-content" class="text-text-secondary mb-4 p-1 rounded-md max-h-[60vh] overflow-y-auto">
+        </div>
+    <footer class="flex justify-end gap-3 mt-4 flex-shrink-0">
+        <button id="quiz-done-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Done</button>
+    </footer>
+</div>
 
 
     <script type="module">
         feather.replace();
 
         document.addEventListener('DOMContentLoaded', async () => {
-        
             
             // --- START: FINAL AUTHENTICATION LOGIC ---
 
@@ -940,6 +950,11 @@
                     headerMainContent: document.getElementById('header-main-content'),
                 },
                 modals: {
+                    // Add these new lines for the quiz modal
+quiz: document.getElementById('quiz-modal'),
+quizContent: document.getElementById('quiz-content'),
+quizCloseBtn: document.getElementById('quiz-close-btn'),
+quizDoneBtn: document.getElementById('quiz-done-btn'),
                     backdrop: document.getElementById('modal-backdrop'),
                     apiKey: document.getElementById('api-key-modal'),
                     apiKeyInput: document.getElementById('api-key-input'),
@@ -1487,19 +1502,35 @@
             }
             
             function renderTagList() {
-                const allNotes = getAllNotes(state.collections);
-                const allTags = new Set(allNotes.flatMap(note => note.tags || []));
-                const sortedTags = Array.from(allTags).sort();
-                
-                if (sortedTags.length === 0) {
-                    app.containers.tagList.innerHTML = `<p class="px-2 text-xs text-text-tertiary">No tags found.</p>`;
-                    return;
-                }
+    const allNotes = getAllNotes(state.collections);
+    // Get a flat list of all tags, including duplicates.
+    const allTagsRaw = allNotes.flatMap(note => note.tags || []);
 
-                app.containers.tagList.innerHTML = sortedTags.map(tag => `
-                    <a href="#" class="tag-filter-item block text-sm p-1 px-2 rounded-md text-text-secondary hover:bg-bg-pane-dark hover:text-text-primary ${state.settings.activeTag === tag ? 'active' : ''}" data-tag="${tag}">#${tag}</a>
-                `).join('');
-            }
+    if (allTagsRaw.length === 0) {
+        app.containers.tagList.innerHTML = `<p class="px-2 text-xs text-text-tertiary">No tags found.</p>`;
+        return;
+    }
+
+    // Create a frequency map to count how many times each tag is used.
+    const tagCounts = allTagsRaw.reduce((acc, tag) => {
+        acc[tag] = (acc[tag] || 0) + 1;
+        return acc;
+    }, {});
+
+    // Get the unique tags and sort them alphabetically.
+    const uniqueTags = [...new Set(allTagsRaw)].sort();
+
+    // Update the HTML to include the count in a styled badge.
+    app.containers.tagList.innerHTML = uniqueTags.map(tag => {
+        const count = tagCounts[tag];
+        return `
+            <a href="#" class="tag-filter-item flex justify-between items-center text-sm p-1 px-2 rounded-md text-text-secondary hover:bg-bg-pane-dark hover:text-text-primary ${state.settings.activeTag === tag ? 'active' : ''}" data-tag="${tag}">
+                <span>#${tag}</span>
+                <span class="text-xs bg-bg-pane-dark rounded-full px-1.5 py-0.5 ml-2">${count}</span>
+            </a>
+        `
+    }).join('');
+}
 
             function parseInternalLinks(htmlContent) {
                 if (!htmlContent) return '';
@@ -1711,18 +1742,25 @@
                     const date = formatDateTime(note.modifiedAt);
                     const pinnedClass = note.pinned ? 'pinned' : '';
                     return `
-                        <div class="list-note-item bg-bg-pane-light p-4 rounded-lg shadow-sm border border-border-color cursor-pointer hover:shadow-md transition-all relative ${pinnedClass}" data-note-id="${note.id}">
-                            <div class="flex justify-between items-start">
-                                <div class="flex-grow min-w-0">
-                                    <h3 class="font-semibold text-lg truncate">${note.name}</h3>
-                                    <p class="text-sm text-text-secondary mt-1 truncate-multiline card-content">${note.content.replace(/<[^>]*>?/gm, '')}</p>
-                                    <p class="text-xs text-text-tertiary mt-3">Last Modified: ${date}</p>
-                                </div>
-                                <button class="summarize-btn flex-shrink-0 ml-4 p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note with AI" data-note-id="${note.id}">
-                                    <i data-feather="zap" class="w-4 h-4"></i>
-                                </button>
-                            </div>
-                        </div>`
+    <div class="list-note-item bg-bg-pane-light p-4 rounded-lg shadow-sm border border-border-color cursor-pointer hover:shadow-md transition-all relative ${pinnedClass}" data-note-id="${note.id}">
+        <div class="flex justify-between items-start">
+            <div class="flex-grow min-w-0">
+                <h3 class="font-semibold text-lg truncate">${note.name}</h3>
+                <p class="text-sm text-text-secondary mt-1 truncate-multiline card-content">${note.content.replace(/<[^>]*>?/gm, '')}</p>
+                <p class="text-xs text-text-tertiary mt-3">Last Modified: ${date}</p>
+            </div>
+
+            <div class="flex items-center flex-shrink-0 ml-4">
+                <button class="summarize-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note with AI" data-note-id="${note.id}">
+                    <i data-feather="zap" class="w-4 h-4"></i>
+                </button>
+                <button class="quiz-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Generate Quiz with AI" data-note-id="${note.id}">
+                    <i data-feather="help-circle" class="w-4 h-4"></i>
+                </button>
+            </div>
+
+        </div>
+    </div>`
                  }).join('');
             }
             
@@ -1967,12 +2005,74 @@
                     });
                 });
             }
+            /**
+ * Renders the generated quiz data into the quiz modal.
+ * @param {Array<Object>} quizArray - An array of quiz question objects.
+ */
+function renderQuizModal(quizArray) {
+    let quizHTML = '<div class="space-y-6">';
+    quizArray.forEach((q, index) => {
+        quizHTML += `
+            <div class="quiz-question-container border-b border-border-color pb-4" data-correct-answer="${q.answer}">
+                <p class="font-semibold text-text-primary">${index + 1}. ${q.question}</p>
+                <div class="mt-3 space-y-2">
+                    ${Object.entries(q.options).map(([key, value]) => `
+                        <label class="block flex items-center p-2 rounded-md border border-border-color cursor-pointer hover:bg-bg-pane-dark transition-colors duration-200">
+                            <input type="radio" name="question-${index}" value="${key}" class="mr-3 shrink-0">
+                            <span>${key}: ${value}</span>
+                        </label>
+                    `).join('')}
+                </div>
+                <p class="quiz-feedback text-sm mt-2 h-5 font-medium"></p>
+            </div>
+        `;
+    });
+    quizHTML += '</div>';
+
+    app.modals.quizContent.innerHTML = quizHTML;
+    openModal(app.modals.quiz);
+}
+
+/**
+ * Handles the AI call to generate an MCQ quiz from note content.
+ * @param {string} noteContent - The plain text content of the note.
+ */
+const handleGenerateQuiz = async (noteContent) => {
+    const toastId = showToast('🤖 Generating quiz...', 'loading');
+
+    // This detailed prompt instructs Gemini to return a clean JSON object.
+    const prompt = `Based on the following text, generate a multiple-choice quiz with 3-5 questions. For each question, provide 4 options (A, B, C, D) and indicate the correct answer. The question and options should be concise. Return the result as a single, valid JSON object with a key "quiz" which is an array of objects. Each object in the array must have three keys: "question" (string), "options" (an object with A, B, C, D keys), and "answer" (a string with the key of the correct option, e.g., "A"). Do not include any text, notes, or markdown formatting like \`\`\`json before or after the JSON object.
+
+    Text:
+    ---
+    ${noteContent}`;
+
+    const payload = { contents: [{ parts: [{ text: prompt }] }] };
+    const jsonResponse = await callGeminiAPI(payload);
+    dismissToast(toastId);
+
+    if (jsonResponse) {
+        try {
+            // The AI might occasionally wrap the response, this cleans it up.
+            const cleanedJsonResponse = jsonResponse.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+            const quizData = JSON.parse(cleanedJsonResponse);
+
+            if (quizData.quiz && Array.isArray(quizData.quiz)) {
+                 renderQuizModal(quizData.quiz);
+            } else {
+                throw new Error("Invalid quiz data structure received from AI.");
+            }
+        } catch (err) {
+            console.error("Failed to parse quiz JSON:", err, "Raw response:", jsonResponse);
+            showToast('Failed to generate a valid quiz. The AI response was malformed.', 'error');
+        }
+    } else {
+        // Error toast is already shown by callGeminiAPI, but we can add a fallback.
+        showToast('Could not generate quiz from AI.', 'error');
+    }
+};
 
             async function init() {
-                if (window.appHasBeenInitialized) {
-        return;
-    }
-    window.appHasBeenInitialized = true;
                 await loadState();
                 buildLunrIndex();
                 
@@ -2444,7 +2544,20 @@
                         handleSummarize(plainContent, noteItemEl);
                         return;
                     }
-                    
+                    const quizBtn = e.target.closest('.quiz-btn');
+if (quizBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const noteId = quizBtn.dataset.noteId;
+    const { item: note } = findItem(noteId);
+    const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
+    if (!plainContent) {
+        showToast("Note is empty, cannot generate a quiz.", "info");
+        return;
+    }
+    handleGenerateQuiz(plainContent);
+    return;
+}
                     const copyBtn = e.target.closest('.copy-code-btn');
                     if (copyBtn) {
                          const codeBlock = copyBtn.closest('.code-block-wrapper, .hljs').querySelector('pre, code');
@@ -2781,6 +2894,38 @@
                     }
                 };
                 app.modals.summaryCloseBtn.addEventListener('click', () => closeModal(app.modals.summary));
+                app.modals.quizCloseBtn.addEventListener('click', () => closeModal(app.modals.quiz));
+app.modals.quizDoneBtn.addEventListener('click', () => closeModal(app.modals.quiz));
+
+app.modals.quizContent.addEventListener('change', e => {
+    if (e.target.type === 'radio') {
+        const questionContainer = e.target.closest('.quiz-question-container');
+        const selectedAnswer = e.target.value;
+        const correctAnswer = questionContainer.dataset.correctAnswer;
+        const feedbackEl = questionContainer.querySelector('.quiz-feedback');
+
+        // Disable all options for this question after an answer is selected
+        questionContainer.querySelectorAll('input[type="radio"]').forEach(radio => {
+            radio.disabled = true;
+            radio.parentElement.classList.add('cursor-not-allowed', 'opacity-60');
+        });
+
+        if (selectedAnswer === correctAnswer) {
+            feedbackEl.textContent = 'Correct!';
+            feedbackEl.className = 'quiz-feedback text-sm mt-2 h-5 font-medium text-green-500';
+            e.target.parentElement.classList.add('bg-green-500/20', 'border-green-500');
+        } else {
+            feedbackEl.textContent = `Incorrect. The correct answer is ${correctAnswer}.`;
+            feedbackEl.className = 'quiz-feedback text-sm mt-2 h-5 font-medium text-red-500';
+            e.target.parentElement.classList.add('bg-red-500/20', 'border-red-500');
+
+            // Highlight the correct answer as well
+            const correctLabel = questionContainer.querySelector(`input[value="${correctAnswer}"]`).parentElement;
+            correctLabel.classList.remove('opacity-60');
+            correctLabel.classList.add('bg-green-500/20', 'border-green-500');
+        }
+    }
+});
 
                 app.elements.chatbotFab.addEventListener('click', () => {
                     renderChatHistory();
