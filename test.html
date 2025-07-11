@@ -1475,41 +1475,43 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
             }
 
             function renderCollectionsList(collections = state.collections, level = 0) {
-                const createItemHTML = (item, currentLevel) => {
-                    const isActive = item.id === state.settings.activeCollectionId;
-                    const isNoteActive = item.id === state.settings.activeNoteId;
-                    const isFolder = item.type === 'folder';
-                    
-                    if (isFolder && item.children) {
-                        item.children.sort((a, b) => {
-                            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-                            return a.name.localeCompare(b.name);
-                        });
-                    }
+    const createItemHTML = (item, currentLevel) => {
+        const isActive = item.id === state.settings.activeCollectionId;
+        const isNoteActive = item.id === state.settings.activeNoteId;
+        const isFolder = item.type === 'folder';
 
-                    return `
-                        <li data-id="${item.id}" draggable="true" class="collection-item-wrapper rounded-md">
-                            <a href="#" class="collection-item flex items-center gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
-                                ${isFolder ? `<i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i>` : ''}
-                                <i data-feather="${isFolder ? 'folder' : (item.pinned ? 'paperclip' : 'file-text')}" class="w-4 h-4 flex-shrink-0 text-text-secondary ${item.pinned ? 'text-accent-primary': ''}"></i>
-                                <span class="truncate flex-grow">${item.name}</span>
-                            </a>
-                            ${isFolder && item.expanded && item.children ? `<ul class="collection-children">${renderCollectionsList(item.children, currentLevel + 1)}</ul>` : ''}
-                        </li>
-                    `;
-                };
-                
-                collections.sort((a, b) => {
-                    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-                    return a.name.localeCompare(b.name);
-                });
-                const listHTML = collections.map(item => createItemHTML(item, level)).join('');
-                
-                if (level === 0) {
-                    app.containers.collectionsList.innerHTML = `<ul class="space-y-1">${listHTML}</ul>`;
-                }
-                return listHTML;
-            }
+        if (isFolder && item.children) {
+            item.children.sort((a, b) => {
+                if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+                return a.name.localeCompare(b.name);
+            });
+        }
+
+        return `
+            <li data-id="${item.id}" draggable="true" class="collection-item-wrapper rounded-md">
+                <a href="#" class="collection-item flex items-center gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
+                    ${isFolder ? `<i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i>` : ''}
+                    <i data-feather="${isFolder ? 'folder' : (item.pinned ? 'paperclip' : 'file-text')}" class="w-4 h-4 flex-shrink-0 text-text-secondary ${item.pinned ? 'text-accent-primary': ''}"></i>
+                    <span class="truncate flex-grow">${item.name}</span>
+                </a>
+                ${isFolder && item.expanded && item.children ? `<ul class="collection-children">${renderCollectionsList(item.children, currentLevel + 1)}</ul>` : ''}
+            </li>
+        `;
+    };
+
+    collections.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+    });
+    const listHTML = collections.map(item => createItemHTML(item, level)).join('');
+
+    if (level === 0) {
+        app.containers.collectionsList.innerHTML = `<ul class="space-y-1">${listHTML}</ul>`;
+        // This is the key fix. It ensures icons are re-rendered every time the main list is updated.
+        feather.replace();
+    }
+    return listHTML;
+}
             
             function renderTagList() {
     const allNotes = getAllNotes(state.collections);
@@ -1614,11 +1616,13 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
             
             function renderMobileControls() {
     const activeCollection = findItem(state.settings.activeCollectionId)?.item;
-    const isNoteActive = !!state.settings.activeNoteId;
+    const note = findItem(state.settings.activeNoteId)?.item;
+    const isNoteActive = !!note;
 
     let controlsHTML = '';
     if (isNoteActive) {
-        // This is the new block that adds AI tools when a note is active
+        // This block now contains BOTH AI Tools and Note Tools
+        const pinText = note.pinned ? 'Unpin Note' : 'Pin Note';
         controlsHTML = `
             <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">AI Tools</div>
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-summarize">
@@ -1626,6 +1630,23 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
             </button>
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-quiz">
                 <i data-feather="help-circle" class="w-4 h-4"></i>MCQ Quiz
+            </button>
+
+            <hr class="my-1 border-border-color">
+
+            <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">Note Tools</div>
+            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-rename">
+                <i data-feather="edit-2" class="w-4 h-4"></i>Rename
+            </button>
+            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-duplicate">
+                <i data-feather="copy" class="w-4 h-4"></i>Duplicate
+            </button>
+            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-pin">
+                <i data-feather="paperclip" class="w-4 h-4"></i>${pinText}
+            </button>
+            <hr class="my-1 border-border-color">
+            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 text-red-500" data-action="mobile-delete">
+                <i data-feather="trash-2" class="w-4 h-4"></i>Delete
             </button>
         `;
     } else if (activeCollection) {
@@ -1668,7 +1689,6 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
     });
     feather.replace();
 }
-
             function renderKanbanView() {
                 app.views.board.classList.remove('hidden');
                 const collectionId = state.settings.activeCollectionId;
@@ -1864,29 +1884,29 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
         const excerptMatch = plainContent.match(new RegExp(`.{0,50}${query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}.{0,50}`, 'i'));
         const excerpt = excerptMatch ? `...${highlightText(excerptMatch[0], query)}...` : highlightText(plainContent.substring(0, 100) + '...', query);
 
+        // The data-note-id and cursor-pointer are now on the main div
         return `
-    <div class="search-result-item p-4 mb-3 rounded-lg hover:shadow-md border border-border-color bg-bg-pane-light transition-shadow">
-        <div class="flex justify-between items-start">
-            <div class="flex-grow min-w-0 cursor-pointer" data-note-id="${note.id}">
-                <div class="font-semibold text-text-secondary text-sm">
-                    ${parentName ? `${highlightText(parentName, query)} / ` : ''}<span class="text-text-primary">${highlightText(note.name, query)}</span>
+            <div class="search-result-item p-4 mb-3 rounded-lg hover:shadow-md border border-border-color bg-bg-pane-light transition-shadow cursor-pointer" data-note-id="${note.id}">
+                <div class="flex justify-between items-start">
+                    <div class="flex-grow min-w-0">
+                        <div class="font-semibold text-text-secondary text-sm">
+                            ${parentName ? `${highlightText(parentName, query)} / ` : ''}<span class="text-text-primary">${highlightText(note.name, query)}</span>
+                        </div>
+                        <p class="text-text-primary mt-2">${excerpt}</p>
+                    </div>
+                    <div class="flex items-center flex-shrink-0 ml-4">
+                        <button class="summarize-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note with AI" data-note-id="${note.id}">
+                            <i data-feather="zap" class="w-4 h-4"></i>
+                        </button>
+                        <button class="quiz-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Generate Quiz with AI" data-note-id="${note.id}">
+                            <i data-feather="help-circle" class="w-4 h-4"></i>
+                        </button>
+                    </div>
                 </div>
-                <p class="text-text-primary mt-2">${excerpt}</p>
             </div>
-            <div class="flex items-center flex-shrink-0 ml-4">
-                <button class="summarize-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note with AI" data-note-id="${note.id}">
-                    <i data-feather="zap" class="w-4 h-4"></i>
-                </button>
-                <button class="quiz-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Generate Quiz with AI" data-note-id="${note.id}">
-                    <i data-feather="help-circle" class="w-4 h-4"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-`
+        `
     }).join('');
 
-    // This is the crucial line that draws the icons after the search results are on the page.
     feather.replace();
 }
             
@@ -2554,35 +2574,79 @@ headerQuizBtn.addEventListener('click', () => handleHeaderAIAction('quiz'));
                     }
                 });
 
-                app.containers.mobileControlsDropdown.addEventListener('click', (e) => {
-                    const button = e.target.closest('.view-btn-mobile');
-                    if (button) {
-    // ADD THIS NEW BLOCK
-    const action = button.dataset.action;
-    if (action === 'mobile-summarize' || action === 'mobile-quiz') {
-        const note = findItem(state.settings.activeNoteId)?.item;
-        if (note) {
-            const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
-            if (action === 'mobile-summarize') {
-                handleSummarize(plainContent);
-            } else {
-                handleGenerateQuiz(plainContent);
-            }
-        }
-        // Close the dropdown after the action
+                app.containers.mobileControlsDropdown.addEventListener('click', async (e) => {
+    const button = e.target.closest('button');
+    if (!button) return;
+
+    const closeDropdown = () => {
         const dropdown = app.containers.mobileControlsDropdown;
         dropdown.classList.add('scale-95', 'opacity-0');
         setTimeout(() => dropdown.classList.add('hidden'), 100);
+    };
+
+    const action = button.dataset.action;
+    const noteId = state.settings.activeNoteId;
+
+    // Handle all actions that require an active note
+    if (action && noteId) {
+        closeDropdown(); // Close menu immediately after an action is clicked
+        const { item: note, parent, index } = findItem(noteId);
+        if (!note) return;
+
+        const parentArray = Array.isArray(parent) ? parent : parent.children;
+        const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
+
+        switch (action) {
+            case 'mobile-summarize':
+                handleSummarize(plainContent);
+                break;
+            case 'mobile-quiz':
+                handleGenerateQuiz(plainContent);
+                break;
+            case 'mobile-rename':
+                const newName = await showPrompt({ title: 'Rename', message: `Enter a new name for "${note.name}":`, initialValue: note.name });
+                if (newName) {
+                    note.name = newName;
+                    saveState();
+                    buildLunrIndex();
+                    render();
+                }
+                break;
+            case 'mobile-duplicate':
+                const newItem = duplicateItem(note);
+                parentArray.splice(index + 1, 0, newItem);
+                showToast(`Duplicated "${note.name}"`);
+                saveState();
+                buildLunrIndex();
+                render();
+                break;
+            case 'mobile-pin':
+                note.pinned = !note.pinned;
+                showToast(note.pinned ? `Pinned "${note.name}"` : `Unpinned "${note.name}"`);
+                saveState();
+                render();
+                break;
+            case 'mobile-delete':
+                const confirmed = await showConfirm({ title: `Delete "${note.name}"`, message: 'This action cannot be undone.', confirmText: 'Delete' });
+                if (confirmed) {
+                    parentArray.splice(index, 1);
+                    showToast(`"${note.name}" deleted.`);
+                    state.settings.activeNoteId = null;
+                    saveState();
+                    buildLunrIndex();
+                    render();
+                }
+                break;
+        }
     } 
-    // END OF NEW BLOCK
+    // Handle view switching, which doesn't need an active note
     else if (button.classList.contains('view-btn-mobile')) {
         state.settings.activeView = button.dataset.view;
         saveState();
         renderMainView();
         renderMobileControls();
     }
-}
-                });
+});
                 
                 app.elements.sortOrderSelect.addEventListener('change', (e) => {
                     state.settings.listSortOrder = e.target.value;
