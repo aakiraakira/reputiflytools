@@ -60,6 +60,7 @@
             --brand-grad-from: #007aff;
             --brand-grad-to: #007aff;
         }
+        
 
         .dark {
             --bg-main: #111827;
@@ -109,6 +110,7 @@
             transition: width 300ms ease-in-out, transform 300ms ease-in-out;
             overflow: hidden;
         }
+        
         #notes-list-pane .sidebar-content-wrapper {
             transition: opacity 150ms ease-in-out;
         }
@@ -304,9 +306,8 @@
         }
         
         .summarize-btn {
-            opacity: 0;
-            transition: opacity 0.2s ease-in-out;
-        }
+    transition: opacity 0.2s ease-in-out;
+}
         .list-note-item:hover .summarize-btn { opacity: 1; }
 
         .chat-bubble { max-width: 80%; }
@@ -373,6 +374,13 @@
                 width: 280px !important; /* Fixed width for mobile overlay */
                 border-right-width: 1px;
             }
+            #main-header {
+           @apply z-10; /* Ensures the header stays above the content area */
+        }
+
+        #notes-list-pane .sidebar-content-wrapper {
+            transition: opacity 150ms ease-in-out;
+        }
             #notes-list-pane.open {
                 transform: translateX(0);
                 box-shadow: 0 0 20px rgba(0,0,0,0.2);
@@ -383,7 +391,10 @@
             #mobile-new-note-fab { display: flex; }
             #desktop-header-controls { display: none; }
             #mobile-header-controls { display: flex; }
-            #chatbot-fab { bottom: 5.5rem; }
+            #chatbot-fab { 
+    display: flex; 
+    bottom: 5.5rem; 
+}
         }
 
         #app-container {
@@ -407,12 +418,10 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
     getAuth,
-    createUserWithEmailAndPassword,
-    signInWithEmailAndPassword,
     onAuthStateChanged,
-    signOut
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFunctions } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
   // Your web app's Firebase configuration
   const firebaseConfig = {
@@ -430,6 +439,8 @@
   // CORRECTED PART: Make auth and db globally available
   window.auth = getAuth(app);
   window.db = getFirestore(app);
+   window.functions = getFunctions(app);
+    
 
   // This is our new entry point!
   onAuthStateChanged(window.auth, (user) => {
@@ -439,50 +450,54 @@
     const chatbotFab = document.getElementById('chatbot-fab');
 
     if (user) {
-      // User is signed in.
-      console.log('User is logged in:', user.uid);
-      if (authContainer) authContainer.style.display = 'none';
-      if (appContainer) appContainer.style.display = 'flex';
-      if (mobileFab) mobileFab.style.display = 'flex';
-      if (chatbotFab) chatbotFab.style.display = 'flex';
-      
-      // --- START: NEW PROFILE LOGIC ---
-      const userInitial = document.getElementById('user-initial');
-      const userEmailDisplay = document.getElementById('user-email-display');
-      const profileButton = document.getElementById('profile-button');
-      const profileDropdown = document.getElementById('profile-dropdown');
-      const signOutLink = document.getElementById('sign-out-link');
+          // User is signed in.
+          console.log('User is logged in:', user.uid);
+          if (authContainer) authContainer.style.display = 'none';
+          if (appContainer) appContainer.style.display = 'flex';
+          
+          // --- START: PROFILE LOGIC ---
+          const userInitial = document.getElementById('user-initial');
+          const userEmailDisplay = document.getElementById('user-email-display');
+          const profileButton = document.getElementById('profile-button');
+          const profileDropdown = document.getElementById('profile-dropdown');
+          const signOutLink = document.getElementById('sign-out-link');
 
-      if (user.email) {
-          userInitial.textContent = user.email.charAt(0).toUpperCase();
-          userEmailDisplay.textContent = user.email;
-          userEmailDisplay.title = user.email;
-      }
-
-      profileButton.addEventListener('click', (e) => {
-          e.stopPropagation();
-          profileDropdown.classList.toggle('hidden');
-          // Re-render icons if the dropdown is shown
-          if (!profileDropdown.classList.contains('hidden')) {
-            feather.replace();
+          if (user.email) {
+              userInitial.textContent = user.email.charAt(0).toUpperCase();
+              userEmailDisplay.textContent = user.email;
+              userEmailDisplay.title = user.email;
           }
-      });
 
-      signOutLink.addEventListener('click', async (e) => {
-          e.preventDefault();
-          try {
-              await signOut(window.auth);
-          } catch (error) {
-              console.error('Sign out error:', error);
+          if(profileButton) { // Check if button exists before adding listener
+            profileButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if(profileDropdown) profileDropdown.classList.toggle('hidden');
+                // Re-render icons if the dropdown is shown
+                if (profileDropdown && !profileDropdown.classList.contains('hidden')) {
+                  feather.replace();
+                }
+            });
           }
-      });
-      
-      // Make sure init() is defined before calling it
-      if (window.appInit) {
-          window.appInit();
-      }
 
-    } else {
+          if(signOutLink) { // Check if link exists
+            signOutLink.addEventListener('click', async (e) => {
+                e.preventDefault();
+                try {
+                    // We need to import signOut here to use it
+                    const { signOut } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
+                    await signOut(window.auth);
+                } catch (error) {
+                    console.error('Sign out error:', error);
+                }
+            });
+          }
+          // --- END: PROFILE LOGIC ---
+          
+          // Make sure init() is defined before calling it
+          if (window.appInit) {
+              window.appInit();
+          }
+      } else {
       // User is signed out.
       console.log('User is logged out.');
       if (authContainer) authContainer.style.display = 'flex';
@@ -781,6 +796,17 @@
         <button data-action="rename" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="edit-2" class="w-4 h-4"></i>Rename</button>
         <button data-action="delete" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark text-red-500 rounded flex items-center gap-2"><i data-feather="trash-2" class="w-4 h-4"></i>Delete</button>
     </div>
+    <div id="quiz-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-2xl z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-4 flex-shrink-0">
+        <h3 class="text-lg font-semibold flex items-center gap-2"><i data-feather="help-circle" class="w-5 h-5 text-accent-primary"></i>MCQ Quiz</h3>
+        <button id="quiz-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    <div id="quiz-content" class="text-text-secondary mb-4 p-1 rounded-md max-h-[60vh] overflow-y-auto">
+        </div>
+    <footer class="flex justify-end gap-3 mt-4 flex-shrink-0">
+        <button id="quiz-done-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Done</button>
+    </footer>
+</div>
 
 
     <script type="module">
@@ -793,11 +819,13 @@
             // Import the functions we need at the top of the module.
             const {
                 createUserWithEmailAndPassword,
-                signInWithEmailAndPassword
+                signInWithEmailAndPassword,
+                sendEmailVerification
             } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
 
             // ADD THIS NEW LINE:
             const { doc, setDoc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
 
             const authContainer = document.getElementById('auth-container');
             const loginForm = document.getElementById('login-form');
@@ -845,10 +873,11 @@
 
                 try {
                     if (mode === 'signup') {
-                        // Use the globally available 'window.auth'
-                        await createUserWithEmailAndPassword(window.auth, email, password);
-                        console.log('Sign up successful!');
-                    } else {
+    // Use the globally available 'window.auth'
+    const userCredential = await createUserWithEmailAndPassword(window.auth, email, password);
+    await sendEmailVerification(userCredential.user); // ADD THIS LINE
+    console.log('Sign up successful! Verification email sent.');
+} else {
                         await signInWithEmailAndPassword(window.auth, email, password);
                         console.log('Login successful!');
                     }
@@ -921,6 +950,11 @@
                     headerMainContent: document.getElementById('header-main-content'),
                 },
                 modals: {
+                    // Add these new lines for the quiz modal
+quiz: document.getElementById('quiz-modal'),
+quizContent: document.getElementById('quiz-content'),
+quizCloseBtn: document.getElementById('quiz-close-btn'),
+quizDoneBtn: document.getElementById('quiz-done-btn'),
                     backdrop: document.getElementById('modal-backdrop'),
                     apiKey: document.getElementById('api-key-modal'),
                     apiKeyInput: document.getElementById('api-key-input'),
@@ -1242,43 +1276,28 @@
             };
             
             async function callGeminiAPI(payload, elementForError) {
-                const apiKey = localStorage.getItem(API_KEY_STORAGE_ITEM);
-
-                if (!apiKey) {
-                    const errorMsg = 'Gemini API key is not set. Please set it via the chatbot.';
-                    if (elementForError) elementForError.textContent = errorMsg;
-                    else showToast(errorMsg, 'error');
-                    openModal(app.modals.apiKey);
-                    return null;
-                }
+                // Clear any previous errors
+                if (elementForError) elementForError.textContent = '';
 
                 try {
-                    const res = await fetch(GEMINI_API_URL, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-goog-api-key': apiKey
-                        },
-                        body: JSON.stringify(payload)
-                    });
+                    // Create a reference to our deployed Cloud Function
+                    const callGeminiFunction = httpsCallable(window.functions, 'callGemini');
+                    
+                    // Call the function with our prompt.
+                    // The Firebase SDK automatically handles sending the user's auth token.
+                    const response = await callGeminiFunction({ prompt: payload.contents[0].parts[0].text });
 
-                    if (!res.ok) {
-                        let errorDetails = `${res.status} ${res.statusText}`;
-                        try {
-                           const errorData = await res.json();
-                           errorDetails = errorData.error?.message || errorDetails;
-                        } catch (e) { /* ignore parsing error */ }
-                        throw new Error(errorDetails);
+                    // The actual result from our function is in response.data.result
+                    const generatedText = response.data.result;
+
+                    if (!generatedText) {
+                        throw new Error('Cloud function returned an empty response.');
                     }
-
-                    const data = await res.json();
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if (!text) throw new Error('AI returned an empty response.');
-                    return text;
+                    return generatedText;
 
                 } catch (err) {
-                    console.error("Gemini API Error:", err);
-                    const errorMsg = `API Error: ${err.message}`;
+                    console.error("Error calling Cloud Function:", err);
+                    const errorMsg = `AI Error: ${err.message}`;
                     if (elementForError) elementForError.textContent = errorMsg;
                     else showToast(errorMsg, 'error');
                     return null;
@@ -1707,18 +1726,25 @@
                     const date = formatDateTime(note.modifiedAt);
                     const pinnedClass = note.pinned ? 'pinned' : '';
                     return `
-                        <div class="list-note-item bg-bg-pane-light p-4 rounded-lg shadow-sm border border-border-color cursor-pointer hover:shadow-md transition-all relative ${pinnedClass}" data-note-id="${note.id}">
-                            <div class="flex justify-between items-start">
-                                <div class="flex-grow min-w-0">
-                                    <h3 class="font-semibold text-lg truncate">${note.name}</h3>
-                                    <p class="text-sm text-text-secondary mt-1 truncate-multiline card-content">${note.content.replace(/<[^>]*>?/gm, '')}</p>
-                                    <p class="text-xs text-text-tertiary mt-3">Last Modified: ${date}</p>
-                                </div>
-                                <button class="summarize-btn flex-shrink-0 ml-4 p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note with AI" data-note-id="${note.id}">
-                                    <i data-feather="sparkles" class="w-4 h-4"></i>
-                                </button>
-                            </div>
-                        </div>`
+    <div class="list-note-item bg-bg-pane-light p-4 rounded-lg shadow-sm border border-border-color cursor-pointer hover:shadow-md transition-all relative ${pinnedClass}" data-note-id="${note.id}">
+        <div class="flex justify-between items-start">
+            <div class="flex-grow min-w-0">
+                <h3 class="font-semibold text-lg truncate">${note.name}</h3>
+                <p class="text-sm text-text-secondary mt-1 truncate-multiline card-content">${note.content.replace(/<[^>]*>?/gm, '')}</p>
+                <p class="text-xs text-text-tertiary mt-3">Last Modified: ${date}</p>
+            </div>
+
+            <div class="flex items-center flex-shrink-0 ml-4">
+                <button class="summarize-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note with AI" data-note-id="${note.id}">
+                    <i data-feather="zap" class="w-4 h-4"></i>
+                </button>
+                <button class="quiz-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Generate Quiz with AI" data-note-id="${note.id}">
+                    <i data-feather="help-circle" class="w-4 h-4"></i>
+                </button>
+            </div>
+
+        </div>
+    </div>`
                  }).join('');
             }
             
@@ -1963,6 +1989,72 @@
                     });
                 });
             }
+            /**
+ * Renders the generated quiz data into the quiz modal.
+ * @param {Array<Object>} quizArray - An array of quiz question objects.
+ */
+function renderQuizModal(quizArray) {
+    let quizHTML = '<div class="space-y-6">';
+    quizArray.forEach((q, index) => {
+        quizHTML += `
+            <div class="quiz-question-container border-b border-border-color pb-4" data-correct-answer="${q.answer}">
+                <p class="font-semibold text-text-primary">${index + 1}. ${q.question}</p>
+                <div class="mt-3 space-y-2">
+                    ${Object.entries(q.options).map(([key, value]) => `
+                        <label class="block flex items-center p-2 rounded-md border border-border-color cursor-pointer hover:bg-bg-pane-dark transition-colors duration-200">
+                            <input type="radio" name="question-${index}" value="${key}" class="mr-3 shrink-0">
+                            <span>${key}: ${value}</span>
+                        </label>
+                    `).join('')}
+                </div>
+                <p class="quiz-feedback text-sm mt-2 h-5 font-medium"></p>
+            </div>
+        `;
+    });
+    quizHTML += '</div>';
+
+    app.modals.quizContent.innerHTML = quizHTML;
+    openModal(app.modals.quiz);
+}
+
+/**
+ * Handles the AI call to generate an MCQ quiz from note content.
+ * @param {string} noteContent - The plain text content of the note.
+ */
+const handleGenerateQuiz = async (noteContent) => {
+    const toastId = showToast('🤖 Generating quiz...', 'loading');
+
+    // This detailed prompt instructs Gemini to return a clean JSON object.
+    const prompt = `Based on the following text, generate a multiple-choice quiz with 3-5 questions. For each question, provide 4 options (A, B, C, D) and indicate the correct answer. The question and options should be concise. Return the result as a single, valid JSON object with a key "quiz" which is an array of objects. Each object in the array must have three keys: "question" (string), "options" (an object with A, B, C, D keys), and "answer" (a string with the key of the correct option, e.g., "A"). Do not include any text, notes, or markdown formatting like \`\`\`json before or after the JSON object.
+
+    Text:
+    ---
+    ${noteContent}`;
+
+    const payload = { contents: [{ parts: [{ text: prompt }] }] };
+    const jsonResponse = await callGeminiAPI(payload);
+    dismissToast(toastId);
+
+    if (jsonResponse) {
+        try {
+            // The AI might occasionally wrap the response, this cleans it up.
+            const cleanedJsonResponse = jsonResponse.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+            const quizData = JSON.parse(cleanedJsonResponse);
+
+            if (quizData.quiz && Array.isArray(quizData.quiz)) {
+                 renderQuizModal(quizData.quiz);
+            } else {
+                throw new Error("Invalid quiz data structure received from AI.");
+            }
+        } catch (err) {
+            console.error("Failed to parse quiz JSON:", err, "Raw response:", jsonResponse);
+            showToast('Failed to generate a valid quiz. The AI response was malformed.', 'error');
+        }
+    } else {
+        // Error toast is already shown by callGeminiAPI, but we can add a fallback.
+        showToast('Could not generate quiz from AI.', 'error');
+    }
+};
 
             async function init() {
                 await loadState();
@@ -2436,7 +2528,20 @@
                         handleSummarize(plainContent, noteItemEl);
                         return;
                     }
-                    
+                    const quizBtn = e.target.closest('.quiz-btn');
+if (quizBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const noteId = quizBtn.dataset.noteId;
+    const { item: note } = findItem(noteId);
+    const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
+    if (!plainContent) {
+        showToast("Note is empty, cannot generate a quiz.", "info");
+        return;
+    }
+    handleGenerateQuiz(plainContent);
+    return;
+}
                     const copyBtn = e.target.closest('.copy-code-btn');
                     if (copyBtn) {
                          const codeBlock = copyBtn.closest('.code-block-wrapper, .hljs').querySelector('pre, code');
@@ -2773,6 +2878,38 @@
                     }
                 };
                 app.modals.summaryCloseBtn.addEventListener('click', () => closeModal(app.modals.summary));
+                app.modals.quizCloseBtn.addEventListener('click', () => closeModal(app.modals.quiz));
+app.modals.quizDoneBtn.addEventListener('click', () => closeModal(app.modals.quiz));
+
+app.modals.quizContent.addEventListener('change', e => {
+    if (e.target.type === 'radio') {
+        const questionContainer = e.target.closest('.quiz-question-container');
+        const selectedAnswer = e.target.value;
+        const correctAnswer = questionContainer.dataset.correctAnswer;
+        const feedbackEl = questionContainer.querySelector('.quiz-feedback');
+
+        // Disable all options for this question after an answer is selected
+        questionContainer.querySelectorAll('input[type="radio"]').forEach(radio => {
+            radio.disabled = true;
+            radio.parentElement.classList.add('cursor-not-allowed', 'opacity-60');
+        });
+
+        if (selectedAnswer === correctAnswer) {
+            feedbackEl.textContent = 'Correct!';
+            feedbackEl.className = 'quiz-feedback text-sm mt-2 h-5 font-medium text-green-500';
+            e.target.parentElement.classList.add('bg-green-500/20', 'border-green-500');
+        } else {
+            feedbackEl.textContent = `Incorrect. The correct answer is ${correctAnswer}.`;
+            feedbackEl.className = 'quiz-feedback text-sm mt-2 h-5 font-medium text-red-500';
+            e.target.parentElement.classList.add('bg-red-500/20', 'border-red-500');
+
+            // Highlight the correct answer as well
+            const correctLabel = questionContainer.querySelector(`input[value="${correctAnswer}"]`).parentElement;
+            correctLabel.classList.remove('opacity-60');
+            correctLabel.classList.add('bg-green-500/20', 'border-green-500');
+        }
+    }
+});
 
                 app.elements.chatbotFab.addEventListener('click', () => {
                     renderChatHistory();
