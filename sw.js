@@ -1,14 +1,14 @@
-const CACHE_NAME = 'reputifly-notes-cache-v2'; // Updated version
+const CACHE_NAME = 'reputifly-notes-cache-v3'; // Updated version
 const urlsToCache = [
   '/',
-  '/note', // IMPORTANT: This should match your clean URL
+  '/note',
   '/manifest.json',
-  '/reputiflyicon.png',
-  '/reputiflylogo.png'
+  '/reputiflyicon.jpg', // Use the correct icon filenames
+  '/reputiflylogo.png',
+  '/favicon.ico'
 ];
 
 self.addEventListener('install', event => {
-  // Skips waiting and activates the new service worker immediately
   self.skipWaiting(); 
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -23,11 +23,7 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request)
       .then(response => {
-        // Cache hit - return response
-        if (response) {
-          return response;
-        }
-        return fetch(event.request);
+        return response || fetch(event.request);
       })
   );
 });
