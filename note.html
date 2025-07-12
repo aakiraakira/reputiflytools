@@ -735,10 +735,6 @@ window.functions = getFunctions(app);
                         <i data-feather="book" class="w-5 h-5"></i>
                         <span>Web Clipper</span>
                     </button>
-                    <button id="archive-view-btn" class="settings-footer-item">
-    <i data-feather="archive" class="w-5 h-5"></i>
-    <span>Archived Notes</span>
-</button>
                     <input type="file" id="import-file-input" class="hidden" accept=".json">
                 </footer>
             </div>
@@ -829,16 +825,6 @@ window.functions = getFunctions(app);
                     <h2 class="text-2xl font-bold mb-6">Search Results</h2>
                     <div id="search-results-list"></div>
                 </div>
-                <div id="archive-view" class="notes-view hidden flex-grow p-4 md:p-8">
-    <div class="flex justify-between items-center mb-6">
-        <h2 class="text-2xl font-bold">Archived Notes</h2>
-        <button id="back-from-archive-btn" class="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary">
-            <i data-feather="arrow-left" class="w-4 h-4"></i>
-            Back to Notes
-        </button>
-    </div>
-    <div id="archive-list-content" class="space-y-3"></div>
-</div>
            </div>
         </main>
     </div><div id="public-note-view" class="hidden min-h-screen bg-bg-main text-text-primary">
@@ -988,9 +974,7 @@ window.functions = getFunctions(app);
         <button data-action="toggle-pin" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="paperclip" class="w-4 h-4"></i><span id="pin-action-text">Pin</span></button>
         <button data-action="duplicate" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="copy" class="w-4 h-4"></i>Duplicate</button>
         <button data-action="rename" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="edit-2" class="w-4 h-4"></i>Rename</button>
-        <button data-action="archive" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="archive" class="w-4 h-4"></i>Archive</button>
-<hr class="my-1 border-border-color">
-<button data-action="delete-permanently" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark text-red-500 rounded flex items-center gap-2"><i data-feather="trash-2" class="w-4 h-4"></i>Delete</button>
+        <button data-action="delete" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark text-red-500 rounded flex items-center gap-2"><i data-feather="trash-2" class="w-4 h-4"></i>Delete</button>
     </div>
     <div id="quiz-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-2xl z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
     <header class="flex justify-between items-center mb-4 flex-shrink-0">
@@ -1515,29 +1499,21 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
                     graphBtn: document.getElementById('graph-btn'),
                 },
                 views: {
-                board: document.getElementById('board-view'),
-                list: document.getElementById('list-view'),
-                searchResults: document.getElementById('search-results-view'),
-                archive: document.getElementById('archive-view'), // ADD THIS
-            },
-            archive: { // ADD THIS ENTIRE OBJECT
-                listContent: document.getElementById('archive-list-content'),
-                backBtn: document.getElementById('back-from-archive-btn')
-            },
-            // REPLACE the old contextMenu object with this one
-contextMenu: {
-    menu: document.getElementById('context-menu'),
-    targetId: null,
-    targetIsContainer: false,
-    pinActionText: document.getElementById('pin-action-text'),
-    togglePinBtn: document.querySelector('[data-action="toggle-pin"]'),
-    renameBtn: document.querySelector('[data-action="rename"]'),
-    duplicateBtn: document.querySelector('[data-action="duplicate"]'),
-    // NEW: Correctly reference the new buttons
-    archiveBtn: document.querySelector('[data-action="archive"]'),
-    deletePermanentlyBtn: document.querySelector('[data-action="delete-permanently"]'),
-},
-        };
+                    board: document.getElementById('board-view'),
+                    list: document.getElementById('list-view'),
+                    searchResults: document.getElementById('search-results-view'),
+                },
+                contextMenu: {
+                    menu: document.getElementById('context-menu'),
+                    targetId: null,
+                    targetIsContainer: false,
+                    pinActionText: document.getElementById('pin-action-text'),
+                    togglePinBtn: document.querySelector('[data-action="toggle-pin"]'),
+                    renameBtn: document.querySelector('[data-action="rename"]'),
+                    deleteBtn: document.querySelector('[data-action="delete"]'),
+                    duplicateBtn: document.querySelector('[data-action="duplicate"]'),
+                }
+            };
 
             let state = {};
             let isSearchActive = false;
@@ -1579,8 +1555,6 @@ contextMenu: {
                     listSortOrder: 'modifiedAt-desc',
                     editorMode: 'editor',
                     activeTag: null,
-                    viewingArchive: false, 
-                    archivePath: [],
                 },
                 kanbanColumns: {
                     'c1': [ { id: 'col1', title: 'To Do' }, { id: 'col2', title: 'In Progress' } ],
@@ -1624,7 +1598,6 @@ contextMenu: {
             const now = new Date().toISOString();
             if (typeof node.createdAt === 'undefined') node.createdAt = now;
             if (typeof node.modifiedAt === 'undefined') node.modifiedAt = node.createdAt;
-if (typeof node.isArchived === 'undefined') node.isArchived = false; // ADD THIS LINE
         }
         if (node.children) {
             // Ensure children is an array before trying to loop through it
@@ -2082,7 +2055,7 @@ if (themeMeta) {
         if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
         return a.name.localeCompare(b.name);
     });
-    const listHTML = collections.filter(item => !item.isArchived).map(item => createItemHTML(item, level)).join('');
+    const listHTML = collections.map(item => createItemHTML(item, level)).join('');
 
     if (level === 0) {
         app.containers.collectionsList.innerHTML = `<ul class="space-y-1">${listHTML}</ul>`;
@@ -2140,54 +2113,46 @@ if (themeMeta) {
             }
 
             function renderMainView() {
-    document.querySelectorAll('.notes-view').forEach(v => v.classList.add('hidden'));
+                document.querySelectorAll('.notes-view').forEach(v => v.classList.add('hidden'));
 
-    // This new logic checks if we are viewing the archive AND if a note is active
-if (state.settings.viewingArchive && !state.settings.activeNoteId) {
-        renderArchiveView();
-        app.elements.currentViewTitle.textContent = "Archive";
-        app.elements.viewSwitcher.style.display = 'none';
-        app.elements.listViewControls.style.display = 'none';
-        return;
-    }
+                if (isSearchActive) {
+                    renderSearchResults(app.search.input.value);
+                    return;
+                }
+                
+                const isNoteActive = !!state.settings.activeNoteId;
+                const isTagActive = !!state.settings.activeTag;
+                const activeCollection = findItem(state.settings.activeCollectionId)?.item;
 
-    if (isSearchActive) {
-        renderSearchResults(app.search.input.value);
-        return;
-    }
+                if (isTagActive) {
+                    app.elements.currentViewTitle.textContent = `Tag: #${state.settings.activeTag}`;
+                } else {
+                    app.elements.currentViewTitle.textContent = activeCollection?.name || "All Notes";
+                }
+                
+                const showListControls = !isNoteActive && (state.settings.activeView === 'list' || !activeCollection || isTagActive);
 
-    const isNoteActive = !!state.settings.activeNoteId;
-    const isTagActive = !!state.settings.activeTag;
-    const activeCollection = findItem(state.settings.activeCollectionId)?.item;
+                app.elements.viewSwitcher.style.display = isNoteActive || !activeCollection || isTagActive ? 'none' : 'flex';
+                app.elements.listViewControls.style.display = showListControls ? 'flex' : 'none';
+                
 
-    if (isTagActive) {
-        app.elements.currentViewTitle.textContent = `Tag: #${state.settings.activeTag}`;
-    } else {
-        app.elements.currentViewTitle.textContent = activeCollection?.name || "All Notes";
-    }
-
-    const showListControls = !isNoteActive && (state.settings.activeView === 'list' || !activeCollection || isTagActive);
-
-    app.elements.viewSwitcher.style.display = isNoteActive || !activeCollection || isTagActive ? 'none' : 'flex';
-    app.elements.listViewControls.style.display = showListControls ? 'flex' : 'none';
-
-    if (isNoteActive) {
-        renderNoteEditor();
-    } else if (isTagActive) {
-        renderListView();
-    } else if (activeCollection) {
-        document.querySelectorAll('#view-switcher-container .view-btn').forEach(b => b.classList.remove('active'));
-        document.querySelector(`#view-switcher-container .view-btn[data-view="${state.settings.activeView}"]`)?.classList.add('active');
-
-        if (state.settings.activeView === 'board') {
-            renderKanbanView();
-        } else {
-            renderListView();
-        }
-    } else {
-        renderListView();
-    }
-}
+                if (isNoteActive) {
+                    renderNoteEditor();
+                } else if (isTagActive) {
+                    renderListView();
+                } else if (activeCollection) {
+                     document.querySelectorAll('#view-switcher-container .view-btn').forEach(b => b.classList.remove('active'));
+                     document.querySelector(`#view-switcher-container .view-btn[data-view="${state.settings.activeView}"]`)?.classList.add('active');
+                    
+                    if (state.settings.activeView === 'board') {
+                        renderKanbanView();
+                    } else {
+                        renderListView();
+                    }
+                } else {
+                     renderListView();
+                }
+            }
             
             function renderMobileControls() {
     const activeCollection = findItem(state.settings.activeCollectionId)?.item;
@@ -2229,13 +2194,9 @@ if (state.settings.viewingArchive && !state.settings.activeNoteId) {
                 <i data-feather="paperclip" class="w-4 h-4"></i>${pinText}
             </button>
             <hr class="my-1 border-border-color">
-            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-archive">
-    <i data-feather="archive" class="w-4 h-4"></i>Archive
-</button>
-<hr class="my-1 border-border-color">
-<button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 text-red-500" data-action="mobile-delete-permanently">
-    <i data-feather="trash-2" class="w-4 h-4"></i>Delete
-</button>
+            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 text-red-500" data-action="mobile-delete">
+                <i data-feather="trash-2" class="w-4 h-4"></i>Delete
+            </button>
         `;
     } else if (activeCollection) {
         controlsHTML += `
@@ -2289,7 +2250,7 @@ if (state.settings.viewingArchive && !state.settings.activeNoteId) {
                 }
                 
                 const columns = state.kanbanColumns[collectionId] || [];
-                const notesInCollection = (collection.children || []).filter(c => c.type === 'note' && !c.isArchived);
+                const notesInCollection = collection.children.filter(c => c.type === 'note') || [];
                 
                 const columnsHTML = columns.map(column => {
                     const notesInColumn = [...notesInCollection]
@@ -2337,14 +2298,13 @@ if (state.settings.viewingArchive && !state.settings.activeNoteId) {
                  const activeTag = state.settings.activeTag;
                  
                  if (activeTag) {
-    notes = getAllNotes(state.collections).filter(note => !note.isArchived && (note.tags || []).includes(activeTag));
-} else {
+                     notes = getAllNotes(state.collections).filter(note => (note.tags || []).includes(activeTag));
+                 } else {
                      const collectionId = state.settings.activeCollectionId;
                      const collection = findItem(collectionId)?.item;
-                     const allNotesInScope = collection
-    ? (collection.children || []).filter(c => c.type === 'note')
-    : getAllNotes(state.collections);
-notes = allNotesInScope.filter(note => !note.isArchived);
+                     notes = collection 
+                        ? (collection.children || []).filter(c => c.type === 'note') 
+                        : getAllNotes(state.collections);
                  }
 
 
@@ -2393,64 +2353,7 @@ notes = allNotesInScope.filter(note => !note.isArchived);
     </div>`
                  }).join('');
             }
-            // REPLACE your existing renderArchiveView function with this
-function renderArchiveView() {
-    app.views.archive.classList.remove('hidden');
-
-    const path = state.settings.archivePath || [];
-    let currentItems;
-    let breadcrumbsHTML = `<a href="#" class="breadcrumb-link hover:underline" data-path-index="-1">Archive</a>`;
-
-    if (path.length === 0) {
-        currentItems = getTopLevelArchivedItems(state.collections);
-    } else {
-        let currentFolder = null;
-        let cumulativePath = [];
-        path.forEach((folderId, index) => {
-            currentFolder = findItem(folderId, cumulativePath.length === 0 ? state.collections : currentFolder?.children)?.item;
-            if (currentFolder) {
-                breadcrumbsHTML += ` / <a href="#" class="breadcrumb-link hover:underline" data-path-index="${index}">${currentFolder.name}</a>`;
-                cumulativePath = currentFolder.children;
-            }
-        });
-        currentItems = currentFolder?.children || [];
-    }
-
-    // Replace the old title with the new breadcrumbs
-    app.elements.currentViewTitle.innerHTML = breadcrumbsHTML;
-
-    // The "Back" button now always goes up one level
-    app.archive.backBtn.style.display = 'flex'; 
-
-    if (currentItems.length === 0) {
-        app.archive.listContent.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="inbox" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">This folder is empty</h3></div>`;
-        feather.replace();
-        return;
-    }
-
-    app.archive.listContent.innerHTML = currentItems.map(item => `
-        <div class="list-note-item bg-bg-pane-light p-4 rounded-lg shadow-sm border border-border-color flex justify-between items-center" data-item-id="${item.id}">
-            <div class="flex items-center gap-3 cursor-pointer flex-grow item-main-action">
-                <i data-feather="${item.type === 'folder' ? 'folder' : 'file-text'}" class="w-5 h-5 text-text-secondary pointer-events-none"></i>
-                <div class="pointer-events-none">
-                    <h3 class="font-semibold text-lg">${item.name}</h3>
-                    <p class="text-xs text-text-tertiary mt-2">Last Modified: ${formatDateTime(item.modifiedAt)}</p>
-                </div>
-            </div>
-            <div class="flex items-center gap-2">
-                ${path.length === 0 ? `
-                <button class="p-2 hover:bg-bg-pane-dark rounded-lg text-text-secondary unarchive-btn" title="Restore Item" data-item-id="${item.id}">
-                    <i data-feather="upload" class="w-4 h-4 pointer-events-none"></i>
-                </button>
-                <button class="p-2 hover:bg-bg-pane-dark rounded-lg text-red-500 delete-permanently-btn" title="Delete Permanently" data-item-id="${item.id}">
-                    <i data-feather="trash-2" class="w-4 h-4 pointer-events-none"></i>
-                </button>
-                ` : ''}
-            </div>
-        </div>
-    `).join('');
-    feather.replace();
-}
+            
             function updateEditorStats() {
                 const text = app.elements.noteEditorBody.innerText || '';
                 const charCount = text.length;
@@ -2472,50 +2375,29 @@ function renderArchiveView() {
                 </div>`;
     }
 }
-function setArchiveState(item, isArchived) {
-    item.isArchived = isArchived;
-    if (item.type === 'folder' && item.children) {
-        item.children.forEach(child => setArchiveState(child, isArchived));
-    }
-}
             function renderNoteEditor() {
-    // 1. Get the note object FIRST. This is the main fix.
-    const note = findItem(state.settings.activeNoteId)?.item;
+    app.containers.noteEditor.classList.remove('hidden');
 
-    // 2. If no note is found, exit the function immediately.
+    const note = findItem(state.settings.activeNoteId)?.item;
     if (!note) {
         state.settings.activeNoteId = null;
         renderMainView();
         return;
     }
 
-    // 3. Now we can safely perform checks and render the UI.
-    app.containers.noteEditor.classList.remove('hidden');
-
-    // Remove any previous "archived" banners
-    app.containers.noteEditor.querySelector('.bg-yellow-500\\/20')?.remove();
-    
-    // Check if the note (which we now know exists) is archived
-    const isArchived = note.isArchived;
-    if (isArchived) {
-        const bannerHTML = `<div class="p-2 text-center bg-yellow-500/20 text-yellow-300 text-sm rounded-md mb-4 mx-4 md:mx-8">This note is archived. You can restore it from the archive view.</div>`;
-        app.containers.noteEditor.insertAdjacentHTML('afterbegin', bannerHTML);
-    }
-    
-    // Set editor to be read-only if archived
-    app.elements.noteEditorBody.contentEditable = !isArchived;
-    app.elements.noteEditorTitle.readOnly = isArchived;
-
-    // Set the title and content
     app.elements.noteEditorTitle.value = note.name;
+
+    // Start with the raw content from the database
     let processedContent = note.content || '';
 
-    // The rest of the original function remains the same...
+    // Find all our attachment placeholders and replace them with the real widget HTML
     processedContent = processedContent.replace(/<div.*?data-attachment='(.*?)'.*?>.*?<\/div>/g, (match, jsonString) => {
         try {
+            // The JSON string might have HTML entities, so we need to decode them
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = jsonString;
             const decodedJson = tempDiv.textContent || tempDiv.innerText || "";
+
             const data = JSON.parse(decodedJson);
             if (data.isAttachment) {
                 return createAttachmentWidgetHTML(data);
@@ -2524,10 +2406,11 @@ function setArchiveState(item, isArchived) {
             console.error("Failed to parse attachment data:", e);
             return '[Error loading attachment]';
         }
-        return match;
+        return match; // Return the original match if it's not our attachment
     });
 
-    if (state.settings.editorMode === 'preview') {
+    // The rest of the function handles the markdown preview
+    if(state.settings.editorMode === 'preview') {
         app.elements.noteEditorBody.classList.add('hidden');
         app.elements.markdownPreview.classList.remove('hidden');
         let html = marked.parse(processedContent);
@@ -2542,7 +2425,7 @@ function setArchiveState(item, isArchived) {
     }
 
     updateEditorStats();
-    feather.replace();
+    feather.replace(); // Important to render new icons
 }
             
             function renderSearchResults(query) {
@@ -2650,8 +2533,7 @@ function setArchiveState(item, isArchived) {
                     modifiedAt: now,
                     pinned: false,
                     links: [],
-                    tags: [],
-isArchived: false // ADD THIS LINE
+                    tags: []
                 };
 
                 if (initialContent) {
@@ -2737,25 +2619,9 @@ isArchived: false // ADD THIS LINE
                     history.pushState("", document.title, window.location.pathname + window.location.search);
                 }
             }
-            function getTopLevelArchivedItems(collections) {
-    const archivedItems = [];
-    function traverse(items) {
-        for (const item of items) {
-            if (item.isArchived) {
-                // If an item is archived, add it to the list and stop searching its children.
-                archivedItems.push(item);
-            } else if (item.children) {
-                // Otherwise, if it's a folder, search inside it.
-                traverse(item.children);
-            }
-        }
-    }
-    traverse(collections);
-    return archivedItems;
-}
             
             function buildLunrIndex() {
-                const allNotes = getAllNotes(state.collections).filter(note => !note.isArchived);
+                const allNotes = getAllNotes(state.collections);
                 lunrIndex = lunr(function () {
                     this.ref('id');
                     this.field('name');
@@ -2849,111 +2715,7 @@ ${noteContent}`;
 };
 
             async function init() {
-                // Add this block inside the init() function
-// REPLACE your existing archive listeners in init() with these
-// ADD this new listener inside your init() function
-app.elements.headerMainContent.addEventListener('click', e => {
-    const breadcrumb = e.target.closest('.breadcrumb-link');
-    if (breadcrumb && state.settings.viewingArchive) {
-        e.preventDefault();
-        const pathIndex = parseInt(breadcrumb.dataset.pathIndex, 10);
-        
-        state.settings.activeNoteId = null;
-        // Slice the path array to navigate to the clicked level
-        state.settings.archivePath = state.settings.archivePath.slice(0, pathIndex + 1);
-        render();
-    }
-});
-
-document.getElementById('archive-view-btn').addEventListener('click', () => {
-    state.settings.viewingArchive = true;
-    state.settings.activeNoteId = null; 
-    state.settings.archivePath = []; // Reset path when entering
-    render();
-});
-
-app.archive.backBtn.addEventListener('click', () => {
-    // This button is now much smarter
-    if (state.settings.archivePath.length > 0) {
-        state.settings.archivePath.pop(); // Go up one level
-    } else {
-        state.settings.viewingArchive = false; // Exit the archive view
-    }
-    state.settings.activeNoteId = null; // Always clear active note when navigating
-    render();
-});
-
-// REPLACE your existing archive click listener with this one
-app.archive.listContent.addEventListener('click', async (e) => {
-    const unarchiveBtn = e.target.closest('.unarchive-btn');
-    const deleteBtn = e.target.closest('.delete-permanently-btn');
-    const mainAction = e.target.closest('.item-main-action');
-    
-    const itemEl = e.target.closest('.list-note-item');
-    const itemId = itemEl?.dataset.itemId;
-
-    if (!itemId) return;
-
-    const findResult = findItem(itemId);
-    if (!findResult) {
-        console.warn(`Could not find item with ID: ${itemId}`);
-        return;
-    }
-    const { item, parent } = findResult;
-
-    if (unarchiveBtn) {
-        // --- THIS IS THE FIX FOR THE UNARCHIVE ERROR ---
-        state.settings.activeNoteId = null; // Clear active note before changing state
-
-        // Handle "orphan" notes whose parent folder was deleted
-        const parentId = (parent && !Array.isArray(parent)) ? parent.id : null;
-        if (item.type === 'note' && parentId && !findItem(parentId)) {
-            // Parent is gone, move this note to the root
-            const parentArray = Array.isArray(parent) ? parent : parent.children;
-            const index = parentArray.findIndex(i => i.id === itemId);
-            if (index > -1) parentArray.splice(index, 1);
-            state.collections.unshift(item); // Add to the start of the root list
-        }
-
-        setArchiveState(item, false);
-        showToast(`"${item.name}" has been restored.`, 'success');
-        await saveState(); 
-        buildLunrIndex();
-        render();
-
-    } else if (deleteBtn) {
-        // --- THIS IS THE FIX FOR THE DELETE ERROR ---
-        state.settings.activeNoteId = null; // Clear active note before changing state
-        
-        const confirmed = await showConfirm({
-            title: `Delete "${item.name}" permanently?`,
-            message: 'This also deletes all items inside. <strong>This action cannot be undone.</strong>',
-            confirmText: 'Delete Permanently'
-        });
-        if (confirmed) {
-            const parentArray = Array.isArray(parent) ? parent : parent.children;
-            const index = parentArray.findIndex(i => i.id === itemId);
-            if (index > -1) {
-                parentArray.splice(index, 1);
-            }
-            showToast(`Permanently deleted "${item.name}".`, 'success');
-            await saveState();
-            buildLunrIndex();
-            render(); 
-        }
-
-    } else if (mainAction) {
-        // This is the new logic for Browse and viewing (see next section)
-        if (item.type === 'folder') {
-            state.settings.archivePath.push(item.id);
-        } else {
-            state.settings.activeNoteId = itemId;
-        }
-        render();
-    }
-});
-
-app.archive.listContent.addEventListener
+                
                 // --- Logic for File Attachments ---
 const attachFileBtn = document.getElementById('attach-file-btn');
 const fileUploadInput = document.getElementById('file-upload-input');
@@ -3482,30 +3244,17 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                 saveState();
                 render();
                 break;
-            case 'mobile-archive':
-    note.isArchived = true;
-    showToast(`"${note.name}" archived.`);
-    state.settings.activeNoteId = null;
-    await saveState();
-    buildLunrIndex();
-    render();
-    break;
-
-case 'mobile-delete-permanently':
-    const mobileDeleteConfirm = await showConfirm({
-        title: `Delete "${note.name}" permanently?`,
-        message: 'This action cannot be undone.',
-        confirmText: 'Delete'
-    });
-    if (mobileDeleteConfirm) {
-        parentArray.splice(index, 1);
-        showToast(`Permanently deleted "${note.name}".`);
-        state.settings.activeNoteId = null;
-        await saveState();
-        buildLunrIndex();
-        render();
-    }
-    break;
+            case 'mobile-delete':
+                const confirmed = await showConfirm({ title: `Delete "${note.name}"`, message: 'This action cannot be undone.', confirmText: 'Delete' });
+                if (confirmed) {
+                    parentArray.splice(index, 1);
+                    showToast(`"${note.name}" deleted.`);
+                    state.settings.activeNoteId = null;
+                    saveState();
+                    buildLunrIndex();
+                    render();
+                }
+                break;
                 case 'mobile-share':
     handleShareNote();
     break;
@@ -4232,12 +3981,10 @@ app.modals.quizContent.addEventListener('change', e => {
                 app.containers.collectionsList.addEventListener('contextmenu', e => {
                     const itemWrapper = e.target.closest('.collection-item-wrapper');
                     
-                    // Reset all buttons first
-app.contextMenu.togglePinBtn.style.display = 'none';
-app.contextMenu.renameBtn.style.display = 'none';
-app.contextMenu.archiveBtn.style.display = 'none'; // Use new name
-app.contextMenu.deletePermanentlyBtn.style.display = 'none'; // Use new name
-app.contextMenu.duplicateBtn.style.display = 'none';
+                    app.contextMenu.togglePinBtn.style.display = 'none';
+                    app.contextMenu.renameBtn.style.display = 'none';
+                    app.contextMenu.deleteBtn.style.display = 'none';
+                    app.contextMenu.duplicateBtn.style.display = 'none';
 
                     if (!itemWrapper && e.target.closest('#collections-list-container')) {
                         app.contextMenu.targetId = null;
@@ -4249,9 +3996,8 @@ app.contextMenu.duplicateBtn.style.display = 'none';
                         const { item } = findItem(app.contextMenu.targetId);
                         
                         app.contextMenu.renameBtn.style.display = 'flex';
-app.contextMenu.archiveBtn.style.display = 'flex'; // Use new name
-app.contextMenu.deletePermanentlyBtn.style.display = 'flex'; // Use new name
-app.contextMenu.duplicateBtn.style.display = 'flex';
+                        app.contextMenu.deleteBtn.style.display = 'flex';
+                        app.contextMenu.duplicateBtn.style.display = 'flex';
 
                         if (item && item.type === 'note') {
                             app.contextMenu.togglePinBtn.style.display = 'flex';
@@ -4297,14 +4043,11 @@ app.contextMenu.duplicateBtn.style.display = 'flex';
                     let findResult, targetItem, parent, parentArray;
 
                     if (id) {
-    findResult = findItem(id);
-    // THIS IS THE FIX: If the item wasn't found, stop here to prevent a crash.
-    if (!findResult) return; 
-
-    targetItem = findResult.item;
-    parent = findResult.parent;
-    parentArray = Array.isArray(parent) ? parent : parent.children;
-}
+                        findResult = findItem(id);
+                        targetItem = findResult.item;
+                        parent = findResult.parent;
+                        parentArray = Array.isArray(parent) ? parent : parent.children;
+                    }
 
                     const createNewItem = (type) => {
                         const name = type === 'note' ? 'Untitled Note' : 'New Folder';
@@ -4348,33 +4091,19 @@ app.contextMenu.duplicateBtn.style.display = 'flex';
                     switch(action) {
                         case 'new-note': createNewItem('note'); break;
                         case 'new-folder': createNewItem('folder'); break;
-                        case 'archive':
-    // Use the new recursive function
-    setArchiveState(targetItem, true); 
-    
-    showToast(`"${targetItem.name}" archived.`);
-    if (state.settings.activeNoteId === id) state.settings.activeNoteId = null;
-    await saveState();
-    buildLunrIndex();
-    render();
-    break;
-
-case 'delete-permanently':
-    const confirmed = await showConfirm({
-        title: `Delete "${targetItem.name}" permanently?`,
-        message: 'This action cannot be undone.',
-        confirmText: 'Delete'
-    });
-    if (confirmed) {
-        const index = parentArray.findIndex(i => i.id === id);
-        parentArray.splice(index, 1);
-        showToast(`"${targetItem.name}" deleted.`);
-        if (state.settings.activeNoteId === id) state.settings.activeNoteId = null;
-        await saveState();
-        buildLunrIndex();
-        render();
-    }
-    break;
+                        case 'delete':
+                            const confirmed = await showConfirm({ title: `Delete "${targetItem.name}"`, message: 'This action cannot be undone.', confirmText: 'Delete', confirmClass: 'bg-red-600' });
+                            if (confirmed) {
+                               const index = parentArray.findIndex(i => i.id === id);
+                               parentArray.splice(index, 1);
+                               showToast(`"${targetItem.name}" deleted.`);
+                               if (state.settings.activeNoteId === id) state.settings.activeNoteId = null;
+                               if (state.settings.activeCollectionId === id) state.settings.activeCollectionId = null;
+                               saveState();
+                               buildLunrIndex();
+                               render();
+                            }
+                            break;
                         case 'rename':
                             const newName = await showPrompt({ title: 'Rename', message: `Enter a new name for "${targetItem.name}":`, initialValue: targetItem.name });
                             if (newName) {
