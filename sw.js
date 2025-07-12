@@ -1,10 +1,13 @@
-const CACHE_NAME = 'reputifly-notes-cache-v1';
+const CACHE_NAME = 'reputifly-notes-cache-v2'; // Updated version
 const urlsToCache = [
   '/',
+  '/index.html',
+  '/notetakeapp.html', // The notes app itself
+  '/note.html',
   '/note',
   '/manifest.json',
   '/reputiflyicon.jpg',
-  '/reputiflylogo,jpg'
+  '/reputiflylogo.jpg'
 ];
 
 self.addEventListener('install', event => {
