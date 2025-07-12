@@ -140,6 +140,22 @@
             color: var(--text-primary);
             transition: background-color 0.3s ease, color 0.3s ease;
         }
+        #flashcard-container.flipped #flashcard {
+    transform: rotateY(180deg);
+}
+.flashcard-face {
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+}
+.transform-style-3d {
+    transform-style: preserve-3d;
+}
+.perspective-1000 {
+    perspective: 1000px;
+}
+.rotate-y-180 {
+    transform: rotateY(180deg);
+}
         
         /* --- UI Polish & Animations --- */
         #note-editor-body {
@@ -150,6 +166,11 @@
             transition: width 300ms ease-in-out, transform 300ms ease-in-out;
             overflow: hidden;
         }
+        #flashcard-front p,
+#flashcard-back p {
+    color: var(--text-primary) !important;
+    margin: 0;
+}
         
         #notes-list-pane .sidebar-content-wrapper {
             transition: opacity 150ms ease-in-out;
@@ -166,6 +187,11 @@
         #sidebar-toggle-btn {
             transition: left 300ms ease-in-out, background-color 0.2s ease;
         }
+        #flashcard-front, #flashcard-back {
+    color: var(--text-primary);
+    font-size: 1.25rem; /* Makes the text a bit bigger */
+    line-height: 1.5;
+}
         #sidebar-toggle-btn .feather-chevron-left {
             transition: transform 0.3s ease;
         }
@@ -728,6 +754,9 @@
                    <button id="header-summarize-btn" style="display: none;" class="p-2 hover:bg-bg-main rounded-l-md" title="AI Summary"><i data-feather="zap" class="w-4 h-4"></i></button>
                    <button id="header-quiz-btn" style="display: none;" class="p-2 hover:bg-bg-main" title="MCQ Quiz"><i data-feather="help-circle" class="w-4 h-4"></i></button>
                    <button id="header-share-btn" style="display: none;" class="p-2 hover:bg-bg-main" title="Share Note (Read-only)"><i data-feather="share-2" class="w-4 h-4"></i></button>
+                   <button id="header-flashcard-btn" style="display: none;" class="p-2 hover:bg-bg-main" title="Flashcard Mode">
+    <i data-feather="copy" class="w-4 h-4"></i>
+</button>
                    <button id="dictate-btn" class="p-2 hover:bg-bg-main" title="Dictate Text"><i data-feather="mic" class="w-4 h-4"></i></button>
                    <button id="graph-btn" class="p-2 hover:bg-bg-main" title="Show Note Graph"><i data-feather="git-merge" class="w-4 h-4"></i></button>
                    <button id="editor-mode-toggle" class="p-2 hover:bg-bg-main disabled:opacity-50 disabled:cursor-not-allowed" title="Toggle Markdown Preview"><i data-feather="eye" class="w-4 h-4"></i></button>
@@ -942,6 +971,27 @@
         <button id="quiz-done-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Done</button>
     </footer>
 </div>
+<div id="flashcard-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-xl z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-4 flex-shrink-0">
+        <h3 class="text-lg font-semibold flex items-center gap-2"><i data-feather="copy" class="w-5 h-5 text-accent-primary"></i>Flashcards</h3>
+        <button id="flashcard-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    <div id="flashcard-content" class="flex-grow flex flex-col items-center justify-center">
+        <div id="flashcard-container" class="w-full h-64 perspective-1000">
+            <div id="flashcard" class="relative w-full h-full text-center transition-transform duration-700 transform-style-3d">
+                <div id="flashcard-front" class="flashcard-face absolute w-full h-full backface-hidden bg-bg-pane-dark rounded-lg p-4 flex items-center justify-center"></div>
+                <div id="flashcard-back" class="flashcard-face absolute w-full h-full backface-hidden bg-bg-pane-dark rounded-lg p-4 flex items-center justify-center transform rotate-y-180"></div>
+            </div>
+        </div>
+    </div>
+    <footer class="flex justify-between items-center mt-4 flex-shrink-0">
+        <div id="flashcard-progress" class="text-sm text-text-secondary"></div>
+        <div class="flex gap-3">
+            <button id="flashcard-prev-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Previous</button>
+            <button id="flashcard-next-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Next</button>
+        </div>
+    </footer>
+</div>
 
 
     <script type="module">
@@ -972,7 +1022,132 @@ function findItem(itemId, tree = state.collections) {
     }
     return null;
 }
+/**
+ * Renders the flashcard data into the modal and handles the UI logic.
+ * @param {Array<Object>} cards - An array of flashcard objects [{front, back}].
+ */
+function renderFlashcardModal(cards) {
+    // Get fresh references to all modal elements each time
+    const modal = document.getElementById('flashcard-modal');
+    const container = document.getElementById('flashcard-container');
+    const frontEl = document.getElementById('flashcard-front');
+    const backEl = document.getElementById('flashcard-back');
+    const progressEl = document.getElementById('flashcard-progress');
+    const prevBtn = document.getElementById('flashcard-prev-btn');
+    const nextBtn = document.getElementById('flashcard-next-btn');
+    const closeBtn = document.getElementById('flashcard-close-btn');
 
+    let currentIndex = 0;
+
+    // --- All event logic is handled by this one function ---
+    const handleModalClick = (e) => {
+        // Use .closest() to see if a specific button was clicked
+        const targetButton = e.target.closest('button');
+
+        if (targetButton === prevBtn) {
+            if (currentIndex > 0) {
+                currentIndex--;
+                updateCard();
+            }
+        } else if (targetButton === nextBtn) {
+            if (currentIndex < cards.length - 1) {
+                currentIndex++;
+                updateCard();
+            } else {
+                cleanupAndClose(); // Finish on the last card
+            }
+        } else if (targetButton === closeBtn) {
+            cleanupAndClose();
+        } else {
+            // If any other part of the modal is clicked, flip the card
+            container.classList.toggle('flipped');
+        }
+    };
+
+    // This function updates the card's content
+    const updateCard = () => {
+        container.classList.remove('flipped'); // Always show the front first
+
+        // Use marked.parse to correctly render potential markdown from the AI
+        frontEl.innerHTML = marked.parse(cards[currentIndex].front || '');
+        backEl.innerHTML = marked.parse(cards[currentIndex].back || '');
+
+        progressEl.textContent = `Card ${currentIndex + 1} of ${cards.length}`;
+        prevBtn.disabled = currentIndex === 0;
+        nextBtn.textContent = (currentIndex === cards.length - 1) ? 'Finish' : 'Next';
+    };
+
+    // This function removes the event listener to prevent future bugs
+    const cleanupAndClose = () => {
+        modal.removeEventListener('click', handleModalClick);
+        closeModal(modal);
+    };
+
+    // --- Setup ---
+    modal.addEventListener('click', handleModalClick); // Add the single listener
+    updateCard(); // Display the first card
+    openModal(modal);
+    feather.replace();
+}
+
+/**
+ * Handles the AI call to generate flashcards from note content, with caching.
+ * @param {Object} note - The full note object from the state.
+ */
+const handleFlashcardMode = async (note) => {
+    // Step 1: Check for a valid cached result first.
+    if (note.cachedFlashcards && note.cachedFlashcards.sourceModifiedAt === note.modifiedAt) {
+        showToast('Loading cached flashcards!', 'info');
+        renderFlashcardModal(note.cachedFlashcards.data);
+        return;
+    }
+
+    // Step 2: If no cache, call the AI.
+    const noteContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
+    if (!noteContent) {
+        showToast("Note is empty, cannot generate flashcards.", "info");
+        return;
+    }
+
+    const toastId = showToast('🤖 Generating AI flashcards...', 'loading');
+    const prompt = `Analyze the following text and identify the key concepts. Create a series of flashcards based on these concepts. For each flashcard, provide a "front" (a question or term) and a "back" (the answer or definition). Return the result as a single, valid JSON object with a key "flashcards" which is an array of objects. Each object in the array must have two keys: "front" (string) and "back" (string). Do not include any text or markdown formatting outside of the JSON object.
+    Text:
+    ---
+    ${noteContent}`;
+
+    const payload = { contents: [{ parts: [{ text: prompt }] }] };
+    const jsonResponse = await callGeminiAPI(payload);
+    dismissToast(toastId);
+
+    if (jsonResponse) {
+        try {
+    // Find the start and end of the JSON object
+    const startIndex = jsonResponse.indexOf('{');
+    const endIndex = jsonResponse.lastIndexOf('}');
+
+    // Extract only the JSON part of the string
+    const jsonString = jsonResponse.substring(startIndex, endIndex + 1);
+
+    const flashcardData = JSON.parse(jsonString);
+
+    if (flashcardData.flashcards && Array.isArray(flashcardData.flashcards)) {
+         renderFlashcardModal(flashcardData.flashcards);
+
+         // Cache the new result in the note object.
+         note.cachedFlashcards = {
+             sourceModifiedAt: note.modifiedAt,
+             data: flashcardData.flashcards
+         };
+         saveState(); // Save the note with the cached data.
+    } else {
+        throw new Error("Invalid flashcard data structure in JSON.");
+    }
+} catch (err) {
+    console.error("Failed to parse flashcard JSON:", err, "Raw response:", jsonResponse);
+    showToast('Failed to generate valid flashcards.', 'error');
+}
+    }
+};
 const getAllNotes = (items) => {
     let notes = [];
     for (const item of items) {
@@ -1766,6 +1941,8 @@ const handleFileUpload = async (file) => {
                 document.getElementById('header-share-btn').style.display = noteActive ? 'flex' : 'none';
                 document.getElementById('header-summarize-btn').style.display = noteActive ? 'flex' : 'none';
                 document.getElementById('header-quiz-btn').style.display = noteActive ? 'flex' : 'none';
+                document.getElementById('header-flashcard-btn').style.display = noteActive ? 'flex' : 'none'; // ADD THIS
+
 
 
                 app.toolbar.editorModeToggle.disabled = !noteActive;
@@ -1967,6 +2144,9 @@ if (themeMeta) {
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-quiz">
                 <i data-feather="help-circle" class="w-4 h-4"></i>MCQ Quiz
             </button>
+            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-flashcard">
+    <i data-feather="copy" class="w-4 h-4"></i>Flashcards
+</button>
 
             <hr class="my-1 border-border-color">
 
@@ -2547,7 +2727,14 @@ const handleHeaderAIAction = (action) => {
             } else if (action === 'quiz') {
                 handleGenerateQuiz(plainContent,note);
             }
-        } else {
+        } if (action === 'summarize') {
+    handleSummarize(plainContent);
+} else if (action === 'quiz') {
+    handleGenerateQuiz(plainContent, note);
+} else if (action === 'flashcard') { // ADD THIS
+    handleFlashcardMode(note); // Use raw HTML content
+}
+        else {
             showToast("Note is empty.", "info");
         }
     }
@@ -2555,6 +2742,8 @@ const handleHeaderAIAction = (action) => {
 
 headerSummarizeBtn.addEventListener('click', () => handleHeaderAIAction('summarize'));
 headerQuizBtn.addEventListener('click', () => handleHeaderAIAction('quiz'));
+headerQuizBtn.addEventListener('click', () => handleHeaderAIAction('quiz'));
+document.getElementById('header-flashcard-btn').addEventListener('click', () => handleHeaderAIAction('flashcard')); // ADD THIS
                 
                 const renderer = new marked.Renderer();
                 renderer.code = function(code, language) {
@@ -3002,6 +3191,9 @@ headerQuizBtn.addEventListener('click', () => handleHeaderAIAction('quiz'));
             case 'mobile-quiz':
                 handleGenerateQuiz(plainContent, note);
                 break;
+                case 'mobile-flashcard':
+    handleFlashcardMode(note);
+    break;
             case 'mobile-rename':
                 const newName = await showPrompt({ title: 'Rename', message: `Enter a new name for "${note.name}":`, initialValue: note.name });
                 if (newName) {
