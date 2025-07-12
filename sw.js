@@ -7,8 +7,7 @@ const CACHE_NAME = 'reputifly-notes-cache-v5';
 // This is a "best-effort" step. The real power is in the fetch event handler.
 const urlsToCache = [
   '/',
-  '/note.html',
-  '/index.html',
+  '/note',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
