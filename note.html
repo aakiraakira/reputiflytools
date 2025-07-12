@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reputifly | AI Note Taker</title>
     
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,6 +17,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
+    <link rel="manifest" href="manifest.json">
     <script src="https://unpkg.com/vis-network@9.1.2/dist/vis-network.min.js"></script>
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
     <script src="https://cdn.jsdelivr.net/npm/lunr/lunr.min.js"></script>
@@ -92,6 +93,25 @@
             --brand-grad-from: #E6397F;
             --brand-grad-to: #FF8A00;
         }
+        .reputify-theme .prose {
+    color: var(--text-secondary);
+}
+.reputify-theme .prose h1,
+.reputify-theme .prose h2,
+.reputify-theme .prose h3,
+.reputify-theme .prose strong {
+    color: var(--text-primary);
+}
+.reputify-theme .prose a {
+    color: var(--accent-primary);
+}
+.reputify-theme .prose code {
+    color: var(--accent-primary-dark);
+}
+.reputify-theme .prose blockquote {
+    color: var(--text-tertiary);
+    border-color: var(--border-color);
+}
 
         .brand-button {
     background-image: linear-gradient(to right, var(--brand-grad-from), var(--brand-grad-to));
@@ -105,6 +125,7 @@
     font-weight: 500;
     transition: opacity 0.2s;
 }
+
 .brand-button:hover {
     opacity: 0.9;
 }
@@ -1040,6 +1061,19 @@ document.getElementById('copy-note-btn').addEventListener('click', () => {
 });
             // --- DEBUG LINE 2: This will run if the note is found ---
             console.log("SUCCESS: Document found. Displaying note.");
+            // This goes inside the if (docSnap.exists()) block
+const noteContentDiv = document.getElementById('public-note-content');
+noteContentDiv.addEventListener('click', (e) => {
+    const copyBtn = e.target.closest('.copy-code-btn');
+    if (copyBtn) {
+        const codeBlock = copyBtn.closest('.code-block-wrapper').querySelector('pre, code');
+        if (codeBlock) {
+            navigator.clipboard.writeText(codeBlock.innerText)
+                .then(() => showToast('Code copied!', 'success'))
+                .catch(() => showToast('Failed to copy code.', 'error'));
+        }
+    }
+});
 
             const noteData = docSnap.data();
             document.getElementById('public-note-title').textContent = noteData.name;
@@ -2419,15 +2453,21 @@ function renderQuizModal(quizArray) {
  * Handles the AI call to generate an MCQ quiz from note content.
  * @param {string} noteContent - The plain text content of the note.
  */
-const handleGenerateQuiz = async (noteContent) => {
-    const toastId = showToast('🤖 Generating quiz...', 'loading');
+const handleGenerateQuiz = async (noteContent, note) => {
+    // Step 1: Check if a valid cached quiz exists.
+    // A quiz is valid if it exists AND the note hasn't been modified since the quiz was made.
+    if (note.cachedQuiz && note.cachedQuiz.sourceModifiedAt === note.modifiedAt) {
+        showToast('Loading cached quiz!', 'info');
+        renderQuizModal(note.cachedQuiz.data);
+        return; // Stop here and use the cached version.
+    }
 
-    // This detailed prompt instructs Gemini to return a clean JSON object.
-    const prompt = `Based on the following text, generate a multiple-choice quiz with 3-5 questions. For each question, provide 4 options (A, B, C, D) and indicate the correct answer. The question and options should be concise. Return the result as a single, valid JSON object with a key "quiz" which is an array of objects. Each object in the array must have three keys: "question" (string), "options" (an object with A, B, C, D keys), and "answer" (a string with the key of the correct option, e.g., "A"). Do not include any text, notes, or markdown formatting like \`\`\`json before or after the JSON object.
-
-    Text:
-    ---
-    ${noteContent}`;
+    // If no valid cache, proceed to generate a new quiz.
+    const toastId = showToast('🤖 Generating new quiz...', 'loading');
+    const prompt = `Based on the following text, generate a multiple-choice quiz with 3-5 questions. For each question, provide 4 options (A, B, C, D) and indicate the correct answer. Return the result as a single, valid JSON object with a key "quiz" which is an array of objects. Each object in the array must have three keys: "question" (string), "options" (an object with A, B, C, D keys), and "answer" (a string with the key of the correct option, e.g., "A"). Do not include any text, notes, or markdown formatting like \`\`\`json before or after the JSON object.
+Text:
+---
+${noteContent}`;
 
     const payload = { contents: [{ parts: [{ text: prompt }] }] };
     const jsonResponse = await callGeminiAPI(payload);
@@ -2435,22 +2475,25 @@ const handleGenerateQuiz = async (noteContent) => {
 
     if (jsonResponse) {
         try {
-            // The AI might occasionally wrap the response, this cleans it up.
             const cleanedJsonResponse = jsonResponse.replace(/^```json\n?/, '').replace(/\n?```$/, '');
             const quizData = JSON.parse(cleanedJsonResponse);
 
             if (quizData.quiz && Array.isArray(quizData.quiz)) {
                  renderQuizModal(quizData.quiz);
+
+                 // Step 2: Save the new quiz result to the note object in the database.
+                 note.cachedQuiz = {
+                     sourceModifiedAt: note.modifiedAt, // Save the timestamp of the note version we used
+                     data: quizData.quiz
+                 };
+                 saveState(); // Save the note, now with the cached quiz data
             } else {
-                throw new Error("Invalid quiz data structure received from AI.");
+                throw new Error("Invalid quiz data structure.");
             }
         } catch (err) {
-            console.error("Failed to parse quiz JSON:", err, "Raw response:", jsonResponse);
-            showToast('Failed to generate a valid quiz. The AI response was malformed.', 'error');
+            console.error("Failed to parse quiz JSON:", err);
+            showToast('Failed to generate a valid quiz.', 'error');
         }
-    } else {
-        // Error toast is already shown by callGeminiAPI, but we can add a fallback.
-        showToast('Could not generate quiz from AI.', 'error');
     }
 };
 
@@ -2492,7 +2535,7 @@ const handleHeaderAIAction = (action) => {
             if (action === 'summarize') {
                 handleSummarize(plainContent);
             } else if (action === 'quiz') {
-                handleGenerateQuiz(plainContent);
+                handleGenerateQuiz(plainContent,note);
             }
         } else {
             showToast("Note is empty.", "info");
@@ -2947,7 +2990,7 @@ headerQuizBtn.addEventListener('click', () => handleHeaderAIAction('quiz'));
                 handleSummarize(plainContent);
                 break;
             case 'mobile-quiz':
-                handleGenerateQuiz(plainContent);
+                handleGenerateQuiz(plainContent, note);
                 break;
             case 'mobile-rename':
                 const newName = await showPrompt({ title: 'Rename', message: `Enter a new name for "${note.name}":`, initialValue: note.name });
@@ -3049,7 +3092,7 @@ if (quizBtn) {
         showToast("Note is empty, cannot generate a quiz.", "info");
         return;
     }
-    handleGenerateQuiz(plainContent);
+    handleGenerateQuiz(plainContent, note);
     return;
 }
                     const copyBtn = e.target.closest('.copy-code-btn');
@@ -3972,6 +4015,18 @@ app.modals.quizContent.addEventListener('change', e => {
             
         });
     </script>
+    <script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').then(registration => {
+        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+      }, err => {
+        console.log('ServiceWorker registration failed: ', err);
+      });
+    });
+  }
+</script>
+</body>
 
 </body>
 </html>
