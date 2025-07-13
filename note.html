@@ -101,6 +101,10 @@
 .reputify-theme .prose {
     color: var(--text-primary); /* This changes the main text to white */
 }
+.in-note-highlight.current {
+    background-color: var(--accent-primary-dark);
+    color: var(--bg-main);
+}
 .reputify-theme .prose h1,
 .reputify-theme .prose h2,
 .reputify-theme .prose h3,
@@ -864,6 +868,13 @@ window.functions = getFunctions(app);
 
            
            <div id="main-content-area" class="flex-grow overflow-y-auto relative flex flex-col">
+            <div id="in-note-search-bar" class="hidden absolute bottom-4 right-8 z-20 bg-bg-pane-dark shadow-lg rounded-lg p-2 flex items-center gap-2 text-sm border border-border-color">
+    <input id="in-note-search-input" type="text" placeholder="Find in note..." class="bg-bg-main rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-primary w-40">
+    <span id="in-note-search-count" class="text-text-tertiary w-20 text-center">No results</span>
+    <button id="in-note-search-prev" title="Previous" class="p-1 hover:bg-bg-main rounded text-text-secondary disabled:opacity-50" disabled><i data-feather="chevron-up" class="w-5 h-5"></i></button>
+    <button id="in-note-search-next" title="Next" class="p-1 hover:bg-bg-main rounded text-text-secondary disabled:opacity-50" disabled><i data-feather="chevron-down" class="w-5 h-5"></i></button>
+    <button id="in-note-search-close" title="Close" class="p-1 hover:bg-bg-main rounded text-text-tertiary"><i data-feather="x" class="w-5 h-5"></i></button>
+</div>
                 <div id="board-view" class="notes-view active flex-grow p-4 md:p-5 overflow-x-auto no-scrollbar h-full">
                     <div id="kanban-board" class="flex gap-4 min-h-full"></div>
                 </div>
@@ -1594,6 +1605,125 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
             let speechRecognizer = null;
             let isDictating = false;
             let lunrIndex;
+            // --- START: In-Note Search Logic ---
+let inNoteMatches = [];
+let inNoteCurrentIndex = -1;
+
+function clearInNoteHighlights() {
+    const editorBody = app.elements.noteEditorBody;
+    const marks = Array.from(editorBody.querySelectorAll('mark.in-note-highlight'));
+    marks.forEach(mark => {
+        const parent = mark.parentNode;
+        parent.replaceChild(document.createTextNode(mark.textContent), mark);
+        parent.normalize(); // Merges adjacent text nodes
+    });
+    inNoteMatches = [];
+    inNoteCurrentIndex = -1;
+}
+
+function updateInNoteUI() {
+    const countEl = document.getElementById('in-note-search-count');
+    const nextBtn = document.getElementById('in-note-search-next');
+    const prevBtn = document.getElementById('in-note-search-prev');
+
+    if (inNoteMatches.length === 0) {
+        countEl.textContent = 'No results';
+        nextBtn.disabled = true;
+        prevBtn.disabled = true;
+    } else {
+        countEl.textContent = `${inNoteCurrentIndex + 1} of ${inNoteMatches.length}`;
+        nextBtn.disabled = inNoteCurrentIndex >= inNoteMatches.length - 1;
+        prevBtn.disabled = inNoteCurrentIndex <= 0;
+    }
+}
+
+function navigateToMatch(index) {
+    if (inNoteMatches[inNoteCurrentIndex]) {
+        inNoteMatches[inNoteCurrentIndex].classList.remove('current');
+    }
+    inNoteCurrentIndex = index;
+    const currentMatch = inNoteMatches[inNoteCurrentIndex];
+    currentMatch.classList.add('current');
+    currentMatch.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    updateInNoteUI();
+}
+
+function performInNoteSearch() {
+    clearInNoteHighlights();
+    const query = document.getElementById('in-note-search-input').value;
+    if (!query) {
+        updateInNoteUI();
+        return;
+    }
+
+    const editorBody = app.elements.noteEditorBody;
+    const regex = new RegExp(`(${query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi');
+
+    const walker = document.createTreeWalker(editorBody, NodeFilter.SHOW_TEXT, null, false);
+    let node;
+    const nodesToReplace = [];
+    while (node = walker.nextNode()) {
+        if (node.parentElement.tagName !== 'SCRIPT' && node.parentElement.tagName !== 'STYLE' && regex.test(node.textContent)) {
+            nodesToReplace.push(node);
+        }
+    }
+
+    nodesToReplace.forEach(node => {
+        const newHtml = node.textContent.replace(regex, `<mark class="in-note-highlight">$1</mark>`);
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = newHtml;
+        const parent = node.parentNode;
+        while(tempDiv.firstChild) {
+            parent.insertBefore(tempDiv.firstChild, node);
+        }
+        parent.removeChild(node);
+    });
+
+    inNoteMatches = Array.from(editorBody.querySelectorAll('mark.in-note-highlight'));
+    if (inNoteMatches.length > 0) {
+        navigateToMatch(0);
+    } else {
+        updateInNoteUI();
+    }
+}
+
+function setupInNoteSearchListeners() {
+    const searchBar = document.getElementById('in-note-search-bar');
+    const searchInput = document.getElementById('in-note-search-input');
+
+    document.getElementById('in-note-search-close').addEventListener('click', () => {
+        clearInNoteHighlights();
+        searchBar.classList.add('hidden');
+    });
+
+    document.getElementById('in-note-search-next').addEventListener('click', () => {
+        if (inNoteCurrentIndex < inNoteMatches.length - 1) {
+            navigateToMatch(inNoteCurrentIndex + 1);
+        }
+    });
+
+    document.getElementById('in-note-search-prev').addEventListener('click', () => {
+        if (inNoteCurrentIndex > 0) {
+            navigateToMatch(inNoteCurrentIndex - 1);
+        }
+    });
+
+    searchInput.addEventListener('input', performInNoteSearch);
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if(e.shiftKey) {
+                document.getElementById('in-note-search-prev').click();
+            } else {
+                document.getElementById('in-note-search-next').click();
+            }
+        }
+        if (e.key === 'Escape') {
+             document.getElementById('in-note-search-close').click();
+        }
+    });
+}
+// --- END: In-Note Search Logic ---
 
             const defaultState = {
                 collections: [
@@ -2470,49 +2600,69 @@ if (themeMeta) {
         return;
     }
 
+    // Check if we need to highlight a search term
+    const highlightQuery = state.settings.searchHighlightQuery;
+
     app.elements.noteEditorTitle.value = note.name;
     app.elements.noteEditorTitle.style.height = 'auto';
-                app.elements.noteEditorTitle.style.height = (app.elements.noteEditorTitle.scrollHeight) + 'px';
+    app.elements.noteEditorTitle.style.height = (app.elements.noteEditorTitle.scrollHeight) + 'px';
 
-    // Start with the raw content from the database
-    let processedContent = note.content || '';
+    let contentToRender = note.content || '';
 
-    // Find all our attachment placeholders and replace them with the real widget HTML
-    processedContent = processedContent.replace(/<div.*?data-attachment='(.*?)'.*?>.*?<\/div>/g, (match, jsonString) => {
-        try {
-            // The JSON string might have HTML entities, so we need to decode them
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = jsonString;
-            const decodedJson = tempDiv.textContent || tempDiv.innerText || "";
-
-            const data = JSON.parse(decodedJson);
-            if (data.isAttachment) {
-                return createAttachmentWidgetHTML(data);
-            }
-        } catch (e) {
-            console.error("Failed to parse attachment data:", e);
-            return '[Error loading attachment]';
-        }
-        return match; // Return the original match if it's not our attachment
-    });
-
-    // The rest of the function handles the markdown preview
-    if(state.settings.editorMode === 'preview') {
+    if (state.settings.editorMode === 'preview') {
         app.elements.noteEditorBody.classList.add('hidden');
         app.elements.markdownPreview.classList.remove('hidden');
-        let html = marked.parse(processedContent);
+        let html = marked.parse(contentToRender);
         html = parseInternalLinks(html);
         app.elements.markdownPreview.innerHTML = html;
         app.toolbar.editorModeToggle.classList.add('active');
     } else {
         app.elements.noteEditorBody.classList.remove('hidden');
         app.elements.markdownPreview.classList.add('hidden');
-        app.elements.noteEditorBody.innerHTML = processedContent;
+        app.elements.noteEditorBody.innerHTML = contentToRender;
         app.toolbar.editorModeToggle.classList.remove('active');
     }
 
+    // If a query was passed from search, highlight and scroll
+    if (highlightQuery && state.settings.editorMode === 'editor') {
+        const editorBody = app.elements.noteEditorBody;
+        const regex = new RegExp(`(${highlightQuery.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi');
+
+        // Use a TreeWalker to safely replace text without breaking HTML
+        const walker = document.createTreeWalker(editorBody, NodeFilter.SHOW_TEXT, null, false);
+        let node;
+        const nodesToReplace = [];
+        while (node = walker.nextNode()) {
+            if (node.parentElement.tagName !== 'SCRIPT' && node.parentElement.tagName !== 'STYLE' && regex.test(node.textContent)) {
+                nodesToReplace.push(node);
+            }
+        }
+
+        nodesToReplace.forEach(node => {
+            const newHtml = node.textContent.replace(regex, `<mark>$1</mark>`);
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = newHtml;
+            const parent = node.parentNode;
+            while(tempDiv.firstChild) {
+                parent.insertBefore(tempDiv.firstChild, node);
+            }
+            parent.removeChild(node);
+        });
+
+        // Scroll to the first highlighted element
+        const firstHighlight = editorBody.querySelector('mark');
+        if (firstHighlight) {
+            setTimeout(() => { // Timeout ensures the DOM has painted
+                firstHighlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+        }
+
+        // Clear the query so it doesn't run again
+        state.settings.searchHighlightQuery = null;
+    }
+
     updateEditorStats();
-    feather.replace(); // Important to render new icons
+    feather.replace();
 }
             
             function renderSearchResults(query) {
@@ -2802,6 +2952,8 @@ ${noteContent}`;
 };
 
             async function init() {
+                setupInNoteSearchListeners();
+
                 
                 // --- Logic for File Attachments ---
 const attachFileBtn = document.getElementById('attach-file-btn');
@@ -3476,17 +3628,19 @@ if (quizBtn) {
 
                     const card = e.target.closest('.kanban-card, .list-note-item, .search-result-item');
                     if (card) {
-                        if (isSearchActive) {
-                            closeSearch(true); // Don't re-render immediately
-                        }
-                        state.settings.activeNoteId = card.dataset.noteId;
-                        const { parent } = findItem(state.settings.activeNoteId);
-                        state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
-                        state.settings.activeTag = null;
-                        saveState();
-                        render();
-                        return;
-                    }
+    // If clicking a search result, store the query for highlighting
+    if (isSearchActive && card.classList.contains('search-result-item')) {
+        state.settings.searchHighlightQuery = app.search.input.value;
+        closeSearch(true); // Don't re-render immediately
+    }
+    state.settings.activeNoteId = card.dataset.noteId;
+    const { parent } = findItem(state.settings.activeNoteId);
+    state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+    state.settings.activeTag = null;
+    saveState();
+    render();
+    return;
+}
                     
                     const internalLink = e.target.closest('a.internal-link');
                     if (internalLink) {
@@ -4334,6 +4488,18 @@ app.modals.quizContent.addEventListener('change', e => {
                 });
                 
                 document.addEventListener('keydown', (e) => {
+                    // Add this inside the existing keydown listener
+if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+    const editorView = document.getElementById('note-editor-view');
+    // Only trigger if the note editor is visible and is the active area
+    if (!editorView.classList.contains('hidden') && editorView.contains(document.activeElement)) {
+        e.preventDefault();
+        document.getElementById('in-note-search-bar').classList.remove('hidden');
+        const input = document.getElementById('in-note-search-input');
+        input.focus();
+        input.select();
+    }
+}
                     if ((e.metaKey || e.ctrlKey) && e.key === 'u') {
     e.preventDefault();
     document.getElementById('file-upload-input').click();
