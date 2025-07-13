@@ -578,7 +578,7 @@
             text-overflow: ellipsis;
         }
         .kanban-card .card-content { -webkit-line-clamp: 3; }
-        .list-note-item .card-content { -webkit-line-clamp: 2; }
+        .list-note-item .card-content, .search-result-item .card-content { -webkit-line-clamp: 2; word-break: break-word; }
         
         .view-btn {
              color: var(--text-secondary);
@@ -952,7 +952,7 @@ window.functions = getFunctions(app);
        </div>
    </div>
 
-    <div id="search-bar-container" class="hidden md:absolute md:top-24 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 z-10 w-full md:w-[95%] md:max-w-[500px]">
+    <div id="search-bar-container" class="hidden md:absolute md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 z-10 w-full md:w-[95%] md:max-w-[500px]">
          <div class="bg-bg-pane-dark rounded-full shadow-lg flex items-center px-4 w-full">
              <i data-feather="search" class="text-text-tertiary"></i>
              <input id="search-input" type="text" placeholder="Search notes and folders..." class="w-full bg-transparent p-3 focus:outline-none text-text-primary">
@@ -976,8 +976,8 @@ window.functions = getFunctions(app);
                 <div id="note-editor-view" class="notes-view hidden flex-grow flex flex-col overflow-y-auto">
                     <div id="highlight-controls" class="hidden sticky top-0 z-20 p-2 bg-bg-main">
 <div id="in-note-search-bar" class="w-full mx-auto bg-bg-pane-dark shadow-lg rounded-full p-1 flex items-center gap-1 text-base border border-border-color px-4">
-        <input id="in-note-search-input" type="text" placeholder="Find in note..." class="flex-grow w-0 bg-transparent rounded-full px-3 py-1 focus:outline-none">
-        <span id="in-note-search-count" class="text-text-tertiary w-20 text-center flex-shrink-0">No results</span>
+        <input id="in-note-search-input" type="text" placeholder="Find in note..." class="flex-grow bg-transparent rounded-full px-3 py-1 focus:outline-none min-w-0">
+        <span id="in-note-search-count" class="text-text-tertiary px-2 text-center flex-shrink-0">No results</span>
         <div class="h-5 w-px bg-border-color"></div>
         <button id="in-note-search-prev" title="Previous" class="p-1 hover:bg-bg-main rounded-full text-text-secondary disabled:opacity-50" disabled><i data-feather="chevron-up" class="w-5 h-5"></i></button>
         <button id="in-note-search-next" title="Next" class="p-1 hover:bg-bg-main rounded-full text-text-secondary disabled:opacity-50" disabled><i data-feather="chevron-down" class="w-5 h-5"></i></button>
@@ -1773,38 +1773,14 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
     }
 }
             // --- START: In-Note Search Logic ---
-            // --- START: In-Note Search Logic ---
-
-function showInNoteSearch() {
-    const highlightControls = document.getElementById('highlight-controls');
-    const editorView = document.getElementById('note-editor-view');
-    // This check prevents errors if the elements don't exist
-    if (highlightControls && editorView && highlightControls.classList.contains('hidden')) {
-        highlightControls.classList.remove('hidden');
-        // Use a timeout to ensure the height is calculated after it's rendered
-        setTimeout(() => {
-            const searchBarHeight = highlightControls.offsetHeight;
-            // Add padding to the editor view itself to push content down
-            editorView.style.scrollPaddingTop = `${searchBarHeight}px`;
-        }, 0);
-    }
-}
-
-function hideInNoteSearch() {
-    const highlightControls = document.getElementById('highlight-controls');
-    const editorView = document.getElementById('note-editor-view');
-    // This check prevents errors if the elements don't exist
-    if (highlightControls && editorView && !highlightControls.classList.contains('hidden')) {
-        highlightControls.classList.add('hidden');
-        // Revert padding to the CSS default
-        editorView.style.scrollPaddingTop = '';
-    }
-}
             // Add this new function
 function closeAndClearSearch() {
     const editorBody = app.elements.noteEditorBody;
+    const highlightControls = document.getElementById('highlight-controls');
 
-    hideInNoteSearch(); // Use our new helper function
+    if (highlightControls) {
+        highlightControls.classList.add('hidden');
+    }
 
     clearInNoteHighlights();
     const inNoteInput = document.getElementById('in-note-search-input');
@@ -1825,6 +1801,9 @@ function closeAndClearSearch() {
             parent.normalize();
         });
     }
+
+    // This is the key: Instantly update the note's content in the state 
+    // and trigger the database save, fixing the refresh bug.
     saveCurrentNoteImmediately();
 }
 let inNoteMatches = [];
@@ -1867,23 +1846,26 @@ function navigateToMatch(index) {
     currentMatch.classList.add('current');
 
     // --- ROBUST SCROLL LOGIC TO PREVENT CUT-OFF HEADER ---
-    // This is the new, more reliable scrolling logic.
-// This new logic correctly calculates scroll position, accounting for the header
-            const mainContentArea = document.getElementById('main-content-area');
-            const header = document.getElementById('highlight-controls');
-            const headerHeight = header.offsetHeight;
-            const elementRect = currentMatch.getBoundingClientRect();
-            const containerRect = mainContentArea.getBoundingClientRect();
-            const scrollTop = mainContentArea.scrollTop;
-            const desiredPadding = 20; // A little space between the header and the highlight
+    const mainContentArea = document.getElementById('main-content-area');
+    const header = document.getElementById('highlight-controls');
+    
+    // Ensure header is visible before getting its height to avoid errors
+    const headerHeight = header.offsetHeight > 0 ? header.offsetHeight : 0;
+    const elementRect = currentMatch.getBoundingClientRect();
+    const containerRect = mainContentArea.getBoundingClientRect();
+    const scrollTop = mainContentArea.scrollTop;
+    const desiredPadding = 20; // A little space between the header and the highlight
 
-            const elementTopRelativeToContainer = elementRect.top - containerRect.top;
-            const targetScrollTop = scrollTop + elementTopRelativeToContainer - headerHeight - desiredPadding;
+    // Calculate the top of the element relative to the scrollable container's visible area
+    const elementTopRelativeToContainer = elementRect.top - containerRect.top;
+    
+    // Calculate the final desired scroll position
+    const targetScrollTop = scrollTop + elementTopRelativeToContainer - headerHeight - desiredPadding;
 
-            mainContentArea.scrollTo({
-                top: targetScrollTop,
-                behavior: 'smooth'
-            });
+    mainContentArea.scrollTo({
+        top: targetScrollTop,
+        behavior: 'smooth'
+    });
     // --- END OF NEW LOGIC ---
 
     updateInNoteUI();
@@ -2886,7 +2868,7 @@ if (themeMeta) {
 
         const firstHighlight = editorBody.querySelector('mark');
         if (firstHighlight) {
-            showInNoteSearch();
+            highlightControls.classList.remove('hidden');
 
             const clearBtn = document.getElementById('clear-search-btn');
             clearBtn.replaceWith(clearBtn.cloneNode(true));
@@ -4449,29 +4431,27 @@ app.modals.quizContent.addEventListener('change', e => {
                 app.elements.desktopNewNoteBtn.addEventListener('click', () => createNewNote());
 
                 const openSearch = () => {
-    const highlightControls = document.getElementById('highlight-controls');
-    // THIS IS THE FIX: Check if highlightControls exists before using it.
-    if (highlightControls && !highlightControls.classList.contains('hidden')) {
-        const clearSearchBtn = document.getElementById('clear-search-btn');
-        if (clearSearchBtn) clearSearchBtn.click();
-    }
+                    const highlightControls = document.getElementById('highlight-controls');
+                    if (!highlightControls.classList.contains('hidden')) {
+                        const clearSearchBtn = document.getElementById('clear-search-btn');
+                        if (clearSearchBtn) clearSearchBtn.click();
+                    }
+                    
+                    if (window.innerWidth < 768) {
+                        // On mobile, show the search bar as an absolute overlay within the header
+                        app.search.container.classList.remove('hidden');
+                        app.search.container.classList.add('absolute', 'top-0', 'left-0', 'w-full', 'h-full', 'bg-bg-main');
+                        app.elements.headerMainContent.classList.add('opacity-0', 'pointer-events-none');
+                    } else {
+                        // Desktop behavior
+                        app.elements.headerMainContent.classList.add('opacity-0', 'pointer-events-none');
+                        app.search.container.classList.remove('hidden');
+                    }
 
-    if (window.innerWidth < 768) {
-        // On mobile, show the search bar as an absolute overlay within the header
-        app.search.container.classList.remove('hidden');
-        // This change adds vertical padding to fix the iOS issue
-        app.search.container.classList.add('absolute', 'top-0', 'left-0', 'right-0', 'bg-bg-main', 'p-2', 'pt-4', 'h-full');
-        app.elements.headerMainContent.classList.add('opacity-0', 'pointer-events-none');
-    } else {
-        // Desktop behavior
-        app.elements.headerMainContent.classList.add('opacity-0', 'pointer-events-none');
-        app.search.container.classList.remove('hidden');
-    }
-
-    isSearchActive = true;
-    app.search.input.focus();
-    renderMainView();
-};
+                    isSearchActive = true;
+                    app.search.input.focus();
+                    renderMainView();
+                };
 
                 const closeSearch = (skipRender = false) => {
                      if (window.innerWidth < 768) {
@@ -4986,7 +4966,7 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
     if (!editorView.classList.contains('hidden') && editorView.contains(document.activeElement)) {
         e.preventDefault();
         // Show the IN-NOTE search bar and focus the input
-        showInNoteSearch();
+        document.getElementById('highlight-controls').classList.remove('hidden');
         const input = document.getElementById('in-note-search-input');
         input.focus();
         input.select();
