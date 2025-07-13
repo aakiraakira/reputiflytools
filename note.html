@@ -2697,12 +2697,18 @@ if (themeMeta) {
                 <i data-feather="trash-2" class="w-4 h-4"></i>Delete
             </button>
         `;
-    } else if (activeCollection) {
-        controlsHTML += `
-            <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">View</div>
-            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="board"><i data-feather="trello" class="w-4 h-4"></i>Board</button>
-            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="list"><i data-feather="list" class="w-4 h-4"></i>List</button>
-        `;
+    }  else if (activeCollection) {
+    controlsHTML += `
+        <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">Actions</div>
+        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-new-note">
+            <i data-feather="file-plus" class="w-4 h-4"></i>New Note
+        </button>
+        <hr class="my-1 border-border-color">
+        <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">View</div>
+        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="board"><i data-feather="trello" class="w-4 h-4"></i>Board</button>
+        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="list"><i data-feather="list" class="w-4 h-4"></i>List</button>
+    `; 
+//...
         if (state.settings.activeView === 'list') {
             controlsHTML += `<hr class="my-1 border-border-color">
                 <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">Sort By</div>
@@ -4499,18 +4505,34 @@ app.modals.quizContent.addEventListener('change', e => {
                 });
 
                 app.elements.newCollectionBtn.addEventListener('click', async () => {
-                    const name = await showPrompt({ title: 'New Collection', message: 'Enter a name for your new collection:', placeholder: 'e.g. Project Phoenix' });
-                    if (name) {
-                        const newCollection = {
-                            id: generateId('c'), name, type: 'folder', children: [], expanded: true
-                        };
-                        state.collections.push(newCollection);
-                        state.kanbanColumns[newCollection.id] = [{ id: generateId('col'), title: 'To Do' }];
-                        state.settings.activeCollectionId = newCollection.id;
-                        saveState();
-                        render();
-                    }
-                });
+    const name = await showPrompt({ title: 'New Collection', message: 'Enter a name for your new collection:', placeholder: 'e.g. Project Phoenix' });
+    if (name) {
+        const newCollection = {
+            id: generateId('c'), name, type: 'folder', children: [], expanded: true
+        };
+        
+        // --- START: Auto-create note logic ---
+        const firstColumnId = generateId('col');
+        state.kanbanColumns[newCollection.id] = [{ id: firstColumnId, title: 'To Do' }];
+
+        const now = new Date().toISOString();
+        const newNote = {
+            id: generateId('n'), name: 'Untitled Note', type: 'note', content: '',
+            status: firstColumnId,
+            createdAt: now, modifiedAt: now,
+            pinned: false, links: [], tags: []
+        };
+        newCollection.children.push(newNote);
+        // --- END: Auto-create note logic ---
+        
+        state.collections.push(newCollection);
+        state.settings.activeCollectionId = newCollection.id;
+        state.settings.activeNoteId = newNote.id; // Make the new note active
+        saveState();
+        buildLunrIndex(); // Rebuild search index
+        render();
+    }
+});
 
                 app.elements.desktopNewNoteBtn.addEventListener('click', () => createNewNote());
 
@@ -4908,7 +4930,39 @@ if (command === 'insertTable') {
                                 parentFolder = Array.isArray(parent) ? null : parent;
                             }
                         }
-                        
+                        if (type === 'folder') {
+    const name = 'New Folder';
+    const newItem = {
+        id: generateId('folder'), name, type, children: [], expanded: true
+    };
+
+    // --- START: Auto-create note logic ---
+    const firstColumnId = generateId('col');
+    state.kanbanColumns[newItem.id] = [{ id: firstColumnId, title: 'To Do' }];
+
+    const now = new Date().toISOString();
+    const newNote = {
+        id: generateId('n'), name: 'Untitled Note', type: 'note', content: '',
+        status: firstColumnId,
+        createdAt: now, modifiedAt: now,
+        pinned: false, links: [], tags: []
+    };
+    newItem.children.push(newNote);
+    // --- END: Auto-create note logic ---
+
+    let destinationArray = state.collections;
+    if (targetItem) {
+        if (targetItem.type === 'folder') {
+            destinationArray = targetItem.children;
+            targetItem.expanded = true;
+        } else {
+            destinationArray = parentArray;
+        }
+    }
+    destinationArray.unshift(newItem);
+    
+    state.settings.activeNoteId = newNote.id; // Make the new note active
+}
                         if (newItem.type === 'note' && parentFolder?.id) {
                             newItem.status = state.kanbanColumns[parentFolder.id]?.[0]?.id || null;
                         }
