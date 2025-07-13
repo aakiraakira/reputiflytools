@@ -240,12 +240,15 @@
             opacity: 1;
             transform: translateY(0);
         }
-        .chat-thinking-bubble {
-            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        .chat-thinking-bubble span {
+            animation: pulse 1.4s ease-in-out infinite both;
         }
+        .chat-thinking-bubble span:nth-child(1) { animation-delay: -0.32s; }
+        .chat-thinking-bubble span:nth-child(2) { animation-delay: -0.16s; }
+
         @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: .5; }
+          0%, 80%, 100% { transform: scale(0); }
+          40% { transform: scale(1.0); }
         }
 
         /* --- Editor Superpowers Demo --- */
@@ -441,7 +444,7 @@
                             </div>
                             <div id="chatbot-demo" class="flex-grow space-y-3 py-3 text-sm overflow-hidden">
                                 <div class="chat-bubble p-3 rounded-lg bg-bg-pane-dark max-w-xs ml-auto">
-                                    <p>What were the key takeaways from the Project Phoenix meeting?</p>
+                                    <p id="chatbot-user-prompt"></p>
                                 </div>
                                 <div class="chat-bubble p-3 rounded-lg bg-bg-pane-dark max-w-xs chat-thinking-bubble">
                                     <span class="w-2 h-2 bg-text-tertiary rounded-full inline-block"></span>
@@ -450,6 +453,9 @@
                                 </div>
                                 <div class="chat-bubble p-3 rounded-lg bg-accent-primary/10 max-w-xs">
                                     <p id="chatbot-response"></p>
+                                </div>
+                                <div class="chat-bubble p-3 rounded-lg bg-accent-primary/10 max-w-xs">
+                                    <p id="chatbot-summary"></p>
                                 </div>
                             </div>
                             <div class="flex-shrink-0 flex items-center gap-2 pt-2 border-t border-border-color">
@@ -527,15 +533,15 @@
                     <div class="md:order-1 glass-card p-6 rounded-xl">
                         <div class="flex flex-col md:flex-row gap-6">
                             <div id="superpower-list" class="flex flex-col gap-2">
-                                <h4 class="font-semibold text-sm text-text-secondary mb-2 hidden md:block">Tools</h4>
+                                <h4 class="font-semibold text-sm text-text-secondary mb-2">Tools</h4>
                                 <button class="superpower-item active w-full text-left p-3 rounded-md flex items-center gap-3" data-target="dictation">
-                                    <i data-feather="mic" class="w-5 h-5 text-accent-primary"></i> <span class="hidden sm:inline">Voice Dictation</span>
+                                    <i data-feather="mic" class="w-5 h-5 text-accent-primary"></i> <span>Voice Dictation</span>
                                 </button>
                                 <button class="superpower-item w-full text-left p-3 rounded-md flex items-center gap-3" data-target="ocr">
-                                    <i data-feather="camera" class="w-5 h-5 text-accent-primary-dark"></i> <span class="hidden sm:inline">OCR Text Scan</span>
+                                    <i data-feather="camera" class="w-5 h-5 text-accent-primary-dark"></i> <span>OCR Text Scan</span>
                                 </button>
                                 <button class="superpower-item w-full text-left p-3 rounded-md flex items-center gap-3" data-target="attachments">
-                                    <i data-feather="paperclip" class="w-5 h-5 text-blue-400"></i> <span class="hidden sm:inline">File Attachments</span>
+                                    <i data-feather="paperclip" class="w-5 h-5 text-blue-400"></i> <span>File Attachments</span>
                                 </button>
                             </div>
                             <div class="flex-1 bg-bg-main p-4 rounded-lg flex items-center justify-center text-center min-h-[150px]">
@@ -788,8 +794,13 @@
         
         // --- Chatbot Demo Animation ---
         const chatContainer = document.getElementById('chatbot-demo');
+        const chatbotUserPrompt = document.getElementById('chatbot-user-prompt');
         const chatbotResponseEl = document.getElementById('chatbot-response');
-        const chatbotResponseText = "The main goal is to refactor the auth system using React & NodeJS, considering the impact on both the mobile and web apps.";
+        const chatbotSummaryEl = document.getElementById('chatbot-summary');
+        
+        const userPromptText = "What were the key takeaways from the Project Phoenix meeting?";
+        const responseText = "The main goal is to refactor the auth system using React & NodeJS, considering the impact on both the mobile and web apps.";
+        const summaryText = "Summary: Refactor auth with React/Node, check mobile/web impact.";
 
         function animateChatbot() {
             if (!chatContainer) return;
@@ -797,38 +808,50 @@
             const userBubble = bubbles[0];
             const thinkingBubble = bubbles[1];
             const aiBubble = bubbles[2];
+            const summaryBubble = bubbles[3];
             
             // Reset
-            userBubble.classList.remove('visible');
-            thinkingBubble.classList.remove('visible');
-            aiBubble.classList.remove('visible');
-            chatbotResponseEl.textContent = '';
+            [userBubble, thinkingBubble, aiBubble, summaryBubble].forEach(b => b.classList.remove('visible'));
+            [chatbotUserPrompt, chatbotResponseEl, chatbotSummaryEl].forEach(el => el.textContent = '');
+
+            // Typing animation function
+            function typeText(element, text, callback) {
+                let charIndex = 0;
+                function type() {
+                    if (charIndex < text.length) {
+                        element.textContent += text.charAt(charIndex);
+                        charIndex++;
+                        setTimeout(type, 25);
+                    } else if (callback) {
+                        callback();
+                    }
+                }
+                type();
+            }
 
             // Start animation
             setTimeout(() => {
                 userBubble.classList.add('visible');
-            }, 500);
+                typeText(chatbotUserPrompt, userPromptText, () => {
+                    setTimeout(() => {
+                        thinkingBubble.classList.add('visible');
+                    }, 500);
 
-            setTimeout(() => {
-                thinkingBubble.classList.add('visible');
-            }, 1500);
-            
-            setTimeout(() => {
-                thinkingBubble.classList.remove('visible');
-                aiBubble.classList.add('visible');
-                let charIndex = 0;
-                function typeResponse() {
-                    if (charIndex < chatbotResponseText.length) {
-                        chatbotResponseEl.textContent += chatbotResponseText.charAt(charIndex);
-                        charIndex++;
-                        setTimeout(typeResponse, 25);
-                    }
-                }
-                typeResponse();
-            }, 3000);
+                    setTimeout(() => {
+                        thinkingBubble.classList.remove('visible');
+                        aiBubble.classList.add('visible');
+                        typeText(chatbotResponseEl, responseText, () => {
+                             setTimeout(() => {
+                                summaryBubble.classList.add('visible');
+                                typeText(chatbotSummaryEl, summaryText);
+                             }, 1000);
+                        });
+                    }, 2000);
+                });
+            }, 500);
         }
         animateChatbot();
-        setInterval(animateChatbot, 8000); // Loop the animation
+        setInterval(animateChatbot, 12000); // Loop the animation
 
 
         // --- Interactive Knowledge Graph ---
