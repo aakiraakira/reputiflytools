@@ -262,6 +262,29 @@
     color: var(--text-primary) !important;
     margin: 0;
 }
+#main-content-area {
+    min-height: 0;
+}
+#backlinks-pane {
+    background-color: var(--bg-pane-light);
+}
+.backlink-item {
+    background-color: var(--bg-main);
+    border: 1px solid var(--border-color);
+    transition: box-shadow 0.2s;
+}
+.backlink-item:hover {
+    box-shadow: 0 4px 12px var(--shadow-color);
+}
+#toggle-backlinks-btn.collapsed .feather-chevron-down {
+    transform: rotate(-90deg);
+}
+#backlinks-list.collapsed {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+    overflow: hidden;
+}
 /* Add these styles for the mobile toolbar fix */
 
         
@@ -945,6 +968,11 @@ window.functions = getFunctions(app);
                                 <i data-feather="download" class="w-5 h-5"></i>
                                 <span>Export Data</span>
                             </button>
+                            <button id="chatbot-toggle-btn" class="settings-footer-item">
+        <i data-feather="message-square" class="w-5 h-5"></i>
+        <span>Show Chatbot Button</span>
+    </button>
+
                             <button id="bookmarklet-info-btn" class="settings-footer-item">
                                 <i data-feather="book" class="w-5 h-5"></i>
                                 <span>Web Clipper</span>
@@ -1035,7 +1063,7 @@ window.functions = getFunctions(app);
                 <div id="list-view" class="notes-view hidden flex-grow p-4 md:p-5">
                     <div id="notes-list-content" class="space-y-3"></div>
                 </div>
-                <div id="note-editor-view" class="notes-view hidden flex-grow flex flex-col overflow-y-auto">
+                <div id="note-editor-view" class="notes-view hidden flex-grow flex flex-col">
                     <div id="highlight-controls" class="hidden sticky top-0 z-20 p-2 bg-bg-main">
 <div id="in-note-search-bar" class="w-full mx-auto bg-bg-pane-dark shadow-lg rounded-full p-1 flex items-center gap-1 text-base border border-border-color px-4">
         <input id="in-note-search-input" type="text" placeholder="Find in note..." class="flex-grow bg-transparent rounded-full px-3 py-1 focus:outline-none">
@@ -1055,6 +1083,21 @@ window.functions = getFunctions(app);
                     </div>
                     <div id="note-editor-body" contenteditable="true" class="flex-grow text-lg leading-relaxed focus:outline-none px-4 md:px-8 pt-2 md:pt-4 pb-4 md:pb-8" data-placeholder="Start writing or drop an image..."></div>
                     <div id="markdown-preview" class="hidden flex-grow text-lg leading-relaxed focus:outline-none p-4 md:p-8 prose"></div>
+                    <div id="backlinks-pane" class="hidden p-4 md:px-8 border-t border-border-color">
+    <div class="flex justify-between items-center mb-3">
+        <div class="flex items-center gap-2">
+            <h4 class="font-semibold text-sm uppercase tracking-wider text-text-secondary">Linked Here</h4>
+            <button id="toggle-backlinks-btn" class="p-1 rounded-full hover:bg-bg-pane-dark">
+                <i data-feather="chevron-down" class="w-4 h-4 transition-transform duration-200"></i>
+            </button>
+        </div>
+        <button id="summarize-backlinks-btn" class="flex items-center gap-2 text-sm text-accent-primary hover:opacity-80 transition-opacity" title="Summarize all linked notes with AI">
+            <i data-feather="zap" class="w-4 h-4"></i>
+            <span>AI Summary</span>
+        </button>
+    </div>
+    <div id="backlinks-list" class="space-y-3 transition-all duration-300"></div>
+</div>
                     <div id="editor-footer" class="p-4 text-xs text-text-tertiary text-left border-t border-border-color flex-shrink-0">
                         <div id="backlinks-pane" class="hidden p-4 md:px-8 border-t border-border-color">
     <h4 class="font-semibold text-sm uppercase tracking-wider text-text-secondary mb-3">Linked here</h4>
@@ -1455,6 +1498,19 @@ const getAllNotes = (items) => {
     }
     return notes;
 };
+function renderChatbotState() {
+    const fab = document.getElementById('chatbot-fab');
+    const toggleBtn = document.getElementById('chatbot-toggle-btn');
+    if (state.settings.chatbotVisible) {
+        fab.classList.remove('hidden');
+        toggleBtn.querySelector('span').textContent = 'Hide Chatbot Button';
+        toggleBtn.classList.remove('text-text-tertiary');
+    } else {
+        fab.classList.add('hidden');
+        toggleBtn.querySelector('span').textContent = 'Show Chatbot Button';
+        toggleBtn.classList.add('text-text-tertiary');
+    }
+}
 
 function parseInternalLinks(htmlContent) {
     if (!htmlContent) return '';
@@ -2043,6 +2099,7 @@ function setupInNoteSearchListeners() {
                     editorMode: 'editor',
                     activeTag: null,
                     tagsCollapsed: false,
+                    backlinksCollapsed: false,
                 },
                 kanbanColumns: {
                     'c1': [ { id: 'col1', title: 'To Do' }, { id: 'col2', title: 'In Progress' } ],
@@ -2100,6 +2157,8 @@ function setupInNoteSearchListeners() {
             }
         }
     };
+    if (typeof loadedState.settings.backlinksCollapsed === 'undefined') loadedState.settings.backlinksCollapsed = false; // Add this line
+
 
     if (!loadedState) loadedState = {};
     if (!loadedState.settings) loadedState.settings = {};
@@ -2455,6 +2514,7 @@ const handleFileUpload = async (file) => {
                 renderCollectionsList();
                 renderTagList();
                 renderTagsState();
+                renderChatbotState();
                 renderMainView();
                 renderMobileControls();
                 
@@ -2697,12 +2757,18 @@ if (themeMeta) {
                 <i data-feather="trash-2" class="w-4 h-4"></i>Delete
             </button>
         `;
-    } else if (activeCollection) {
-        controlsHTML += `
-            <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">View</div>
-            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="board"><i data-feather="trello" class="w-4 h-4"></i>Board</button>
-            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="list"><i data-feather="list" class="w-4 h-4"></i>List</button>
-        `;
+    }  else if (activeCollection) {
+    controlsHTML += `
+        <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">Actions</div>
+        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-new-note">
+            <i data-feather="file-plus" class="w-4 h-4"></i>New Note
+        </button>
+        <hr class="my-1 border-border-color">
+        <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">View</div>
+        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="board"><i data-feather="trello" class="w-4 h-4"></i>Board</button>
+        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="list"><i data-feather="list" class="w-4 h-4"></i>List</button>
+    `; 
+//...
         if (state.settings.activeView === 'list') {
             controlsHTML += `<hr class="my-1 border-border-color">
                 <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">Sort By</div>
@@ -2712,7 +2778,12 @@ if (themeMeta) {
                     <option value="name-asc">Title (A-Z)</option>
                 </select>
             `;
-        }
+        }controlsHTML += `
+        <hr class="my-1 border-border-color">
+        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 text-red-500" data-action="mobile-delete-folder">
+            <i data-feather="trash-2" class="w-4 h-4"></i>Delete Folder
+        </button>
+    `;
     } else {
         controlsHTML = `<div class="px-3 py-2 text-sm text-text-secondary">No options available</div>`;
     }
@@ -2965,28 +3036,104 @@ if (themeMeta) {
     } else {
         highlightControls.classList.add('hidden');
     }
+    
 
-    const backlinksPane = document.getElementById('backlinks-pane');
-    const backlinksList = document.getElementById('backlinks-list');
-    const allNotes = getAllNotes(state.collections);
-    const backlinks = allNotes.filter(n =>
-        n.id !== note.id && (n.links || []).some(link => link.toLowerCase() === note.name.toLowerCase())
-    );
-    if (backlinks.length > 0) {
-        backlinksList.innerHTML = backlinks.map(b => {
-            const parentResult = findItem(b.id);
-            const parent = parentResult ? parentResult.parent : null;
-            const parentName = parent && !Array.isArray(parent) ? parent.name : 'Uncategorized';
-            return `<a href="#" class="backlink-item block p-2 rounded-md hover:bg-bg-pane-dark" data-note-id="${b.id}"><div class="font-semibold text-text-primary">${b.name}</div><div class="text-xs text-text-tertiary">${parentName}</div></a>`;
-        }).join('');
-        backlinksPane.classList.remove('hidden');
-    } else {
-        backlinksPane.classList.add('hidden');
-    }
+    // --- START: New Backlinks Logic ---
+const backlinksPane = document.getElementById('backlinks-pane');
+const backlinksList = document.getElementById('backlinks-list');
+const summarizeBtn = document.getElementById('summarize-backlinks-btn');
+const toggleBtn = document.getElementById('toggle-backlinks-btn');
+
+const allNotes = getAllNotes(state.collections);
+const backlinks = allNotes.filter(n =>
+    n.id !== note.id && (n.links || []).some(link => link.toLowerCase() === note.name.toLowerCase())
+);
+
+if (backlinks.length > 0) {
+    backlinksList.innerHTML = backlinks.map(b => {
+        const parentResult = findItem(b.id);
+        const parent = parentResult ? parentResult.parent : null;
+        const parentName = parent && !Array.isArray(parent) ? parent.name : 'Uncategorized';
+        
+        const plainContent = b.content.replace(/<[^>]*>?/gm, '').trim();
+        const excerpt = plainContent.substring(0, 120) + (plainContent.length > 120 ? '...' : '');
+        const lastModified = formatDateTime(b.modifiedAt);
+
+        return `
+            <a href="#" class="backlink-item block p-3 rounded-lg" data-note-id="${b.id}">
+                <div class="font-semibold text-text-primary">${b.name} <span class="text-text-tertiary font-normal">| ${parentName}</span></div>
+                <p class="text-sm text-text-secondary mt-1">${excerpt || 'No content preview'}</p>
+                <p class="text-xs text-text-tertiary mt-2">Modified: ${lastModified}</p>
+            </a>`;
+    }).join('');
+
+    summarizeBtn.onclick = () => handleBacklinksSummary(note, backlinks);
+    toggleBtn.onclick = () => {
+        state.settings.backlinksCollapsed = !state.settings.backlinksCollapsed;
+        saveState();
+        renderBacklinksState();
+    };
+
+    backlinksPane.classList.remove('hidden');
+    renderBacklinksState(); // Render initial state
+} else {
+    backlinksPane.classList.add('hidden');
+}
+// --- END: New Backlinks Logic ---
 
     updateEditorStats();
     feather.replace();
 }
+function renderBacklinksState() {
+    const isCollapsed = state.settings.backlinksCollapsed;
+    const list = document.getElementById('backlinks-list');
+    const btn = document.getElementById('toggle-backlinks-btn');
+    if (list && btn) {
+        list.classList.toggle('collapsed', isCollapsed);
+        btn.classList.toggle('collapsed', isCollapsed);
+    }
+}
+
+const handleBacklinksSummary = async (currentNote, backlinkingNotes) => {
+    // --- 1. Caching Logic ---
+    const cacheKey = backlinkingNotes.map(n => n.id + n.modifiedAt).join('');
+    if (currentNote.cachedBacklinksSummary && currentNote.cachedBacklinksSummary.key === cacheKey) {
+        app.modals.summaryContent.innerHTML = currentNote.cachedBacklinksSummary.summary;
+        openModal(app.modals.summary);
+        feather.replace();
+        showToast('Loaded summary from cache.', 'info');
+        return;
+    }
+
+    // --- 2. AI Call Logic ---
+    const toastId = showToast('Summarizing linked notes...', 'loading');
+    const combinedContent = backlinkingNotes.map(n => `Note: ${n.name}\nContent: ${n.content.replace(/<[^>]*>?/gm, '')}`).join('\n\n---\n\n');
+    const prompt = `Based on the following notes that all link to "${currentNote.name}", provide a concise summary of their collective content. Synthesize the information into a cohesive overview.
+
+Combined Content:
+---
+${combinedContent}`;
+
+    const payload = { contents: [{ parts: [{ text: prompt }] }] };
+    const summaryText = await callGeminiAPI(payload);
+    dismissToast(toastId);
+
+    if (summaryText) {
+        const summaryHtml = marked.parse(summaryText).trim();
+        app.modals.summaryContent.innerHTML = summaryHtml;
+        openModal(app.modals.summary);
+        feather.replace();
+
+        // --- 3. Save to Cache ---
+        currentNote.cachedBacklinksSummary = {
+            key: cacheKey,
+            summary: summaryHtml
+        };
+        saveState();
+    } else {
+        showToast('Could not generate summary.', 'error');
+    }
+};
             
             function renderSearchResults(query) {
                 app.views.searchResults.classList.remove('hidden');
@@ -3126,6 +3273,8 @@ if (themeMeta) {
                 saveState();
                 buildLunrIndex();
                 render();
+                app.elements.noteEditorTitle.focus();
+    app.elements.noteEditorTitle.select();
                 return newNote;
             };
 
@@ -3278,6 +3427,12 @@ ${noteContent}`;
 };
 
             async function init() {
+                // Add this inside the init() function
+document.getElementById('chatbot-toggle-btn').addEventListener('click', () => {
+    state.settings.chatbotVisible = !state.settings.chatbotVisible;
+    saveState();
+    renderChatbotState();
+});
                 // --- START: Inline Toolbar Scroll Logic ---
 const toolbarButtons = document.getElementById('inline-toolbar-buttons');
 const scrollLeftBtn = document.getElementById('toolbar-scroll-left');
@@ -3568,11 +3723,16 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                     
                     state.settings.activeTag = null; // Deactivate tag filter
 
-                    if (item.type === 'folder') {
-                        state.settings.activeCollectionId = id;
-                        state.settings.activeNoteId = null;
-                        item.expanded = !item.expanded;
-                    } else if (item.type === 'note') {
+                   if (item.type === 'folder') {
+    // Default to list view on mobile devices
+    if (window.innerWidth < 768) {
+        state.settings.activeView = 'list';
+    }
+    
+    state.settings.activeCollectionId = id;
+    state.settings.activeNoteId = null;
+    item.expanded = !item.expanded;
+} else if (item.type === 'note') {
                          state.settings.activeNoteId = id;
                          const result = findItem(id);
                          const parent = result.parent;
@@ -3860,6 +4020,33 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
 
     const action = button.dataset.action;
     const noteId = state.settings.activeNoteId;
+    if (action === 'mobile-delete-folder') {
+        closeDropdown();
+        const collectionId = state.settings.activeCollectionId;
+        if (!collectionId) return;
+
+        const { item: folder, parent, index } = findItem(collectionId);
+        if (!folder) return;
+
+        const parentArray = Array.isArray(parent) ? parent : parent.children;
+
+        const confirmed = await showConfirm({
+            title: `Delete Folder "${folder.name}"`,
+            message: 'This will delete the folder and <strong>all notes inside it</strong>. This action cannot be undone.',
+            confirmText: 'Delete'
+        });
+
+        if (confirmed) {
+            parentArray.splice(index, 1);
+            showToast(`Folder "${folder.name}" deleted.`, 'success');
+            state.settings.activeCollectionId = null;
+            state.settings.activeNoteId = null;
+            saveState();
+            buildLunrIndex();
+            render();
+        }
+        return; // Stop after handling this action
+    }
 
     // Handle all actions that require an active note
     if (action === 'mobile-new-note') {
@@ -4499,18 +4686,34 @@ app.modals.quizContent.addEventListener('change', e => {
                 });
 
                 app.elements.newCollectionBtn.addEventListener('click', async () => {
-                    const name = await showPrompt({ title: 'New Collection', message: 'Enter a name for your new collection:', placeholder: 'e.g. Project Phoenix' });
-                    if (name) {
-                        const newCollection = {
-                            id: generateId('c'), name, type: 'folder', children: [], expanded: true
-                        };
-                        state.collections.push(newCollection);
-                        state.kanbanColumns[newCollection.id] = [{ id: generateId('col'), title: 'To Do' }];
-                        state.settings.activeCollectionId = newCollection.id;
-                        saveState();
-                        render();
-                    }
-                });
+    const name = await showPrompt({ title: 'New Collection', message: 'Enter a name for your new collection:', placeholder: 'e.g. Project Phoenix' });
+    if (name) {
+        const newCollection = {
+            id: generateId('c'), name, type: 'folder', children: [], expanded: true
+        };
+        
+        // --- START: Auto-create note logic ---
+        const firstColumnId = generateId('col');
+        state.kanbanColumns[newCollection.id] = [{ id: firstColumnId, title: 'To Do' }];
+
+        const now = new Date().toISOString();
+        const newNote = {
+            id: generateId('n'), name: 'Untitled Note', type: 'note', content: '',
+            status: firstColumnId,
+            createdAt: now, modifiedAt: now,
+            pinned: false, links: [], tags: []
+        };
+        newCollection.children.push(newNote);
+        // --- END: Auto-create note logic ---
+        
+        state.collections.push(newCollection);
+        state.settings.activeCollectionId = newCollection.id;
+        state.settings.activeNoteId = newNote.id; // Make the new note active
+        saveState();
+        buildLunrIndex(); // Rebuild search index
+        render();
+    }
+});
 
                 app.elements.desktopNewNoteBtn.addEventListener('click', () => createNewNote());
 
@@ -4908,7 +5111,39 @@ if (command === 'insertTable') {
                                 parentFolder = Array.isArray(parent) ? null : parent;
                             }
                         }
-                        
+                        if (type === 'folder') {
+    const name = 'New Folder';
+    const newItem = {
+        id: generateId('folder'), name, type, children: [], expanded: true
+    };
+
+    // --- START: Auto-create note logic ---
+    const firstColumnId = generateId('col');
+    state.kanbanColumns[newItem.id] = [{ id: firstColumnId, title: 'To Do' }];
+
+    const now = new Date().toISOString();
+    const newNote = {
+        id: generateId('n'), name: 'Untitled Note', type: 'note', content: '',
+        status: firstColumnId,
+        createdAt: now, modifiedAt: now,
+        pinned: false, links: [], tags: []
+    };
+    newItem.children.push(newNote);
+    // --- END: Auto-create note logic ---
+
+    let destinationArray = state.collections;
+    if (targetItem) {
+        if (targetItem.type === 'folder') {
+            destinationArray = targetItem.children;
+            targetItem.expanded = true;
+        } else {
+            destinationArray = parentArray;
+        }
+    }
+    destinationArray.unshift(newItem);
+    
+    state.settings.activeNoteId = newNote.id; // Make the new note active
+}
                         if (newItem.type === 'note' && parentFolder?.id) {
                             newItem.status = state.kanbanColumns[parentFolder.id]?.[0]?.id || null;
                         }
@@ -5039,6 +5274,11 @@ if (command === 'insertTable') {
                     if ((e.metaKey || e.ctrlKey) && e.key === 'u') {
     e.preventDefault();
     document.getElementById('file-upload-input').click();
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        // This re-uses the same logic as the header button
+        app.elements.newCollectionBtn.click();
+    }
 }
 
                     if (e.key === 'Escape') {
