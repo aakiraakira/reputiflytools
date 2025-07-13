@@ -819,7 +819,7 @@ window.functions = getFunctions(app);
 
         <aside id="notes-list-pane" class="w-[280px] bg-bg-pane-light border-r border-border-color flex flex-col flex-shrink-0">
             <div class="sidebar-content-wrapper flex flex-col h-full min-w-[280px]">
-                <header class="flex justify-between items-center p-4 border-b border-border-color flex-shrink-0 gap-2 h-[65px]">
+                <header class="flex justify-between items-center p-4 border-b border-border-color flex-shrink-0 gap-2">
                     <div class="flex items-center gap-3">
                         <div id="profile-section" class="relative">
                             <button id="profile-button" title="Account Settings" class="w-8 h-8 rounded-full bg-gradient-to-r from-[var(--brand-grad-from)] to-[var(--brand-grad-to)] flex items-center justify-center font-bold text-white hover:opacity-90 transition-opacity">
@@ -901,7 +901,7 @@ window.functions = getFunctions(app);
         </button>
 
         <main id="editor-pane" class="flex-grow bg-bg-main flex flex-col">
-           <header id="main-header" class="flex justify-between items-center p-4 border-b border-border-color flex-shrink-0 relative h-[65px]">
+           <header id="main-header" class="flex justify-between items-center p-2 md:p-4 border-b border-border-color flex-shrink-0 relative">
    <div id="header-main-content" class="flex justify-between items-center w-full transition-opacity duration-200">
        <div class="flex items-center gap-2 flex-shrink min-w-0">
          <button id="mobile-menu-button" class="md:hidden p-1 -ml-1"><i data-feather="menu" class="w-6 h-6"></i></button>
@@ -975,7 +975,7 @@ window.functions = getFunctions(app);
                 </div>
                 <div id="note-editor-view" class="notes-view hidden flex-grow flex flex-col overflow-y-auto">
                     <div id="highlight-controls" class="hidden sticky top-0 z-20 p-2 bg-bg-main">
-<div id="in-note-search-bar" class="w-full mx-auto bg-bg-pane-dark shadow-lg rounded-full p-1 flex items-center gap-1 text-base border border-border-color px-4">
+    <div id="in-note-search-bar" class="w-full max-w-2xl mx-auto bg-bg-pane-dark shadow-lg rounded-full p-1 flex items-center gap-2 text-sm border border-border-color">
         <input id="in-note-search-input" type="text" placeholder="Find in note..." class="flex-grow bg-transparent rounded-full px-3 py-1 focus:outline-none">
         <span id="in-note-search-count" class="text-text-tertiary w-20 text-center flex-shrink-0">No results</span>
         <div class="h-5 w-px bg-border-color"></div>
@@ -1806,6 +1806,63 @@ function closeAndClearSearch() {
     // and trigger the database save, fixing the refresh bug.
     saveCurrentNoteImmediately();
 }
+function saveCurrentNoteImmediately() {
+    if (!state.settings.activeNoteId) return;
+    const findResult = findItem(state.settings.activeNoteId);
+    if (findResult && findResult.item) {
+        const note = findResult.item;
+        const newName = app.elements.noteEditorTitle.value;
+        const newContent = app.elements.noteEditorBody.innerHTML;
+
+        // Update the state object in memory right away
+        note.name = newName;
+        note.content = newContent;
+        note.modifiedAt = new Date().toISOString();
+        updateNoteLinks(note);
+        updateNoteTags(note);
+
+        // Trigger the async save to the database
+        saveState();
+
+        // Update the UI
+        buildLunrIndex();
+        renderCollectionsList();
+    }
+}
+// --- START: In-Note Search Logic ---
+// Add this new function
+function closeAndClearSearch() {
+    const editorBody = app.elements.noteEditorBody;
+    const highlightControls = document.getElementById('highlight-controls');
+
+    if (highlightControls) {
+        highlightControls.classList.add('hidden');
+    }
+
+    clearInNoteHighlights();
+    const inNoteInput = document.getElementById('in-note-search-input');
+    if (inNoteInput) {
+        inNoteInput.value = '';
+    }
+    updateInNoteUI();
+
+    const marks = Array.from(editorBody.querySelectorAll('mark:not(.in-note-highlight)'));
+
+    if (marks.length > 0) {
+        marks.forEach(mark => {
+            const parent = mark.parentNode;
+            while (mark.firstChild) {
+                parent.insertBefore(mark.firstChild, mark);
+            }
+            parent.removeChild(mark);
+            parent.normalize();
+        });
+    }
+
+    // This is the key: Instantly update the note's content in the state 
+    // and trigger the database save, fixing the refresh bug.
+    saveCurrentNoteImmediately();
+}
 let inNoteMatches = [];
 let inNoteCurrentIndex = -1;
 
@@ -1846,8 +1903,20 @@ function navigateToMatch(index) {
     currentMatch.classList.add('current');
 
     // --- ROBUST SCROLL LOGIC TO PREVENT CUT-OFF HEADER ---
-    // This is the new, more reliable scrolling logic.
-currentMatch.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const mainContentArea = document.getElementById('main-content-area');
+    const highlightControls = document.getElementById('highlight-controls');
+    const mainRect = mainContentArea.getBoundingClientRect();
+    const highlightRect = currentMatch.getBoundingClientRect();
+
+    const barHeight = highlightControls.offsetHeight;
+    const desiredPadding = 80; // A comfortable margin from the top
+
+    const targetScrollTop = mainContentArea.scrollTop + (highlightRect.top - mainRect.top) - barHeight - desiredPadding;
+
+    mainContentArea.scrollTo({
+        top: Math.max(0, targetScrollTop),
+        behavior: 'smooth'
+    });
     // --- END OF NEW LOGIC ---
 
     updateInNoteUI();
@@ -1923,6 +1992,7 @@ function setupInNoteSearchListeners() {
         }
     });
 }
+// --- END: In-Note Search Logic ---
 // --- END: In-Note Search Logic ---
 
             const defaultState = {
@@ -2945,7 +3015,7 @@ if (themeMeta) {
                         <div class="font-semibold text-text-secondary text-sm">
                             ${parentName ? `${highlightText(parentName, query)} / ` : ''}<span class="text-text-primary">${highlightText(note.name, query)}</span>
                         </div>
-                        <p class="text-text-primary mt-2 truncate">${excerpt}</p>
+                        <p class="text-text-primary mt-2">${excerpt}</p>
                     </div>
                     <div class="flex items-center flex-shrink-0 ml-4">
                         <button class="summarize-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note with AI" data-note-id="${note.id}">
@@ -4410,11 +4480,6 @@ app.modals.quizContent.addEventListener('change', e => {
                 app.elements.desktopNewNoteBtn.addEventListener('click', () => createNewNote());
 
                 const openSearch = () => {
-                    const highlightControls = document.getElementById('highlight-controls');
-    if (!highlightControls.classList.contains('hidden')) {
-        const clearSearchBtn = document.getElementById('clear-search-btn');
-        if (clearSearchBtn) clearSearchBtn.click();
-    }
     if (window.innerWidth < 768) {
         app.elements.headerMainContent.classList.add('hidden');
         // This is the fix: explicitly set display to flex
@@ -4917,7 +4982,17 @@ if (command === 'insertTable') {
                 
                 document.addEventListener('keydown', (e) => {
                     // Add this inside the existing keydown listener
-
+if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+    const editorView = document.getElementById('note-editor-view');
+    // Only trigger if the note editor is visible and is the active area
+    if (!editorView.classList.contains('hidden') && editorView.contains(document.activeElement)) {
+        e.preventDefault();
+        document.getElementById('in-note-search-bar').classList.remove('hidden');
+        const input = document.getElementById('in-note-search-input');
+        input.focus();
+        input.select();
+    }
+}
                     if ((e.metaKey || e.ctrlKey) && e.key === 'u') {
     e.preventDefault();
     document.getElementById('file-upload-input').click();
@@ -4932,24 +5007,10 @@ if (command === 'insertTable') {
                             toggleMobileSidebar(false);
                         }
                     }
-                    // This is the NEW, correct code to add
-if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
-    const editorView = document.getElementById('note-editor-view');
-
-    // Check if the note editor is visible and you're typing in it
-    if (!editorView.classList.contains('hidden') && editorView.contains(document.activeElement)) {
-        e.preventDefault();
-        // Show the IN-NOTE search bar and focus the input
-        document.getElementById('highlight-controls').classList.remove('hidden');
-        const input = document.getElementById('in-note-search-input');
-        input.focus();
-        input.select();
-    } else if (!isSearchActive) {
-        // Otherwise, if global search isn't already active, open it
-        e.preventDefault();
-        openSearch();
-    }
-}
+                    if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
+                        if (e.key === 'f') { e.preventDefault(); openSearch(); }
+                        if (e.key === 'n') { e.preventDefault(); createNewNote(); }
+                    }
                 });
                 
                 document.addEventListener('click', (e) => {
