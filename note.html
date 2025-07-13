@@ -1847,7 +1847,22 @@ function navigateToMatch(index) {
 
     // --- ROBUST SCROLL LOGIC TO PREVENT CUT-OFF HEADER ---
     // This is the new, more reliable scrolling logic.
-currentMatch.scrollIntoView({ behavior: 'smooth', block: 'center' });
+// This new logic correctly calculates scroll position, accounting for the header
+            const mainContentArea = document.getElementById('main-content-area');
+            const header = document.getElementById('highlight-controls');
+            const headerHeight = header.offsetHeight;
+            const elementRect = currentMatch.getBoundingClientRect();
+            const containerRect = mainContentArea.getBoundingClientRect();
+            const scrollTop = mainContentArea.scrollTop;
+            const desiredPadding = 20; // A little space between the header and the highlight
+
+            const elementTopRelativeToContainer = elementRect.top - containerRect.top;
+            const targetScrollTop = scrollTop + elementTopRelativeToContainer - headerHeight - desiredPadding;
+
+            mainContentArea.scrollTo({
+                top: targetScrollTop,
+                behavior: 'smooth'
+            });
     // --- END OF NEW LOGIC ---
 
     updateInNoteUI();
@@ -2905,63 +2920,66 @@ if (themeMeta) {
 }
             
             function renderSearchResults(query) {
-    app.views.searchResults.classList.remove('hidden');
+                app.views.searchResults.classList.remove('hidden');
 
-    if (!query) {
-        app.containers.searchResultsList.innerHTML = `<p class="text-text-secondary text-center"><i data-feather="search" class="w-12 h-12 mx-auto mb-4"></i><br>Start typing to search for notes.</p>`;
-        feather.replace();
-        return;
-    }
+                if (!query) {
+                    app.containers.searchResultsList.innerHTML = `<p class="text-text-secondary text-center"><i data-feather="search" class="w-12 h-12 mx-auto mb-4"></i><br>Start typing to search for notes.</p>`;
+                    feather.replace();
+                    return;
+                }
 
-    const results = lunrIndex.search(query);
-    const resultNotes = results.map(res => findItem(res.ref)?.item).filter(Boolean);
+                const results = lunrIndex.search(query);
+                const resultNotes = results.map(res => findItem(res.ref)?.item).filter(Boolean);
 
-    if(resultNotes.length === 0) {
-         app.containers.searchResultsList.innerHTML = `<p class="text-text-secondary text-center"><i data-feather="x-circle" class="w-12 h-12 mx-auto mb-4"></i><br>No results found for "${query}".</p>`;
-         feather.replace();
-         return;
-    }
+                if(resultNotes.length === 0) {
+                     app.containers.searchResultsList.innerHTML = `<p class="text-text-secondary text-center"><i data-feather="x-circle" class="w-12 h-12 mx-auto mb-4"></i><br>No results found for "${query}".</p>`;
+                     feather.replace();
+                     return;
+                }
 
-    const highlightText = (text, query) => {
-        if (!query || !text) return text;
-        const escapedQuery = query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-        const regex = new RegExp(`(${escapedQuery})`, 'gi');
-        return text.replace(regex, `<mark>$1</mark>`);
-    };
+                const highlightText = (text, query) => {
+                    if (!query || !text) return text;
+                    // Escape special characters for the regex
+                    const escapedQuery = query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                    const regex = new RegExp(`(${escapedQuery})`, 'gi');
+                    // Escape HTML characters before returning
+                    return text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(regex, `<mark>$1</mark>`);
+                };
 
-    app.containers.searchResultsList.innerHTML = resultNotes.map(note => {
-        const parentResult = findItem(note.id);
-        const parent = parentResult ? parentResult.parent : null;
-        const parentName = parent && !Array.isArray(parent) ? parent.name : null;
-        const plainContent = note.content.replace(/<[^>]*>?/gm, '');
-        const excerptMatch = plainContent.match(new RegExp(`.{0,50}${query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}.{0,50}`, 'i'));
-        const excerpt = excerptMatch ? `...${highlightText(excerptMatch[0], query)}...` : highlightText(plainContent.substring(0, 100) + '...', query);
+                app.containers.searchResultsList.innerHTML = resultNotes.map(note => {
+                    const parentResult = findItem(note.id);
+                    const parent = parentResult ? parentResult.parent : null;
+                    const parentName = parent && !Array.isArray(parent) ? parent.name : null;
+                    const plainContent = note.content.replace(/<[^>]*>?/gm, '');
+                    
+                    // This is the new, more robust excerpt logic. It shows the beginning of the note.
+                    const excerpt = highlightText(plainContent, query);
 
-        // The data-note-id and cursor-pointer are now on the main div
-        return `
-            <div class="search-result-item p-4 mb-3 rounded-lg hover:shadow-md border border-border-color bg-bg-pane-light transition-shadow cursor-pointer" data-note-id="${note.id}">
-                <div class="flex justify-between items-start">
-                    <div class="flex-grow min-w-0">
-                        <div class="font-semibold text-text-secondary text-sm">
-                            ${parentName ? `${highlightText(parentName, query)} / ` : ''}<span class="text-text-primary">${highlightText(note.name, query)}</span>
+                    return `
+                        <div class="search-result-item p-4 mb-3 rounded-lg hover:shadow-md border border-border-color bg-bg-pane-light transition-shadow cursor-pointer" data-note-id="${note.id}">
+                            <div class="flex justify-between items-start">
+                                <div class="flex-grow min-w-0">
+                                    <div class="font-semibold text-text-secondary text-sm">
+                                        ${parentName ? `${highlightText(parentName, query)} / ` : ''}<span class="text-text-primary">${highlightText(note.name, query)}</span>
+                                    </div>
+                                    
+                                    <p class="text-text-secondary mt-2 truncate-multiline card-content" style="-webkit-line-clamp: 2;">${excerpt}</p>
+                                </div>
+                                <div class="flex items-center flex-shrink-0 ml-4">
+                                    <button class="summarize-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note with AI" data-note-id="${note.id}">
+                                        <i data-feather="zap" class="w-4 h-4"></i>
+                                    </button>
+                                    <button class="quiz-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Generate Quiz with AI" data-note-id="${note.id}">
+                                        <i data-feather="help-circle" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        <p class="text-text-primary mt-2 truncate">${excerpt}</p>
-                    </div>
-                    <div class="flex items-center flex-shrink-0 ml-4">
-                        <button class="summarize-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note with AI" data-note-id="${note.id}">
-                            <i data-feather="zap" class="w-4 h-4"></i>
-                        </button>
-                        <button class="quiz-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Generate Quiz with AI" data-note-id="${note.id}">
-                            <i data-feather="help-circle" class="w-4 h-4"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `
-    }).join('');
+                    `;
+                }).join('');
 
-    feather.replace();
-}
+                feather.replace();
+            }
             
             function renderChatHistory() {
                 app.modals.chatbotHistory.innerHTML = state.chatHistory.map(msg => {
@@ -4411,38 +4429,43 @@ app.modals.quizContent.addEventListener('change', e => {
 
                 const openSearch = () => {
                     const highlightControls = document.getElementById('highlight-controls');
-    if (!highlightControls.classList.contains('hidden')) {
-        const clearSearchBtn = document.getElementById('clear-search-btn');
-        if (clearSearchBtn) clearSearchBtn.click();
-    }
-    if (window.innerWidth < 768) {
-        app.elements.headerMainContent.classList.add('hidden');
-        // This is the fix: explicitly set display to flex
-        app.search.container.classList.remove('hidden');
-        app.search.container.classList.add('flex');
-    } else {
-        app.elements.headerMainContent.classList.add('opacity-0', 'pointer-events-none');
-        app.search.container.classList.remove('hidden');
-    }
-    isSearchActive = true;
-    app.search.input.focus();
-    renderMainView();
-};
+                    if (!highlightControls.classList.contains('hidden')) {
+                        const clearSearchBtn = document.getElementById('clear-search-btn');
+                        if (clearSearchBtn) clearSearchBtn.click();
+                    }
+                    
+                    if (window.innerWidth < 768) {
+                        // On mobile, show the search bar as an absolute overlay within the header
+                        app.search.container.classList.remove('hidden');
+                        app.search.container.classList.add('absolute', 'top-0', 'left-0', 'w-full', 'h-full', 'bg-bg-main');
+                        app.elements.headerMainContent.classList.add('opacity-0', 'pointer-events-none');
+                    } else {
+                        // Desktop behavior
+                        app.elements.headerMainContent.classList.add('opacity-0', 'pointer-events-none');
+                        app.search.container.classList.remove('hidden');
+                    }
+
+                    isSearchActive = true;
+                    app.search.input.focus();
+                    renderMainView();
+                };
 
                 const closeSearch = (skipRender = false) => {
-    if (window.innerWidth < 768) {
-        app.elements.headerMainContent.classList.remove('hidden');
-        // This is the fix: remove the flex display
-        app.search.container.classList.add('hidden');
-        app.search.container.classList.remove('flex');
-    } else {
-        app.elements.headerMainContent.classList.remove('opacity-0', 'pointer-events-none');
-        app.search.container.classList.add('hidden');
-    }
-    app.search.input.value = '';
-    isSearchActive = false;
-    if (!skipRender) render();
-};
+                     if (window.innerWidth < 768) {
+                        // Properly hide the absolute overlay and restore the main header content
+                        app.search.container.classList.add('hidden');
+                        app.search.container.classList.remove('absolute', 'top-0', 'left-0', 'w-full', 'h-full', 'bg-bg-main');
+                        app.elements.headerMainContent.classList.remove('opacity-0', 'pointer-events-none');
+                    } else {
+                        // Desktop behavior
+                        app.elements.headerMainContent.classList.remove('opacity-0', 'pointer-events-none');
+                        app.search.container.classList.add('hidden');
+                    }
+
+                    app.search.input.value = '';
+                    isSearchActive = false;
+                    if (!skipRender) render();
+                };
 
                 app.search.icon.addEventListener('click', openSearch);
                 app.search.mobileIcon.addEventListener('click', openSearch);
