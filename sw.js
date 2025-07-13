@@ -8,6 +8,7 @@ const CACHE_NAME = 'reputifly-notes-cache-v5';
 const urlsToCache = [
   '/',
   '/note',
+  '/notes',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
