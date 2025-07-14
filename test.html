@@ -1009,10 +1009,17 @@ window.functions = getFunctions(app);
         <main id="editor-pane" class="flex-grow bg-bg-main flex flex-col">
            <header id="main-header" class="flex justify-between items-center p-4 border-b border-border-color flex-shrink-0 relative h-[65px]">
    <div id="header-main-content" class="flex justify-between items-center w-full transition-opacity duration-200">
-       <div class="flex items-center gap-2 flex-shrink min-w-0">
-         <button id="mobile-menu-button" class="md:hidden p-1 -ml-1"><i data-feather="menu" class="w-6 h-6"></i></button>
-         <h2 id="current-view-title" class="text-lg font-semibold"></h2>
-       </div>
+   <div class="flex items-center gap-2 flex-shrink min-w-0">
+     <button id="mobile-menu-button" class="md:hidden p-1 -ml-1"><i data-feather="menu" class="w-6 h-6"></i></button>
+     
+     <button id="back-to-archive-btn" class="hidden flex items-center gap-2 text-sm pr-4 text-text-secondary hover:text-text-primary">
+        <i data-feather="arrow-left" class="w-4 h-4"></i>
+        <span>Back to Archive</span>
+     </button>
+
+     <h2 id="current-view-title" class="text-lg font-semibold"></h2>
+   </div>
+   
        
        <div id="desktop-header-controls" class="hidden md:flex items-center gap-4">
            <div class="flex-grow"></div>
@@ -2718,8 +2725,9 @@ function renderArchiveList() {
 function renderArchiveView() {
     app.views.archive.classList.remove('hidden');
     const container = document.getElementById('archive-view-list');
-    container.classList.add('space-y-4'); // Adds margin between items
+    container.classList.add('space-y-4');
 
+    const backToArchiveBtn = document.getElementById('back-to-archive-btn'); // Get header button
     let itemsToRender = state.archive;
     let isSubFolderView = false;
 
@@ -2732,7 +2740,18 @@ function renderArchiveView() {
         }
     }
 
-    // Handle empty states
+    // --- NEW LOGIC TO CONTROL THE HEADER BUTTON ---
+    if (isSubFolderView) {
+        backToArchiveBtn.classList.remove('hidden');
+        backToArchiveBtn.querySelector('span').textContent = 'Back to main archive';
+        app.elements.currentViewTitle.classList.add('hidden');
+    } else {
+        // Hide the back button if we're at the top level of the archive
+        backToArchiveBtn.classList.add('hidden');
+        app.elements.currentViewTitle.classList.remove('hidden');
+    }
+    // --- END OF NEW LOGIC ---
+
     if (itemsToRender.length === 0) {
         container.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="archive" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">${isSubFolderView ? 'This archived folder is empty.' : 'Archive is Empty'}</h3><p>You can archive notes or folders via the context menu.</p></div>`;
         feather.replace();
@@ -2760,15 +2779,9 @@ function renderArchiveView() {
             </div>
         </div>`;
     }).join('');
-
-    // Add a 'Back' button if we are inside a folder
-    const backButtonHTML = isSubFolderView ? `
-        <button id="archive-back-btn" class="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary mb-6">
-            <i data-feather="arrow-left" class="w-4 h-4"></i>
-            Back to main archive
-        </button>` : '';
-
-    container.innerHTML = backButtonHTML + itemsHTML;
+    
+    // The old back button is now removed from here
+    container.innerHTML = itemsHTML;
     feather.replace();
 }
             function updateNoteTags(note) {
@@ -3043,39 +3056,40 @@ function renderArchiveView() {
     }
 }
             function renderNoteEditor() {
+    const backToArchiveBtn = document.getElementById('back-to-archive-btn'); // New line
     app.containers.noteEditor.classList.remove('hidden');
-    const note = findItem(state.settings.activeNoteId)?.item;
+
+    // --- MODIFICATION START ---
+    const findResult = findItem(state.settings.activeNoteId); // Get the full result
+    const note = findResult?.item;
+    const isArchived = findResult?.location === 'archive';
+    // --- MODIFICATION END ---
+
     const highlightControls = document.getElementById('highlight-controls');
     const editorBody = app.elements.noteEditorBody;
 
     if (!note) {
         state.settings.activeNoteId = null;
         if (highlightControls) highlightControls.classList.add('hidden');
+        backToArchiveBtn.classList.add('hidden'); // New line
         renderMainView();
         return;
     }
 
-    const highlightQuery = state.settings.searchHighlightQuery;
+    // --- MODIFICATION START ---
+    // Show or hide the back button and the normal title
+    if (isArchived) {
+    backToArchiveBtn.classList.remove('hidden');
+    // --- ADD THIS LINE ---
+    backToArchiveBtn.querySelector('span').textContent = 'Back to Archive';
+    app.elements.currentViewTitle.classList.add('hidden');
+} else {
+        backToArchiveBtn.classList.add('hidden');
+        app.elements.currentViewTitle.classList.remove('hidden');
+    }
+    // --- MODIFICATION END ---
 
     app.elements.noteEditorTitle.value = note.name;
-    app.elements.noteEditorTitle.style.height = 'auto';
-    app.elements.noteEditorTitle.style.height = (app.elements.noteEditorTitle.scrollHeight) + 'px';
-
-    let contentToRender = note.content || '';
-
-    if (state.settings.editorMode === 'preview') {
-        editorBody.classList.add('hidden');
-        app.elements.markdownPreview.classList.remove('hidden');
-        let html = marked.parse(contentToRender);
-        html = parseInternalLinks(html);
-        app.elements.markdownPreview.innerHTML = html;
-        app.toolbar.editorModeToggle.classList.add('active');
-    } else {
-        editorBody.classList.remove('hidden');
-        app.elements.markdownPreview.classList.add('hidden');
-        editorBody.innerHTML = contentToRender;
-        app.toolbar.editorModeToggle.classList.remove('active');
-    }
     const isReadOnly = location === 'archive';
     app.elements.noteEditorTitle.readOnly = isReadOnly;
     app.elements.noteEditorBody.contentEditable = !isReadOnly;
@@ -3533,6 +3547,19 @@ ${noteContent}`;
 };
 
             async function init() {
+                // Add this inside the init() function
+document.getElementById('back-to-archive-btn').addEventListener('click', () => {
+    // If we are inside an archived folder, go back to the main archive list
+    if (state.settings.activeArchiveFolderId) {
+        state.settings.activeArchiveFolderId = null;
+    } else {
+        // Otherwise, we must be in an archived note, so exit the editor
+        state.settings.activeNoteId = null;
+        state.settings.activeView = 'archive';
+    }
+    saveState();
+    render();
+});
                 // Add this inside the init() function
 document.getElementById('toggle-archive-btn').addEventListener('click', () => {
     state.settings.archiveCollapsed = !state.settings.archiveCollapsed;
