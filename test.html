@@ -2844,8 +2844,6 @@ function renderArchiveView() {
     let controlsHTML = '';
 
     if (isNoteActive) {
-        // This part for active notes is correct, no changes needed here.
-        // (Existing logic for when a note is open)
         if (findResult.location === 'archive') {
             controlsHTML = `
                 <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">Archive Actions</div>
@@ -2863,17 +2861,16 @@ function renderArchiveView() {
                 <hr class="my-1 border-border-color">
                 <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">Note Tools</div>
                 <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-new-note"><i data-feather="file-plus" class="w-4 h-4"></i>New Note</button>
-                <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-rename"><i data-feather="edit-2" class="w-4 h-4"></i>Rename</button>
+                <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-archive-note"><i data-feather="archive" class="w-4 h-4"></i>Archive Note</button>
                 <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-duplicate"><i data-feather="copy" class="w-4 h-4"></i>Duplicate</button>
                 <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-share"><i data-feather="share-2" class="w-4 h-4"></i>Share Note</button>
                 <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-upload"><i data-feather="upload-cloud" class="w-4 h-4"></i>Upload File</button>
                 <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-pin"><i data-feather="paperclip" class="w-4 h-4"></i>${pinText}</button>
                 <hr class="my-1 border-border-color">
-                <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 text-red-500" data-action="mobile-delete"><i data-feather="trash-2" class="w-4 h-4"></i>Delete</button>
+                <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark text-red-500 rounded flex items-center gap-2" data-action="mobile-delete"><i data-feather="trash-2" class="w-4 h-4"></i>Delete</button>
             `;
         }
     } else if (activeCollection) {
-        // *** THIS IS THE NEW LOGIC BLOCK TO ADD ***
         controlsHTML = `
             <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">Folder Actions</div>
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-new-note">
@@ -2882,13 +2879,15 @@ function renderArchiveView() {
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-rename-folder">
                 <i data-feather="edit-2" class="w-4 h-4"></i>Rename Folder
             </button>
+            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-archive-folder">
+                <i data-feather="archive" class="w-4 h-4"></i>Archive Folder
+            </button>
             <hr class="my-1 border-border-color">
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark text-red-500 rounded flex items-center gap-2" data-action="mobile-delete-folder">
                 <i data-feather="trash-2" class="w-4 h-4"></i>Delete Folder
             </button>
         `;
     } else {
-        // This is the fallback for when nothing is selected
         controlsHTML = `
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-new-note">
                 <i data-feather="file-plus" class="w-4 h-4"></i>New Note
@@ -2897,24 +2896,6 @@ function renderArchiveView() {
     }
 
     app.containers.mobileControlsDropdown.innerHTML = controlsHTML;
-
-    // This part for sorting and view switching is correct.
-    const mobileSortSelect = document.getElementById('sort-order-mobile');
-    if (mobileSortSelect) {
-        mobileSortSelect.value = state.settings.listSortOrder;
-        mobileSortSelect.addEventListener('change', (e) => {
-            state.settings.listSortOrder = e.target.value;
-            app.elements.sortOrderSelect.value = e.target.value;
-            saveState();
-            renderListView();
-        });
-    }
-
-    document.querySelectorAll('.view-btn-mobile').forEach(btn => {
-        if (btn.dataset.view === state.settings.activeView) {
-            btn.classList.add('bg-bg-pane-dark', 'font-semibold');
-        }
-    });
     feather.replace();
 }
             function renderKanbanView() {
@@ -4177,6 +4158,29 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
 
     const action = button.dataset.action;
     const noteId = state.settings.activeNoteId;
+    const collectionId = state.settings.activeCollectionId;
+
+    // --- ADDED: Logic for archiving a folder ---
+    if (action === 'mobile-archive-folder') {
+        closeDropdown();
+        if (!collectionId) return;
+        
+        const { item: folder, parent, index } = findItem(collectionId);
+        if (!folder) return;
+
+        const parentArray = Array.isArray(parent) ? parent : parent.children;
+        const [itemToArchive] = parentArray.splice(index, 1);
+        itemToArchive.modifiedAt = new Date().toISOString();
+        state.archive.unshift(itemToArchive);
+        
+        showToast(`Folder "${folder.name}" archived.`, 'success');
+        state.settings.activeCollectionId = null;
+        state.settings.activeNoteId = null;
+        saveState();
+        buildLunrIndex();
+        render();
+        return;
+    }
     if (action === 'mobile-delete-folder') {
         closeDropdown();
         const collectionId = state.settings.activeCollectionId;
@@ -4220,6 +4224,16 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
         const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
 
         switch (action) {
+            case 'mobile-archive-note':
+                parentArray.splice(index, 1);
+                note.modifiedAt = new Date().toISOString();
+                state.archive.unshift(note);
+                showToast(`Note "${note.name}" archived.`, 'success');
+                state.settings.activeNoteId = null;
+                saveState();
+                buildLunrIndex();
+                render();
+                break;
             case 'mobile-summarize':
                 handleSummarize(plainContent);
                 break;
