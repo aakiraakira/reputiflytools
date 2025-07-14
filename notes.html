@@ -808,9 +808,7 @@ window.functions = getFunctions(app);
 
     if (user) {
           // User is signed in.
-          // User is signed in.
           console.log('User is logged in:', user.uid);
-          document.body.classList.add('overflow-hidden'); // FIX: Apply overflow lock only to the app view
           if (authContainer) authContainer.style.display = 'none';
           if (appContainer) appContainer.style.display = 'flex';
           
@@ -864,9 +862,7 @@ window.functions = getFunctions(app);
           }
       } else {
       // User is signed out.
-      // User is signed out.
       console.log('User is logged out.');
-      document.body.classList.remove('overflow-hidden'); // FIX: Remove overflow lock from auth view
       if (authContainer) authContainer.style.display = 'flex';
       if (appContainer) appContainer.style.display = 'none';
 
@@ -879,8 +875,8 @@ window.functions = getFunctions(app);
   });
 </script>
 </head>
-<body>
-    <div id="auth-container" class="flex items-center justify-center min-h-screen bg-bg-main py-12 px-4">
+<body class="overflow-hidden">
+    <div id="auth-container" class="flex items-center justify-center h-screen bg-bg-main">
     <div class="w-full max-w-sm p-8 space-y-6 bg-bg-pane-light rounded-lg shadow-xl">
         <div>
             <h2 id="auth-title" class="text-2xl font-bold text-center text-text-primary">Login to Your Notes</h2>
@@ -1163,7 +1159,7 @@ window.functions = getFunctions(app);
         <div class="mt-16 p-6 bg-bg-pane-dark rounded-lg text-center">
             <h3 class="font-bold text-xl text-text-primary">Enjoying this note?</h3>
             <p class="text-text-secondary mt-2 mb-4">Create your own smart notes with AI summaries, quizzes, and more.</p>
-            <a href="https://reputifly.org/note" class="brand-button inline-block text-white font-semibold px-5 py-2.5 rounded-lg hover:opacity-90 transition-opacity">
+            <a href="https://reputifly.org/signup" class="brand-button inline-block text-white font-semibold px-5 py-2.5 rounded-lg hover:opacity-90 transition-opacity">
                 Create a Free Account
             </a>
         </div>
@@ -2085,7 +2081,7 @@ function setupInNoteSearchListeners() {
                     activeNoteId: null,
                     paneWidth: 280,
                     sidebarCollapsed: false,
-                    activeView: 'list',
+                    activeView: 'board',
                     listSortOrder: 'modifiedAt-desc',
                     editorMode: 'editor',
                     activeTag: null,
@@ -2180,38 +2176,34 @@ function setupInNoteSearchListeners() {
 
             // REPLACE the old loadState function with this one.
 
+// Located inside the async function attached to the 'DOMContentLoaded' event listener
+
 async function loadState() {
     const user = window.auth.currentUser;
-    if (!user) return; // Should not happen, but good practice.
+    if (!user) return;
 
     const toastId = showToast('Loading Notes...', 'loading');
     const userDocRef = doc(window.db, "users", user.uid, "data", "appState");
 
     try {
-        // Attempt to get the document from Firestore.
-        // With persistence enabled, this will first try the cache, then the server.
         const docSnap = await getDoc(userDocRef);
 
         if (docSnap.exists()) {
-            // Data was successfully loaded from cache or server.
             console.log("Successfully loaded state from Firestore.");
             const loadedState = docSnap.data();
             state = migrateState(loadedState);
         } else {
-            // This is a confirmed new user because we got a response from the server
-            // saying the document does not exist. It's safe to load defaults.
             console.log("No data in cloud, loading default state for new user.");
             state = JSON.parse(JSON.stringify(defaultState));
             await saveState(); // Save the default state for the new user.
         }
 
     } catch (error) {
-        // This block now only runs if the user is offline AND data is not in the cache.
         console.error("Failed to load state:", error.message);
 
-        // THE KEY FIX: Do NOT reset the state to default.
-        // Instead, we trust the 'state' object that might already be in memory.
-        // If 'state' is empty, we initialize it to an empty shell to prevent errors.
+        // --- THIS IS THE KEY FIX ---
+        // Only initialize an empty state if the in-memory state is also empty.
+        // This preserves any work done while offline before a connection is established.
         if (!state || Object.keys(state).length === 0) {
             console.log("Could not fetch from cache or network. Initializing empty state.");
             state = migrateState({}); // Initializes with empty arrays/objects.
@@ -2220,11 +2212,9 @@ async function loadState() {
 
     } finally {
         dismissToast(toastId);
-        // This was in the old function; keep it for theme consistency.
         state.settings.theme = localStorage.getItem('codex-notes-theme') || 'reputify';
     }
 }
-
             const generateId = (prefix = 'id') => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             function formatBytes(bytes, decimals = 2) {
     if (!+bytes) return '0 Bytes';
@@ -3629,6 +3619,38 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                 app.elements.sortOrderSelect.value = state.settings.listSortOrder;
                 
                 app.elements.themeToggle.addEventListener('click', () => {
+                    // ADD THIS NEW EVENT LISTENER for the profile dropdown
+                const profileButton = document.getElementById('profile-button');
+                const profileDropdown = document.getElementById('profile-dropdown');
+                const signOutLink = document.getElementById('sign-out-link');
+
+                if (profileButton && profileDropdown) {
+                    profileButton.addEventListener('click', (e) => {
+                        e.stopPropagation(); // Prevents the document click from firing immediately
+                        profileDropdown.classList.toggle('hidden');
+                    });
+                }
+                
+                if(signOutLink) {
+                    signOutLink.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        try {
+                            await signOut(window.auth);
+                            console.log('User signed out successfully.');
+                            // onAuthStateChanged will handle hiding the app and showing the login form.
+                        } catch (error) {
+                            console.error('Sign out error:', error);
+                            showToast('Error signing out.', 'error');
+                        }
+                    });
+                }
+
+                // Hides dropdown if you click anywhere else
+                document.addEventListener('click', (e) => {
+                    if (profileButton && !profileButton.contains(e.target) && profileDropdown && !profileDropdown.classList.contains('hidden')) {
+                        profileDropdown.classList.add('hidden');
+                    }
+                });
                     const themes = ['reputify', 'light', 'dark'];
                     const currentThemeIndex = themes.indexOf(state.settings.theme);
                     state.settings.theme = themes[(currentThemeIndex + 1) % themes.length];
