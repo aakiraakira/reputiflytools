@@ -215,15 +215,6 @@
 .brand-button:hover {
     opacity: 0.9;
 }
-/* --- START: MOBILE KEYBOARD/LAYOUT FIX --- */
-        html {
-            height: 100%;
-            overflow: hidden; /* Locks the entire page from scrolling */
-        }
-        body {
-            height: 100%; /* Ensures body fills the locked page height */
-        }
-        /* --- END: MOBILE KEYBOARD/LAYOUT FIX --- */
         
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -294,7 +285,6 @@
     margin-top: 0;
     overflow: hidden;
 }
-
 /* Add these styles for the mobile toolbar fix */
 
         
@@ -398,10 +388,6 @@
     font-weight: 500;
     text-decoration: none;
     transition: opacity 0.2s;
-}
-.file-attachment-widget .download-btn i,
-.file-attachment-widget .download-btn svg {
-    color: white; /* Ensures the icon itself is white */
 }
 .file-attachment-widget .download-btn:hover {
     opacity: 0.8;
@@ -808,58 +794,89 @@ window.functions = getFunctions(app);
   // This is our new entry point!
   // This is our new entry point!
   onAuthStateChanged(window.auth, (user) => {
+    // --- ADD THESE TWO LINES ---
     const params = new URLSearchParams(window.location.search);
-    if (params.has('view')) return;
+    if (params.has('view')) return; // If it's a share link, STOP here.
 
     const authContainer = document.getElementById('auth-container');
     const appContainer = document.getElementById('app-container');
+    
+    // START: MODIFIED SECTION
     const chatbotFab = document.getElementById('chatbot-fab');
     const mobileFab = document.getElementById('mobile-new-note-fab');
+    // END: MODIFIED SECTION
 
     if (user) {
-        // User is signed in.
-        console.log('User is logged in:', user.uid);
-        window.scrollTo(0, 0);
-        
-        // 1. First, hide the auth screen and show the app container
-        if (authContainer) authContainer.style.display = 'none';
-        if (appContainer) appContainer.style.display = 'flex';
-        
-        // 2. Then, show the floating action buttons
-        if (chatbotFab) chatbotFab.style.display = 'flex';
-        if (mobileFab) mobileFab.style.display = 'flex';
+          // User is signed in.
+          console.log('User is logged in:', user.uid);
+          if (authContainer) authContainer.style.display = 'none';
+          if (appContainer) appContainer.style.display = 'flex';
+          
+          // START: MODIFIED SECTION
+          // Restore button visibility
+          if (chatbotFab) chatbotFab.style.display = 'flex';
+          if (mobileFab) mobileFab.style.display = 'flex'; // CSS will handle hiding on desktop
+          // END: MODIFIED SECTION
 
-        // 3. Populate user-specific profile info
-        const userInitial = document.getElementById('user-initial');
-        const userEmailDisplay = document.getElementById('user-email-display');
-        if (user.email) {
-            if(userInitial) userInitial.textContent = user.email.charAt(0).toUpperCase();
-            if(userEmailDisplay) {
-                userEmailDisplay.textContent = user.email;
-                userEmailDisplay.title = user.email;
-            }
-        }
-        
-        // 4. THIS IS THE KEY CHANGE:
-        // Now that the app container is visible, run the main app initialization.
-        // This function will handle loading state and the first full render.
-        if (window.appInit) {
-            window.appInit();
-        }
+          // --- START: PROFILE LOGIC ---
+          const userInitial = document.getElementById('user-initial');
+          const userEmailDisplay = document.getElementById('user-email-display');
+          const profileButton = document.getElementById('profile-button');
+          const profileDropdown = document.getElementById('profile-dropdown');
+          const signOutLink = document.getElementById('sign-out-link');
 
-    } else {
-        // User is signed out.
-        console.log('User is logged out.');
-        if (authContainer) authContainer.style.display = 'flex';
-        if (appContainer) appContainer.style.display = 'none';
-        if (chatbotFab) chatbotFab.style.display = 'none';
-        if (mobileFab) mobileFab.style.display = 'none';
+          if (user.email) {
+              userInitial.textContent = user.email.charAt(0).toUpperCase();
+              userEmailDisplay.textContent = user.email;
+              userEmailDisplay.title = user.email;
+          }
+
+          if(profileButton) { // Check if button exists before adding listener
+            profileButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if(profileDropdown) profileDropdown.classList.toggle('hidden');
+                // Re-render icons if the dropdown is shown
+                if (profileDropdown && !profileDropdown.classList.contains('hidden')) {
+                  feather.replace();
+                }
+            });
+          }
+
+          if(signOutLink) { // Check if link exists
+            signOutLink.addEventListener('click', async (e) => {
+                e.preventDefault();
+                try {
+                    // We need to import signOut here to use it
+                    const { signOut } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
+                    await signOut(window.auth);
+                } catch (error) {
+                    console.error('Sign out error:', error);
+                }
+            });
+          }
+          // --- END: PROFILE LOGIC ---
+          
+          // Make sure init() is defined before calling it
+          if (window.appInit) {
+              window.appInit();
+          }
+      } else {
+      // User is signed out.
+      console.log('User is logged out.');
+      if (authContainer) authContainer.style.display = 'flex';
+      if (appContainer) appContainer.style.display = 'none';
+
+      // START: MODIFIED SECTION
+      // Hide buttons on login/signup page
+      if (chatbotFab) chatbotFab.style.display = 'none';
+      if (mobileFab) mobileFab.style.display = 'none';
+      // END: MODIFIED SECTION
     }
   });
 </script>
 </head>
 <body class="overflow-hidden">
-    <div id="auth-container" class="fixed inset-0 z-50 flex items-center justify-center bg-bg-main">
+    <div id="auth-container" class="flex items-center justify-center h-screen bg-bg-main">
     <div class="w-full max-w-sm p-8 space-y-6 bg-bg-pane-light rounded-lg shadow-xl">
         <div>
             <h2 id="auth-title" class="text-2xl font-bold text-center text-text-primary">Login to Your Notes</h2>
@@ -883,7 +900,7 @@ window.functions = getFunctions(app);
     </div>
 </div>
 
-    <div id="app-container" class="flex h-full relative">
+    <div id="app-container" class="flex h-screen relative">
 
         <aside id="notes-list-pane" class="w-[280px] bg-bg-pane-light border-r border-border-color flex flex-col flex-shrink-0">
             <div class="sidebar-content-wrapper flex flex-col h-full min-w-[280px]">
@@ -1096,7 +1113,6 @@ window.functions = getFunctions(app);
            </div>
         </main>
         <div id="table-creator-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-sm z-50 transition-all duration-300 transform scale-95 opacity-0">
-            <div id="mobile-sidebar-overlay" class="fixed inset-0 bg-black/30 z-30 hidden md:hidden transition-opacity duration-300 opacity-0 pointer-events-none"></div>
     <h3 class="text-lg font-semibold mb-4">Create Table</h3>
     <div class="grid grid-cols-2 gap-4">
         <div>
@@ -1161,6 +1177,7 @@ window.functions = getFunctions(app);
     
     
     <div id="modal-backdrop" class="fixed inset-0 bg-black/50 z-40 transition-opacity duration-300 opacity-0 pointer-events-none"></div>
+    <div id="mobile-sidebar-overlay" class="fixed inset-0 bg-black/30 z-30 hidden md:hidden transition-opacity duration-300 opacity-0 pointer-events-none"></div>
     
     <div id="api-key-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-md z-50 transition-all duration-300 transform scale-95 opacity-100">
         <h3 class="text-lg font-semibold mb-2">Gemini API Key Required</h3>
@@ -2064,7 +2081,7 @@ function setupInNoteSearchListeners() {
                     activeNoteId: null,
                     paneWidth: 280,
                     sidebarCollapsed: false,
-                    activeView: 'list',
+                    activeView: 'board',
                     listSortOrder: 'modifiedAt-desc',
                     editorMode: 'editor',
                     activeTag: null,
@@ -3608,38 +3625,6 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                 app.elements.sortOrderSelect.value = state.settings.listSortOrder;
                 
                 app.elements.themeToggle.addEventListener('click', () => {
-                    // ADD THIS NEW EVENT LISTENER for the profile dropdown
-                const profileButton = document.getElementById('profile-button');
-                const profileDropdown = document.getElementById('profile-dropdown');
-                const signOutLink = document.getElementById('sign-out-link');
-
-                if (profileButton && profileDropdown) {
-                    profileButton.addEventListener('click', (e) => {
-                        e.stopPropagation(); // Prevents the document click from firing immediately
-                        profileDropdown.classList.toggle('hidden');
-                    });
-                }
-                
-                if(signOutLink) {
-                    signOutLink.addEventListener('click', async (e) => {
-                        e.preventDefault();
-                        try {
-                            await signOut(window.auth);
-                            console.log('User signed out successfully.');
-                            // onAuthStateChanged will handle hiding the app and showing the login form.
-                        } catch (error) {
-                            console.error('Sign out error:', error);
-                            showToast('Error signing out.', 'error');
-                        }
-                    });
-                }
-
-                // Hides dropdown if you click anywhere else
-                document.addEventListener('click', (e) => {
-                    if (profileButton && !profileButton.contains(e.target) && profileDropdown && !profileDropdown.classList.contains('hidden')) {
-                        profileDropdown.classList.add('hidden');
-                    }
-                });
                     const themes = ['reputify', 'light', 'dark'];
                     const currentThemeIndex = themes.indexOf(state.settings.theme);
                     state.settings.theme = themes[(currentThemeIndex + 1) % themes.length];
