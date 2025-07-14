@@ -1,7 +1,7 @@
 // sw.js
 
 // A new cache name to force the browser to update the service worker
-const CACHE_NAME = 'reputifly-notes-cache-v7';
+const CACHE_NAME = 'reputifly-notes-cache-v8';
 
 // The list of files to pre-cache when the app is first loaded.
 // This is a "best-effort" step. The real power is in the fetch event handler.
