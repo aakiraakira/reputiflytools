@@ -1020,7 +1020,7 @@ window.functions = getFunctions(app);
        <div id="mobile-header-controls" class="flex md:hidden items-center gap-2 relative">
          <button id="mobile-search-icon" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="search" class="w-5 h-5"></i></button>
          <button id="mobile-more-button" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="more-vertical" class="w-5 h-5"></i></button>
-         <div id="mobile-controls-dropdown" class="dropdown-menu hidden absolute top-full right-0 mt-2 w-48 bg-bg-pane-light shadow-2xl rounded-md p-2 border-border-color origin-top-right scale-95 opacity-0 z-10">
+         <div id="mobile-controls-dropdown" class="dropdown-menu hidden absolute top-full right-0 mt-2 w-48 bg-bg-pane-light shadow-2xl rounded-md p-2 border-border-color origin-top-right scale-95 opacity-0 z-50">
          </div>
        </div>
    </div>
@@ -1615,7 +1615,8 @@ noteContentDiv.addEventListener('click', (e) => {
             const {
                 createUserWithEmailAndPassword,
                 signInWithEmailAndPassword,
-                sendEmailVerification
+                sendEmailVerification,
+                signout
             } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
 
             // ADD THIS NEW LINE:
@@ -3411,6 +3412,16 @@ ${noteContent}`;
 };
 
             async function init() {
+                const closeMobileDropdown = () => {
+    const dropdown = app.containers.mobileControlsDropdown;
+    const backdrop = app.modals.backdrop;
+    dropdown.classList.add('scale-95', 'opacity-0');
+    backdrop.style.opacity = '0';
+    backdrop.style.pointerEvents = 'none';
+    setTimeout(() => {
+        dropdown.classList.add('hidden');
+    }, 150);
+};
                 
                 // Add this inside the init() function
 // Located inside the init() function
@@ -3606,9 +3617,6 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                 
 
                 app.elements.sortOrderSelect.value = state.settings.listSortOrder;
-                
-                app.elements.themeToggle.addEventListener('click', () => {
-                    // ADD THIS NEW EVENT LISTENER for the profile dropdown
                 const profileButton = document.getElementById('profile-button');
                 const profileDropdown = document.getElementById('profile-dropdown');
                 const signOutLink = document.getElementById('sign-out-link');
@@ -3624,7 +3632,7 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                     signOutLink.addEventListener('click', async (e) => {
                         e.preventDefault();
                         try {
-                            await signOut(window.auth);
+                            await signout(window.auth);
                             console.log('User signed out successfully.');
                             // onAuthStateChanged will handle hiding the app and showing the login form.
                         } catch (error) {
@@ -3640,6 +3648,10 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                         profileDropdown.classList.add('hidden');
                     }
                 });
+                
+                app.elements.themeToggle.addEventListener('click', () => {
+                    // ADD THIS NEW EVENT LISTENER for the profile dropdown
+                
                     const themes = ['reputify', 'light', 'dark'];
                     const currentThemeIndex = themes.indexOf(state.settings.theme);
                     state.settings.theme = themes[(currentThemeIndex + 1) % themes.length];
@@ -5308,25 +5320,37 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
                 });
                 
                 document.addEventListener('click', (e) => {
-                    if(!app.contextMenu.menu.contains(e.target)) closeContextMenu();
-                    if(!app.containers.mobileControlsDropdown.contains(e.target) && !app.elements.mobileMoreButton.contains(e.target)) {
-                        const dropdown = app.containers.mobileControlsDropdown;
-                        dropdown.classList.add('scale-95', 'opacity-0');
-                        setTimeout(() => dropdown.classList.add('hidden'), 100);
-                    }
-                });
+    // This now only handles the context menu
+    if(!app.contextMenu.menu.contains(e.target)) {
+        closeContextMenu();
+    }
+    // This also closes the profile dropdown if it's open
+    const profileButton = document.getElementById('profile-button');
+    const profileDropdown = document.getElementById('profile-dropdown');
+    if (profileButton && !profileButton.contains(e.target) && profileDropdown && !profileDropdown.classList.contains('hidden')) {
+         profileDropdown.classList.add('hidden');
+    }
+});
+
                 
-                app.elements.mobileMoreButton.addEventListener('click', () => {
-                    const dropdown = app.containers.mobileControlsDropdown;
-                    const isHidden = dropdown.classList.contains('hidden');
-                    if (isHidden) {
-                        dropdown.classList.remove('hidden');
-                        setTimeout(() => dropdown.classList.remove('scale-95', 'opacity-0'), 10);
-                    } else {
-                        dropdown.classList.add('scale-95', 'opacity-0');
-                        setTimeout(() => dropdown.classList.add('hidden'), 100);
-                    }
-                });
+                // REPLACE IT WITH THIS
+app.elements.mobileMoreButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const dropdown = app.containers.mobileControlsDropdown;
+    const backdrop = app.modals.backdrop;
+    if (dropdown.classList.contains('hidden')) {
+        dropdown.classList.remove('hidden');
+        backdrop.style.pointerEvents = 'auto';
+        backdrop.classList.add('bg-black/30');
+        backdrop.classList.remove('bg-black/50');
+        setTimeout(() => {
+            dropdown.classList.remove('scale-95', 'opacity-0');
+            backdrop.style.opacity = '1';
+        }, 10);
+    } else {
+        closeMobileDropdown();
+    }
+});
 
                 render();
             }
