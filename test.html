@@ -4369,61 +4369,14 @@ if (e.key === 'Backspace') {
                     return false;
                 };
 
-                // NEW: Enhanced paste event listener
-app.elements.noteEditorBody.addEventListener('paste', (e) => {
-    // First, check for pasting files (e.g., images)
-    const files = e.clipboardData.files;
-    let handledFile = false;
-    for (const file of files) {
-        if (handleImageFile(file)) {
-            e.preventDefault();
-            handledFile = true;
-        }
-    }
-    if (handledFile) {
-        return; // Stop if we handled a file paste
-    }
-
-    // --- Start of New Logic for Pasted Text ---
-    // 1. Prevent the browser's default paste action
-    e.preventDefault();
-
-    // 2. Get pasted content (HTML or plain text)
-    let pastedHtml = e.clipboardData.getData('text/html');
-    if (!pastedHtml) {
-        const plainText = e.clipboardData.getData('text/plain');
-        pastedHtml = `<p>${plainText.replace(/\n/g, '<br>')}</p>`;
-    }
-
-    // 3. Sanitize the HTML to remove theme-clashing styles
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = pastedHtml;
-
-    // Remove all 'style' and 'class' attributes from pasted elements
-    const allElements = tempDiv.querySelectorAll('*');
-    allElements.forEach(el => {
-        el.removeAttribute('style');
-        el.removeAttribute('class');
-    });
-
-    // Specifically find and remove obsolete <font> tags
-    const fontTags = tempDiv.querySelectorAll('font');
-    fontTags.forEach(fontTag => {
-        const parent = fontTag.parentNode;
-        while (fontTag.firstChild) {
-            parent.insertBefore(fontTag.firstChild, fontTag);
-        }
-        parent.removeChild(fontTag);
-    });
-
-    const sanitizedHtml = tempDiv.innerHTML;
-
-    // 4. Insert the clean, sanitized HTML into the editor
-    document.execCommand('insertHTML', false, sanitizedHtml);
-
-    // 5. Trigger a save of the new content
-    saveNoteContent();
-});
+                app.elements.noteEditorBody.addEventListener('paste', (e) => {
+                    const files = e.clipboardData.files;
+                    for (const file of files) {
+                        if (handleImageFile(file)) {
+                            e.preventDefault();
+                        }
+                    }
+                });
 
                 app.elements.noteEditorBody.addEventListener('drop', (e) => {
                     e.preventDefault();
@@ -4916,19 +4869,13 @@ if (command === 'insertChecklist') {
         container = container.nodeType === 3 ? container.parentNode : container;
 
         const currentChecklist = container.closest('.task-list-item');
-        
-        // This improved onchange logic ensures changes are saved reliably
-        const onchangeLogic = `const item=this.closest('.task-list-item'); if(item){item.classList.toggle('checked',this.checked); this.checked?this.setAttribute('checked',''):this.removeAttribute('checked');} const event=new Event('input',{bubbles:true,cancelable:true}); this.dispatchEvent(event);`.replace(/"/g, '&quot;');
 
-        // CASE 1: TOGGLE OFF - If you're inside a checklist, it converts it back to a normal paragraph.
+        // CASE 1: TOGGLE OFF - If we are in a checklist, convert it back to a paragraph.
         if (currentChecklist) {
             const text = currentChecklist.querySelector('.task-list-item-text').innerText;
             const p = document.createElement('p');
-            // Sanitize text and handle empty lines
-            p.innerHTML = text.trim() ? text.trim().replace(/</g, "&lt;").replace(/>/g, "&gt;") : '<br>';
+            p.innerHTML = text.trim() || '<br>';
             currentChecklist.parentNode.replaceChild(p, currentChecklist);
-            
-            // Restore cursor position
             range.selectNodeContents(p);
             range.collapse(false);
             selection.removeAllRanges();
@@ -4936,26 +4883,24 @@ if (command === 'insertChecklist') {
             return;
         }
 
-        // CASE 2: TOGGLE ON - Converts the current selection to checklist items.
-        const selectedText = selection.toString();
-        let checklistHTML;
-
-        if (selectedText.trim() === '') {
-            // If nothing is selected, insert one blank checklist item.
-            checklistHTML = `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div>`;
-        } else {
-            // If text is selected, convert each line into a separate checklist item.
-            // This now correctly handles multi-line selections.
-            const lines = selectedText.split('\n');
-            checklistHTML = lines.map(line => {
-                const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
-                if (sanitizedLine === '') return null; // Ignore empty lines in the selection
-                return `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div></div>`;
-            }).filter(Boolean).join('');
-        }
+        // CASE 2: TOGGLE ON - Find the parent block, get all its text, and replace the whole block.
+        const blockToConvert = container.closest('p, div');
+        const onchangeLogic = `const p=this.closest('.task-list-item'); p.classList.toggle('checked', this.checked); this.checked ? this.setAttribute('checked','') : this.removeAttribute('checked'); saveNoteContent();`.replace(/"/g, '&quot;');
         
-        // Use the browser's standard 'insertHTML' command to safely replace the selection.
-        document.execCommand('insertHTML', false, checklistHTML);
+        if (blockToConvert && blockToConvert.isContentEditable) {
+            const lines = blockToConvert.innerText.split('\n').filter(line => line.trim() !== '');
+            if (lines.length > 0) {
+                const checklistHTML = lines.map(line => {
+                    const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                    return `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div></div>`;
+                }).join('');
+                blockToConvert.outerHTML = checklistHTML;
+            }
+        } else {
+            // CASE 3: INSERT NEW - Fallback to insert a new blank checklist item.
+            const checklistHTML = `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div><p><br></p>`;
+            document.execCommand('insertHTML', false, checklistHTML);
+        }
     });
     return;
 }
