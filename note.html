@@ -124,78 +124,35 @@
 /* Add these styles for checklist items */
 /* Add these styles for checklist items */
 /* UPDATED: Styles for checklist items in editor AND public view */
-/* --- START: New Custom Checklist Styles --- */
-/* --- START: New Custom Checklist Styles --- */
-#note-editor-body .task-list-item, #public-note-content .task-list-item {
+/* --- START: Simplified Checklist Styles --- */
+.task-list-item {
     display: flex;
-    align-items: flex-start; /* Use flex-start for multi-line text */
-    gap: 0.5rem; /* 8px */
+    align-items: flex-start;
+    gap: 0.75rem; /* 12px */
     margin: 0.5rem 0;
+    list-style: none;
+    padding-left: 0;
 }
-.task-list-item-checkbox {
-    position: relative;
-    display: inline-block;
+
+.task-list-item input[type="checkbox"] {
     flex-shrink: 0;
-    width: 1.25rem; /* 20px */
-    height: 1.25rem; /* 20px */
-    padding-top: 2px; /* Minor adjustment for perfect alignment */
-}
-/* Hide the default checkbox */
-.task-list-item-checkbox input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-/* The custom checkbox box */
-.task-list-item-checkbox span {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 1.25rem;
-    width: 1.25rem;
-    background-color: transparent;
-    border: 2px solid var(--text-tertiary);
-    border-radius: 4px;
+    margin-top: 0.2rem;
+    width: 1.1rem;
+    height: 1.1rem;
     cursor: pointer;
-    transition: all 0.2s ease;
 }
-/* Style the box on hover */
-.task-list-item:hover .task-list-item-checkbox span {
-    border-color: var(--accent-primary);
-}
-/* Style the box when the real checkbox is checked */
-.task-list-item-checkbox input:checked ~ span {
-    background-color: var(--accent-primary);
-    border-color: var(--accent-primary);
-}
-/* The checkmark (hidden by default) */
-.task-list-item-checkbox span:after {
-    content: "";
-    position: absolute;
-    display: none;
-    left: 6px;
-    top: 2px;
-    width: 6px;
-    height: 12px;
-    border: solid white;
-    border-width: 0 3px 3px 0;
-    transform: rotate(45deg);
-}
-/* Show the checkmark when the box is checked */
-.task-list-item-checkbox input:checked ~ span:after {
-    display: block;
-}
-/* The text part of the checklist item */
+
 .task-list-item-text {
     outline: none;
     flex-grow: 1;
-    padding-top: 2px; /* Ensures text aligns with checkbox */
-    line-height: 1.25rem;
 }
+
+/* This class handles the strikethrough when an item is checked */
 .task-list-item.checked .task-list-item-text {
     text-decoration: line-through;
     color: var(--text-tertiary);
 }
+/* --- END: Simplified Checklist Styles --- */
 /* --- END: New Custom Checklist Styles --- */
 /* --- END: New Custom Checklist Styles --- */
 
@@ -4306,19 +4263,12 @@ if (e.key === 'Enter') {
         } else {
             // SINGLE ENTER: Create a new blank checklist item after the current one
             // SINGLE ENTER: Create a new blank checklist item after the current one
+// SINGLE ENTER: Create a new blank checklist item after the current one
 const newChecklist = document.createElement('div');
 newChecklist.classList.add('task-list-item');
-//
-// --- START: CORRECTED BLOCK ---
-// This standardized onchange logic fixes the bug by ensuring the 'checked' attribute is
-// written to the HTML, allowing the state to be saved and restored correctly.
+
 const onchangeLogic = `const p=this.closest('.task-list-item'); p.classList.toggle('checked'); this.checked ? this.setAttribute('checked','') : this.removeAttribute('checked'); saveNoteContent();`.replace(/"/g, '&quot;');
-newChecklist.innerHTML = `
-    <label class="task-list-item-checkbox" contenteditable="false">
-        <input type="checkbox" onchange="${onchangeLogic}">
-        <span></span>
-    </label>
-    <div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
+newChecklist.innerHTML = `<input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
 // --- END: CORRECTED BLOCK ---
 
             parentChecklist.after(newChecklist);
@@ -4907,66 +4857,46 @@ app.modals.quizContent.addEventListener('change', e => {
 // This is the final, corrected checklist logic for all cases
 // This is the final, corrected logic for the checklist feature
 // This is the new, stable, and final checklist logic
+// This is the final, corrected logic for the checklist feature
 if (command === 'insertChecklist') {
     restoreSelectionAndExec(() => {
         const selection = window.getSelection();
         if (!selection.rangeCount) return;
         const range = selection.getRangeAt(0);
 
-        // Find the immediate block-level element the cursor is in
         const container = range.commonAncestorContainer;
         const currentBlock = container.nodeType === 3
             ? container.parentNode.closest('.task-list-item, p, div, li')
             : container.closest('.task-list-item, p, div, li');
 
-        // CASE 1: TOGGLE OFF
-        // If the cursor or selection is inside a single checklist item, convert it back to a paragraph.
+        // CASE 1: TOGGLE OFF (Convert checklist back to paragraph)
         if (currentBlock && currentBlock.classList.contains('task-list-item')) {
             const text = currentBlock.querySelector('.task-list-item-text').innerText;
             const p = document.createElement('p');
             p.innerHTML = text.trim() || '<br>';
             currentBlock.parentNode.replaceChild(p, currentBlock);
-
-            // Place cursor in the new paragraph
             range.selectNodeContents(p);
-            range.collapse(false); // collapse to the end
+            range.collapse(false);
             selection.removeAllRanges();
             selection.addRange(range);
 
-        } else if (!selection.isCollapsed) {
-            // CASE 2: TOGGLE ON
-            // If regular text is selected, convert it into a checklist.
-            const selectedText = selection.toString();
-            const lines = selectedText.split('\n').filter(line => line.trim() !== '');
-
-            if (lines.length > 0) {
-                const onchangeLogic = `const p=this.closest('.task-list-item');p.classList.toggle('checked');this.checked?this.setAttribute('checked',''):this.removeAttribute('checked');saveNoteContent();`.replace(/"/g, '&quot;');
-                const checklistHTML = lines.map(line => {
-                    const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                    return `
-                    <div class="task-list-item">
-                        <label class="task-list-item-checkbox" contenteditable="false">
-                            <input type="checkbox" onchange="${onchangeLogic}">
-                            <span></span>
-                        </label>
-                        <div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div>
-                    </div>`;
-                }).join('');
-                document.execCommand('insertHTML', false, checklistHTML);
-            }
-
         } else {
-            // CASE 3: INSERT NEW
-            // If there's no selection, insert a new, blank checklist item.
-             const onchangeLogic = `const p=this.closest('.task-list-item');p.classList.toggle('checked');this.checked?this.setAttribute('checked',''):this.removeAttribute('checked');saveNoteContent();`.replace(/"/g, '&quot;');
-             const checklistHTML = `
-                <div class="task-list-item">
-                    <label class="task-list-item-checkbox" contenteditable="false">
-                        <input type="checkbox" onchange="${onchangeLogic}">
-                        <span></span>
-                    </label>
-                    <div class="task-list-item-text" contenteditable="true">&nbsp;</div>
-                </div><p><br></p>`;
+            // CASE 2 & 3: TOGGLE ON or INSERT NEW
+            const onchangeLogic = `const p=this.closest('.task-list-item'); p.classList.toggle('checked'); this.checked ? this.setAttribute('checked','') : this.removeAttribute('checked'); saveNoteContent();`.replace(/"/g, '&quot;');
+            
+            let checklistHTML = '';
+            // If text is selected, convert it
+            if (!selection.isCollapsed) {
+                 const selectedText = selection.toString();
+                 const lines = selectedText.split('\n').filter(line => line.trim() !== '');
+                 checklistHTML = lines.map(line => {
+                    const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                    return `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div></div>`;
+                 }).join('');
+            } else {
+            // Otherwise, insert a new blank item
+                 checklistHTML = `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div><p><br></p>`;
+            }
             document.execCommand('insertHTML', false, checklistHTML);
         }
     });
