@@ -609,6 +609,9 @@
         }
         .kanban-card .card-content { -webkit-line-clamp: 3; }
         .list-note-item .card-content { -webkit-line-clamp: 2; }
+        .list-note-item .flex-grow {
+    min-width: 0;
+}
         
         .view-btn {
              color: var(--text-secondary);
@@ -2270,6 +2273,18 @@ async function loadState() {
 }
 
             const generateId = (prefix = 'id') => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const createChecklistItem = (content = '&nbsp;') => {
+    const item = document.createElement('div');
+    item.className = 'task-list-item';
+    const onchangeLogic = `const p=this.closest('.task-list-item'); p.classList.toggle('checked', this.checked); this.checked ? this.setAttribute('checked', '') : this.removeAttribute('checked'); performImmediateSave();`.replace(/"/g, '&quot;');
+    item.innerHTML = `
+        <label class="task-list-item-checkbox" contenteditable="false">
+            <input type="checkbox" onchange="${onchangeLogic}">
+            <span></span>
+        </label>
+        <div class="task-list-item-text" contenteditable="true">${content}</div>`;
+    return item;
+};
             function formatBytes(bytes, decimals = 2) {
     if (!+bytes) return '0 Bytes';
     const k = 1024;
@@ -4413,6 +4428,46 @@ performImmediateSave = () => {
 saveNoteContent = debounce(performImmediateSave, 500);
 
                 const updateStatsDebounced = debounce(updateEditorStats, 250);
+                // FIX: Intercept paste events to clean content and handle checklist pasting
+app.elements.noteEditorBody.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const selection = window.getSelection();
+    if (!selection.rangeCount) return;
+
+    const plainText = (e.clipboardData || window.clipboardData).getData('text/plain');
+    const lines = plainText.split(/\r?\n/).filter(line => line.trim() !== '');
+
+    const parentChecklistItem = selection.anchorNode.parentNode.closest('.task-list-item');
+
+    // If pasting inside a checklist, create new checklist items for each line
+    if (parentChecklistItem && lines.length > 1) {
+        const parentText = parentChecklistItem.querySelector('.task-list-item-text');
+        let currentItem = parentChecklistItem;
+
+        // Insert first line into the current item
+        document.execCommand('insertText', false, lines[0]);
+
+        // Create new items for subsequent lines
+        for (let i = 1; i < lines.length; i++) {
+            const newChecklist = createChecklistItem(lines[i]);
+            currentItem.after(newChecklist);
+            currentItem = newChecklist;
+        }
+        // Place cursor at the end of the last pasted item
+        const newTextSpan = currentItem.querySelector('.task-list-item-text');
+        const range = document.createRange();
+        range.selectNodeContents(newTextSpan);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+    } else {
+        // Default behavior: paste as plain text, preserving line breaks with <br>
+        const sanitizedHtml = plainText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, '<br>');
+        document.execCommand('insertHTML', false, sanitizedHtml);
+    }
+    performImmediateSave();
+});
 
                 app.elements.noteEditorTitle.addEventListener('input', saveNoteContent);
                 app.elements.noteEditorBody.addEventListener('input', () => {
@@ -4421,69 +4476,58 @@ saveNoteContent = debounce(performImmediateSave, 500);
                 });
 
                 app.elements.noteEditorBody.addEventListener('keydown', (e) => {
-                    // Add this block to handle Enter key in checklists
-if (e.key === 'Enter') {
     const selection = window.getSelection();
-    const parentChecklist = selection.anchorNode.parentNode.closest('.task-list-item');
+    if (!selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
 
-    if (parentChecklist) {
-        e.preventDefault();
-        const textContent = parentChecklist.querySelector('.task-list-item-text').innerText.trim();
+    const parentChecklistItem = range.commonAncestorContainer.parentNode.closest('.task-list-item');
 
-        if (textContent === '') {
-            // DOUBLE ENTER: Text is empty, so replace checklist with a normal paragraph
-            const p = document.createElement('p');
-            p.innerHTML = '<br>';
-            parentChecklist.parentNode.replaceChild(p, parentChecklist);
-            // Move cursor to the new paragraph
-            const range = document.createRange();
-            range.setStart(p, 0);
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
-        } else {
-            // SINGLE ENTER: Create a new blank checklist item after the current one
-            const newChecklist = document.createElement('div');
-            newChecklist.classList.add('task-list-item');
-            newChecklist.innerHTML = `
-                <label class="task-list-item-checkbox" contenteditable="false">
-                    <input type="checkbox" onchange="this.closest('.task-list-item').classList.toggle('checked'); saveNoteContent();">
-                    <span></span>
-                </label>
-                <div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
+    if (parentChecklistItem) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const textContent = parentChecklistItem.querySelector('.task-list-item-text').innerText.trim();
 
-            parentChecklist.after(newChecklist);
-            // Move cursor to the new checklist item's text area
-            const newTextSpan = newChecklist.querySelector('.task-list-item-text');
-            const range = document.createRange();
-            range.selectNodeContents(newTextSpan);
-            range.collapse(false);
-            selection.removeAllRanges();
-            selection.addRange(range);
-        }
-        saveNoteContent();
-        return;
-    }
-}
-                    // Add this block to handle deleting checklist items
-if (e.key === 'Backspace') {
-    const selection = window.getSelection();
-    if (selection.isCollapsed && selection.anchorOffset === 0) {
-        const span = selection.anchorNode.nodeType === 3 ? selection.anchorNode.parentNode : selection.anchorNode;
-        if (span && span.classList.contains('task-list-item-text')) {
-            const taskItem = span.closest('.task-list-item');
-            // Only delete if the text is empty
-            if (taskItem && span.innerText.trim() === '') {
-                e.preventDefault();
-                taskItem.remove();
-                saveNoteContent();
-                return;
+            if (textContent === '') {
+                // Double enter on empty item: replace with a paragraph
+                const p = document.createElement('p');
+                p.innerHTML = '<br>';
+                parentChecklistItem.parentNode.replaceChild(p, parentChecklistItem);
+                range.setStart(p, 0);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            } else {
+                // Single enter: create a new checklist item below
+                const newItem = createChecklistItem();
+                parentChecklistItem.after(newItem);
+                // Move cursor to the new item
+                const newTextSpan = newItem.querySelector('.task-list-item-text');
+                range.selectNodeContents(newTextSpan);
+                range.collapse(false);
+                selection.removeAllRanges();
+                selection.addRange(range);
             }
+            performImmediateSave(); // Use immediate save
+            return;
+        }
+
+        if (e.key === 'Backspace' && range.collapsed && range.startOffset === 0) {
+             const textNode = range.commonAncestorContainer;
+             const textContent = textNode.textContent || '';
+             // Only trigger if at the very start of the text span
+             if (textNode.parentNode.classList.contains('task-list-item-text') && textContent === (textNode.textContent || '')) {
+                 e.preventDefault();
+                 const p = document.createElement('p');
+                 p.innerHTML = textContent || '<br>';
+                 parentChecklistItem.parentNode.replaceChild(p, parentChecklistItem);
+                 range.selectNodeContents(p);
+                 range.collapse(false);
+                 selection.removeAllRanges();
+                 selection.addRange(range);
+                 performImmediateSave();
+                 return;
+             }
         }
     }
-}
-                    const selection = window.getSelection();
-                    if (!selection.rangeCount) return;
 
                     if (e.key === 'Enter' && !e.shiftKey) {
                         let container = selection.anchorNode;
@@ -5042,64 +5086,27 @@ if (command === 'insertChecklist') {
     restoreSelectionAndExec(() => {
         const selection = window.getSelection();
         if (!selection.rangeCount) return;
-        const range = selection.getRangeAt(0);
 
-        // Find the immediate block-level element the cursor is in
-        const container = range.commonAncestorContainer;
-        const currentBlock = container.nodeType === 3
-            ? container.parentNode.closest('.task-list-item, p, div, li')
-            : container.closest('.task-list-item, p, div, li');
+        // Get the plain text of the selection and split it into lines
+        const selectedText = selection.toString();
+        const lines = selectedText.split('\n').filter(line => line.trim() !== '');
 
-        // CASE 1: TOGGLE OFF
-        // If the cursor or selection is inside a single checklist item, convert it back to a paragraph.
-        if (currentBlock && currentBlock.classList.contains('task-list-item')) {
-            const text = currentBlock.querySelector('.task-list-item-text').innerText;
-            const p = document.createElement('p');
-            p.innerHTML = text.trim() || '<br>';
-            currentBlock.parentNode.replaceChild(p, currentBlock);
-
-            // Place cursor in the new paragraph
-            range.selectNodeContents(p);
-            range.collapse(false); // collapse to the end
-            selection.removeAllRanges();
-            selection.addRange(range);
-
-        } else if (!selection.isCollapsed) {
-            // CASE 2: TOGGLE ON
-            // If regular text is selected, convert it into a checklist.
-            const selectedText = selection.toString();
-            const lines = selectedText.split('\n').filter(line => line.trim() !== '');
-
-            if (lines.length > 0) {
-                const onchangeLogic = `const p=this.closest('.task-list-item');p.classList.toggle('checked');this.checked?this.setAttribute('checked',''):this.removeAttribute('checked');saveNoteContent();`.replace(/"/g, '&quot;');
-                const checklistHTML = lines.map(line => {
-                    const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                    return `
-                    <div class="task-list-item">
-                        <label class="task-list-item-checkbox" contenteditable="false">
-                            <input type="checkbox" onchange="${onchangeLogic}">
-                            <span></span>
-                        </label>
-                        <div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div>
-                    </div>`;
-                }).join('');
-                document.execCommand('insertHTML', false, checklistHTML);
-            }
-
-        } else {
-            // CASE 3: INSERT NEW
-            // If there's no selection, insert a new, blank checklist item.
-             const onchangeLogic = `const p=this.closest('.task-list-item');p.classList.toggle('checked');this.checked?this.setAttribute('checked',''):this.removeAttribute('checked');saveNoteContent();`.replace(/"/g, '&quot;');
-             const checklistHTML = `
-                <div class="task-list-item">
-                    <label class="task-list-item-checkbox" contenteditable="false">
-                        <input type="checkbox" onchange="${onchangeLogic}">
-                        <span></span>
-                    </label>
-                    <div class="task-list-item-text" contenteditable="true">&nbsp;</div>
-                </div><p><br></p>`;
-            document.execCommand('insertHTML', false, checklistHTML);
+        // If there's no real text, just insert one blank checklist item
+        if (lines.length === 0) {
+            const blankItem = createChecklistItem();
+            document.execCommand('insertHTML', false, blankItem.outerHTML + '<p><br></p>');
+            return;
         }
+
+        // For each line of selected text, create a checklist item
+        const checklistHTML = lines.map(line => {
+            // Sanitize the line to prevent HTML injection
+            const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            return createChecklistItem(sanitizedLine).outerHTML;
+        }).join('');
+
+        // Replace the entire selection with the new checklist items
+        document.execCommand('insertHTML', false, checklistHTML);
     });
     return;
 }
