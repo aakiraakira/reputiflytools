@@ -4369,14 +4369,61 @@ if (e.key === 'Backspace') {
                     return false;
                 };
 
-                app.elements.noteEditorBody.addEventListener('paste', (e) => {
-                    const files = e.clipboardData.files;
-                    for (const file of files) {
-                        if (handleImageFile(file)) {
-                            e.preventDefault();
-                        }
-                    }
-                });
+                // NEW: Enhanced paste event listener
+app.elements.noteEditorBody.addEventListener('paste', (e) => {
+    // First, check for pasting files (e.g., images)
+    const files = e.clipboardData.files;
+    let handledFile = false;
+    for (const file of files) {
+        if (handleImageFile(file)) {
+            e.preventDefault();
+            handledFile = true;
+        }
+    }
+    if (handledFile) {
+        return; // Stop if we handled a file paste
+    }
+
+    // --- Start of New Logic for Pasted Text ---
+    // 1. Prevent the browser's default paste action
+    e.preventDefault();
+
+    // 2. Get pasted content (HTML or plain text)
+    let pastedHtml = e.clipboardData.getData('text/html');
+    if (!pastedHtml) {
+        const plainText = e.clipboardData.getData('text/plain');
+        pastedHtml = `<p>${plainText.replace(/\n/g, '<br>')}</p>`;
+    }
+
+    // 3. Sanitize the HTML to remove theme-clashing styles
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = pastedHtml;
+
+    // Remove all 'style' and 'class' attributes from pasted elements
+    const allElements = tempDiv.querySelectorAll('*');
+    allElements.forEach(el => {
+        el.removeAttribute('style');
+        el.removeAttribute('class');
+    });
+
+    // Specifically find and remove obsolete <font> tags
+    const fontTags = tempDiv.querySelectorAll('font');
+    fontTags.forEach(fontTag => {
+        const parent = fontTag.parentNode;
+        while (fontTag.firstChild) {
+            parent.insertBefore(fontTag.firstChild, fontTag);
+        }
+        parent.removeChild(fontTag);
+    });
+
+    const sanitizedHtml = tempDiv.innerHTML;
+
+    // 4. Insert the clean, sanitized HTML into the editor
+    document.execCommand('insertHTML', false, sanitizedHtml);
+
+    // 5. Trigger a save of the new content
+    saveNoteContent();
+});
 
                 app.elements.noteEditorBody.addEventListener('drop', (e) => {
                     e.preventDefault();
