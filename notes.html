@@ -243,6 +243,11 @@
     margin-top: 0;
     overflow: hidden;
 }
+/* --- START: Selection-based Hide Checkboxes --- */
+.task-list-item.checkbox-hidden input[type="checkbox"] {
+    display: none;
+}
+/* --- END: Selection-based Hide Checkboxes --- */
 /* Add these styles for the mobile toolbar fix */
 
         
@@ -1238,6 +1243,7 @@ window.functions = getFunctions(app);
         <button data-command="insertTable" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Insert Table"><i data-feather="grid" class="w-4 h-4"></i></button>
         <button data-command="monospace" class="p-2 hover:bg-bg-main rounded font-mono font-bold flex-shrink-0" title="Monospace">M</button>
         <button data-command="insertChecklist" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Checklist"><i data-feather="check-square" class="w-4 h-4"></i></button>
+        <button data-command="toggleCheckboxes" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Hide/Show Checkboxes"><i data-feather="eye-off" class="w-4 h-4"></i></button>
         <div class="w-px h-5 bg-border-color mx-1 flex-shrink-0"></div>
         <button data-command="formatBlock" data-value="h1" class="p-2 hover:bg-bg-main rounded font-bold text-sm flex-shrink-0">H1</button>
         <button data-command="formatBlock" data-value="h2" class="p-2 hover:bg-bg-main rounded font-bold text-sm flex-shrink-0">H2</button>
@@ -4241,142 +4247,184 @@ saveNoteContent = debounce(performImmediateSave, 500);
                 });
 
                 app.elements.noteEditorBody.addEventListener('keydown', (e) => {
-                    // Add this block to handle Enter key in checklists
-if (e.key === 'Enter') {
     const selection = window.getSelection();
-    const parentChecklist = selection.anchorNode.parentNode.closest('.task-list-item');
+    if (!selection.rangeCount) return;
 
-    if (parentChecklist) {
-        e.preventDefault();
-        const textContent = parentChecklist.querySelector('.task-list-item-text').innerText.trim();
+    // --- START OF NEW, ROBUST BACKSPACE LOGIC ---
+    if (e.key === 'Backspace') {
+        if (selection.isCollapsed && selection.getRangeAt(0).startOffset === 0) {
+            let container = selection.getRangeAt(0).startContainer;
+            let textSpan = (container.nodeType === 3) ? container.parentNode : container;
+            
+            // Handle cases where the cursor is technically on the parent div
+            if (textSpan && !textSpan.classList.contains('task-list-item-text')) {
+                textSpan = textSpan.querySelector('.task-list-item-text');
+            }
 
-        if (textContent === '') {
-            // DOUBLE ENTER: Text is empty, so replace checklist with a normal paragraph
-            const p = document.createElement('p');
-            p.innerHTML = '<br>';
-            parentChecklist.parentNode.replaceChild(p, parentChecklist);
-            // Move cursor to the new paragraph
-            const range = document.createRange();
-            range.setStart(p, 0);
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
-        } else {
-            // SINGLE ENTER: Create a new blank checklist item after the current one
-            // SINGLE ENTER: Create a new blank checklist item after the current one
-// SINGLE ENTER: Create a new blank checklist item after the current one
-// SINGLE ENTER: Create a new blank checklist item after the current one
-const newChecklist = document.createElement('div');
-newChecklist.classList.add('task-list-item');
+            if (textSpan && textSpan.classList.contains('task-list-item-text')) {
+                const taskItem = textSpan.closest('.task-list-item');
+                if (taskItem) {
+                    e.preventDefault(); // Prevent default browser backspace
 
-const onchangeLogic = `const p=this.closest('.task-list-item'); p.classList.toggle('checked', this.checked); this.checked ? this.setAttribute('checked','') : this.removeAttribute('checked'); saveNoteContent();`.replace(/"/g, '&quot;');
-newChecklist.innerHTML = `<input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
-// --- END: CORRECTED BLOCK ---
+                    // Create a new paragraph to replace the checklist item
+                    const p = document.createElement('p');
+                    p.innerHTML = textSpan.innerHTML || '<br>'; // Preserve content or create a line break
 
-            parentChecklist.after(newChecklist);
-            // Move cursor to the new checklist item's text area
-            const newTextSpan = newChecklist.querySelector('.task-list-item-text');
-            const range = document.createRange();
-            range.selectNodeContents(newTextSpan);
-            range.collapse(false);
-            selection.removeAllRanges();
-            selection.addRange(range);
+                    // Replace the checklist item in the DOM
+                    taskItem.parentNode.replaceChild(p, taskItem);
+
+                    // Place the cursor correctly at the beginning of the new paragraph
+                    const newRange = document.createRange();
+                    newRange.selectNodeContents(p);
+                    newRange.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(newRange);
+                    
+                    // Manually trigger an input event so the app saves the change
+                    const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+                    p.dispatchEvent(inputEvent);
+
+                    return; // Stop further execution
+                }
+            }
         }
-        saveNoteContent();
-        return;
     }
-}
-                    // Add this block to handle deleting checklist items
-if (e.key === 'Backspace') {
-    const selection = window.getSelection();
-    if (selection.isCollapsed && selection.anchorOffset === 0) {
-        const span = selection.anchorNode.nodeType === 3 ? selection.anchorNode.parentNode : selection.anchorNode;
-        if (span && span.classList.contains('task-list-item-text')) {
-            const taskItem = span.closest('.task-list-item');
-            // Only delete if the text is empty
-            if (taskItem && span.innerText.trim() === '') {
+    // --- END OF NEW, ROBUST BACKSPACE LOGIC ---
+
+    // Handles pressing 'Enter' inside a checklist
+    if (e.key === 'Enter') {
+        const parentChecklist = selection.anchorNode.parentNode.closest('.task-list-item');
+        if (parentChecklist) {
+            e.preventDefault();
+            const textContent = parentChecklist.querySelector('.task-list-item-text').innerText.trim();
+            if (textContent === '') {
+                // If line is empty, convert it to a normal paragraph
+                const p = document.createElement('p');
+                p.innerHTML = '<br>';
+                parentChecklist.parentNode.replaceChild(p, parentChecklist);
+                const range = document.createRange();
+                range.setStart(p, 0);
+                range.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            } else {
+                // If line has text, create a new blank checklist item below it
+                const newChecklist = document.createElement('div');
+                newChecklist.classList.add('task-list-item');
+                const onchangeLogic = `const item=this.closest('.task-list-item'); if(item){item.classList.toggle('checked',this.checked); this.checked?this.setAttribute('checked',''):this.removeAttribute('checked');} const event=new Event('input',{bubbles:true,cancelable:true}); this.dispatchEvent(event);`.replace(/"/g, '&quot;');
+                newChecklist.innerHTML = `<input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
+                parentChecklist.after(newChecklist);
+                
+                // Move cursor to the new item
+                const newTextSpan = newChecklist.querySelector('.task-list-item-text');
+                const range = document.createRange();
+                range.selectNodeContents(newTextSpan);
+                range.collapse(false);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+            saveNoteContent();
+            return;
+        }
+    }
+
+    // Default behavior for other keys or situations
+    const range = selection.getRangeAt(0);
+    if (e.key === 'Enter' && !e.shiftKey) {
+        let container = selection.anchorNode;
+        container = container.nodeType === 3 ? container.parentNode : container;
+        const blockquote = container.closest('blockquote');
+        if (blockquote && container.textContent.trim() === '' && container.matches('p, div') && container.parentNode === blockquote) {
+            const isLastNode = !container.nextSibling && (container.innerHTML === '' || container.innerHTML === '<br>');
+            if (isLastNode) {
                 e.preventDefault();
-                taskItem.remove();
+                const newP = document.createElement('p');
+                newP.innerHTML = '<br>';
+                blockquote.after(newP);
+                container.remove();
+                if (!blockquote.textContent.trim()) {
+                    blockquote.remove();
+                }
+                const newRange = document.createRange();
+                newRange.setStart(newP, 0);
+                newRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(newRange);
                 saveNoteContent();
                 return;
             }
         }
     }
-}
-                    const selection = window.getSelection();
-                    if (!selection.rangeCount) return;
 
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                        let container = selection.anchorNode;
-                        container = container.nodeType === 3 ? container.parentNode : container;
-                        
-                        const blockquote = container.closest('blockquote');
-                        
-                        if (blockquote && container.textContent.trim() === '' && container.matches('p, div') && container.parentNode === blockquote) {
-                            const isLastNode = !container.nextSibling && (container.innerHTML === '' || container.innerHTML === '<br>');
-                            if(isLastNode) {
-                                e.preventDefault();
-                                
-                                const newP = document.createElement('p');
-                                newP.innerHTML = '<br>';
-                                blockquote.after(newP);
-                                container.remove();
-                                
-                                if (!blockquote.textContent.trim()) {
-                                    blockquote.remove();
-                                }
+    if (e.key === 'Backspace' && range.collapsed && range.startOffset === 0) {
+        const pre = selection.anchorNode.closest('pre');
+        if (pre && pre.textContent.length === 0) {
+            const wrapper = pre.closest('.code-block-wrapper');
+            if (wrapper) {
+                e.preventDefault();
+                wrapper.remove();
+                saveNoteContent();
+                return;
+            }
+        }
+    }
+});
 
-                                const range = document.createRange();
-                                range.setStart(newP, 0);
-                                range.collapse(true);
-                                selection.removeAllRanges();
-                                selection.addRange(range);
-                                
-                                saveNoteContent();
-                                return;
-                            }
-                        }
-                    }
-                    
-                    if (e.key === 'Backspace') {
-                        const range = selection.getRangeAt(0);
-                        if (range.collapsed && range.startOffset === 0) {
-                            const pre = selection.anchorNode.closest('pre');
-                            if (pre && pre.textContent.length === 0) {
-                                const wrapper = pre.closest('.code-block-wrapper');
-                                if (wrapper) {
-                                    e.preventDefault();
-                                    wrapper.remove();
-                                    saveNoteContent();
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                });
-                
-                const handleImageFile = (file) => {
-                    if (file.type.startsWith('image/')) {
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                            const imgHTML = `<img src="${e.target.result}" alt="Pasted image">`;
-                            document.execCommand('insertHTML', false, imgHTML);
-                            saveNoteContent();
-                        };
-                        reader.readAsDataURL(file);
-                        return true;
-                    }
-                    return false;
-                };
+                // NEW: Enhanced paste event listener
+app.elements.noteEditorBody.addEventListener('paste', (e) => {
+    // First, check for pasting files (e.g., images)
+    const files = e.clipboardData.files;
+    let handledFile = false;
+    for (const file of files) {
+        if (handleImageFile(file)) {
+            e.preventDefault();
+            handledFile = true;
+        }
+    }
+    if (handledFile) {
+        return; // Stop if we handled a file paste
+    }
 
-                app.elements.noteEditorBody.addEventListener('paste', (e) => {
-                    const files = e.clipboardData.files;
-                    for (const file of files) {
-                        if (handleImageFile(file)) {
-                            e.preventDefault();
-                        }
-                    }
-                });
+    // --- Start of New Logic for Pasted Text ---
+    // 1. Prevent the browser's default paste action
+    e.preventDefault();
+
+    // 2. Get pasted content (HTML or plain text)
+    let pastedHtml = e.clipboardData.getData('text/html');
+    if (!pastedHtml) {
+        const plainText = e.clipboardData.getData('text/plain');
+        pastedHtml = `<p>${plainText.replace(/\n/g, '<br>')}</p>`;
+    }
+
+    // 3. Sanitize the HTML to remove theme-clashing styles
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = pastedHtml;
+
+    // Remove all 'style' and 'class' attributes from pasted elements
+    const allElements = tempDiv.querySelectorAll('*');
+    allElements.forEach(el => {
+        el.removeAttribute('style');
+        el.removeAttribute('class');
+    });
+
+    // Specifically find and remove obsolete <font> tags
+    const fontTags = tempDiv.querySelectorAll('font');
+    fontTags.forEach(fontTag => {
+        const parent = fontTag.parentNode;
+        while (fontTag.firstChild) {
+            parent.insertBefore(fontTag.firstChild, fontTag);
+        }
+        parent.removeChild(fontTag);
+    });
+
+    const sanitizedHtml = tempDiv.innerHTML;
+
+    // 4. Insert the clean, sanitized HTML into the editor
+    document.execCommand('insertHTML', false, sanitizedHtml);
+
+    // 5. Trigger a save of the new content
+    saveNoteContent();
+});
 
                 app.elements.noteEditorBody.addEventListener('drop', (e) => {
                     e.preventDefault();
@@ -4813,6 +4861,26 @@ app.modals.quizContent.addEventListener('change', e => {
                         });
                         return;
                     }
+                    if (command === 'toggleCheckboxes') {
+        restoreSelectionAndExec(() => {
+            const selection = window.getSelection();
+            if (!selection.rangeCount) return;
+
+            // Get all checklist items in the note editor
+            const allChecklistItems = app.elements.noteEditorBody.querySelectorAll('.task-list-item');
+
+            // Check each item to see if it's included in the user's selection
+            allChecklistItems.forEach(item => {
+                // selection.containsNode(item, true) checks for full or partial selection
+                if (selection.containsNode(item, true)) {
+                    // Toggle the class that hides the checkbox
+                    item.classList.toggle('checkbox-hidden');
+                }
+            });
+        });
+        return; // Stop after handling the command
+    }
+                    
 
                     if (command === 'formatBlock' && value === 'code') {
                          restoreSelectionAndExec(() => {
@@ -4869,13 +4937,19 @@ if (command === 'insertChecklist') {
         container = container.nodeType === 3 ? container.parentNode : container;
 
         const currentChecklist = container.closest('.task-list-item');
+        
+        // This improved onchange logic ensures changes are saved reliably
+        const onchangeLogic = `const item=this.closest('.task-list-item'); if(item){item.classList.toggle('checked',this.checked); this.checked?this.setAttribute('checked',''):this.removeAttribute('checked');} const event=new Event('input',{bubbles:true,cancelable:true}); this.dispatchEvent(event);`.replace(/"/g, '&quot;');
 
-        // CASE 1: TOGGLE OFF - If we are in a checklist, convert it back to a paragraph.
+        // CASE 1: TOGGLE OFF - If you're inside a checklist, it converts it back to a normal paragraph.
         if (currentChecklist) {
             const text = currentChecklist.querySelector('.task-list-item-text').innerText;
             const p = document.createElement('p');
-            p.innerHTML = text.trim() || '<br>';
+            // Sanitize text and handle empty lines
+            p.innerHTML = text.trim() ? text.trim().replace(/</g, "&lt;").replace(/>/g, "&gt;") : '<br>';
             currentChecklist.parentNode.replaceChild(p, currentChecklist);
+            
+            // Restore cursor position
             range.selectNodeContents(p);
             range.collapse(false);
             selection.removeAllRanges();
@@ -4883,24 +4957,26 @@ if (command === 'insertChecklist') {
             return;
         }
 
-        // CASE 2: TOGGLE ON - Find the parent block, get all its text, and replace the whole block.
-        const blockToConvert = container.closest('p, div');
-        const onchangeLogic = `const p=this.closest('.task-list-item'); p.classList.toggle('checked', this.checked); this.checked ? this.setAttribute('checked','') : this.removeAttribute('checked'); saveNoteContent();`.replace(/"/g, '&quot;');
-        
-        if (blockToConvert && blockToConvert.isContentEditable) {
-            const lines = blockToConvert.innerText.split('\n').filter(line => line.trim() !== '');
-            if (lines.length > 0) {
-                const checklistHTML = lines.map(line => {
-                    const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                    return `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div></div>`;
-                }).join('');
-                blockToConvert.outerHTML = checklistHTML;
-            }
+        // CASE 2: TOGGLE ON - Converts the current selection to checklist items.
+        const selectedText = selection.toString();
+        let checklistHTML;
+
+        if (selectedText.trim() === '') {
+            // If nothing is selected, insert one blank checklist item.
+            checklistHTML = `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div>`;
         } else {
-            // CASE 3: INSERT NEW - Fallback to insert a new blank checklist item.
-            const checklistHTML = `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div><p><br></p>`;
-            document.execCommand('insertHTML', false, checklistHTML);
+            // If text is selected, convert each line into a separate checklist item.
+            // This now correctly handles multi-line selections.
+            const lines = selectedText.split('\n');
+            checklistHTML = lines.map(line => {
+                const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+                if (sanitizedLine === '') return null; // Ignore empty lines in the selection
+                return `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div></div>`;
+            }).filter(Boolean).join('');
         }
+        
+        // Use the browser's standard 'insertHTML' command to safely replace the selection.
+        document.execCommand('insertHTML', false, checklistHTML);
     });
     return;
 }
