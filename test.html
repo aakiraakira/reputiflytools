@@ -1374,6 +1374,7 @@ window.functions = getFunctions(app);
 // --- 1. HELPER FUNCTIONS (Lowest Level) ---
 // These are needed by other functions, so they must come first.
 
+// Located inside the // --- 1. HELPER FUNCTIONS --- section
 function findItem(itemId, tree = null) {
     if (!itemId) return null;
 
@@ -1386,15 +1387,15 @@ function findItem(itemId, tree = null) {
         return null;
     }
 
-    // Original search logic for a specific tree
+    // Original search logic for a specific tree (collections or archive)
     for (let i = 0; i < tree.length; i++) {
         const item = tree[i];
         if (item.id === itemId) return {item, parent: tree, index: i};
         if (item.type === 'folder' && item.children) {
             const result = findItem(itemId, item.children);
+            // This part is crucial for finding items in nested folders within the archive
             if (result) {
-                const parentObject = tree.find(parentItem => parentItem.children === result.parent);
-                return { ...result, parent: parentObject || tree };
+                return result;
             }
         }
     }
@@ -2722,38 +2723,16 @@ function renderArchiveList() {
     `).join('');
 }
 
+// Located near other render... functions
 function renderArchiveView() {
     app.views.archive.classList.remove('hidden');
     const container = document.getElementById('archive-view-list');
-    container.classList.add('space-y-4');
+    container.className = 'space-y-4'; // Reset classes
 
-    const backToArchiveBtn = document.getElementById('back-to-archive-btn'); // Get header button
-    let itemsToRender = state.archive;
-    let isSubFolderView = false;
-
-    // Check if we are viewing inside a folder
-    if (state.settings.activeArchiveFolderId) {
-        const folder = findItem(state.settings.activeArchiveFolderId)?.item;
-        if (folder && folder.children) {
-            itemsToRender = folder.children;
-            isSubFolderView = true;
-        }
-    }
-
-    // --- NEW LOGIC TO CONTROL THE HEADER BUTTON ---
-    if (isSubFolderView) {
-        backToArchiveBtn.classList.remove('hidden');
-        backToArchiveBtn.querySelector('span').textContent = 'Back to main archive';
-        app.elements.currentViewTitle.classList.add('hidden');
-    } else {
-        // Hide the back button if we're at the top level of the archive
-        backToArchiveBtn.classList.add('hidden');
-        app.elements.currentViewTitle.classList.remove('hidden');
-    }
-    // --- END OF NEW LOGIC ---
+    const itemsToRender = state.archive;
 
     if (itemsToRender.length === 0) {
-        container.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="archive" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">${isSubFolderView ? 'This archived folder is empty.' : 'Archive is Empty'}</h3><p>You can archive notes or folders via the context menu.</p></div>`;
+        container.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="archive" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">Archive is Empty</h3><p>You can archive notes or folders from the context menu.</p></div>`;
         feather.replace();
         return;
     }
@@ -2772,15 +2751,14 @@ function renderArchiveView() {
                     <p class="text-xs text-text-tertiary mt-3">Archived: ${date}</p>
                 </div>
                 <div class="flex items-center flex-shrink-0 ml-4">
-                    <button class="unarchive-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Unarchive Item" data-id="${item.id}">
+                     <button class="unarchive-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Unarchive Item" data-id="${item.id}">
                         <i data-feather="inbox" class="w-4 h-4"></i>
                     </button>
                 </div>
             </div>
         </div>`;
     }).join('');
-    
-    // The old back button is now removed from here
+
     container.innerHTML = itemsHTML;
     feather.replace();
 }
@@ -2798,24 +2776,22 @@ function renderArchiveView() {
                 note.links = [...matches].map(match => match[1].trim());
             }
 
-            function renderMainView() {
+            // Located near other render... functions
+function renderMainView() {
     document.querySelectorAll('.notes-view').forEach(v => v.classList.add('hidden'));
+    document.getElementById('back-to-archive-btn').classList.add('hidden'); // Always hide by default
+    app.elements.currentViewTitle.classList.remove('hidden'); // Always show by default
 
     if (isSearchActive) {
         renderSearchResults(app.search.input.value);
         return;
     }
 
-    // --- CORRECTED LOGIC START ---
-
-    // 1. First, always check if a specific note should be displayed.
-    // The renderNoteEditor function already knows how to handle read-only for archived notes.
     if (state.settings.activeNoteId) {
-        renderNoteEditor();
+        renderNoteEditor(); // This function now handles both archived and regular notes
         return;
     }
 
-    // 2. If no note is active, THEN check for special views like Archive or Tags.
     if (state.settings.activeView === 'archive') {
         app.elements.currentViewTitle.textContent = "Archive";
         app.elements.viewSwitcher.style.display = 'none';
@@ -2833,11 +2809,10 @@ function renderArchiveView() {
         app.elements.currentViewTitle.textContent = activeCollection?.name || "All Notes";
     }
 
-    const showListControls = !state.settings.activeNoteId && (state.settings.activeView === 'list' || !activeCollection || isTagActive);
-    app.elements.viewSwitcher.style.display = state.settings.activeNoteId || !activeCollection || isTagActive ? 'none' : 'flex';
+    const showListControls = !activeCollection || isTagActive || state.settings.activeView === 'list';
+    app.elements.viewSwitcher.style.display = (!activeCollection || isTagActive) ? 'none' : 'flex';
     app.elements.listViewControls.style.display = showListControls ? 'flex' : 'none';
 
-    // 3. Finally, render the normal collection or tag lists.
     if (isTagActive) {
         renderListView();
     } else if (activeCollection) {
@@ -2850,9 +2825,8 @@ function renderArchiveView() {
             renderListView();
         }
     } else {
-        renderListView(); // Default view if nothing else is selected
+        renderListView(); // Default to list view for "All Notes"
     }
-    // --- CORRECTED LOGIC END ---
 }
             
             function renderMobileControls() {
@@ -3055,54 +3029,54 @@ function renderArchiveView() {
                 </div>`;
     }
 }
-            function renderNoteEditor() {
-    const backToArchiveBtn = document.getElementById('back-to-archive-btn'); // New line
+            // Located inside the init() function
+function renderNoteEditor() {
+    const backToArchiveBtn = document.getElementById('back-to-archive-btn');
     app.containers.noteEditor.classList.remove('hidden');
 
-    // --- MODIFICATION START ---
-    const findResult = findItem(state.settings.activeNoteId); // Get the full result
+    const findResult = findItem(state.settings.activeNoteId); // This now correctly searches both locations
     const note = findResult?.item;
-    const isArchived = findResult?.location === 'archive';
-    // --- MODIFICATION END ---
+    const isArchived = findResult?.location === 'archive'; // The key fix is here
 
     const highlightControls = document.getElementById('highlight-controls');
     const editorBody = app.elements.noteEditorBody;
+    const highlightQuery = state.settings.searchHighlightQuery;
 
     if (!note) {
         state.settings.activeNoteId = null;
         if (highlightControls) highlightControls.classList.add('hidden');
-        backToArchiveBtn.classList.add('hidden'); // New line
+        backToArchiveBtn.classList.add('hidden');
         renderMainView();
         return;
     }
 
-    // --- MODIFICATION START ---
-    // Show or hide the back button and the normal title
+    // Show/hide the 'Back to Archive' button and control editor read-only state
     if (isArchived) {
-    backToArchiveBtn.classList.remove('hidden');
-    // --- ADD THIS LINE ---
-    backToArchiveBtn.querySelector('span').textContent = 'Back to Archive';
-    app.elements.currentViewTitle.classList.add('hidden');
-} else {
+        backToArchiveBtn.classList.remove('hidden');
+        backToArchiveBtn.querySelector('span').textContent = 'Back to Archive';
+        app.elements.currentViewTitle.classList.add('hidden');
+        editorBody.contentEditable = 'false';
+        app.elements.noteEditorTitle.readOnly = true;
+        editorBody.style.cursor = 'not-allowed';
+        editorBody.setAttribute('data-placeholder', 'This note is archived and is read-only.');
+    } else {
         backToArchiveBtn.classList.add('hidden');
         app.elements.currentViewTitle.classList.remove('hidden');
+        editorBody.contentEditable = 'true';
+        app.elements.noteEditorTitle.readOnly = false;
+        editorBody.style.cursor = 'text';
+        editorBody.setAttribute('data-placeholder', 'Start writing or drop an image...');
     }
-    // --- MODIFICATION END ---
 
     app.elements.noteEditorTitle.value = note.name;
-    const isReadOnly = location === 'archive';
-    app.elements.noteEditorTitle.readOnly = isReadOnly;
-    app.elements.noteEditorBody.contentEditable = !isReadOnly;
-    app.elements.noteEditorBody.style.cursor = isReadOnly ? 'not-allowed' : 'text';
-    if(isReadOnly) {
-        app.elements.noteEditorBody.setAttribute('data-placeholder', 'This note is in an archived folder and is read-only.');
-    } else {
-        app.elements.noteEditorBody.setAttribute('data-placeholder', 'Start writing or drop an image...');
-    }
+    let finalContent = note.content || '';
 
-    if (highlightQuery && state.settings.editorMode === 'editor') {
+    // Clear previous highlights by resetting content
+    editorBody.innerHTML = parseInternalLinks(finalContent);
+
+    if (highlightQuery && state.settings.editorMode === 'editor' && !isArchived) {
+        // Highlighting logic remains largely the same but now respects isArchived
         const regex = new RegExp(`(${highlightQuery.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi');
-
         const walker = document.createTreeWalker(editorBody, NodeFilter.SHOW_TEXT, null, false);
         let node;
         const nodesToReplace = [];
@@ -3111,13 +3085,12 @@ function renderArchiveView() {
                 nodesToReplace.push(node);
             }
         }
-
         nodesToReplace.forEach(node => {
             const newHtml = node.textContent.replace(regex, `<mark>$1</mark>`);
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = newHtml;
             const parent = node.parentNode;
-            while(tempDiv.firstChild) {
+            while (tempDiv.firstChild) {
                 parent.insertBefore(tempDiv.firstChild, node);
             }
             parent.removeChild(node);
@@ -3126,80 +3099,49 @@ function renderArchiveView() {
         const firstHighlight = editorBody.querySelector('mark');
         if (firstHighlight) {
             highlightControls.classList.remove('hidden');
-
-            const clearBtn = document.getElementById('clear-search-btn');
-            clearBtn.replaceWith(clearBtn.cloneNode(true));
-            document.getElementById('clear-search-btn').addEventListener('click', closeAndClearSearch);
-            app.elements.noteEditorBody.addEventListener('mousedown', closeAndClearSearch, { once: true });
-
-            document.getElementById('in-note-search-input').value = highlightQuery;
-            performInNoteSearch();
-
-            // ROBUST SCROLL LOGIC
-            setTimeout(() => {
-                const mainContentArea = document.getElementById('main-content-area');
-                const mainRect = mainContentArea.getBoundingClientRect();
-                const highlightRect = firstHighlight.getBoundingClientRect();
-
-                const barHeight = highlightControls.offsetHeight;
-                const desiredPadding = 20; 
-
-                const targetScrollTop = mainContentArea.scrollTop + (highlightRect.top - mainRect.top) - barHeight - desiredPadding;
-
-                mainContentArea.scrollTo({
-                    top: Math.max(0, targetScrollTop),
-                    behavior: 'smooth'
-                });
-            }, 100);
+            performInNoteSearch(); // Use the existing function to setup UI
         }
         state.settings.searchHighlightQuery = null;
     } else {
         highlightControls.classList.add('hidden');
     }
-    
 
-    // --- START: New Backlinks Logic ---
-const backlinksPane = document.getElementById('backlinks-pane');
-const backlinksList = document.getElementById('backlinks-list');
-const summarizeBtn = document.getElementById('summarize-backlinks-btn');
-const toggleBtn = document.getElementById('toggle-backlinks-btn');
+    const backlinksPane = document.getElementById('backlinks-pane');
+    const backlinksList = document.getElementById('backlinks-list');
+    const summarizeBtn = document.getElementById('summarize-backlinks-btn');
+    const toggleBtn = document.getElementById('toggle-backlinks-btn');
 
-const allNotes = getAllNotes(state.collections);
-const backlinks = allNotes.filter(n =>
-    n.id !== note.id && (n.links || []).some(link => link.toLowerCase() === note.name.toLowerCase())
-);
+    const allNotes = getAllNotes(state.collections);
+    const backlinks = allNotes.filter(n =>
+        n.id !== note.id && (n.links || []).some(link => link.toLowerCase() === note.name.toLowerCase())
+    );
 
-if (backlinks.length > 0) {
-    backlinksList.innerHTML = backlinks.map(b => {
-        const parentResult = findItem(b.id);
-        const parent = parentResult ? parentResult.parent : null;
-        const parentName = parent && !Array.isArray(parent) ? parent.name : 'Uncategorized';
-        
-        const plainContent = b.content.replace(/<[^>]*>?/gm, '').trim();
-        const excerpt = plainContent.substring(0, 120) + (plainContent.length > 120 ? '...' : '');
-        const lastModified = formatDateTime(b.modifiedAt);
-
-        return `
-            <a href="#" class="backlink-item block p-3 rounded-lg" data-note-id="${b.id}">
-                <div class="font-semibold text-text-primary">${b.name} <span class="text-text-tertiary font-normal">| ${parentName}</span></div>
-                <p class="text-sm text-text-secondary mt-1">${excerpt || 'No content preview'}</p>
-                <p class="text-xs text-text-tertiary mt-2">Modified: ${lastModified}</p>
-            </a>`;
-    }).join('');
-
-    summarizeBtn.onclick = () => handleBacklinksSummary(note, backlinks);
-    toggleBtn.onclick = () => {
-        state.settings.backlinksCollapsed = !state.settings.backlinksCollapsed;
-        saveState();
+    if (backlinks.length > 0) {
+        backlinksList.innerHTML = backlinks.map(b => {
+            const parentResult = findItem(b.id);
+            const parent = parentResult ? parentResult.parent : null;
+            const parentName = parent && !Array.isArray(parent) ? parent.name : 'Uncategorized';
+            const plainContent = b.content.replace(/<[^>]*>?/gm, '').trim();
+            const excerpt = plainContent.substring(0, 120) + (plainContent.length > 120 ? '...' : '');
+            const lastModified = formatDateTime(b.modifiedAt);
+            return `
+                <a href="#" class="backlink-item block p-3 rounded-lg" data-note-id="${b.id}">
+                    <div class="font-semibold text-text-primary">${b.name} <span class="text-text-tertiary font-normal">| ${parentName}</span></div>
+                    <p class="text-sm text-text-secondary mt-1">${excerpt || 'No content preview'}</p>
+                    <p class="text-xs text-text-tertiary mt-2">Modified: ${lastModified}</p>
+                </a>`;
+        }).join('');
+        summarizeBtn.onclick = () => handleBacklinksSummary(note, backlinks);
+        toggleBtn.onclick = () => {
+            state.settings.backlinksCollapsed = !state.settings.backlinksCollapsed;
+            saveState();
+            renderBacklinksState();
+        };
+        backlinksPane.classList.remove('hidden');
         renderBacklinksState();
-    };
-
-    backlinksPane.classList.remove('hidden');
-    renderBacklinksState(); // Render initial state
-} else {
-    backlinksPane.classList.add('hidden');
-}
-// --- END: New Backlinks Logic ---
+    } else {
+        backlinksPane.classList.add('hidden');
+    }
 
     updateEditorStats();
     feather.replace();
@@ -4180,7 +4122,6 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                 });
 
                 app.containers.mobileControlsDropdown.addEventListener('click', async (e) => {
-                    
     const button = e.target.closest('button');
     if (!button) return;
 
@@ -4194,19 +4135,31 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
     const noteId = state.settings.activeNoteId;
     const collectionId = state.settings.activeCollectionId;
 
-    // --- ADDED: Logic for archiving a folder ---
+    if (action === 'mobile-unarchive') {
+        closeDropdown();
+        if (!noteId) return;
+        const archiveIndex = state.archive.findIndex(i => i.id === noteId);
+        if (archiveIndex > -1) {
+            const [unarchivedItem] = state.archive.splice(archiveIndex, 1);
+            state.collections.unshift(unarchivedItem);
+            showToast(`"${unarchivedItem.name}" has been unarchived.`, 'success');
+            state.settings.activeNoteId = null; // Go back to the archive list view
+            saveState();
+            buildLunrIndex();
+            render();
+        }
+        return;
+    }
+
     if (action === 'mobile-archive-folder') {
         closeDropdown();
         if (!collectionId) return;
-        
         const { item: folder, parent, index } = findItem(collectionId);
         if (!folder) return;
-
         const parentArray = Array.isArray(parent) ? parent : parent.children;
         const [itemToArchive] = parentArray.splice(index, 1);
         itemToArchive.modifiedAt = new Date().toISOString();
         state.archive.unshift(itemToArchive);
-        
         showToast(`Folder "${folder.name}" archived.`, 'success');
         state.settings.activeCollectionId = null;
         state.settings.activeNoteId = null;
@@ -4215,9 +4168,9 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
         render();
         return;
     }
+
     if (action === 'mobile-delete-folder') {
         closeDropdown();
-        const collectionId = state.settings.activeCollectionId;
         if (!collectionId) return;
 
         const { item: folder, parent, index } = findItem(collectionId);
@@ -4240,17 +4193,17 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
             buildLunrIndex();
             render();
         }
-        return; // Stop after handling this action
+        return;
     }
 
-    // Handle all actions that require an active note
     if (action === 'mobile-new-note') {
-    closeDropdown();
-    createNewNote();
-    return;
-}
+        closeDropdown();
+        createNewNote();
+        return;
+    }
+
     if (action && noteId) {
-        closeDropdown(); // Close menu immediately after an action is clicked
+        closeDropdown();
         const { item: note, parent, index } = findItem(noteId);
         if (!note) return;
 
@@ -4274,29 +4227,8 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
             case 'mobile-quiz':
                 handleGenerateQuiz(plainContent, note);
                 break;
-                case 'mobile-unarchive':
-            const archiveIndex = state.archive.findIndex(i => i.id === noteId);
-            if (archiveIndex > -1) {
-                const [unarchivedItem] = state.archive.splice(archiveIndex, 1);
-                state.collections.unshift(unarchivedItem);
-                showToast(`"${unarchivedItem.name}" has been unarchived.`, 'success');
-                state.settings.activeNoteId = null; // Go back to the archive list view
-                saveState();
-                buildLunrIndex();
-                render();
-            }
-            break;
-                case 'mobile-flashcard':
-    handleFlashcardMode(note);
-    break;
-            case 'mobile-rename':
-                const newName = await showPrompt({ title: 'Rename', message: `Enter a new name for "${note.name}":`, initialValue: note.name });
-                if (newName) {
-                    note.name = newName;
-                    saveState();
-                    buildLunrIndex();
-                    render();
-                }
+            case 'mobile-flashcard':
+                handleFlashcardMode(note);
                 break;
             case 'mobile-duplicate':
                 const newItem = duplicateItem(note);
@@ -4305,6 +4237,12 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                 saveState();
                 buildLunrIndex();
                 render();
+                break;
+            case 'mobile-share':
+                handleShareNote();
+                break;
+            case 'mobile-upload':
+                document.getElementById('file-upload-input').click();
                 break;
             case 'mobile-pin':
                 note.pinned = !note.pinned;
@@ -4323,15 +4261,8 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                     render();
                 }
                 break;
-                case 'mobile-share':
-    handleShareNote();
-    break;
-    case 'mobile-upload':
-    document.getElementById('file-upload-input').click();
-    break;
         }
     } 
-    // Handle view switching, which doesn't need an active note
     else if (button.classList.contains('view-btn-mobile')) {
         state.settings.activeView = button.dataset.view;
         saveState();
@@ -4348,164 +4279,113 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                 });
                 
                 app.containers.mainContentArea.addEventListener('click', (e) => {
-                    // Add this block to handle backlink clicks
-const backlink = e.target.closest('.backlink-item');
-if (backlink) {
-    e.preventDefault();
-    state.settings.activeNoteId = backlink.dataset.noteId;
-    saveState();
-    render(); // Re-render the editor with the new note
-    if (window.innerWidth < 768) { // ADD THIS LINE
-            toggleMobileSidebar(false);   // ADD THIS LINE
-        }                                 // ADD THIS LINE
-        return;
-    
-}
-
-                    const deleteBlockBtn = e.target.closest('.delete-block-btn');
-                    if (deleteBlockBtn) {
-                        const wrapper = deleteBlockBtn.closest('.code-block-wrapper');
-                        if(wrapper) {
-                            const nextEl = wrapper.nextElementSibling;
-                            if(nextEl && nextEl.tagName === 'P' && (nextEl.innerHTML === '<br>' || nextEl.innerHTML === '')) {
-                                nextEl.remove();
-                            }
-                            wrapper.remove();
-                            saveNoteContent();
-                            showToast('Code block deleted', 'info');
-                        }
-                        return;
-                    }
-                    
-                    const summarizeBtn = e.target.closest('.summarize-btn');
-if (summarizeBtn) {
-    e.preventDefault();
-    e.stopPropagation();
-    const noteId = summarizeBtn.dataset.noteId;
-    const { item: note } = findItem(noteId);
-    const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
-    if (!plainContent) {
-        showToast("Note is empty, nothing to summarize.", "info");
-        return;
-    }
-    // No longer needs the second argument
-    handleSummarize(plainContent);
-    return;
-}
-                    const quizBtn = e.target.closest('.quiz-btn');
-if (quizBtn) {
-    e.preventDefault();
-    e.stopPropagation();
-    const noteId = quizBtn.dataset.noteId;
-    const { item: note } = findItem(noteId);
-    const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
-    if (!plainContent) {
-        showToast("Note is empty, cannot generate a quiz.", "info");
-        return;
-    }
-    handleGenerateQuiz(plainContent, note);
-    return;
-}
-                    const copyBtn = e.target.closest('.copy-code-btn');
-                    if (copyBtn) {
-                         const codeBlock = copyBtn.closest('.code-block-wrapper, .hljs').querySelector('pre, code');
-                         if(codeBlock) {
-                            const code = codeBlock.innerText;
-                            navigator.clipboard.writeText(code)
-                                .then(() => showToast('Code copied!', 'success'))
-                                .catch(err => showToast('Failed to copy code', 'error'));
-                         }
-                        return;
-                    }
-                    // --- START: NEW UNARCHIVE LOGIC ---
-const unarchiveBtn = e.target.closest('.unarchive-btn');
-if (unarchiveBtn) {
-    e.preventDefault();
-    e.stopPropagation();
-    const idToUnarchive = unarchiveBtn.dataset.id;
-    const findResult = findItem(idToUnarchive);
-
-    if (findResult) {
-        const { item, parent, index } = findResult;
-        const parentArray = Array.isArray(parent) ? parent : parent.children;
-        const [unarchivedItem] = parentArray.splice(index, 1);
-
-        state.collections.unshift(unarchivedItem); // Move to root of notes
-        showToast(`"${item.name}" has been unarchived.`, 'success');
+    const backlink = e.target.closest('.backlink-item');
+    if (backlink) {
+        e.preventDefault();
+        state.settings.activeNoteId = backlink.dataset.noteId;
         saveState();
-        buildLunrIndex();
         render();
+        if (window.innerWidth < 768) {
+            toggleMobileSidebar(false);
+        }
+        return;
     }
-    return;
-}
-// --- END: NEW UNARCHIVE LOGIC ---
 
+    const unarchiveBtn = e.target.closest('.unarchive-btn');
+    if (unarchiveBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const idToUnarchive = unarchiveBtn.dataset.id;
+        const archiveIndex = state.archive.findIndex(i => i.id === idToUnarchive);
+        if (archiveIndex > -1) {
+            const [unarchivedItem] = state.archive.splice(archiveIndex, 1);
+            state.collections.unshift(unarchivedItem);
+            showToast(`"${unarchivedItem.name}" has been unarchived.`, 'success');
+            saveState();
+            buildLunrIndex();
+            render();
+        }
+        return;
+    }
 
-// --- START: NEW ARCHIVE NAVIGATION LOGIC ---
-const archiveBackBtn = e.target.closest('#archive-back-btn');
-if (archiveBackBtn) {
-    state.settings.activeArchiveFolderId = null;
-    saveState();
-    render();
-    return;
-}
+    const card = e.target.closest('.kanban-card, .list-note-item, .search-result-item');
+    if (card) {
+        const noteId = card.dataset.noteId;
+        const isArchived = card.dataset.isArchived === 'true';
 
-const card = e.target.closest('.kanban-card, .list-note-item, .search-result-item');
-if (card) {
-    const noteId = card.dataset.noteId;
-    const isArchived = card.dataset.isArchived === 'true';
-
-    if (isArchived) {
-        const itemType = card.dataset.itemType;
-        if (itemType === 'folder') {
-            state.settings.activeArchiveFolderId = noteId; // Navigate into folder
+        if (isArchived) {
+             state.settings.activeNoteId = noteId; // Open note in editor
         } else {
-            state.settings.activeNoteId = noteId; // Open note in editor
+            if (isSearchActive && card.classList.contains('search-result-item')) {
+                state.settings.searchHighlightQuery = app.search.input.value;
+                closeSearch(true);
+            }
+            state.settings.activeNoteId = noteId;
+            const { parent } = findItem(noteId);
+            state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+            state.settings.activeTag = null;
         }
-    } else {
-        // ... (existing logic for normal note clicks)
-        if (isSearchActive && card.classList.contains('search-result-item')) {
-            state.settings.searchHighlightQuery = app.search.input.value;
-            closeSearch(true);
+
+        saveState();
+        render();
+        if (window.innerWidth < 768) {
+            toggleMobileSidebar(false);
         }
-        state.settings.activeNoteId = noteId;
-        const { parent } = findItem(noteId);
-        state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
-        state.settings.activeTag = null;
+        return;
     }
 
-    saveState();
-    render();
-    return;
-}
-// --- END: NEW ARCHIVE NAVIGATION LOGIC ---
-//...
-                    
-                    const internalLink = e.target.closest('a.internal-link');
-                    if (internalLink) {
-                        e.preventDefault();
-                        const noteId = internalLink.dataset.noteId;
-                        if(noteId) {
-                            state.settings.activeNoteId = noteId;
-                            const { parent } = findItem(noteId);
-                            state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
-                            state.settings.activeTag = null;
-                            saveState();
-                            render();
-                            showToast(`Mapsd to "${internalLink.textContent}"`);
-                            if (window.innerWidth < 768) { // ADD THIS LINE
-            toggleMobileSidebar(false);   // ADD THIS LINE
+    const summarizeBtn = e.target.closest('.summarize-btn');
+    if (summarizeBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const noteId = summarizeBtn.dataset.noteId;
+        const { item: note } = findItem(noteId);
+        const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
+        if (!plainContent) {
+            showToast("Note is empty, nothing to summarize.", "info");
+            return;
         }
-                        }
-                        return;
-                    }
-                    
-                    const link = e.target.closest('a');
-                    if (link && link.href && (app.elements.noteEditorBody.contains(link) || app.elements.markdownPreview.contains(link))) {
-                        e.preventDefault();
-                        window.open(link.href, '_blank');
-                    }
-                });
+        handleSummarize(plainContent);
+        return;
+    }
+    const quizBtn = e.target.closest('.quiz-btn');
+    if (quizBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const noteId = quizBtn.dataset.noteId;
+        const { item: note } = findItem(noteId);
+        const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
+        if (!plainContent) {
+            showToast("Note is empty, cannot generate a quiz.", "info");
+            return;
+        }
+        handleGenerateQuiz(plainContent, note);
+        return;
+    }
+    const internalLink = e.target.closest('a.internal-link');
+    if (internalLink) {
+        e.preventDefault();
+        const noteId = internalLink.dataset.noteId;
+        if(noteId) {
+            state.settings.activeNoteId = noteId;
+            const { parent } = findItem(noteId);
+            state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+            state.settings.activeTag = null;
+            saveState();
+            render();
+            if (window.innerWidth < 768) { 
+                toggleMobileSidebar(false);
+            }
+        }
+        return;
+    }
+
+    const link = e.target.closest('a');
+    if (link && link.href && (app.elements.noteEditorBody.contains(link) || app.elements.markdownPreview.contains(link))) {
+        e.preventDefault();
+        window.open(link.href, '_blank');
+    }
+});
 
                 // This is the core save logic
 performImmediateSave = () => {
