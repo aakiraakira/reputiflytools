@@ -150,7 +150,10 @@
 }
 
 /* This handles the strikethrough effect */
-.task-list-item.checked .task-list-item-text {
+/* PASTE THIS NEW RULE */
+/* This handles the strikethrough effect in both the editor and public views */
+#note-editor-body .task-list-item.checked .task-list-item-text,
+#public-note-content .task-list-item.checked .task-list-item-text {
     text-decoration: line-through;
     color: var(--text-tertiary);
 }
@@ -4265,11 +4268,10 @@ if (e.key === 'Enter') {
             // SINGLE ENTER: Create a new blank checklist item after the current one
             // SINGLE ENTER: Create a new blank checklist item after the current one
 // SINGLE ENTER: Create a new blank checklist item after the current one
-// SINGLE ENTER: Create a new blank checklist item after the current one
 const newChecklist = document.createElement('div');
 newChecklist.classList.add('task-list-item');
 
-const onchangeLogic = `const p=this.closest('.task-list-item'); p.classList.toggle('checked', this.checked); this.checked ? this.setAttribute('checked','') : this.removeAttribute('checked'); saveNoteContent();`.replace(/"/g, '&quot;');
+const onchangeLogic = `const p=this.closest('.task-list-item'); p.classList.toggle('checked'); this.checked ? this.setAttribute('checked','') : this.removeAttribute('checked'); saveNoteContent();`.replace(/"/g, '&quot;');
 newChecklist.innerHTML = `<input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
 // --- END: CORRECTED BLOCK ---
 
@@ -4369,14 +4371,61 @@ if (e.key === 'Backspace') {
                     return false;
                 };
 
-                app.elements.noteEditorBody.addEventListener('paste', (e) => {
-                    const files = e.clipboardData.files;
-                    for (const file of files) {
-                        if (handleImageFile(file)) {
-                            e.preventDefault();
-                        }
-                    }
-                });
+                // NEW: Enhanced paste event listener
+app.elements.noteEditorBody.addEventListener('paste', (e) => {
+    // First, check for pasting files (e.g., images)
+    const files = e.clipboardData.files;
+    let handledFile = false;
+    for (const file of files) {
+        if (handleImageFile(file)) {
+            e.preventDefault();
+            handledFile = true;
+        }
+    }
+    if (handledFile) {
+        return; // Stop if we handled a file paste
+    }
+
+    // --- Start of New Logic for Pasted Text ---
+    // 1. Prevent the browser's default paste action
+    e.preventDefault();
+
+    // 2. Get pasted content (HTML or plain text)
+    let pastedHtml = e.clipboardData.getData('text/html');
+    if (!pastedHtml) {
+        const plainText = e.clipboardData.getData('text/plain');
+        pastedHtml = `<p>${plainText.replace(/\n/g, '<br>')}</p>`;
+    }
+
+    // 3. Sanitize the HTML to remove theme-clashing styles
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = pastedHtml;
+
+    // Remove all 'style' and 'class' attributes from pasted elements
+    const allElements = tempDiv.querySelectorAll('*');
+    allElements.forEach(el => {
+        el.removeAttribute('style');
+        el.removeAttribute('class');
+    });
+
+    // Specifically find and remove obsolete <font> tags
+    const fontTags = tempDiv.querySelectorAll('font');
+    fontTags.forEach(fontTag => {
+        const parent = fontTag.parentNode;
+        while (fontTag.firstChild) {
+            parent.insertBefore(fontTag.firstChild, fontTag);
+        }
+        parent.removeChild(fontTag);
+    });
+
+    const sanitizedHtml = tempDiv.innerHTML;
+
+    // 4. Insert the clean, sanitized HTML into the editor
+    document.execCommand('insertHTML', false, sanitizedHtml);
+
+    // 5. Trigger a save of the new content
+    saveNoteContent();
+});
 
                 app.elements.noteEditorBody.addEventListener('drop', (e) => {
                     e.preventDefault();
@@ -4865,40 +4914,45 @@ if (command === 'insertChecklist') {
         const selection = window.getSelection();
         if (!selection.rangeCount) return;
         const range = selection.getRangeAt(0);
-        let container = range.commonAncestorContainer;
-        container = container.nodeType === 3 ? container.parentNode : container;
 
-        const currentChecklist = container.closest('.task-list-item');
+        const container = range.commonAncestorContainer;
+        const currentBlock = container.nodeType === 3
+            ? container.parentNode.closest('.task-list-item, p, div, li')
+            : container.closest('.task-list-item, p, div, li');
 
-        // CASE 1: TOGGLE OFF - If we are in a checklist, convert it back to a paragraph.
-        if (currentChecklist) {
-            const text = currentChecklist.querySelector('.task-list-item-text').innerText;
+        // CASE 1: TOGGLE OFF (Convert checklist back to paragraph)
+        if (currentBlock && currentBlock.classList.contains('task-list-item')) {
+            const text = currentBlock.querySelector('.task-list-item-text').innerText;
             const p = document.createElement('p');
             p.innerHTML = text.trim() || '<br>';
-            currentChecklist.parentNode.replaceChild(p, currentChecklist);
+            currentBlock.parentNode.replaceChild(p, currentBlock);
             range.selectNodeContents(p);
             range.collapse(false);
             selection.removeAllRanges();
             selection.addRange(range);
-            return;
-        }
 
-        // CASE 2: TOGGLE ON - Find the parent block, get all its text, and replace the whole block.
-        const blockToConvert = container.closest('p, div');
-        const onchangeLogic = `const p=this.closest('.task-list-item'); p.classList.toggle('checked', this.checked); this.checked ? this.setAttribute('checked','') : this.removeAttribute('checked'); saveNoteContent();`.replace(/"/g, '&quot;');
-        
-        if (blockToConvert && blockToConvert.isContentEditable) {
-            const lines = blockToConvert.innerText.split('\n').filter(line => line.trim() !== '');
-            if (lines.length > 0) {
-                const checklistHTML = lines.map(line => {
+        } else {
+            // CASE 2 & 3: TOGGLE ON or INSERT NEW
+            const onchangeLogic = `const p=this.closest('.task-list-item'); p.classList.toggle('checked'); this.checked ? this.setAttribute('checked','') : this.removeAttribute('checked'); saveNoteContent();`.replace(/"/g, '&quot;');
+            
+            let checklistHTML = '';
+            // If text is selected, convert it
+            if (!selection.isCollapsed) {
+                 const selectedText = selection.toString();
+                 // NEW LOGIC to correctly handle multiline selection
+const lines = selectedText.split('\n');
+// If the selection ends with a newline, split() creates an extra empty string. Remove it.
+if (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+    lines.pop();
+}
+                 checklistHTML = lines.map(line => {
                     const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
                     return `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div></div>`;
-                }).join('');
-                blockToConvert.outerHTML = checklistHTML;
+                 }).join('');
+            } else {
+            // Otherwise, insert a new blank item
+                 checklistHTML = `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div><p><br></p>`;
             }
-        } else {
-            // CASE 3: INSERT NEW - Fallback to insert a new blank checklist item.
-            const checklistHTML = `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div><p><br></p>`;
             document.execCommand('insertHTML', false, checklistHTML);
         }
     });
