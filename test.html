@@ -23,7 +23,7 @@
     <script src="https://unpkg.com/vis-network@9.1.2/dist/vis-network.min.js"></script>
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
     <script src="https://cdn.jsdelivr.net/npm/lunr/lunr.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.1/dist/browser-image-compression.js"></script>
     
 
     <script>
@@ -758,7 +758,7 @@ enableIndexedDbPersistence(db)
 // --- END OF NEW BLOCK ---
 
 window.db = db; // This now uses the offline-enabled db instance
-window.functions = getFunctions(app);
+window.functions = getFunctions(app, 'asia-southeast1');
     
 
   // This is our new entry point!
@@ -992,7 +992,6 @@ window.functions = getFunctions(app);
                    <div id="expandable-toolbar-buttons" class="hidden items-center">
                         <button id="dictate-btn" class="p-2 hover:bg-bg-main" title="Dictate Text"><i data-feather="mic" class="w-4 h-4"></i></button>
                         <button id="graph-btn" class="p-2 hover:bg-bg-main" title="Show Note Graph"><i data-feather="git-merge" class="w-4 h-4"></i></button>
-                        <button id="download-note-btn" class="p-2 hover:bg-bg-main" title="Download Note as Image"><i data-feather="download" class="w-4 h-4"></i></button>
                         <button id="editor-mode-toggle" class="p-2 hover:bg-bg-main disabled:opacity-50 disabled:cursor-not-allowed" title="Toggle Markdown Preview"><i data-feather="eye" class="w-4 h-4"></i></button>
                         <button data-command="ocr" class="p-2 hover:bg-bg-main" title="Scan Image for Text"><i data-feather="camera" class="w-4 h-4"></i></button>
                         <input type="file" id="ocr-file-input" class="hidden" accept="image/*">
@@ -2208,63 +2207,88 @@ const handleFileUpload = async (file) => {
     const user = window.auth.currentUser;
     if (!file || !user) return;
 
-    const maxSize = 5 * 1024 * 1024; // 5MB limit
-    if (file.size > maxSize) {
-        showToast('File is too large. Max size is 5MB.', 'error');
+    // --- Overall file size limit ---
+    const OVERALL_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
+
+    let fileToUpload = file;
+
+    // --- Step 1: Perform local compression if the file is an image ---
+    if (file.type.startsWith('image/')) {
+        const localToast = showToast(`Optimizing ${file.name}...`, 'loading');
+        try {
+            const options = {
+                maxWidthOrHeight: 1920,
+                initialQuality: 0.8,
+                fileType: 'image/webp',
+                useWebWorker: true,
+            };
+            fileToUpload = await imageCompression(file, options);
+            dismissToast(localToast);
+        } catch (error) {
+            dismissToast(localToast);
+            console.error('Local compression failed.', error);
+            // If local compression fails, we continue with the original file.
+        }
+    }
+
+    // --- Step 2: Check the final file size against the 5MB limit ---
+    if (fileToUpload.size > OVERALL_MAX_SIZE) {
+        showToast(`File is too large (${(fileToUpload.size / 1024 / 1024).toFixed(2)} MB). Max size is 5MB.`, 'error');
         return;
     }
 
-    const toastId = showToast(`Uploading ${file.name}... 0%`, 'loading');
-
+    // --- Step 3: Upload the processed file directly to Firebase Storage ---
+    const uploadToastId = showToast(`Uploading ${fileToUpload.name}... 0%`, 'loading');
     try {
         const { getStorage, ref, uploadBytesResumable, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js");
         const storage = getStorage();
-        const storageRef = ref(storage, `users/${user.uid}/${Date.now()}-${file.name}`);
-        const uploadTask = uploadBytesResumable(storageRef, file);
+        const storageRef = ref(storage, `users/${user.uid}/${Date.now()}-${fileToUpload.name}`);
+        const uploadTask = uploadBytesResumable(storageRef, fileToUpload);
 
-        uploadTask.on('state_changed',
-            (snapshot) => {
-                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                const toastElement = document.getElementById(toastId);
-                if (toastElement) toastElement.textContent = `Uploading ${file.name}... ${Math.round(progress)}%`;
-            },
-            (error) => {
-                dismissToast(toastId);
-                showToast(`Upload failed: ${error.code}`, 'error');
-            },
-            async () => {
-                dismissToast(toastId);
-                showToast('Upload complete!', 'success');
-                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-                const escapedFileName = file.name.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                let fileHTML = '';
-
-                if (file.type.startsWith('image/')) {
-                    // Make the image non-editable so it can be deleted as a single block
-                    fileHTML = `<p><img src="${downloadURL}" alt="${escapedFileName}" style="max-width: 100%; height: auto; border-radius: 8px;" contenteditable="false" /></p>`;
-                } else {
-                    // This new widget is non-editable, making it easy to delete with backspace.
-                    // The download button now only contains text.
-                    fileHTML = `<div class="file-attachment-widget" contenteditable="false">
-                                    <i data-feather="file-text" class="w-6 h-6 text-text-secondary flex-shrink-0"></i>
-                                    <div class="file-info">
-                                        <div class="file-name">${escapedFileName}</div>
-                                        <div class="file-size">${formatBytes(file.size)}</div>
-                                    </div>
-                                    <a href="${downloadURL}" target="_blank" class="brand-button p-2" download title="Download ${escapedFileName}"><i data-feather="download" class="w-5 h-5"></i></a>
-                                </div>`;
+        const downloadURL = await new Promise((resolve, reject) => {
+            uploadTask.on('state_changed',
+                (snapshot) => {
+                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                    const toastElement = document.getElementById(uploadToastId);
+                    if (toastElement) toastElement.textContent = `Uploading ${fileToUpload.name}... ${Math.round(progress)}%`;
+                },
+                (error) => reject(error),
+                async () => {
+                    const url = await getDownloadURL(uploadTask.snapshot.ref);
+                    resolve(url);
                 }
-                
-                app.elements.noteEditorBody.focus();
-                // We add a paragraph after the widget to ensure you can place your cursor after it.
-                document.execCommand('insertHTML', false, fileHTML + "<p><br></p>");
-                feather.replace(); 
-                saveNoteContent();
-            }
-        );
+            );
+        });
+
+        // --- Step 4: Insert the final file/image into the editor ---
+        dismissToast(uploadToastId);
+        showToast('Upload complete!', 'success');
+
+        const escapedFileName = fileToUpload.name.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        let fileHTML = '';
+
+        if (fileToUpload.type.startsWith('image/')) {
+            fileHTML = `<p><img src="${downloadURL}" alt="${escapedFileName}" style="max-width: 100%; height: auto; border-radius: 8px;" contenteditable="false" /></p>`;
+        } else {
+            fileHTML = `<div class="file-attachment-widget" contenteditable="false">
+                            <i data-feather="file-text" class="w-6 h-6 text-text-secondary flex-shrink-0"></i>
+                            <div class="file-info">
+                                <div class="file-name">${escapedFileName}</div>
+                                <div class="file-size">${formatBytes(fileToUpload.size)}</div>
+                            </div>
+                            <a href="${downloadURL}" target="_blank" class="brand-button p-2" download title="Download ${escapedFileName}"><i data-feather="download" class="w-5 h-5"></i></a>
+                        </div>`;
+        }
+
+        app.elements.noteEditorBody.focus();
+        document.execCommand('insertHTML', false, fileHTML + "<p><br></p>");
+        feather.replace();
+        saveNoteContent();
+
     } catch (error) {
-        dismissToast(toastId);
-        showToast('An error occurred during upload.', 'error');
+        dismissToast(uploadToastId);
+        showToast(`Upload failed: ${error.code || error.message}`, 'error');
+        return;
     }
 };
             
@@ -3401,52 +3425,7 @@ ${noteContent}`;
 };
 
             async function init() {
-                // --- START: Download Note as Image Logic ---
-const downloadNoteBtn = document.getElementById('download-note-btn');
-
-downloadNoteBtn.addEventListener('click', async () => {
-    const noteId = state.settings.activeNoteId;
-    if (!noteId) return;
-
-    const { item: note } = findItem(noteId);
-    const editorView = document.getElementById('note-editor-view');
-
-    // Temporarily remove the word count footer to not include it in the image
-    const editorFooter = document.getElementById('editor-footer');
-    editorFooter.style.display = 'none';
-
-    const toastId = showToast('Preparing download...', 'loading');
-
-    try {
-        const canvas = await html2canvas(editorView, {
-            // Options to improve image quality
-            scale: 2, 
-            useCORS: true, // Handles images from other domains
-            backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-main').trim()
-        });
-
-        // Create a temporary link to trigger the download
-        const link = document.createElement('a');
-        link.href = canvas.toDataURL('image/png');
-        link.download = `${note.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`;
-
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-
-        dismissToast(toastId);
-        showToast('Download started!', 'success');
-
-    } catch (error) {
-        console.error('Error generating note image:', error);
-        dismissToast(toastId);
-        showToast('Could not generate image.', 'error');
-    } finally {
-        // IMPORTANT: Show the footer again
-        editorFooter.style.display = 'flex';
-    }
-});
-// --- END: Download Note as Image Logic ---
+                
                 
                 // Add this inside the init() function
 // Located inside the init() function
