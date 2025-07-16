@@ -758,7 +758,7 @@ enableIndexedDbPersistence(db)
 // --- END OF NEW BLOCK ---
 
 window.db = db; // This now uses the offline-enabled db instance
-window.functions = getFunctions(app);
+window.functions = getFunctions(app, 'asia-southeast1');
     
 
   // This is our new entry point!
@@ -2208,12 +2208,12 @@ const handleFileUpload = async (file) => {
     const user = window.auth.currentUser;
     if (!file || !user) return;
 
-    // --- SMART UPLOAD SETTINGS ---
-    const SIZE_THRESHOLD_FOR_TINYPNG = 200 * 1024; // 200 KB
-    const OVERALL_MAX_SIZE = 5 * 1024 * 1024;      // 5 MB
+    // --- Overall file size limit ---
+    const OVERALL_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 
-    // --- STEP 1: Always perform initial client-side compression ---
     let fileToUpload = file;
+
+    // --- Step 1: Perform local compression if the file is an image ---
     if (file.type.startsWith('image/')) {
         const localToast = showToast(`Optimizing ${file.name}...`, 'loading');
         try {
@@ -2228,116 +2228,69 @@ const handleFileUpload = async (file) => {
         } catch (error) {
             dismissToast(localToast);
             console.error('Local compression failed.', error);
+            // If local compression fails, we continue with the original file.
         }
     }
 
-    // Check against the absolute 5MB limit
+    // --- Step 2: Check the final file size against the 5MB limit ---
     if (fileToUpload.size > OVERALL_MAX_SIZE) {
         showToast(`File is too large (${(fileToUpload.size / 1024 / 1024).toFixed(2)} MB). Max size is 5MB.`, 'error');
         return;
     }
-    
-    let downloadURL;
-    let finalFileName = fileToUpload.name;
-    let finalFileSize = fileToUpload.size;
-    let uploadToastId;
-    
-    // --- STEP 2: Conditionally call TinyPNG for still-large images ---
-    if (fileToUpload.type.startsWith('image/') && fileToUpload.size > SIZE_THRESHOLD_FOR_TINYPNG) {
-        // --- PATH A: File is large, use TinyPNG via Cloud Function ---
-        uploadToastId = showToast('Performing Advanced Optimization...', 'loading');
-        try {
-            const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
-            const optimizeWithTinyPNG = httpsCallable(window.functions, 'optimizeWithTinyPNG');
 
-            const reader = new FileReader();
-            const base64String = await new Promise(resolve => {
-                reader.onload = e => resolve(e.target.result.split(',')[1]);
-                reader.readAsDataURL(fileToUpload);
-            });
+    // --- Step 3: Upload the processed file directly to Firebase Storage ---
+    const uploadToastId = showToast(`Uploading ${fileToUpload.name}... 0%`, 'loading');
+    try {
+        const { getStorage, ref, uploadBytesResumable, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js");
+        const storage = getStorage();
+        const storageRef = ref(storage, `users/${user.uid}/${Date.now()}-${fileToUpload.name}`);
+        const uploadTask = uploadBytesResumable(storageRef, fileToUpload);
 
-            const result = await optimizeWithTinyPNG({
-                imageBuffer: base64String,
-                fileName: fileToUpload.name
-            });
+        const downloadURL = await new Promise((resolve, reject) => {
+            uploadTask.on('state_changed',
+                (snapshot) => {
+                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                    const toastElement = document.getElementById(uploadToastId);
+                    if (toastElement) toastElement.textContent = `Uploading ${fileToUpload.name}... ${Math.round(progress)}%`;
+                },
+                (error) => reject(error),
+                async () => {
+                    const url = await getDownloadURL(uploadTask.snapshot.ref);
+                    resolve(url);
+                }
+            );
+        });
 
-            downloadURL = result.data.downloadURL;
-            finalFileSize = result.data.finalSize;
-            console.log(`TinyPNG success! Original: ${fileToUpload.size}, Final: ${finalFileSize}`);
-        } catch (error) {
-            dismissToast(uploadToastId);
-            showToast('Advanced optimization failed, uploading standard version.', 'error');
-            console.error('TinyPNG function call failed:', error);
-            // Fallback: Upload the locally compressed version if the API fails.
-            // We just let the code proceed to PATH B by not returning.
-            // But we first need to re-show an upload toast.
-            uploadToastId = showToast(`Uploading ${fileToUpload.name}... 0%`, 'loading');
-            try {
-                const { getStorage, ref, uploadBytesResumable, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js");
-                const storage = getStorage();
-                const storageRef = ref(storage, `users/${user.uid}/${Date.now()}-${fileToUpload.name}`);
-                const uploadTask = uploadBytesResumable(storageRef, fileToUpload);
-                downloadURL = await uploadTask.then(snapshot => getDownloadURL(snapshot.ref));
-            } catch (fallbackError) {
-                dismissToast(uploadToastId);
-                showToast(`Upload failed: ${fallbackError.code || fallbackError.message}`, 'error');
-                return;
-            }
+        // --- Step 4: Insert the final file/image into the editor ---
+        dismissToast(uploadToastId);
+        showToast('Upload complete!', 'success');
+
+        const escapedFileName = fileToUpload.name.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        let fileHTML = '';
+
+        if (fileToUpload.type.startsWith('image/')) {
+            fileHTML = `<p><img src="${downloadURL}" alt="${escapedFileName}" style="max-width: 100%; height: auto; border-radius: 8px;" contenteditable="false" /></p>`;
+        } else {
+            fileHTML = `<div class="file-attachment-widget" contenteditable="false">
+                            <i data-feather="file-text" class="w-6 h-6 text-text-secondary flex-shrink-0"></i>
+                            <div class="file-info">
+                                <div class="file-name">${escapedFileName}</div>
+                                <div class="file-size">${formatBytes(fileToUpload.size)}</div>
+                            </div>
+                            <a href="${downloadURL}" target="_blank" class="brand-button p-2" download title="Download ${escapedFileName}"><i data-feather="download" class="w-5 h-5"></i></a>
+                        </div>`;
         }
-    } else {
-        // --- PATH B: File is small enough (or not an image), upload directly to Storage ---
-        uploadToastId = showToast(`Uploading ${fileToUpload.name}... 0%`, 'loading');
-        try {
-            const { getStorage, ref, uploadBytesResumable, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js");
-            const storage = getStorage();
-            const storageRef = ref(storage, `users/${user.uid}/${Date.now()}-${fileToUpload.name}`);
-            const uploadTask = uploadBytesResumable(storageRef, fileToUpload);
 
-            downloadURL = await new Promise((resolve, reject) => {
-                uploadTask.on('state_changed',
-                    (snapshot) => {
-                        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                        const toastElement = document.getElementById(uploadToastId);
-                        if (toastElement) toastElement.textContent = `Uploading ${fileToUpload.name}... ${Math.round(progress)}%`;
-                    },
-                    (error) => reject(error),
-                    async () => {
-                        const url = await getDownloadURL(uploadTask.snapshot.ref);
-                        resolve(url);
-                    }
-                );
-            });
-        } catch(error) {
-            dismissToast(uploadToastId);
-            showToast(`Upload failed: ${error.code || error.message}`, 'error');
-            return;
-        }
+        app.elements.noteEditorBody.focus();
+        document.execCommand('insertHTML', false, fileHTML + "<p><br></p>");
+        feather.replace();
+        saveNoteContent();
+
+    } catch (error) {
+        dismissToast(uploadToastId);
+        showToast(`Upload failed: ${error.code || error.message}`, 'error');
+        return;
     }
-
-    // --- STEP 3: Insert the final file/image into the editor ---
-    dismissToast(uploadToastId);
-    showToast('Upload complete!', 'success');
-
-    const escapedFileName = finalFileName.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    let fileHTML = '';
-
-    if (fileToUpload.type.startsWith('image/')) {
-        fileHTML = `<p><img src="${downloadURL}" alt="${escapedFileName}" style="max-width: 100%; height: auto; border-radius: 8px;" contenteditable="false" /></p>`;
-    } else {
-        fileHTML = `<div class="file-attachment-widget" contenteditable="false">
-                        <i data-feather="file-text" class="w-6 h-6 text-text-secondary flex-shrink-0"></i>
-                        <div class="file-info">
-                            <div class="file-name">${escapedFileName}</div>
-                            <div class="file-size">${formatBytes(finalFileSize)}</div>
-                        </div>
-                        <a href="${downloadURL}" target="_blank" class="brand-button p-2" download title="Download ${escapedFileName}"><i data-feather="download" class="w-5 h-5"></i></a>
-                    </div>`;
-    }
-
-    app.elements.noteEditorBody.focus();
-    document.execCommand('insertHTML', false, fileHTML + "<p><br></p>");
-    feather.replace();
-    saveNoteContent();
 };
             
             
