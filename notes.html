@@ -1557,16 +1557,19 @@ const handleGlobalAIQuery = async () => {
     const inputEl = document.getElementById('global-ai-input');
     const sourcesContainer = document.getElementById('global-ai-sources-container');
     const copyBtnFooter = document.getElementById('global-ai-copy-btn-footer');
-    copyBtnFooter.classList.remove('hidden');
     const query = inputEl.value.trim();
 
     if (!query) return;
 
+    // --- START: MODIFIED SECTION ---
+    // Clear previous results and set loading state right when a new question is asked
     askBtn.disabled = true;
     askBtn.querySelector('span').textContent = 'Thinking...';
     answerContainer.classList.add('hidden');
     sourcesContainer.classList.add('hidden');
     copyBtnFooter.classList.add('hidden');
+    answerEl.innerHTML = '';
+    // --- END: MODIFIED SECTION ---
 
     const searchResults = lunrIndex.search(query);
     const topNotes = searchResults.slice(0, 5).map(res => findItem(res.ref)?.item).filter(Boolean);
@@ -1579,8 +1582,6 @@ const handleGlobalAIQuery = async () => {
     }
 
     const context = topNotes.map(note => `--- Note: "${note.name}" ---\n${note.content.replace(/<[^>]*>?/gm, '')}`).join('\n\n');
-    
-    // --- NEW: Add conversation history to the prompt ---
     const historyContext = askYourNotesHistory.map(item => `Previous Question: ${item.question}\nPrevious Answer: ${item.answer}`).join('\n\n');
     
     const prompt = `You are a helpful assistant.
@@ -1600,12 +1601,9 @@ ${context}`;
         answerContainer.classList.remove('hidden');
         copyBtnFooter.classList.remove('hidden');
         
-        // --- NEW: Call the function to find and display snippets ---
         findAndDisplaySourceSnippets(aiResponse, topNotes);
         
-        // --- NEW: Add the latest exchange to memory ---
         askYourNotesHistory.push({ question: query, answer: aiResponse });
-
     } else {
         showToast('The AI could not provide an answer.', 'error');
     }
@@ -1629,32 +1627,40 @@ const findAndDisplaySourceSnippets = (aiAnswer, sourceNotes) => {
         return;
     }
 
+    // Calculate raw scores first
     const scoredNotes = sourceNotes.map(note => {
         const noteText = note.content.replace(/<[^>]*>?/gm, ' ').toLowerCase();
         let score = 0;
         keywords.forEach(kw => {
-            if (noteText.includes(kw)) {
-                score++;
-            }
+            if (noteText.includes(kw)) score++;
         });
-        return { note, relevance: score / keywords.length };
+        return { note, score };
     });
 
-    const RELEVANCE_THRESHOLD = 0.20;
-    const relevantNotes = scoredNotes
-        .filter(item => item.relevance >= RELEVANCE_THRESHOLD)
-        .sort((a, b) => b.relevance - a.relevance);
+    const RELEVANCE_THRESHOLD_SCORE = 1; // Note must contain at least 1 keyword
+    let relevantNotes = scoredNotes.filter(item => item.score > RELEVANCE_THRESHOLD_SCORE);
+    
+    // Calculate the total score for normalization
+    const totalScore = relevantNotes.reduce((sum, item) => sum + item.score, 0);
 
-    if (relevantNotes.length === 0) {
+    if (totalScore === 0) {
         sourcesContainer.classList.add('hidden');
         return;
     }
-    
-    let snippetsHTML = '';
-    relevantNotes.forEach(item => {
-        const noteText = item.note.content.replace(/<[^>]*>?/gm, ' ');
-        let bestSnippet = `...${noteText.substring(0, 120)}...`;
 
+    let snippetsHTML = '';
+    relevantNotes
+      .sort((a, b) => b.score - a.score) // Sort by highest score
+      .forEach(item => {
+        // --- NEW: Normalization Logic ---
+        const normalizedPercentage = Math.round((item.score / totalScore) * 100);
+
+        let relevanceClass = 'bg-gray-600';
+        if (normalizedPercentage > 40) relevanceClass = 'bg-green-500';
+        else if (normalizedPercentage > 15) relevanceClass = 'bg-yellow-500';
+
+        const noteText = item.note.content.replace(/<[^>]*>?/gm, ' ');
+        let bestSnippet = `..."${noteText.substring(0, 120)}"...`;
         for (const kw of keywords) {
             const regex = new RegExp(`[^.!?]*\\b${kw}\\b[^.!?]*[.!?]`, 'i');
             const match = noteText.match(regex);
@@ -1663,34 +1669,25 @@ const findAndDisplaySourceSnippets = (aiAnswer, sourceNotes) => {
                 break;
             }
         }
-
         keywords.forEach(kw => {
             bestSnippet = bestSnippet.replace(new RegExp(`\\b(${kw})\\b`, 'gi'), `<strong class="text-accent-primary">$1</strong>`);
         });
 
-        // --- NEW: Logic to create the relevance badge ---
-        const relevancePercentage = Math.round(item.relevance * 100);
-        let relevanceClass = 'bg-gray-600'; // Low relevance
-        if (relevancePercentage > 66) {
-            relevanceClass = 'bg-green-500'; // High relevance
-        } else if (relevancePercentage > 33) {
-            relevanceClass = 'bg-yellow-500'; // Medium relevance
-        }
-
-        // --- NEW: Added relevance badge to the HTML ---
+        // --- NEW: Snippet is now wrapped in an <a> tag ---
         snippetsHTML += `
-            <div class="p-2 border border-border-color bg-bg-pane-dark rounded-md text-xs">
+            <a href="#" class="source-snippet-link block p-2 border border-border-color bg-bg-pane-dark rounded-md text-xs hover:bg-bg-pane-light" data-note-id="${item.note.id}">
                 <div class="font-semibold text-text-primary mb-1 flex justify-between items-center">
                     <span>🧾 From: “${item.note.name}”</span>
-                    <span class="text-xs text-white font-medium px-1.5 py-0.5 rounded-full ${relevanceClass}">${relevancePercentage}% Relevant</span>
+                    <span class="text-xs text-white font-medium px-1.5 py-0.5 rounded-full ${relevanceClass}">${normalizedPercentage}% Relevant</span>
                 </div>
-                <div class="text-text-secondary italic">${bestSnippet}</div>
-            </div>
+                <div class="text-text-secondary italic pointer-events-none">${bestSnippet}</div>
+            </a>
         `;
     });
 
     sourcesEl.innerHTML = snippetsHTML;
     sourcesContainer.classList.remove('hidden');
+    feather.replace();
 };
 function parseInternalLinks(htmlContent) {
     
@@ -3650,6 +3647,25 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- Source Snippet Click Listener ---
+document.getElementById('global-ai-modal').addEventListener('click', (e) => {
+    const link = e.target.closest('.source-snippet-link');
+    if (link) {
+        e.preventDefault();
+        const noteId = link.dataset.noteId;
+        if (noteId) {
+            // Logic to switch to the note
+            state.settings.activeNoteId = noteId;
+            const { parent } = findItem(noteId);
+            state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+            state.settings.activeTag = null;
+            saveState();
+            render();
+            // Close the modal
+            closeModal(document.getElementById('global-ai-modal'));
+        }
+    }
+});
                 // --- Copy Button Listeners ---
 // --- Copy Button Listeners ---
 document.getElementById('summary-copy-btn').addEventListener('click', () => {
@@ -3667,13 +3683,23 @@ document.getElementById('global-ai-copy-btn-footer').addEventListener('click', (
         .catch(() => showToast('Failed to copy.', 'error'));
 });
                 // --- Global AI Q&A Listeners ---
-document.getElementById('global-ai-btn').addEventListener('click', () => { // Desktop button
-    askYourNotesHistory = [];
+const openGlobalAIModal = () => {
+    // This now ONLY clears the input field, leaving the previous answer and sources visible.
     document.getElementById('global-ai-input').value = '';
-    document.getElementById('global-ai-answer-container').classList.add('hidden');
+
+    // It also resets the 'Ask' button so you can submit a new question.
+    const askBtn = document.getElementById('global-ai-ask-btn');
+    if (askBtn) {
+        askBtn.disabled = false;
+        askBtn.querySelector('span').textContent = 'Ask';
+    }
+
     openModal(document.getElementById('global-ai-modal'));
     feather.replace();
-});
+};
+document.getElementById('global-ai-btn').addEventListener('click', openGlobalAIModal); // Desktop button
+document.getElementById('mobile-global-ai-btn').addEventListener('click', openGlobalAIModal); // Mobile button
+
 
 document.getElementById('mobile-global-ai-btn').addEventListener('click', () => { // Mobile button
     document.getElementById('global-ai-input').value = '';
