@@ -197,6 +197,12 @@
 .rotate-y-180 {
     transform: rotateY(180deg);
 }
+/* --- START: Modal Scroll Fix --- */
+#global-ai-modal .modal-content-area {
+    overflow-y: auto;
+    max-height: 65vh; /* Sets a max height relative to the viewport */
+}
+/* --- END: Modal Scroll Fix --- */
         
         /* --- UI Polish & Animations --- */
         #note-editor-body {
@@ -1337,28 +1343,35 @@ window.functions = getFunctions(app,);
         <button id="global-ai-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
     </header>
     
-    <div class="flex-grow flex flex-col gap-4">
+    <div class="modal-content-area flex-grow flex flex-col gap-4 p-1">
         <div>
             <label for="global-ai-input" class="text-sm font-medium text-text-secondary">Your Question</label>
-            <textarea id="global-ai-input" rows="3" class="w-full mt-1 bg-bg-pane-dark border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="e.g., Summarize today's meeting notes."></textarea>
+            <textarea id="global-ai-input" rows="3" class="w-full mt-1 bg-bg-pane-dark border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="e.g., What was the design strategy for Project Centauri?"></textarea>
         </div>
         
         <div id="global-ai-answer-container" class="hidden">
             <label class="text-sm font-medium text-text-secondary">Answer from your notes</label>
             <div class="relative">
-                <div id="global-ai-answer" class="text-text-secondary mt-1 bg-bg-pane-dark p-4 rounded-md max-h-[40vh] overflow-y-auto prose max-w-none"></div>
+                <div id="global-ai-answer" class="text-text-secondary mt-1 bg-bg-pane-dark p-4 rounded-md prose max-w-none"></div>
                 <button id="global-ai-copy-btn" class="ai-response-copy-btn hidden" title="Copy Answer">
                     <i data-feather="copy" class="w-4 h-4"></i>
                 </button>
             </div>
-            </div>
-    </div>
+        </div>
 
-    <footer class="flex justify-end gap-3 mt-6 flex-shrink-0">
-        <button id="global-ai-ask-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90 flex items-center gap-2">
-            <span id="global-ai-btn-text">Ask</span>
-        </button>
-    </footer>
+        <div id="global-ai-sources-container" class="hidden">
+             <label class="text-sm font-medium text-text-secondary">Sources</label>
+             <div id="global-ai-sources" class="mt-1 space-y-2"></div>
+        </div>
+    </div>
+    <footer class="flex justify-between items-center mt-6 flex-shrink-0 pt-4 border-t border-border-color">
+    <button id="global-ai-copy-btn-footer" class="hidden flex items-center gap-2 px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">
+        <i data-feather="copy" class="w-4 h-4"></i>Copy Answer
+    </button>
+    <button id="global-ai-ask-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90 flex items-center gap-2 ml-auto">
+        <span id="global-ai-btn-text">Ask</span>
+    </button>
+</footer>
 </div>
 
 
@@ -1533,62 +1546,119 @@ const handleGlobalAIQuery = async () => {
     const answerContainer = document.getElementById('global-ai-answer-container');
     const answerEl = document.getElementById('global-ai-answer');
     const inputEl = document.getElementById('global-ai-input');
+    const sourcesContainer = document.getElementById('global-ai-sources-container');
+    const copyBtnFooter = document.getElementById('global-ai-copy-btn-footer');
+    copyBtnFooter.classList.remove('hidden');
     const query = inputEl.value.trim();
 
-    if (!query) {
-        showToast('Please enter a question.', 'error');
-        return;
-    }
+    if (!query) return;
 
-    // --- Start loading state ---
     askBtn.disabled = true;
     askBtn.querySelector('span').textContent = 'Thinking...';
     answerContainer.classList.add('hidden');
-    answerEl.innerHTML = '';
+    sourcesContainer.classList.add('hidden');
+    copyBtnFooter.classList.add('hidden');
 
-    // 1. Use Lunr.js to find the most relevant notes
     const searchResults = lunrIndex.search(query);
-    const topNotes = searchResults.slice(0, 5) // Take top 5 results
-        .map(res => findItem(res.ref)?.item)
-        .filter(Boolean); // Filter out any nulls
+    const topNotes = searchResults.slice(0, 5).map(res => findItem(res.ref)?.item).filter(Boolean);
 
     if (topNotes.length === 0) {
-        showToast('No relevant notes found to answer your question.', 'info');
+        showToast('No relevant notes found.', 'info');
         askBtn.disabled = false;
         askBtn.querySelector('span').textContent = 'Ask';
         return;
     }
 
-    // 2. Create the context from the content of the found notes
-    const context = topNotes.map(note => 
-        `--- Note: "${note.name}" ---\n${note.content.replace(/<[^>]*>?/gm, '')}`
-    ).join('\n\n');
-
-    // 3. Create the detailed prompt for the AI
-    const prompt = `Based ONLY on the context from the provided notes below, answer the user's question. If the answer cannot be found in the notes, say "I could not find an answer in your notes." Do not use any external knowledge.
+    const context = topNotes.map(note => `--- Note: "${note.name}" ---\n${note.content.replace(/<[^>]*>?/gm, '')}`).join('\n\n');
+    
+    // --- NEW: Add conversation history to the prompt ---
+    const historyContext = askYourNotesHistory.map(item => `Previous Question: ${item.question}\nPrevious Answer: ${item.answer}`).join('\n\n');
+    
+    const prompt = `You are a helpful assistant.
+${historyContext ? `For context, here is the previous turn of our conversation:\n${historyContext}\n\n` : ''}
+Based ONLY on the context from the provided notes below, answer the user's new question. If the answer cannot be found in the notes, say "I could not find an answer in your notes." Do not use any external knowledge.
 
 User's Question: "${query}"
 
 Context from Notes:
 ${context}`;
     
-    // 4. Call the AI
     const payload = { contents: [{ parts: [{ text: prompt }] }] };
     const aiResponse = await callGeminiAPI(payload);
 
-    // 5. Display the result
     if (aiResponse) {
         answerEl.innerHTML = marked.parse(aiResponse);
         answerContainer.classList.remove('hidden');
-        const copyBtn = document.getElementById('global-ai-copy-btn');
-if(copyBtn) copyBtn.classList.remove('hidden');
+        copyBtnFooter.classList.remove('hidden');
+        
+        // --- NEW: Call the function to find and display snippets ---
+        findAndDisplaySourceSnippets(aiResponse, topNotes);
+        
+        // --- NEW: Add the latest exchange to memory ---
+        askYourNotesHistory.push({ question: query, answer: aiResponse });
+
     } else {
         showToast('The AI could not provide an answer.', 'error');
     }
 
-    // --- End loading state ---
     askBtn.disabled = false;
     askBtn.querySelector('span').textContent = 'Ask';
+    feather.replace();
+};
+
+const findAndDisplaySourceSnippets = (aiAnswer, sourceNotes) => {
+    const sourcesEl = document.getElementById('global-ai-sources');
+    const sourcesContainer = document.getElementById('global-ai-sources-container');
+    sourcesEl.innerHTML = ''; // Clear previous snippets
+    
+    // 1. Get keywords from the AI's answer, ignoring common words.
+    const stopWords = new Set(['a', 'an', 'the', 'is', 'was', 'are', 'in', 'on', 'of', 'to', 'and', 'it', 'for', 'from']);
+    const keywords = [...new Set(aiAnswer.toLowerCase().match(/\b(\w+)\b/g) || [])]
+        .filter(word => word.length > 3 && !stopWords.has(word));
+
+    if (keywords.length === 0) {
+        sourcesContainer.classList.add('hidden');
+        return;
+    }
+
+    let foundSnippets = new Map();
+
+    // 2. Search for sentences in source notes containing these keywords.
+    for (const note of sourceNotes) {
+        const noteText = note.content.replace(/<[^>]*>?/gm, ' ');
+        const sentences = noteText.match(/[^.!?]+[.!?]+/g) || [];
+
+        for (const sentence of sentences) {
+            // Find the first sentence in each note that contains a keyword.
+            if (keywords.some(kw => new RegExp(`\\b${kw}\\b`, 'i').test(sentence))) {
+                if (!foundSnippets.has(note.id)) { // Only take the first best snippet from each note
+                    // Highlight the keywords in the snippet
+                    let highlightedSentence = sentence;
+                    keywords.forEach(kw => {
+                        highlightedSentence = highlightedSentence.replace(new RegExp(`\\b(${kw})\\b`, 'gi'), `<strong class="text-accent-primary">$1</strong>`);
+                    });
+                    foundSnippets.set(note.id, { name: note.name, snippet: `..."${highlightedSentence.trim()}"...` });
+                }
+            }
+        }
+    }
+
+    // 3. Display the found snippets.
+    if (foundSnippets.size > 0) {
+        let snippetsHTML = '';
+        foundSnippets.forEach((data) => {
+            snippetsHTML += `
+                <div class="p-2 border border-border-color bg-bg-pane-dark rounded-md text-xs">
+                    <div class="font-semibold text-text-primary mb-1">🧾 From: “${data.name}”</div>
+                    <div class="text-text-secondary italic">${data.snippet}</div>
+                </div>
+            `;
+        });
+        sourcesEl.innerHTML = snippetsHTML;
+        sourcesContainer.classList.remove('hidden');
+    } else {
+        sourcesContainer.classList.add('hidden');
+    }
 };
 function parseInternalLinks(htmlContent) {
     
@@ -1953,6 +2023,7 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
                     };
             let lunrIndex;
             let hasInitialized = false;
+            let askYourNotesHistory = [];
             function saveCurrentNoteImmediately() {
     if (!state.settings.activeNoteId) return;
     const findResult = findItem(state.settings.activeNoteId);
@@ -3548,6 +3619,7 @@ ${noteContent}`;
 
             async function init() {
                 // --- Copy Button Listeners ---
+// --- Copy Button Listeners ---
 document.getElementById('summary-copy-btn').addEventListener('click', () => {
     const content = document.getElementById('summary-content').innerText;
     navigator.clipboard.writeText(content)
@@ -3555,7 +3627,8 @@ document.getElementById('summary-copy-btn').addEventListener('click', () => {
         .catch(() => showToast('Failed to copy.', 'error'));
 });
 
-document.getElementById('global-ai-copy-btn').addEventListener('click', () => {
+// This now uses the correct ID for the button in the "Ask Your Notes" modal footer
+document.getElementById('global-ai-copy-btn-footer').addEventListener('click', () => {
     const content = document.getElementById('global-ai-answer').innerText;
     navigator.clipboard.writeText(content)
         .then(() => showToast('Answer copied!', 'success'))
@@ -3563,6 +3636,7 @@ document.getElementById('global-ai-copy-btn').addEventListener('click', () => {
 });
                 // --- Global AI Q&A Listeners ---
 document.getElementById('global-ai-btn').addEventListener('click', () => { // Desktop button
+    askYourNotesHistory = [];
     document.getElementById('global-ai-input').value = '';
     document.getElementById('global-ai-answer-container').classList.add('hidden');
     openModal(document.getElementById('global-ai-modal'));
