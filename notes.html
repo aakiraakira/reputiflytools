@@ -23,6 +23,7 @@
     <script src="https://unpkg.com/vis-network@9.1.2/dist/vis-network.min.js"></script>
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
     <script src="https://cdn.jsdelivr.net/npm/lunr/lunr.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.1/dist/browser-image-compression.js"></script>
     
 
     <script>
@@ -2206,62 +2207,85 @@ const handleFileUpload = async (file) => {
     const user = window.auth.currentUser;
     if (!file || !user) return;
 
+    let fileToUpload = file; // Default to the original file
+
+    // --- START: Image Compression Logic ---
+    if (file.type.startsWith('image/') && typeof imageCompression === 'function') {
+        const compressionToastId = showToast(`Optimizing ${file.name}...`, 'loading');
+        try {
+            const options = {
+    maxSizeMB: 1,
+    maxWidthOrHeight: 1920,
+    useWebWorker: true,
+    // Add this line to convert images to the efficient WebP format
+    fileType: 'image/webp', 
+};
+            const compressedFile = await imageCompression(file, options);
+            console.log(`Compressed ${file.name} from ${(file.size / 1024 / 1024).toFixed(2)} MB to ${(compressedFile.size / 1024 / 1024).toFixed(2)} MB`);
+            fileToUpload = compressedFile; // Use the compressed file for uploading
+            dismissToast(compressionToastId);
+        } catch (error) {
+            console.error('Image compression failed:', error);
+            dismissToast(compressionToastId);
+            showToast('Could not optimize image.', 'error');
+            // If compression fails, we'll just upload the original file
+        }
+    }
+    // --- END: Image Compression Logic ---
+
     const maxSize = 5 * 1024 * 1024; // 5MB limit
-    if (file.size > maxSize) {
-        showToast('File is too large. Max size is 5MB.', 'error');
+    if (fileToUpload.size > maxSize) {
+        showToast(`File is too large (${(fileToUpload.size / 1024 / 1024).toFixed(2)} MB). Max size is 5MB.`, 'error');
         return;
     }
 
-    const toastId = showToast(`Uploading ${file.name}... 0%`, 'loading');
+    const uploadToastId = showToast(`Uploading ${fileToUpload.name}... 0%`, 'loading');
 
     try {
         const { getStorage, ref, uploadBytesResumable, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js");
         const storage = getStorage();
-        const storageRef = ref(storage, `users/${user.uid}/${Date.now()}-${file.name}`);
-        const uploadTask = uploadBytesResumable(storageRef, file);
+        // Use the 'fileToUpload' variable, which is either the original or the compressed file
+        const storageRef = ref(storage, `users/${user.uid}/${Date.now()}-${fileToUpload.name}`);
+        const uploadTask = uploadBytesResumable(storageRef, fileToUpload);
 
         uploadTask.on('state_changed',
             (snapshot) => {
                 const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                const toastElement = document.getElementById(toastId);
-                if (toastElement) toastElement.textContent = `Uploading ${file.name}... ${Math.round(progress)}%`;
+                const toastElement = document.getElementById(uploadToastId);
+                if (toastElement) toastElement.textContent = `Uploading ${fileToUpload.name}... ${Math.round(progress)}%`;
             },
             (error) => {
-                dismissToast(toastId);
+                dismissToast(uploadToastId);
                 showToast(`Upload failed: ${error.code}`, 'error');
             },
             async () => {
-                dismissToast(toastId);
+                dismissToast(uploadToastId);
                 showToast('Upload complete!', 'success');
                 const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-                const escapedFileName = file.name.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                const escapedFileName = fileToUpload.name.replace(/</g, "&lt;").replace(/>/g, "&gt;");
                 let fileHTML = '';
 
-                if (file.type.startsWith('image/')) {
-                    // Make the image non-editable so it can be deleted as a single block
+                if (fileToUpload.type.startsWith('image/')) {
                     fileHTML = `<p><img src="${downloadURL}" alt="${escapedFileName}" style="max-width: 100%; height: auto; border-radius: 8px;" contenteditable="false" /></p>`;
                 } else {
-                    // This new widget is non-editable, making it easy to delete with backspace.
-                    // The download button now only contains text.
                     fileHTML = `<div class="file-attachment-widget" contenteditable="false">
                                     <i data-feather="file-text" class="w-6 h-6 text-text-secondary flex-shrink-0"></i>
                                     <div class="file-info">
                                         <div class="file-name">${escapedFileName}</div>
-                                        <div class="file-size">${formatBytes(file.size)}</div>
+                                        <div class="file-size">${formatBytes(fileToUpload.size)}</div>
                                     </div>
                                     <a href="${downloadURL}" target="_blank" class="brand-button p-2" download title="Download ${escapedFileName}"><i data-feather="download" class="w-5 h-5"></i></a>
                                 </div>`;
                 }
-                
+
                 app.elements.noteEditorBody.focus();
-                // We add a paragraph after the widget to ensure you can place your cursor after it.
                 document.execCommand('insertHTML', false, fileHTML + "<p><br></p>");
                 feather.replace(); 
                 saveNoteContent();
             }
         );
     } catch (error) {
-        dismissToast(toastId);
+        dismissToast(uploadToastId);
         showToast('An error occurred during upload.', 'error');
     }
 };
