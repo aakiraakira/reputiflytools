@@ -758,7 +758,7 @@ enableIndexedDbPersistence(db)
 // --- END OF NEW BLOCK ---
 
 window.db = db; // This now uses the offline-enabled db instance
-window.functions = getFunctions(app, 'asia-southeast1');
+window.functions = getFunctions(app,);
     
 
   // This is our new entry point!
@@ -973,6 +973,7 @@ window.functions = getFunctions(app, 'asia-southeast1');
            <div class="flex-grow"></div>
            <div class="flex items-center gap-2">
                <button id="header-search-icon" class="p-2 hover:bg-bg-pane-dark rounded-lg text-text-secondary" title="Search (Cmd+F)"><i data-feather="search" class="w-4 h-4"></i></button>
+               <button id="global-ai-btn" class="p-2 hover:bg-bg-pane-dark rounded-lg text-text-secondary" title="Ask Your Notes (AI Search)"><i data-feather="message-circle" class="w-4 h-4"></i></button>
                <div id="list-view-controls" class="hidden items-center gap-2">
                  <label for="sort-order" class="text-sm text-text-secondary">Sort by:</label>
                  <select id="sort-order" class="bg-bg-pane-dark text-text-primary text-sm rounded-md p-1 border-0 focus:ring-2 focus:ring-accent-primary">
@@ -1302,6 +1303,30 @@ window.functions = getFunctions(app, 'asia-southeast1');
         </div>
     </footer>
 </div>
+<div id="global-ai-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-2xl z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-4 flex-shrink-0">
+        <h3 class="text-lg font-semibold flex items-center gap-2"><i data-feather="message-circle" class="w-5 h-5 text-accent-primary"></i>Ask Your Notes</h3>
+        <button id="global-ai-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    
+    <div class="flex-grow flex flex-col gap-4">
+        <div>
+            <label for="global-ai-input" class="text-sm font-medium text-text-secondary">Your Question</label>
+            <textarea id="global-ai-input" rows="3" class="w-full mt-1 bg-bg-pane-dark border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="e.g., What are the key points about Project Phoenix?"></textarea>
+        </div>
+        
+        <div id="global-ai-answer-container" class="hidden">
+            <label class="text-sm font-medium text-text-secondary">Answer from your notes</label>
+            <div id="global-ai-answer" class="text-text-secondary mt-1 bg-bg-pane-dark p-4 rounded-md max-h-[40vh] overflow-y-auto prose max-w-none"></div>
+        </div>
+    </div>
+
+    <footer class="flex justify-end gap-3 mt-6 flex-shrink-0">
+        <button id="global-ai-ask-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90 flex items-center gap-2">
+            <span id="global-ai-btn-text">Ask</span>
+        </button>
+    </footer>
+</div>
 
 
     <script type="module">
@@ -1470,8 +1495,68 @@ const getAllNotes = (items) => {
     }
     return notes;
 };
+const handleGlobalAIQuery = async () => {
+    const askBtn = document.getElementById('global-ai-ask-btn');
+    const answerContainer = document.getElementById('global-ai-answer-container');
+    const answerEl = document.getElementById('global-ai-answer');
+    const inputEl = document.getElementById('global-ai-input');
+    const query = inputEl.value.trim();
 
+    if (!query) {
+        showToast('Please enter a question.', 'error');
+        return;
+    }
+
+    // --- Start loading state ---
+    askBtn.disabled = true;
+    askBtn.querySelector('span').textContent = 'Thinking...';
+    answerContainer.classList.add('hidden');
+    answerEl.innerHTML = '';
+
+    // 1. Use Lunr.js to find the most relevant notes
+    const searchResults = lunrIndex.search(query);
+    const topNotes = searchResults.slice(0, 5) // Take top 5 results
+        .map(res => findItem(res.ref)?.item)
+        .filter(Boolean); // Filter out any nulls
+
+    if (topNotes.length === 0) {
+        showToast('No relevant notes found to answer your question.', 'info');
+        askBtn.disabled = false;
+        askBtn.querySelector('span').textContent = 'Ask';
+        return;
+    }
+
+    // 2. Create the context from the content of the found notes
+    const context = topNotes.map(note => 
+        `--- Note: "${note.name}" ---\n${note.content.replace(/<[^>]*>?/gm, '')}`
+    ).join('\n\n');
+
+    // 3. Create the detailed prompt for the AI
+    const prompt = `Based ONLY on the context from the provided notes below, answer the user's question. If the answer cannot be found in the notes, say "I could not find an answer in your notes." Do not use any external knowledge.
+
+User's Question: "${query}"
+
+Context from Notes:
+${context}`;
+    
+    // 4. Call the AI
+    const payload = { contents: [{ parts: [{ text: prompt }] }] };
+    const aiResponse = await callGeminiAPI(payload);
+
+    // 5. Display the result
+    if (aiResponse) {
+        answerEl.innerHTML = marked.parse(aiResponse);
+        answerContainer.classList.remove('hidden');
+    } else {
+        showToast('The AI could not provide an answer.', 'error');
+    }
+
+    // --- End loading state ---
+    askBtn.disabled = false;
+    askBtn.querySelector('span').textContent = 'Ask';
+};
 function parseInternalLinks(htmlContent) {
+    
     // This check now prevents the function from running if state or state.collections is missing.
     if (!htmlContent || !state || !state.collections) return htmlContent;
 
@@ -3426,6 +3511,19 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- Global AI Q&A Listeners ---
+document.getElementById('global-ai-btn').addEventListener('click', () => {
+    document.getElementById('global-ai-input').value = '';
+    document.getElementById('global-ai-answer-container').classList.add('hidden');
+    openModal(document.getElementById('global-ai-modal'));
+    feather.replace();
+});
+
+document.getElementById('global-ai-close-btn').addEventListener('click', () => {
+    closeModal(document.getElementById('global-ai-modal'));
+});
+
+document.getElementById('global-ai-ask-btn').addEventListener('click', handleGlobalAIQuery);
                 if (hasInitialized) return;
 hasInitialized = true;
                 
