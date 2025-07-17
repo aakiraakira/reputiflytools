@@ -1615,6 +1615,18 @@ const getAllNotes = (items) => {
     }
     return notes;
 };
+const getAllFolders = (items = state.collections) => {
+    let folders = [];
+    for (const item of items) {
+        if (item.type === 'folder') {
+            folders.push(item);
+            if (item.children) {
+                folders = folders.concat(getAllFolders(item.children));
+            }
+        }
+    }
+    return folders;
+};
 const handleGlobalAIQuery = async () => {
     const askBtn = document.getElementById('global-ai-ask-btn');
     const answerContainer = document.getElementById('global-ai-answer-container');
@@ -1774,9 +1786,13 @@ function parseInternalLinks(htmlContent) {
 // --- 2. HANDLER FUNCTIONS (Higher Level) ---
 // These functions use the helpers defined above.
 
-const handleShareNote = async () => {
-    const note = findItem(state.settings.activeNoteId)?.item;
-    if (!note) return;
+const handleShareNote = async (noteToShare) => {
+    // This now accepts an argument, or defaults to the active note
+    const note = noteToShare || findItem(state.settings.activeNoteId)?.item;
+    if (!note) {
+        showToast('❌ No note selected to share.', 'error');
+        return;
+    }
 
     const toastId = showToast('Creating share link...', 'loading');
 
@@ -3728,7 +3744,9 @@ const commands = [
         name: 'nn',
         description: 'New Note. Usage: /nn [note name]',
         execute: (args) => {
-            const newNote = createNewNote(true, `<h1>${args || 'Untitled Note'}</h1>`);
+            // FIX: Pass empty content to prevent duplicate titles
+            const newNote = createNewNote(true, '');
+            // Set name on the returned object
             newNote.name = args || 'Untitled Note';
             saveState();
             render();
@@ -3738,11 +3756,10 @@ const commands = [
     {
         name: 'nf',
         description: 'New Folder. Usage: /nf [folder name]',
-        execute: async (args) => {
+        execute: (args) => {
             const folderName = args || 'Untitled Folder';
             const newCollection = { id: generateId('c'), name: folderName, type: 'folder', children: [], expanded: true };
-            const firstColumnId = generateId('col');
-            state.kanbanColumns[newCollection.id] = [{ id: firstColumnId, title: 'To Do' }];
+            state.kanbanColumns[newCollection.id] = [{ id: generateId('col'), title: 'To Do' }];
             state.collections.push(newCollection);
             saveState();
             buildLunrIndex();
@@ -3755,33 +3772,137 @@ const commands = [
         description: 'Ask Your Notes AI. Usage: /ask [question]',
         execute: (args) => {
             if (!args) return showToast('❌ Please provide a question.', 'error');
-            const aiModalInput = document.getElementById('global-ai-input');
-            const aiModalAskBtn = document.getElementById('global-ai-ask-btn');
-            aiModalInput.value = args;
             openModal(document.getElementById('global-ai-modal'));
-            aiModalAskBtn.click(); // Automatically trigger the AI search
+            document.getElementById('global-ai-input').value = args;
+            document.getElementById('global-ai-ask-btn').click();
             feather.replace();
         }
     },
     {
         name: 'summary',
-        description: 'Summarize the current active note.',
-        execute: () => {
-            document.getElementById('header-summarize-btn')?.click();
+        description: 'Summarize a note. Usage: /summary [note name]',
+        execute: (args) => {
+            let noteToProcess = null;
+            if (args) {
+                noteToProcess = getAllNotes(state.collections).find(n => n.name.toLowerCase() === args.toLowerCase());
+                if (!noteToProcess) return showToast(`❌ Note not found: "${args}"`, 'error');
+            } else if (state.settings.activeNoteId) {
+                noteToProcess = findItem(state.settings.activeNoteId)?.item;
+            }
+
+            if (noteToProcess) {
+                const plainContent = (noteToProcess.content || '').replace(/<[^>]*>?/gm, '').trim();
+                if (!plainContent) return showToast('Note is empty.', 'info');
+                handleSummarize(plainContent);
+            } else {
+                showToast('❌ Activate a note or use /summary [note name].', 'error');
+            }
         }
     },
     {
         name: 'quiz',
-        description: 'Generate an MCQ quiz for the current note.',
-        execute: () => {
-            document.getElementById('header-quiz-btn')?.click();
+        description: 'Generate a quiz. Usage: /quiz [note name]',
+        execute: (args) => {
+            let noteToProcess = null;
+            if (args) {
+                noteToProcess = getAllNotes(state.collections).find(n => n.name.toLowerCase() === args.toLowerCase());
+                if (!noteToProcess) return showToast(`❌ Note not found: "${args}"`, 'error');
+            } else if (state.settings.activeNoteId) {
+                noteToProcess = findItem(state.settings.activeNoteId)?.item;
+            }
+
+            if (noteToProcess) {
+                const plainContent = (noteToProcess.content || '').replace(/<[^>]*>?/gm, '').trim();
+                if (!plainContent) return showToast('Note is empty.', 'info');
+                handleGenerateQuiz(plainContent, noteToProcess);
+            } else {
+                showToast('❌ Activate a note or use /quiz [note name].', 'error');
+            }
         }
     },
     {
         name: 'flashcard',
-        description: 'Open flashcard mode for the current note.',
-        execute: () => {
-            document.getElementById('header-flashcard-btn')?.click();
+        description: 'Open flashcards. Usage: /flashcard [note name]',
+        execute: (args) => {
+            let noteToProcess = null;
+            if (args) {
+                noteToProcess = getAllNotes(state.collections).find(n => n.name.toLowerCase() === args.toLowerCase());
+                if (!noteToProcess) return showToast(`❌ Note not found: "${args}"`, 'error');
+            } else if (state.settings.activeNoteId) {
+                noteToProcess = findItem(state.settings.activeNoteId)?.item;
+            }
+
+            if (noteToProcess) {
+                handleFlashcardMode(noteToProcess);
+            } else {
+                showToast('❌ Activate a note or use /flashcard [note name].', 'error');
+            }
+        }
+    },
+    {
+        name: 'share',
+        description: 'Create a share link. Usage: /share [note name]',
+        execute: (args) => {
+            let noteToShare = null;
+            if (args) {
+                noteToShare = getAllNotes(state.collections).find(n => n.name.toLowerCase() === args.toLowerCase());
+                if (!noteToShare) return showToast(`❌ Note not found: "${args}"`, 'error');
+            }
+            // handleShareNote already handles the case where noteToShare is null
+            handleShareNote(noteToShare);
+        }
+    },
+    {
+        name: 'dn',
+        description: 'Delete a note. Usage: /dn [note name]',
+        execute: async (args) => {
+            let findResult = null;
+            if (args) {
+                const note = getAllNotes(state.collections).find(n => n.name.toLowerCase() === args.toLowerCase());
+                if (note) findResult = findItem(note.id);
+            } else if (state.settings.activeNoteId) {
+                findResult = findItem(state.settings.activeNoteId);
+            }
+
+            if (!findResult) return showToast('❌ Note not found or specified.', 'error');
+            
+            const confirmed = await showConfirm({ title: `Delete "${findResult.item.name}"?`, message: 'This cannot be undone.', confirmText: 'Delete' });
+            if (confirmed) {
+                const parentArray = Array.isArray(findResult.parent) ? findResult.parent : findResult.parent.children;
+                parentArray.splice(findResult.index, 1);
+                showToast(`🗑️ Note "${findResult.item.name}" deleted.`, 'success');
+                if (state.settings.activeNoteId === findResult.item.id) state.settings.activeNoteId = null;
+                saveState();
+                buildLunrIndex();
+                render();
+            }
+        }
+    },
+    {
+        name: 'df',
+        description: 'Delete a folder. Usage: /df [folder name]',
+        execute: async (args) => {
+            let findResult = null;
+            if (args) {
+                const folder = getAllFolders().find(f => f.name.toLowerCase() === args.toLowerCase());
+                if (folder) findResult = findItem(folder.id);
+            } else if (state.settings.activeCollectionId) {
+                findResult = findItem(state.settings.activeCollectionId);
+                if (findResult?.item.type !== 'folder') findResult = null; // Ensure it's a folder
+            }
+
+            if (!findResult) return showToast('❌ Folder not found or specified.', 'error');
+
+            const confirmed = await showConfirm({ title: `Delete folder "${findResult.item.name}"?`, message: 'This will delete the folder and <strong>all notes inside</strong>. This cannot be undone.', confirmText: 'Delete' });
+            if (confirmed) {
+                const parentArray = Array.isArray(findResult.parent) ? findResult.parent : findResult.parent.children;
+                parentArray.splice(findResult.index, 1);
+                showToast(`🗑️ Folder "${findResult.item.name}" deleted.`, 'success');
+                if (state.settings.activeCollectionId === findResult.item.id) state.settings.activeCollectionId = null;
+                saveState();
+                buildLunrIndex();
+                render();
+            }
         }
     }
 ];
