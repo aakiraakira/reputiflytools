@@ -3848,16 +3848,24 @@ const renderLinkedNotesModal = (note) => {
     const outgoingLinks = (note.links || []).map(linkName => allNotes.find(n => n.name === linkName)).filter(Boolean);
     const incomingLinks = allNotes.filter(n => n.id !== note.id && (n.links || []).some(linkName => linkName === note.name));
 
+    const createNoteHTML = (n) => {
+        const findResult = findItem(n.id);
+        const parentName = (findResult && findResult.parent && !Array.isArray(findResult.parent)) ? findResult.parent.name : 'Uncategorized';
+        return `
+            <li>
+                <a href="#" class="linked-note-jump block p-3 rounded-lg hover:bg-bg-pane-dark" data-note-id="${n.id}">
+                    <div class="font-semibold text-text-primary">${n.name}</div>
+                    <p class="text-sm text-text-secondary mt-1">${parentName}</p>
+                </a>
+            </li>`;
+    };
+
     let contentHTML = '';
     if (outgoingLinks.length > 0) {
-        contentHTML += `<div><h4 class="font-semibold text-text-primary">Links from this note:</h4><ul class="mt-1 space-y-1">` +
-            outgoingLinks.map(n => `<li><a href="#" class="linked-note-jump block p-2 rounded-md hover:bg-bg-pane-dark text-text-secondary" data-note-id="${n.id}">${n.name}</a></li>`).join('') +
-            `</ul></div>`;
+        contentHTML += `<div><h4 class="font-semibold text-text-primary mb-1">Links from this note:</h4><ul class="space-y-1">` + outgoingLinks.map(createNoteHTML).join('') + `</ul></div>`;
     }
     if (incomingLinks.length > 0) {
-        contentHTML += `<div><h4 class="font-semibold text-text-primary">Linked here (Backlinks):</h4><ul class="mt-1 space-y-1">` +
-            incomingLinks.map(n => `<li><a href="#" class="linked-note-jump block p-2 rounded-md hover:bg-bg-pane-dark text-text-secondary" data-note-id="${n.id}">${n.name}</a></li>`).join('') +
-            `</ul></div>`;
+        contentHTML += `<div><h4 class="font-semibold text-text-primary mb-1">Linked here (Backlinks):</h4><ul class="space-y-1">` + incomingLinks.map(createNoteHTML).join('') + `</ul></div>`;
     }
     if (!contentHTML) {
         contentHTML = `<p class="text-text-secondary">No connections found for this note.</p>`;
@@ -3937,7 +3945,7 @@ const renderSuggestions = (rawInput) => {
     let suggestionsHTML = '';
     const argQuery = argString.toLowerCase();
 
-    if (command && command.suggest && parts.length > 1) {
+    if (command && command.suggest) {
         let finalSuggestions = [];
         const toSeparator = /\s+to\s+/i;
         const fromSeparator = /\s+from\s+/i;
@@ -3953,30 +3961,39 @@ const renderSuggestions = (rawInput) => {
             const tagParts = tagArg.split(/ (.*)/s);
             const tagName = tagParts[0];
             const noteQuery = (tagParts[1] || '').toLowerCase();
-
             if (getAllTags().includes(tagName) && tagParts.length > 1) {
                 const notesInTag = getAllNotes(state.collections).filter(n => (n.tags || []).includes(tagName));
                 finalSuggestions = notesInTag.filter(n => n.name.toLowerCase().includes(noteQuery));
             } else {
                 finalSuggestions = getAllTags().filter(t => t.toLowerCase().includes(tagArg.toLowerCase())).map(t => ({ id: t, name: t, type: 'tag' }));
             }
-        } else {
-            const suggestionMap = new Map();
-            let itemsForNameMatch = [];
-            if (command.suggest.includes('items') || command.suggest.includes('folders')) itemsForNameMatch.push(...getAllFolders());
-            if (command.suggest.includes('items') || command.suggest.includes('notes')) itemsForNameMatch.push(...getAllNotes(state.collections));
-            
-            itemsForNameMatch.filter(item => item.name.toLowerCase().includes(argQuery)).forEach(item => suggestionMap.set(item.id, { ...item, matchType: 'name' }));
+        } else if (parts.length > 1) {
+            const noteSuggestionMap = new Map();
+            let folderSuggestions = [];
 
-            if (argQuery && (command.suggest.includes('items') || command.suggest.includes('notes'))) {
-                lunrIndex.search(argQuery).forEach(res => {
-                    if (!suggestionMap.has(res.ref)) {
-                        const item = findItem(res.ref)?.item;
-                        if(item) suggestionMap.set(item.id, { ...item, matchType: 'content', snippet: createContentSnippet(item.content, argQuery) });
-                    }
-                });
+            // 1. Get NOTE matches first (from name and content)
+            if (command.suggest.includes('items') || command.suggest.includes('notes')) {
+                const allNotes = getAllNotes(state.collections);
+                allNotes.filter(item => item.name.toLowerCase().includes(argQuery)).forEach(item => noteSuggestionMap.set(item.id, { ...item, matchType: 'name' }));
+                if (argQuery) {
+                    lunrIndex.search(argQuery).forEach(res => {
+                        if (!noteSuggestionMap.has(res.ref)) {
+                            const item = findItem(res.ref)?.item;
+                            if (item && item.type === 'note') noteSuggestionMap.set(item.id, { ...item, matchType: 'content', snippet: createContentSnippet(item.content, argQuery) });
+                        }
+                    });
+                }
             }
-            finalSuggestions = Array.from(suggestionMap.values());
+            
+            // 2. Get FOLDER matches
+            if (command.suggest.includes('items') || command.suggest.includes('folders')) {
+                folderSuggestions = getAllFolders()
+                    .filter(item => item.name.toLowerCase().includes(argQuery))
+                    .map(item => ({ ...item, matchType: 'name' }));
+            }
+
+            // 3. Combine with notes prioritized
+            finalSuggestions = [...Array.from(noteSuggestionMap.values()), ...folderSuggestions];
         }
 
         if (finalSuggestions.length > 0) {
@@ -3993,6 +4010,7 @@ const renderSuggestions = (rawInput) => {
         } else if (argString) {
             suggestionsHTML = `<div class="p-2 text-sm text-text-tertiary">No items match "${argString}"</div>`;
         }
+
     } 
     else {
         const filteredCommands = commands.filter(cmd => cmd.name.startsWith(commandName));
