@@ -202,12 +202,59 @@
     overflow-y: auto;
     max-height: 65vh; /* Sets a max height relative to the viewport */
 }
+
 /* --- END: Modal Scroll Fix --- */
         
         /* --- UI Polish & Animations --- */
         #note-editor-body {
     overflow-wrap: break-word;
     word-wrap: break-word; /* For older browser compatibility */
+}
+#command-prompt-container {
+    transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+
+#command-prompt-container.hidden {
+    opacity: 0;
+    transform: translate(-50%, 20px) scale(0.95);
+    pointer-events: none;
+}
+
+.command-suggestion-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+    cursor: pointer;
+}
+.command-suggestion-item:hover {
+    background-color: var(--bg-pane-light);
+}
+.command-suggestion-item.active {
+    background-color: var(--accent-primary);
+    color: white;
+}
+.command-suggestion-item .cmd-name {
+    font-weight: 600;
+}
+.command-suggestion-item .cmd-alias {
+    font-size: 0.75rem;
+    background-color: var(--bg-pane-light);
+    color: var(--text-secondary);
+    border-radius: 0.25rem;
+    padding: 2px 6px;
+}
+.command-suggestion-item.active .cmd-alias {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: white;
+}
+.command-suggestion-item .cmd-desc {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+.command-suggestion-item.active .cmd-desc {
+    color: rgba(255, 255, 255, 0.8);
 }
 #note-editor-title {
     overflow-wrap: break-word;
@@ -225,6 +272,27 @@
     opacity: 0;
     margin-top: 0;
     overflow: hidden;
+}
+#command-suggestions {
+    max-height: 220px; /* Sets a height limit for ~5-6 items */
+    overflow-y: auto;  /* Allows scrolling only when content exceeds the max-height */
+    scrollbar-width: thin; /* For Firefox */
+    scrollbar-color: var(--bg-pane-dark) transparent; /* For Firefox */
+}
+
+/* Hides the default scrollbar and styles a new one for Chrome/Safari/Edge */
+#command-suggestions::-webkit-scrollbar {
+    width: 8px;
+}
+
+#command-suggestions::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#command-suggestions::-webkit-scrollbar-thumb {
+    background-color: var(--bg-pane-dark);
+    border-radius: 10px;
+    border: 2px solid var(--bg-pane-light);
 }
         #flashcard-front p,
 #flashcard-back p {
@@ -1568,6 +1636,18 @@ const getAllNotes = (items) => {
     }
     return notes;
 };
+const getAllFolders = (items = state.collections) => {
+    let folders = [];
+    for (const item of items) {
+        if (item.type === 'folder') {
+            folders.push(item);
+            if (item.children) {
+                folders = folders.concat(getAllFolders(item.children));
+            }
+        }
+    }
+    return folders;
+};
 const handleGlobalAIQuery = async () => {
     const askBtn = document.getElementById('global-ai-ask-btn');
     const answerContainer = document.getElementById('global-ai-answer-container');
@@ -1727,9 +1807,13 @@ function parseInternalLinks(htmlContent) {
 // --- 2. HANDLER FUNCTIONS (Higher Level) ---
 // These functions use the helpers defined above.
 
-const handleShareNote = async () => {
-    const note = findItem(state.settings.activeNoteId)?.item;
-    if (!note) return;
+const handleShareNote = async (noteToShare) => {
+    // This now accepts an argument, or defaults to the active note
+    const note = noteToShare || findItem(state.settings.activeNoteId)?.item;
+    if (!note) {
+        showToast('❌ No note selected to share.', 'error');
+        return;
+    }
 
     const toastId = showToast('Creating share link...', 'loading');
 
@@ -3668,6 +3752,325 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: SLASH COMMAND CONSOLE ---
+                // --- START: SLASH COMMAND CONSOLE ---
+
+// --- START: SLASH COMMAND CONSOLE ---
+
+// --- START: SLASH COMMAND CONSOLE ---
+
+const createContentSnippet = (content, query) => {
+    const plainText = content.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ');
+    const lowerQuery = query.toLowerCase();
+    const queryIndex = plainText.toLowerCase().indexOf(lowerQuery);
+    if (queryIndex === -1) return null;
+    const start = Math.max(0, queryIndex - 20);
+    const end = Math.min(plainText.length, queryIndex + query.length + 40);
+    let snippet = plainText.substring(start, end);
+    const regex = new RegExp(`(${query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi');
+    snippet = snippet.replace(regex, '<b class="text-accent-primary">$1</b>');
+    return `...${snippet}...`;
+};
+
+const findBestMatch = (query, items) => {
+    if (!query) return null;
+    const lowerQuery = query.toLowerCase();
+    let bestMatch = null;
+    let highScore = -1;
+    for (const item of items) {
+        const lowerName = item.name.toLowerCase();
+        let score = 0;
+        if (lowerName === lowerQuery) score = 100;
+        else if (lowerName.startsWith(lowerQuery)) score = 50;
+        else if (lowerName.includes(lowerQuery)) score = 20;
+        if (score > 0) score -= lowerName.length / 100;
+        if (score > highScore) {
+            highScore = score;
+            bestMatch = item;
+        }
+    }
+    return bestMatch;
+};
+
+const getAllTags = () => {
+    const allNotes = getAllNotes(state.collections);
+    const allTagsRaw = allNotes.flatMap(note => note.tags || []);
+    return [...new Set(allTagsRaw)];
+};
+
+const commandPromptContainer = document.getElementById('command-prompt-container');
+const commandInput = document.getElementById('command-input');
+const commandSuggestionsContainer = document.getElementById('command-suggestions');
+let isCommandPromptOpen = false;
+let suggestionIndex = -1;
+
+const executeWithSmartFind = async (args, itemType, action) => {
+    let allItems, targetItem = null;
+    if (itemType === 'notes') allItems = getAllNotes(state.collections);
+    else if (itemType === 'folders') allItems = getAllFolders();
+    else allItems = [...getAllNotes(state.collections), ...getAllFolders()];
+    if (args) {
+        targetItem = findBestMatch(args, allItems);
+        if (!targetItem && itemType !== 'folders') {
+            const contentResults = lunrIndex.search(args);
+            if (contentResults.length > 0) {
+                const item = findItem(contentResults[0].ref)?.item;
+                if (item && item.type === 'note' && (itemType === 'notes' || itemType === 'items')) targetItem = item;
+            }
+        }
+    }
+    if (!targetItem) {
+        if (itemType === 'notes' && state.settings.activeNoteId) targetItem = findItem(state.settings.activeNoteId)?.item;
+        else if (itemType === 'folders' && state.settings.activeCollectionId) {
+            const res = findItem(state.settings.activeCollectionId);
+            if (res?.item.type === 'folder') targetItem = res.item;
+        } else if (itemType === 'items') {
+             const activeId = state.settings.activeNoteId || state.settings.activeCollectionId;
+             if (activeId) targetItem = findItem(activeId)?.item;
+        }
+    }
+    if (!targetItem) {
+        const typeName = itemType.slice(0, -1);
+        return showToast(`❌ ${typeName.charAt(0).toUpperCase() + typeName.slice(1)} not found.`, 'error');
+    }
+    action(targetItem);
+};
+
+const commands = [
+    { name: 'nn', description: 'New Note. Usage: /nn [note name]', execute: (args)=>{const n=createNewNote(true,'');n.name=args||'Untitled Note';saveState();render();showToast(`✅ Note "${n.name}" created`)} },
+    { name: 'nf', description: 'New Folder. Usage: /nf [folder name]', execute: (args)=>{const n=args||'Untitled Folder';const c={id:generateId('c'),name:n,type:'folder',children:[],expanded:true};state.kanbanColumns[c.id]=[{id:generateId('col'),title:'To Do'}];state.collections.push(c);saveState();buildLunrIndex();render();showToast(`✅ Folder "${n}" created`)}},
+    { name: 'rename', description: 'Rename item. Usage: /rename [old] to [new]', suggest: 'items', execute: async(args)=>{const s=/\s+to\s+/i;if(!s.test(args))return showToast('❌ Use: /rename [old] to [new]','error');const p=args.split(s);const o=p[0].trim();const n=p[1].trim();if(!o||!n)return showToast('❌ Both names required.','error');const i=findBestMatch(o,[...getAllNotes(state.collections),...getAllFolders()]);if(!i)return showToast(`❌ Not found: "${o}"`,'error');const c=await showConfirm({title:'Confirm Rename',message:`Rename "${i.name}" to "${n}"?`,confirmText:'Rename'});if(c){i.name=n;saveState();buildLunrIndex();render();showToast(`✅ Renamed to "${n}"`)}} },
+    { name: 'link', description: 'Link notes. Usage: /link [source] to [target]', suggest: 'notes', execute: (args)=>{const s=/\s+to\s+/i;if(!s.test(args))return showToast('❌ Use: /link [source] to [target]','error');const p=args.split(s);const sN=p[0].trim();const tN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');if(sO.id===tO.id)return showToast('❌ Cannot link a note to itself.','error');sO.content+=`\n<p>[[${tO.name}]]</p>`;updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Linked "${sO.name}" to "${tO.name}"`)}},
+    { name: 'unlink', description: 'Unlink notes. Usage: /unlink [target] from [source]', suggest: 'notes', execute: (args)=>{const s=/\s+from\s+/i;if(!s.test(args))return showToast('❌ Use: /unlink [target] from [source]','error');const p=args.split(s);const tN=p[0].trim();const sN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');const r=new RegExp(`\\[\\[\\s*${tO.name}\\s*\\]\\]`,'gi');if(!r.test(sO.content))return showToast(`❌ Link to "${tO.name}" not found in "${sO.name}".`,'info');sO.content=sO.content.replace(r,'').replace(/<p>\s*<\/p>/gi,'');updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Unlinked "${tO.name}" from "${sO.name}"`)}},
+    { name: 'go', description: 'Go to item or tag. Usage: /go [item] or /go #[tag]', suggest: 'items_or_tags', execute: (args)=>{if(!args)return showToast('❌ Specify item or tag.','error');if(args.startsWith('#')){const tN=args.substring(1).trim();if(!tN)return showToast('❌ Tag name needed.','error');if(!getAllTags().includes(tN))return showToast(`❌ Tag not found: #${tN}`,'error');state.settings.activeTag=tN;state.settings.activeNoteId=null;state.settings.activeCollectionId=null;showToast(`🏷️ Showing notes tagged with #${tN}`);saveState();render();return}executeWithSmartFind(args,'items',(i)=>{state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id}else{state.settings.activeCollectionId=i.id;state.settings.activeNoteId=null}showToast(`🚀 Navigated to "${i.name}"`);saveState();render()})} },
+    { name: 'theme', description: 'Toggle through color themes.', execute: ()=>document.getElementById('theme-toggle')?.click() },
+    { name: 'voice', description: 'Start/stop voice dictation in current note.', execute: ()=>{if(!state.settings.activeNoteId)return showToast('❌ Must be in a note.','error');document.getElementById('dictate-btn')?.click()} },
+    { name: 'ask', description: 'Ask Your Notes AI. Usage: /ask [question]', execute: (args)=>{if(!args)return showToast('❌ Question needed.','error');openModal(document.getElementById('global-ai-modal'));document.getElementById('global-ai-input').value=args;document.getElementById('global-ai-ask-btn').click();feather.replace()} },
+    { name: 'summary', description: 'Summarize a note. Usage: /summary [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleSummarize(c)})},
+    { name: 'quiz', description: 'Generate quiz. Usage: /quiz [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleGenerateQuiz(c,n)})},
+    { name: 'flashcard', description: 'Open flashcards. Usage: /flashcard [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>handleFlashcardMode(n))},
+    { name: 'share', description: 'Create share link. Usage: /share [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>handleShareNote(n))},
+    { name: 'dup', description: 'Duplicate an item. Usage: /dup [item name]', suggest: 'items', execute: (args)=>executeWithSmartFind(args,'items',(i)=>{const r=findItem(i.id);const nI=duplicateItem(i);const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index+1,0,nI);showToast(`✅ Duplicated "${i.name}"`);saveState();buildLunrIndex();render()})},
+    { name: 'pin', description: 'Toggle pin on a note. Usage: /pin [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{n.pinned=!n.pinned;showToast(n.pinned?`📌 Pinned "${n.name}"`:`👎 Unpinned "${n.name}"`);saveState();render()})},
+    { name: 'tag', description: 'Add a tag to current note. Usage: /tag [tagname]', execute: (args)=>{if(!state.settings.activeNoteId)return showToast('❌ Must be in a note.','error');if(!args)return showToast('❌ Tag name needed.','error');const tN=args.split(' ')[0].replace(/#/g,'');if(!tN)return;app.elements.noteEditorBody.innerHTML+=` #${tN}`;performImmediateSave();showToast(`🏷️ Tagged with #${tN}`)}},
+    { name: 'dn', description: 'Delete a note. Usage: /dn [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',async(n)=>{const r=findItem(n.id);const c=await showConfirm({title:`Delete "${n.name}"?`,message:'This cannot be undone.',confirmText:'Delete'});if(c){const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index,1);showToast(`🗑️ Note deleted.`);if(state.settings.activeNoteId===n.id)state.settings.activeNoteId=null;saveState();buildLunrIndex();render()}})},
+    { name: 'df', description: 'Delete folder. Usage: /df [folder name]', suggest: 'folders', execute: (args)=>executeWithSmartFind(args,'folders',async(f)=>{const r=findItem(f.id);const c=await showConfirm({title:`Delete folder "${f.name}"?`,message:'This will delete the folder and <strong>all notes inside</strong>.',confirmText:'Delete'});if(c){const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index,1);showToast(`🗑️ Folder deleted.`);if(state.settings.activeCollectionId===f.id)state.settings.activeCollectionId=null;saveState();buildLunrIndex();render()}})}
+];
+
+const openCommandPrompt = () => { if(isCommandPromptOpen)return;isCommandPromptOpen=true;commandPromptContainer.classList.remove('hidden');commandInput.value='/';renderSuggestions('/');commandInput.focus();setTimeout(()=>commandInput.setSelectionRange(commandInput.value.length,commandInput.value.length),0) };
+const closeCommandPrompt = () => { if(!isCommandPromptOpen)return;isCommandPromptOpen=false;commandPromptContainer.classList.add('hidden');commandSuggestionsContainer.classList.add('hidden');suggestionIndex=-1 };
+
+const renderSuggestions = (rawInput) => {
+    const input = rawInput.startsWith('/') ? rawInput.slice(1) : rawInput;
+    const parts = input.split(' ');
+    const commandName = parts[0];
+    const argString = parts.slice(1).join(' ');
+    const command = commands.find(c => c.name === commandName);
+
+    let suggestionsHTML = '';
+    const argQuery = argString.toLowerCase();
+
+    // Case 1: Command requires arguments, so we suggest items or tags
+    // The main condition is changed to trigger even with an empty argString
+    if (command && command.suggest && parts.length > 1) {
+        let finalSuggestions = [];
+        const toSeparator = /\s+to\s+/i;
+        const fromSeparator = /\s+from\s+/i;
+
+        // Special suggestion logic for multi-part commands
+        if ((command.name === 'link' || command.name === 'rename') && toSeparator.test(argString)) {
+            const targetQuery = argString.split(toSeparator)[1].toLowerCase() || '';
+            finalSuggestions = getAllNotes(state.collections).filter(n => n.name.toLowerCase().includes(targetQuery));
+        } else if (command.name === 'unlink' && fromSeparator.test(argString)) {
+            const sourceQuery = argString.split(fromSeparator)[1].toLowerCase() || '';
+            finalSuggestions = getAllNotes(state.collections).filter(n => n.name.toLowerCase().includes(sourceQuery));
+        } else if (command.name === 'go' && argString.startsWith('#')) {
+            const tagQuery = argString.substring(1).toLowerCase();
+            finalSuggestions = getAllTags().filter(t => t.toLowerCase().includes(tagQuery)).map(t => ({ id: t, name: t, type: 'tag' }));
+        } 
+        // Default argument suggestion logic (now runs for commands like `/go `)
+        else {
+            const suggestionMap = new Map();
+            let itemsForNameMatch = [];
+            
+            if (command.suggest === 'items' || command.suggest === 'items_or_tags' || command.suggest === 'folders') {
+                itemsForNameMatch.push(...getAllFolders());
+            }
+            if (command.suggest === 'items' || command.suggest === 'items_or_tags' || command.suggest === 'notes') {
+                itemsForNameMatch.push(...getAllNotes(state.collections));
+            }
+            
+            itemsForNameMatch.filter(item => item.name.toLowerCase().includes(argQuery))
+                .forEach(item => suggestionMap.set(item.id, { ...item, matchType: 'name' }));
+
+            // Only search content if there's an actual query
+            if (argQuery && (command.suggest === 'items' || command.suggest === 'items_or_tags' || command.suggest === 'notes')) {
+                lunrIndex.search(argQuery).forEach(res => {
+                    if (!suggestionMap.has(res.ref)) {
+                        const item = findItem(res.ref)?.item;
+                        if(item) suggestionMap.set(item.id, { ...item, matchType: 'content', snippet: createContentSnippet(item.content, argQuery) });
+                    }
+                });
+            }
+            finalSuggestions = Array.from(suggestionMap.values());
+        }
+
+        if (finalSuggestions.length > 0) {
+            suggestionsHTML = finalSuggestions.map((item, index) => {
+                const isTag = item.type === 'tag';
+                const dataAttribute = isTag ? `data-tag-name="#${item.name}"` : `data-item-name="${item.name.replace(/"/g, '&quot;')}"`;
+                const icon = isTag ? 'hash' : (item.matchType === 'content' ? 'search' : (item.type === 'folder' ? 'folder' : 'file-text'));
+                return `
+                <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" ${dataAttribute}>
+                    <div class="flex items-center gap-2 min-w-0"> <i data-feather="${icon}" class="w-4 h-4 text-text-secondary flex-shrink-0"></i> <span class="cmd-name truncate">${item.name}</span> </div>
+                    ${item.matchType === 'content' ? `<span class="cmd-desc text-right truncate">${item.snippet || ''}</span>` : ''}
+                </div>`;
+            }).join('');
+        } else if (argString) {
+            suggestionsHTML = `<div class="p-2 text-sm text-text-tertiary">No items match "${argString}"</div>`;
+        }
+
+    } 
+    // Case 2: Suggesting commands
+    else {
+        const filteredCommands = commands.filter(cmd => cmd.name.startsWith(commandName));
+        if (filteredCommands.length > 0) {
+            suggestionsHTML = filteredCommands.map((cmd, index) => `
+                <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-command-name="${cmd.name}">
+                    <div class="flex items-center gap-3"><span class="cmd-name">/${cmd.name}</span></div>
+                    <span class="cmd-desc">${cmd.description}</span>
+                </div>`).join('');
+        }
+    }
+    
+    if (suggestionsHTML) {
+        commandSuggestionsContainer.innerHTML = suggestionsHTML;
+        commandSuggestionsContainer.classList.remove('hidden');
+        feather.replace();
+    } else {
+        commandSuggestionsContainer.classList.add('hidden');
+    }
+    suggestionIndex = -1;
+};
+
+const executeCommand = (inputValue) => {
+    const cleanInput = inputValue.slice(1).trim();
+    if (!cleanInput) { closeCommandPrompt(); return; }
+    const parts = cleanInput.split(' ');
+    const commandName = parts[0];
+    const args = parts.slice(1).join(' ');
+    const command = commands.find(c => c.name === commandName);
+    if (command) command.execute(args);
+    else showToast(`❌ Command not found: ${commandName}`, 'error');
+    closeCommandPrompt();
+};
+
+document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === '/') { e.preventDefault(); isCommandPromptOpen ? closeCommandPrompt() : openCommandPrompt(); }
+    if (!isCommandPromptOpen) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeCommandPrompt(); return; }
+
+    const activeSuggestion = commandSuggestionsContainer.querySelector('.command-suggestion-item.active');
+    
+    const completeAndExecute = (suggestionEl) => {
+        const commandName = commandInput.value.slice(1).split(' ')[0];
+        const argString = commandInput.value.slice(1).substring(commandName.length).trim();
+        const itemName = suggestionEl.dataset.itemName;
+        const tagName = suggestionEl.dataset.tagName;
+        const commandSuggestion = suggestionEl.dataset.commandName;
+
+        let finalCommand;
+        if (commandSuggestion) {
+            finalCommand = `/${commandSuggestion}`;
+        } else if (tagName) {
+            finalCommand = `/go ${tagName}`;
+        } else if (itemName) {
+            const toSeparator = /\s+to\s+/i;
+            const fromSeparator = /\s+from\s+/i;
+
+            if ((commandName === 'link' || commandName === 'rename') && toSeparator.test(argString)) {
+                finalCommand = `/${commandName} ${argString.split(toSeparator)[0]} to ${itemName}`;
+            } else if (commandName === 'unlink' && fromSeparator.test(argString)) {
+                finalCommand = `/${commandName} ${argString.split(fromSeparator)[0]} from ${itemName}`;
+            } else {
+                finalCommand = `/${commandName} ${itemName}`;
+            }
+        }
+        executeCommand(finalCommand);
+    };
+
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        if (activeSuggestion) {
+            completeAndExecute(activeSuggestion);
+        } else {
+            executeCommand(commandInput.value);
+        }
+        return;
+    }
+
+    if (e.key === 'Tab') {
+        e.preventDefault();
+        const suggestionToUse = activeSuggestion || commandSuggestionsContainer.querySelector('.command-suggestion-item');
+        if (suggestionToUse) {
+            const commandName = commandInput.value.slice(1).split(' ')[0];
+            const argString = commandInput.value.slice(1).substring(commandName.length).trim();
+            const itemName = suggestionToUse.dataset.itemName;
+            const tagName = suggestionToUse.dataset.tagName;
+            const commandSuggestion = suggestionToUse.dataset.commandName;
+            
+            let completedValue = commandInput.value;
+            if (commandSuggestion) {
+                completedValue = `/${commandSuggestion} `;
+            } else if (tagName) {
+                completedValue = `/go ${tagName} `;
+            } else if (itemName) {
+                const toSeparator = /\s+to\s+/i;
+                const fromSeparator = /\s+from\s+/i;
+                 if ((commandName === 'link' || commandName === 'rename') && toSeparator.test(argString)) {
+                    completedValue = `/${commandName} ${argString.split(toSeparator)[0]} to ${itemName} `;
+                } else if (commandName === 'unlink' && fromSeparator.test(argString)) {
+                    completedValue = `/${commandName} ${argString.split(fromSeparator)[0]} from ${itemName} `;
+                } else if (commandName === 'link' || commandName === 'rename') {
+                     completedValue = `/${commandName} ${itemName} to `;
+                } else if (commandName === 'unlink') {
+                     completedValue = `/${commandName} ${itemName} from `;
+                }
+                else {
+                    completedValue = `/${commandName} ${itemName} `;
+                }
+            }
+            commandInput.value = completedValue;
+            commandSuggestionsContainer.classList.add('hidden');
+            const end = commandInput.value.length;
+            commandInput.setSelectionRange(end, end);
+        }
+        return;
+    }
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const suggestions = Array.from(commandSuggestionsContainer.querySelectorAll('.command-suggestion-item'));
+        if (suggestions.length === 0) return;
+        if(activeSuggestion) activeSuggestion.classList.remove('active');
+        const direction = e.key === 'ArrowDown' ? 1 : -1;
+        suggestionIndex = (suggestionIndex + direction + suggestions.length) % suggestions.length;
+        suggestions[suggestionIndex].classList.add('active');
+    }
+});
+
+commandInput.addEventListener('input', () => { if (!commandInput.value.startsWith('/')) commandInput.value = '/'; renderSuggestions(commandInput.value); });
+commandSuggestionsContainer.addEventListener('click', (e) => { const item = e.target.closest('.command-suggestion-item'); if (item) { const cmd = commandInput.value.slice(1).split(' ')[0]; const val = item.dataset.itemName||item.dataset.tagName||item.dataset.commandName; let finalCmd; const toSep=/\s+to\s+/i; const fromSep=/\s+from\s+/i; const argStr=commandInput.value.slice(1).substring(cmd.length).trim(); if(item.dataset.itemName){if((cmd==='link'||cmd==='rename')&&toSep.test(argStr)){finalCmd=`/${cmd} ${argStr.split(toSep)[0]} to ${val}`}else if(cmd==='unlink'&&fromSep.test(argStr)){finalCmd=`/${cmd} ${argStr.split(fromSep)[0]} from ${val}`}else{finalCmd=`/${cmd} ${val}`}}else{finalCmd=`/${val}`}executeCommand(finalCmd); }});
+document.addEventListener('click', (e) => { if (isCommandPromptOpen && !commandPromptContainer.contains(e.target)) closeCommandPrompt(); });
+
+// --- END: SLASH COMMAND CONSOLE ---
+
+// --- END: SLASH COMMAND CONSOLE ---
+// --- END: SLASH COMMAND CONSOLE ---
+
+// --- END: SLASH COMMAND CONSOLE ---
+
+// --- END: SLASH COMMAND CONSOLE ---
                 // --- Source Snippet Click Listener ---
 document.getElementById('global-ai-modal').addEventListener('click', (e) => {
     const link = e.target.closest('.source-snippet-link');
@@ -5758,6 +6161,16 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
   }
 </script>
 </body>
+<div id="command-prompt-container" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 w-[90%] max-w-lg z-50">
+    <div class="relative">
+        <div id="command-suggestions" class="hidden absolute bottom-full left-0 w-full mb-1 bg-bg-pane-dark rounded-md shadow-lg p-1 border border-border-color max-h-60 overflow-y-auto">
+            </div>
+        <div class="flex items-center gap-2 bg-bg-pane-dark p-2 rounded-lg shadow-2xl border border-border-color">
+            <i data-feather="slash" class="w-5 h-5 text-text-tertiary"></i>
+            <input type="text" id="command-input" class="w-full bg-transparent focus:outline-none text-text-primary" placeholder="Type a command..." autocomplete="off">
+        </div>
+    </div>
+</div>
 
 </body>
 </html>
