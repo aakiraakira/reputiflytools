@@ -202,12 +202,63 @@
     overflow-y: auto;
     max-height: 65vh; /* Sets a max height relative to the viewport */
 }
+
 /* --- END: Modal Scroll Fix --- */
         
         /* --- UI Polish & Animations --- */
         #note-editor-body {
     overflow-wrap: break-word;
     word-wrap: break-word; /* For older browser compatibility */
+}
+#command-prompt-container {
+    transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+
+#command-prompt-container.hidden {
+    opacity: 0;
+    transform: translate(-50%, 20px) scale(0.95);
+    pointer-events: none;
+}
+
+.command-suggestion-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+    cursor: pointer;
+}
+.command-suggestion-item:hover {
+    background-color: var(--bg-pane-light);
+}
+.command-suggestion-item.active {
+    background-color: var(--accent-primary);
+    color: white;
+}
+.command-suggestion-item .cmd-name {
+    font-weight: 600;
+}
+.command-suggestion-item .cmd-alias {
+    font-size: 0.75rem;
+    background-color: var(--bg-pane-light);
+    color: var(--text-secondary);
+    border-radius: 0.25rem;
+    padding: 2px 6px;
+}
+.command-suggestion-item.active .cmd-alias {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: white;
+}
+.command-suggestion-item .cmd-desc {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+.command-suggestion-item.active .cmd-desc {
+    color: rgba(255, 255, 255, 0.8);
+}
+#note-editor-title {
+    overflow-wrap: break-word;
+    word-wrap: break-word;
 }
         #notes-list-pane {
             transition: width 300ms ease-in-out, transform 300ms ease-in-out;
@@ -233,6 +284,15 @@
 #backlinks-pane {
     background-color: var(--bg-pane-light);
 }
+/* --- START: Scrollbar Hiding Utility --- */
+.no-scrollbar::-webkit-scrollbar {
+    display: none; /* For Chrome, Safari, and Opera */
+}
+.no-scrollbar {
+    -ms-overflow-style: none;  /* For Internet Explorer and Edge */
+    scrollbar-width: none;  /* For Firefox */
+}
+/* --- END: Scrollbar Hiding Utility --- */
 .backlink-item {
     background-color: var(--bg-main);
     border: 1px solid var(--border-color);
@@ -243,6 +303,11 @@
 }
 #toggle-backlinks-btn.collapsed .feather-chevron-down {
     transform: rotate(-90deg);
+}
+#current-view-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 #backlinks-list.collapsed {
     max-height: 0;
@@ -300,11 +365,20 @@
 /* UPDATED: Styles for tables in editor AND public view */
 /* UPDATED: Styles for tables in editor AND public view */
 /* --- START: Public Note Table Scroll Fix --- */
+/* --- START: Public Note Table Scroll Fix --- */
+#note-editor-body table,
 #public-note-content table {
     display: block;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch; /* For smoother scrolling on mobile */
 }
+#editor-pane {
+    min-width: 0;
+}
+.card-content {
+    word-break: break-all;
+}
+/* --- END: Public Note Table Scroll Fix --- */
 /* --- END: Public Note Table Scroll Fix --- */
 #note-editor-body table, #public-note-content table {
     width: 100%;
@@ -1343,7 +1417,7 @@ window.functions = getFunctions(app,);
         <button id="global-ai-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
     </header>
     
-    <div class="modal-content-area flex-grow flex flex-col gap-4 p-1">
+    <div class="modal-content-area no-scrollbar flex-grow flex flex-col gap-4 p-1">
         <div>
             <label for="global-ai-input" class="text-sm font-medium text-text-secondary">Your Question</label>
             <textarea id="global-ai-input" rows="3" class="w-full mt-1 bg-bg-pane-dark border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="e.g., What was the design strategy for Project Centauri?"></textarea>
@@ -1541,6 +1615,18 @@ const getAllNotes = (items) => {
     }
     return notes;
 };
+const getAllFolders = (items = state.collections) => {
+    let folders = [];
+    for (const item of items) {
+        if (item.type === 'folder') {
+            folders.push(item);
+            if (item.children) {
+                folders = folders.concat(getAllFolders(item.children));
+            }
+        }
+    }
+    return folders;
+};
 const handleGlobalAIQuery = async () => {
     const askBtn = document.getElementById('global-ai-ask-btn');
     const answerContainer = document.getElementById('global-ai-answer-container');
@@ -1548,16 +1634,19 @@ const handleGlobalAIQuery = async () => {
     const inputEl = document.getElementById('global-ai-input');
     const sourcesContainer = document.getElementById('global-ai-sources-container');
     const copyBtnFooter = document.getElementById('global-ai-copy-btn-footer');
-    copyBtnFooter.classList.remove('hidden');
     const query = inputEl.value.trim();
 
     if (!query) return;
 
+    // --- START: MODIFIED SECTION ---
+    // Clear previous results and set loading state right when a new question is asked
     askBtn.disabled = true;
     askBtn.querySelector('span').textContent = 'Thinking...';
     answerContainer.classList.add('hidden');
     sourcesContainer.classList.add('hidden');
     copyBtnFooter.classList.add('hidden');
+    answerEl.innerHTML = '';
+    // --- END: MODIFIED SECTION ---
 
     const searchResults = lunrIndex.search(query);
     const topNotes = searchResults.slice(0, 5).map(res => findItem(res.ref)?.item).filter(Boolean);
@@ -1570,8 +1659,6 @@ const handleGlobalAIQuery = async () => {
     }
 
     const context = topNotes.map(note => `--- Note: "${note.name}" ---\n${note.content.replace(/<[^>]*>?/gm, '')}`).join('\n\n');
-    
-    // --- NEW: Add conversation history to the prompt ---
     const historyContext = askYourNotesHistory.map(item => `Previous Question: ${item.question}\nPrevious Answer: ${item.answer}`).join('\n\n');
     
     const prompt = `You are a helpful assistant.
@@ -1591,12 +1678,9 @@ ${context}`;
         answerContainer.classList.remove('hidden');
         copyBtnFooter.classList.remove('hidden');
         
-        // --- NEW: Call the function to find and display snippets ---
         findAndDisplaySourceSnippets(aiResponse, topNotes);
         
-        // --- NEW: Add the latest exchange to memory ---
         askYourNotesHistory.push({ question: query, answer: aiResponse });
-
     } else {
         showToast('The AI could not provide an answer.', 'error');
     }
@@ -1609,10 +1693,9 @@ ${context}`;
 const findAndDisplaySourceSnippets = (aiAnswer, sourceNotes) => {
     const sourcesEl = document.getElementById('global-ai-sources');
     const sourcesContainer = document.getElementById('global-ai-sources-container');
-    sourcesEl.innerHTML = ''; // Clear previous snippets
-    
-    // 1. Get keywords from the AI's answer, ignoring common words.
-    const stopWords = new Set(['a', 'an', 'the', 'is', 'was', 'are', 'in', 'on', 'of', 'to', 'and', 'it', 'for', 'from']);
+    sourcesEl.innerHTML = '';
+
+    const stopWords = new Set(['a', 'an', 'the', 'is', 'was', 'are', 'in', 'on', 'of', 'to', 'and', 'it', 'for', 'from', 'your', 'notes']);
     const keywords = [...new Set(aiAnswer.toLowerCase().match(/\b(\w+)\b/g) || [])]
         .filter(word => word.length > 3 && !stopWords.has(word));
 
@@ -1621,44 +1704,67 @@ const findAndDisplaySourceSnippets = (aiAnswer, sourceNotes) => {
         return;
     }
 
-    let foundSnippets = new Map();
+    // Calculate raw scores first
+    const scoredNotes = sourceNotes.map(note => {
+        const noteText = note.content.replace(/<[^>]*>?/gm, ' ').toLowerCase();
+        let score = 0;
+        keywords.forEach(kw => {
+            if (noteText.includes(kw)) score++;
+        });
+        return { note, score };
+    });
 
-    // 2. Search for sentences in source notes containing these keywords.
-    for (const note of sourceNotes) {
-        const noteText = note.content.replace(/<[^>]*>?/gm, ' ');
-        const sentences = noteText.match(/[^.!?]+[.!?]+/g) || [];
+    const RELEVANCE_THRESHOLD_SCORE = 1; // Note must contain at least 1 keyword
+    let relevantNotes = scoredNotes.filter(item => item.score > RELEVANCE_THRESHOLD_SCORE);
+    
+    // Calculate the total score for normalization
+    const totalScore = relevantNotes.reduce((sum, item) => sum + item.score, 0);
 
-        for (const sentence of sentences) {
-            // Find the first sentence in each note that contains a keyword.
-            if (keywords.some(kw => new RegExp(`\\b${kw}\\b`, 'i').test(sentence))) {
-                if (!foundSnippets.has(note.id)) { // Only take the first best snippet from each note
-                    // Highlight the keywords in the snippet
-                    let highlightedSentence = sentence;
-                    keywords.forEach(kw => {
-                        highlightedSentence = highlightedSentence.replace(new RegExp(`\\b(${kw})\\b`, 'gi'), `<strong class="text-accent-primary">$1</strong>`);
-                    });
-                    foundSnippets.set(note.id, { name: note.name, snippet: `..."${highlightedSentence.trim()}"...` });
-                }
+    if (totalScore === 0) {
+        sourcesContainer.classList.add('hidden');
+        return;
+    }
+
+    let snippetsHTML = '';
+    relevantNotes
+      .sort((a, b) => b.score - a.score) // Sort by highest score
+      .forEach(item => {
+        // --- NEW: Normalization Logic ---
+        const normalizedPercentage = Math.round((item.score / totalScore) * 100);
+
+        let relevanceClass = 'bg-gray-600';
+        if (normalizedPercentage > 40) relevanceClass = 'bg-green-500';
+        else if (normalizedPercentage > 15) relevanceClass = 'bg-yellow-500';
+
+        const noteText = item.note.content.replace(/<[^>]*>?/gm, ' ');
+        let bestSnippet = `..."${noteText.substring(0, 120)}"...`;
+        for (const kw of keywords) {
+            const regex = new RegExp(`[^.!?]*\\b${kw}\\b[^.!?]*[.!?]`, 'i');
+            const match = noteText.match(regex);
+            if (match) {
+                bestSnippet = `..."${match[0].trim()}"...`;
+                break;
             }
         }
-    }
-
-    // 3. Display the found snippets.
-    if (foundSnippets.size > 0) {
-        let snippetsHTML = '';
-        foundSnippets.forEach((data) => {
-            snippetsHTML += `
-                <div class="p-2 border border-border-color bg-bg-pane-dark rounded-md text-xs">
-                    <div class="font-semibold text-text-primary mb-1">🧾 From: “${data.name}”</div>
-                    <div class="text-text-secondary italic">${data.snippet}</div>
-                </div>
-            `;
+        keywords.forEach(kw => {
+            bestSnippet = bestSnippet.replace(new RegExp(`\\b(${kw})\\b`, 'gi'), `<strong class="text-accent-primary">$1</strong>`);
         });
-        sourcesEl.innerHTML = snippetsHTML;
-        sourcesContainer.classList.remove('hidden');
-    } else {
-        sourcesContainer.classList.add('hidden');
-    }
+
+        // --- NEW: Snippet is now wrapped in an <a> tag ---
+        snippetsHTML += `
+            <a href="#" class="source-snippet-link block p-2 border border-border-color bg-bg-pane-dark rounded-md text-xs hover:bg-bg-pane-light" data-note-id="${item.note.id}">
+                <div class="font-semibold text-text-primary mb-1 flex justify-between items-center">
+                    <span>🧾 From: “${item.note.name}”</span>
+                    <span class="text-xs text-white font-medium px-1.5 py-0.5 rounded-full ${relevanceClass}">${normalizedPercentage}% Relevant</span>
+                </div>
+                <div class="text-text-secondary italic pointer-events-none">${bestSnippet}</div>
+            </a>
+        `;
+    });
+
+    sourcesEl.innerHTML = snippetsHTML;
+    sourcesContainer.classList.remove('hidden');
+    feather.replace();
 };
 function parseInternalLinks(htmlContent) {
     
@@ -1680,9 +1786,13 @@ function parseInternalLinks(htmlContent) {
 // --- 2. HANDLER FUNCTIONS (Higher Level) ---
 // These functions use the helpers defined above.
 
-const handleShareNote = async () => {
-    const note = findItem(state.settings.activeNoteId)?.item;
-    if (!note) return;
+const handleShareNote = async (noteToShare) => {
+    // This now accepts an argument, or defaults to the active note
+    const note = noteToShare || findItem(state.settings.activeNoteId)?.item;
+    if (!note) {
+        showToast('❌ No note selected to share.', 'error');
+        return;
+    }
 
     const toastId = showToast('Creating share link...', 'loading');
 
@@ -2953,6 +3063,9 @@ if (themeMeta) {
         <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-new-note">
             <i data-feather="file-plus" class="w-4 h-4"></i>New Note
         </button>
+        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-rename-folder">
+    <i data-feather="edit-2" class="w-4 h-4"></i>Rename Folder
+</button>
         <hr class="my-1 border-border-color">
         <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">View</div>
         <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="board"><i data-feather="trello" class="w-4 h-4"></i>Board</button>
@@ -3618,6 +3731,232 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: SLASH COMMAND CONSOLE ---
+                // --- START: SLASH COMMAND CONSOLE ---
+
+const findBestMatch = (query, items) => {
+    if (!query) return null;
+    const lowerQuery = query.toLowerCase();
+    let bestMatch = null;
+    let highScore = -1;
+
+    for (const item of items) {
+        const lowerName = item.name.toLowerCase();
+        let score = 0;
+
+        if (lowerName === lowerQuery) {
+            score = 100; // Perfect match
+        } else if (lowerName.startsWith(lowerQuery)) {
+            score = 50; // Starts with match
+        } else if (lowerName.includes(lowerQuery)) {
+            score = 20; // Substring match
+        }
+
+        if (score > 0) {
+            // Add a bonus for being shorter (closer match)
+            score -= lowerName.length / 100;
+        }
+        
+        if (score > highScore) {
+            highScore = score;
+            bestMatch = item;
+        }
+    }
+    return bestMatch;
+};
+
+const commandPromptContainer = document.getElementById('command-prompt-container');
+const commandInput = document.getElementById('command-input');
+const commandSuggestionsContainer = document.getElementById('command-suggestions');
+let isCommandPromptOpen = false;
+let suggestionIndex = -1;
+
+const commands = [
+    { name: 'nn', description: 'New Note. Usage: /nn [note name]', execute: (args) => { createNewNote(true, `<h1>${args || 'Untitled Note'}</h1>`); showToast(`✅ Note "${args || 'Untitled Note'}" created`); } },
+    { name: 'nf', description: 'New Folder. Usage: /nf [folder name]', execute: (args) => { const n = args||'Untitled Folder'; state.collections.push({id:generateId('c'),name:n,type:'folder',children:[],expanded:true}); state.kanbanColumns[state.collections[state.collections.length-1].id]=[{id:generateId('col'),title:'To Do'}]; saveState();buildLunrIndex();render();showToast(`✅ Folder "${n}" created`); } },
+    { name: 'ask', description: 'Ask Your Notes AI. Usage: /ask [question]', execute: (args) => { if (!args) return showToast('❌ Question needed.','error'); openModal(document.getElementById('global-ai-modal'));document.getElementById('global-ai-input').value=args;document.getElementById('global-ai-ask-btn').click();feather.replace(); } },
+    { name: 'summary', description: 'Summarize a note. Usage: /summary [note name]', suggest: 'notes', execute: (args) => { let n = args ? findBestMatch(args, getAllNotes(state.collections)) : findItem(state.settings.activeNoteId)?.item; if(n){const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleSummarize(c);}else{showToast('❌ Note not found or specified.','error');} } },
+    { name: 'quiz', description: 'Generate a quiz. Usage: /quiz [note name]', suggest: 'notes', execute: (args) => { let n=args?findBestMatch(args,getAllNotes(state.collections)):findItem(state.settings.activeNoteId)?.item;if(n){const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleGenerateQuiz(c,n);}else{showToast('❌ Note not found or specified.','error');} } },
+    { name: 'flashcard', description: 'Open flashcards. Usage: /flashcard [note name]', suggest: 'notes', execute: (args) => { let n=args?findBestMatch(args,getAllNotes(state.collections)):findItem(state.settings.activeNoteId)?.item;if(n){handleFlashcardMode(n);}else{showToast('❌ Note not found or specified.','error');} } },
+    { name: 'share', description: 'Create a share link. Usage: /share [note name]', suggest: 'notes', execute: (args) => { handleShareNote(args ? findBestMatch(args, getAllNotes(state.collections)) : null); } },
+    { name: 'dup', description: 'Duplicate an item. Usage: /dup [item name]', suggest: 'items', execute: (args) => { let r=null;if(args){const i=findBestMatch(args,[...getAllNotes(state.collections),...getAllFolders(state.collections)]);if(i)r=findItem(i.id);}else{const a=state.settings.activeNoteId||state.settings.activeCollectionId;if(a)r=findItem(a);}if(!r)return showToast('❌ Item not found.','error');const i=duplicateItem(r.item);const p=Array.isArray(r.parent)?r.parent:r.parent.children;p.splice(r.index+1,0,i);showToast(`✅ Duplicated "${r.item.name}"`);saveState();buildLunrIndex();render(); } },
+    { name: 'go', description: 'Go to a note or folder. Usage: /go [item name]', suggest: 'items', execute: (args) => { if(!args)return showToast('❌ Name needed.','error');const i=findBestMatch(args,[...getAllNotes(state.collections),...getAllFolders(state.collections)]);if(!i)return showToast(`❌ Not found: "${args}"`,'error');state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id;}else{state.settings.activeCollectionId=i.id;state.settings.activeNoteId=null;}showToast(`🚀 Navigated to "${i.name}"`);saveState();render();} },
+    { name: 'pin', description: 'Toggle pin on a note. Usage: /pin [note name]', suggest: 'notes', execute: (args) => { let n=args?findBestMatch(args,getAllNotes(state.collections)):findItem(state.settings.activeNoteId)?.item;if(!n)return showToast('❌ Note not found.','error');n.pinned=!n.pinned;showToast(n.pinned?`📌 Pinned "${n.name}"`:`👎 Unpinned "${n.name}"`);saveState();render();} },
+    { name: 'tag', description: 'Add a tag to the current note. Usage: /tag [tagname]', execute: (args) => { if(!state.settings.activeNoteId)return showToast('❌ Must be in a note.','error');if(!args)return showToast('❌ Tag name needed.','error');const t=args.split(' ')[0].replace(/#/g,'');if(!t)return;app.elements.noteEditorBody.innerHTML+=` #${t}`;performImmediateSave();showToast(`🏷️ Tagged with #${t}`);} },
+    { name: 'dn', description: 'Delete a note. Usage: /dn [note name]', suggest: 'notes', execute: async (args) => { let r=args?findItem(findBestMatch(args,getAllNotes(state.collections))?.id):findItem(state.settings.activeNoteId);if(!r)return showToast('❌ Note not found.','error');const c=await showConfirm({title:`Delete "${r.item.name}"?`,message:'This cannot be undone.',confirmText:'Delete'});if(c){const p=Array.isArray(r.parent)?r.parent:r.parent.children;p.splice(r.index,1);showToast(`🗑️ Note deleted.`);if(state.settings.activeNoteId===r.item.id)state.settings.activeNoteId=null;saveState();buildLunrIndex();render();}} },
+    { name: 'df', description: 'Delete a folder. Usage: /df [folder name]', suggest: 'folders', execute: async (args) => { let r;if(args){const f=findBestMatch(args,getAllFolders());if(f)r=findItem(f.id);}else if(state.settings.activeCollectionId){const fR=findItem(state.settings.activeCollectionId);if(fR?.item.type==='folder')r=fR;}if(!r)return showToast('❌ Folder not found.','error');const c=await showConfirm({title:`Delete folder "${r.item.name}"?`,message:'This will delete the folder and <strong>all notes inside</strong>.',confirmText:'Delete'});if(c){const p=Array.isArray(r.parent)?r.parent:r.parent.children;p.splice(r.index,1);showToast(`🗑️ Folder deleted.`);if(state.settings.activeCollectionId===r.item.id)state.settings.activeCollectionId=null;saveState();buildLunrIndex();render();}} }
+];
+
+const openCommandPrompt = () => {
+    if (isCommandPromptOpen) return;
+    isCommandPromptOpen = true;
+    commandPromptContainer.classList.remove('hidden');
+    commandInput.value = '/';
+    renderSuggestions('/');
+    commandInput.focus();
+    setTimeout(() => commandInput.setSelectionRange(commandInput.value.length, commandInput.value.length), 0);
+};
+
+const closeCommandPrompt = () => {
+    if (!isCommandPromptOpen) return;
+    isCommandPromptOpen = false;
+    commandPromptContainer.classList.add('hidden');
+    commandSuggestionsContainer.classList.add('hidden');
+    suggestionIndex = -1;
+};
+
+const renderSuggestions = (rawInput) => {
+    const input = rawInput.startsWith('/') ? rawInput.slice(1) : rawInput;
+    const parts = input.split(' ');
+    const commandName = parts[0];
+    const argQuery = parts.slice(1).join(' ');
+    const command = commands.find(c => c.name === commandName);
+
+    // Case 1: Suggesting arguments (notes, folders, etc.)
+    if (command && command.suggest && parts.length > 1) {
+        let itemsToSuggest = [];
+        if (command.suggest === 'items') itemsToSuggest = [...getAllNotes(state.collections), ...getAllFolders(state.collections)];
+        else if (command.suggest === 'notes') itemsToSuggest = getAllNotes(state.collections);
+        else if (command.suggest === 'folders') itemsToSuggest = getAllFolders();
+        
+        const filteredItems = itemsToSuggest
+            .filter(item => item.name.toLowerCase().includes(argQuery.toLowerCase()))
+            .slice(0, 5);
+
+        if (filteredItems.length === 0) {
+            commandSuggestionsContainer.classList.add('hidden');
+            return;
+        }
+        commandSuggestionsContainer.innerHTML = filteredItems.map((item, index) => `
+            <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-item-name="${item.name.replace(/"/g, '&quot;')}">
+                <div class="flex items-center gap-2">
+                    <i data-feather="${item.type === 'folder' ? 'folder' : 'file-text'}" class="w-4 h-4 text-text-secondary"></i>
+                    <span class="cmd-name">${item.name}</span>
+                </div>
+            </div>`).join('');
+    } 
+    // Case 2: Suggesting commands
+    else {
+        const filteredCommands = commands
+            .filter(cmd => cmd.name.startsWith(commandName))
+            .slice(0, 5);
+
+        if (filteredCommands.length === 0) {
+            commandSuggestionsContainer.classList.add('hidden');
+            return;
+        }
+        commandSuggestionsContainer.innerHTML = filteredCommands.map((cmd, index) => `
+            <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-command-name="${cmd.name}">
+                <div class="flex items-center gap-3"><span class="cmd-name">/${cmd.name}</span></div>
+                <span class="cmd-desc">${cmd.description}</span>
+            </div>`).join('');
+    }
+    
+    commandSuggestionsContainer.classList.remove('hidden');
+    feather.replace();
+    suggestionIndex = -1; // Reset selection
+};
+
+const executeCommand = (inputValue) => {
+    const cleanInput = inputValue.slice(1).trim();
+    if (!cleanInput) { closeCommandPrompt(); return; }
+    const parts = cleanInput.split(' ');
+    const commandName = parts[0];
+    const args = parts.slice(1).join(' ');
+    const command = commands.find(c => c.name === commandName);
+    if (command) command.execute(args);
+    else showToast(`❌ Command not found: ${commandName}`, 'error');
+    closeCommandPrompt();
+};
+
+document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+        e.preventDefault();
+        isCommandPromptOpen ? closeCommandPrompt() : openCommandPrompt();
+    }
+    if (!isCommandPromptOpen) return;
+
+    if (e.key === 'Escape') { e.preventDefault(); closeCommandPrompt(); return; }
+
+    const activeSuggestion = commandSuggestionsContainer.querySelector('.command-suggestion-item.active');
+
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        if (activeSuggestion) {
+            const commandName = commandInput.value.slice(1).split(' ')[0];
+            const suggestionValue = activeSuggestion.dataset.itemName || activeSuggestion.dataset.commandName;
+            const finalCommand = `/${commandName} ${suggestionValue || ''}`;
+            executeCommand(finalCommand);
+        } else {
+            executeCommand(commandInput.value);
+        }
+        return;
+    }
+
+    if (e.key === 'Tab') {
+        e.preventDefault();
+        const firstSuggestion = commandSuggestionsContainer.querySelector('.command-suggestion-item');
+        if (activeSuggestion) { // If one is highlighted, use it
+            const commandName = commandInput.value.slice(1).split(' ')[0];
+            const suggestionValue = activeSuggestion.dataset.itemName || activeSuggestion.dataset.commandName;
+            commandInput.value = `/${suggestionValue.includes(' ') ? commandName + ' ' + suggestionValue : suggestionValue} `;
+            commandSuggestionsContainer.classList.add('hidden');
+        } else if (firstSuggestion) { // Otherwise, use the first one in the list
+             const commandName = commandInput.value.slice(1).split(' ')[0];
+             const suggestionValue = firstSuggestion.dataset.itemName || firstSuggestion.dataset.commandName;
+             commandInput.value = `/${suggestionValue.includes(' ') ? commandName + ' ' + suggestionValue : suggestionValue} `;
+             commandSuggestionsContainer.classList.add('hidden');
+        }
+        // Move cursor to end
+        const end = commandInput.value.length;
+        commandInput.setSelectionRange(end, end);
+        return;
+    }
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const suggestions = Array.from(commandSuggestionsContainer.querySelectorAll('.command-suggestion-item'));
+        if (suggestions.length === 0) return;
+        if(activeSuggestion) activeSuggestion.classList.remove('active');
+        const direction = e.key === 'ArrowDown' ? 1 : -1;
+        suggestionIndex = (suggestionIndex + direction + suggestions.length) % suggestions.length;
+        suggestions[suggestionIndex].classList.add('active');
+    }
+});
+
+commandInput.addEventListener('input', () => {
+    if (!commandInput.value.startsWith('/')) commandInput.value = '/';
+    renderSuggestions(commandInput.value);
+});
+
+document.addEventListener('click', (e) => {
+    if (isCommandPromptOpen && !commandPromptContainer.contains(e.target)) closeCommandPrompt();
+});
+
+// --- END: SLASH COMMAND CONSOLE ---
+
+// --- END: SLASH COMMAND CONSOLE ---
+
+// --- END: SLASH COMMAND CONSOLE ---
+                // --- Source Snippet Click Listener ---
+document.getElementById('global-ai-modal').addEventListener('click', (e) => {
+    const link = e.target.closest('.source-snippet-link');
+    if (link) {
+        e.preventDefault();
+        const noteId = link.dataset.noteId;
+        if (noteId) {
+            // Logic to switch to the note
+            state.settings.activeNoteId = noteId;
+            const { parent } = findItem(noteId);
+            state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+            state.settings.activeTag = null;
+            saveState();
+            render();
+            // Close the modal
+            closeModal(document.getElementById('global-ai-modal'));
+        }
+    }
+});
                 // --- Copy Button Listeners ---
 // --- Copy Button Listeners ---
 document.getElementById('summary-copy-btn').addEventListener('click', () => {
@@ -3635,13 +3974,23 @@ document.getElementById('global-ai-copy-btn-footer').addEventListener('click', (
         .catch(() => showToast('Failed to copy.', 'error'));
 });
                 // --- Global AI Q&A Listeners ---
-document.getElementById('global-ai-btn').addEventListener('click', () => { // Desktop button
-    askYourNotesHistory = [];
+const openGlobalAIModal = () => {
+    // This now ONLY clears the input field, leaving the previous answer and sources visible.
     document.getElementById('global-ai-input').value = '';
-    document.getElementById('global-ai-answer-container').classList.add('hidden');
+
+    // It also resets the 'Ask' button so you can submit a new question.
+    const askBtn = document.getElementById('global-ai-ask-btn');
+    if (askBtn) {
+        askBtn.disabled = false;
+        askBtn.querySelector('span').textContent = 'Ask';
+    }
+
     openModal(document.getElementById('global-ai-modal'));
     feather.replace();
-});
+};
+document.getElementById('global-ai-btn').addEventListener('click', openGlobalAIModal); // Desktop button
+document.getElementById('mobile-global-ai-btn').addEventListener('click', openGlobalAIModal); // Mobile button
+
 
 document.getElementById('mobile-global-ai-btn').addEventListener('click', () => { // Mobile button
     document.getElementById('global-ai-input').value = '';
@@ -4295,6 +4644,29 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
         }
         return; // Stop after handling this action
     }
+    if (action === 'mobile-rename-folder') {
+    closeDropdown();
+    const collectionId = state.settings.activeCollectionId;
+    if (!collectionId) return;
+
+    const { item: folder } = findItem(collectionId);
+    if (!folder) return;
+
+    const newName = await showPrompt({
+        title: 'Rename Folder',
+        message: `Enter a new name for "${folder.name}":`,
+        initialValue: folder.name
+    });
+
+    if (newName && newName !== folder.name) {
+        folder.name = newName;
+        saveState();
+        buildLunrIndex();
+        render();
+        showToast(`Folder renamed to "${newName}"`, 'success');
+    }
+    return;
+}
 
     // Handle all actions that require an active note
     if (action === 'mobile-new-note') {
@@ -5656,6 +6028,16 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
   }
 </script>
 </body>
+<div id="command-prompt-container" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 w-[90%] max-w-lg z-50">
+    <div class="relative">
+        <div id="command-suggestions" class="hidden absolute bottom-full left-0 w-full mb-1 bg-bg-pane-dark rounded-md shadow-lg p-1 border border-border-color max-h-60 overflow-y-auto">
+            </div>
+        <div class="flex items-center gap-2 bg-bg-pane-dark p-2 rounded-lg shadow-2xl border border-border-color">
+            <i data-feather="slash" class="w-5 h-5 text-text-tertiary"></i>
+            <input type="text" id="command-input" class="w-full bg-transparent focus:outline-none text-text-primary" placeholder="Type a command and press Enter...">
+        </div>
+    </div>
+</div>
 
 </body>
 </html>
