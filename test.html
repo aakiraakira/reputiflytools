@@ -273,6 +273,27 @@
     margin-top: 0;
     overflow: hidden;
 }
+#command-suggestions {
+    max-height: 220px; /* Sets a height limit for ~5-6 items */
+    overflow-y: auto;  /* Allows scrolling only when content exceeds the max-height */
+    scrollbar-width: thin; /* For Firefox */
+    scrollbar-color: var(--bg-pane-dark) transparent; /* For Firefox */
+}
+
+/* Hides the default scrollbar and styles a new one for Chrome/Safari/Edge */
+#command-suggestions::-webkit-scrollbar {
+    width: 8px;
+}
+
+#command-suggestions::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#command-suggestions::-webkit-scrollbar-thumb {
+    background-color: var(--bg-pane-dark);
+    border-radius: 10px;
+    border: 2px solid var(--bg-pane-light);
+}
         #flashcard-front p,
 #flashcard-back p {
     color: var(--text-primary) !important;
@@ -3733,6 +3754,24 @@ ${noteContent}`;
             async function init() {
                 // --- START: SLASH COMMAND CONSOLE ---
                 // --- START: SLASH COMMAND CONSOLE ---
+                // --- START: SLASH COMMAND CONSOLE ---
+
+const createContentSnippet = (content, query) => {
+    const plainText = content.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ');
+    const lowerQuery = query.toLowerCase();
+    const queryIndex = plainText.toLowerCase().indexOf(lowerQuery);
+
+    if (queryIndex === -1) return null;
+
+    const start = Math.max(0, queryIndex - 20);
+    const end = Math.min(plainText.length, queryIndex + query.length + 40);
+    let snippet = plainText.substring(start, end);
+
+    const regex = new RegExp(`(${query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi');
+    snippet = snippet.replace(regex, '<b class="text-accent-primary">$1</b>');
+
+    return `...${snippet}...`;
+};
 
 const findBestMatch = (query, items) => {
     if (!query) return null;
@@ -3744,18 +3783,11 @@ const findBestMatch = (query, items) => {
         const lowerName = item.name.toLowerCase();
         let score = 0;
 
-        if (lowerName === lowerQuery) {
-            score = 100; // Perfect match
-        } else if (lowerName.startsWith(lowerQuery)) {
-            score = 50; // Starts with match
-        } else if (lowerName.includes(lowerQuery)) {
-            score = 20; // Substring match
-        }
+        if (lowerName === lowerQuery) score = 100;
+        else if (lowerName.startsWith(lowerQuery)) score = 50;
+        else if (lowerName.includes(lowerQuery)) score = 20;
 
-        if (score > 0) {
-            // Add a bonus for being shorter (closer match)
-            score -= lowerName.length / 100;
-        }
+        if (score > 0) score -= lowerName.length / 100;
         
         if (score > highScore) {
             highScore = score;
@@ -3771,20 +3803,214 @@ const commandSuggestionsContainer = document.getElementById('command-suggestions
 let isCommandPromptOpen = false;
 let suggestionIndex = -1;
 
+const executeWithSmartFind = async (args, itemType, action) => {
+    let allItems, targetItem = null;
+
+    if (itemType === 'notes') allItems = getAllNotes(state.collections);
+    else if (itemType === 'folders') allItems = getAllFolders();
+    else allItems = [...getAllNotes(state.collections), ...getAllFolders(state.collections)];
+
+    if (args) {
+        targetItem = findBestMatch(args, allItems);
+        
+        if (!targetItem && itemType !== 'folders') {
+            const contentResults = lunrIndex.search(args);
+            if (contentResults.length > 0) {
+                const topResultId = contentResults[0].ref;
+                const item = findItem(topResultId)?.item;
+                if (item && item.type === 'note' && (itemType === 'notes' || itemType === 'items')) {
+                    targetItem = item;
+                }
+            }
+        }
+    }
+    
+    if (!targetItem) {
+        if (itemType === 'notes' && state.settings.activeNoteId) {
+            targetItem = findItem(state.settings.activeNoteId)?.item;
+        } else if (itemType === 'folders' && state.settings.activeCollectionId) {
+            const res = findItem(state.settings.activeCollectionId);
+            if (res?.item.type === 'folder') targetItem = res.item;
+        } else if (itemType === 'items') {
+             const activeId = state.settings.activeNoteId || state.settings.activeCollectionId;
+             if (activeId) targetItem = findItem(activeId)?.item;
+        }
+    }
+
+    if (!targetItem) {
+        const typeName = itemType.slice(0, -1);
+        return showToast(`❌ ${typeName.charAt(0).toUpperCase() + typeName.slice(1)} not found or specified.`, 'error');
+    }
+    
+    action(targetItem);
+};
+
 const commands = [
-    { name: 'nn', description: 'New Note. Usage: /nn [note name]', execute: (args) => { createNewNote(true, `<h1>${args || 'Untitled Note'}</h1>`); showToast(`✅ Note "${args || 'Untitled Note'}" created`); } },
-    { name: 'nf', description: 'New Folder. Usage: /nf [folder name]', execute: (args) => { const n = args||'Untitled Folder'; state.collections.push({id:generateId('c'),name:n,type:'folder',children:[],expanded:true}); state.kanbanColumns[state.collections[state.collections.length-1].id]=[{id:generateId('col'),title:'To Do'}]; saveState();buildLunrIndex();render();showToast(`✅ Folder "${n}" created`); } },
-    { name: 'ask', description: 'Ask Your Notes AI. Usage: /ask [question]', execute: (args) => { if (!args) return showToast('❌ Question needed.','error'); openModal(document.getElementById('global-ai-modal'));document.getElementById('global-ai-input').value=args;document.getElementById('global-ai-ask-btn').click();feather.replace(); } },
-    { name: 'summary', description: 'Summarize a note. Usage: /summary [note name]', suggest: 'notes', execute: (args) => { let n = args ? findBestMatch(args, getAllNotes(state.collections)) : findItem(state.settings.activeNoteId)?.item; if(n){const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleSummarize(c);}else{showToast('❌ Note not found or specified.','error');} } },
-    { name: 'quiz', description: 'Generate a quiz. Usage: /quiz [note name]', suggest: 'notes', execute: (args) => { let n=args?findBestMatch(args,getAllNotes(state.collections)):findItem(state.settings.activeNoteId)?.item;if(n){const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleGenerateQuiz(c,n);}else{showToast('❌ Note not found or specified.','error');} } },
-    { name: 'flashcard', description: 'Open flashcards. Usage: /flashcard [note name]', suggest: 'notes', execute: (args) => { let n=args?findBestMatch(args,getAllNotes(state.collections)):findItem(state.settings.activeNoteId)?.item;if(n){handleFlashcardMode(n);}else{showToast('❌ Note not found or specified.','error');} } },
-    { name: 'share', description: 'Create a share link. Usage: /share [note name]', suggest: 'notes', execute: (args) => { handleShareNote(args ? findBestMatch(args, getAllNotes(state.collections)) : null); } },
-    { name: 'dup', description: 'Duplicate an item. Usage: /dup [item name]', suggest: 'items', execute: (args) => { let r=null;if(args){const i=findBestMatch(args,[...getAllNotes(state.collections),...getAllFolders(state.collections)]);if(i)r=findItem(i.id);}else{const a=state.settings.activeNoteId||state.settings.activeCollectionId;if(a)r=findItem(a);}if(!r)return showToast('❌ Item not found.','error');const i=duplicateItem(r.item);const p=Array.isArray(r.parent)?r.parent:r.parent.children;p.splice(r.index+1,0,i);showToast(`✅ Duplicated "${r.item.name}"`);saveState();buildLunrIndex();render(); } },
-    { name: 'go', description: 'Go to a note or folder. Usage: /go [item name]', suggest: 'items', execute: (args) => { if(!args)return showToast('❌ Name needed.','error');const i=findBestMatch(args,[...getAllNotes(state.collections),...getAllFolders(state.collections)]);if(!i)return showToast(`❌ Not found: "${args}"`,'error');state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id;}else{state.settings.activeCollectionId=i.id;state.settings.activeNoteId=null;}showToast(`🚀 Navigated to "${i.name}"`);saveState();render();} },
-    { name: 'pin', description: 'Toggle pin on a note. Usage: /pin [note name]', suggest: 'notes', execute: (args) => { let n=args?findBestMatch(args,getAllNotes(state.collections)):findItem(state.settings.activeNoteId)?.item;if(!n)return showToast('❌ Note not found.','error');n.pinned=!n.pinned;showToast(n.pinned?`📌 Pinned "${n.name}"`:`👎 Unpinned "${n.name}"`);saveState();render();} },
-    { name: 'tag', description: 'Add a tag to the current note. Usage: /tag [tagname]', execute: (args) => { if(!state.settings.activeNoteId)return showToast('❌ Must be in a note.','error');if(!args)return showToast('❌ Tag name needed.','error');const t=args.split(' ')[0].replace(/#/g,'');if(!t)return;app.elements.noteEditorBody.innerHTML+=` #${t}`;performImmediateSave();showToast(`🏷️ Tagged with #${t}`);} },
-    { name: 'dn', description: 'Delete a note. Usage: /dn [note name]', suggest: 'notes', execute: async (args) => { let r=args?findItem(findBestMatch(args,getAllNotes(state.collections))?.id):findItem(state.settings.activeNoteId);if(!r)return showToast('❌ Note not found.','error');const c=await showConfirm({title:`Delete "${r.item.name}"?`,message:'This cannot be undone.',confirmText:'Delete'});if(c){const p=Array.isArray(r.parent)?r.parent:r.parent.children;p.splice(r.index,1);showToast(`🗑️ Note deleted.`);if(state.settings.activeNoteId===r.item.id)state.settings.activeNoteId=null;saveState();buildLunrIndex();render();}} },
-    { name: 'df', description: 'Delete a folder. Usage: /df [folder name]', suggest: 'folders', execute: async (args) => { let r;if(args){const f=findBestMatch(args,getAllFolders());if(f)r=findItem(f.id);}else if(state.settings.activeCollectionId){const fR=findItem(state.settings.activeCollectionId);if(fR?.item.type==='folder')r=fR;}if(!r)return showToast('❌ Folder not found.','error');const c=await showConfirm({title:`Delete folder "${r.item.name}"?`,message:'This will delete the folder and <strong>all notes inside</strong>.',confirmText:'Delete'});if(c){const p=Array.isArray(r.parent)?r.parent:r.parent.children;p.splice(r.index,1);showToast(`🗑️ Folder deleted.`);if(state.settings.activeCollectionId===r.item.id)state.settings.activeCollectionId=null;saveState();buildLunrIndex();render();}} }
+    {
+        name: 'nn',
+        description: 'New Note. Usage: /nn [note name]',
+        execute: (args) => {
+            const newNote = createNewNote(true, '');
+            newNote.name = args || 'Untitled Note';
+            saveState();
+            render();
+            showToast(`✅ Note "${newNote.name}" created`, 'success');
+        }
+    },
+    {
+        name: 'nf',
+        description: 'New Folder. Usage: /nf [folder name]',
+        execute: (args) => {
+            const folderName = args || 'Untitled Folder';
+            const newCollection = { id: generateId('c'), name: folderName, type: 'folder', children: [], expanded: true };
+            state.kanbanColumns[newCollection.id] = [{ id: generateId('col'), title: 'To Do' }];
+            state.collections.push(newCollection);
+            saveState();
+            buildLunrIndex();
+            render();
+            showToast(`✅ Folder "${folderName}" created`, 'success');
+        }
+    },
+    {
+        name: 'ask',
+        description: 'Ask Your Notes AI. Usage: /ask [question]',
+        execute: (args) => {
+            if (!args) return showToast('❌ Please provide a question.', 'error');
+            openModal(document.getElementById('global-ai-modal'));
+            document.getElementById('global-ai-input').value = args;
+            document.getElementById('global-ai-ask-btn').click();
+            feather.replace();
+        }
+    },
+    {
+        name: 'summary',
+        description: 'Summarize a note. Usage: /summary [note name]',
+        suggest: 'notes',
+        execute: (args) => executeWithSmartFind(args, 'notes', (note) => {
+            const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
+            if (!plainContent) return showToast('Note is empty.', 'info');
+            handleSummarize(plainContent);
+        })
+    },
+    {
+        name: 'quiz',
+        description: 'Generate a quiz. Usage: /quiz [note name]',
+        suggest: 'notes',
+        execute: (args) => executeWithSmartFind(args, 'notes', (note) => {
+            const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
+            if (!plainContent) return showToast('Note is empty.', 'info');
+            handleGenerateQuiz(plainContent, note);
+        })
+    },
+    {
+        name: 'flashcard',
+        description: 'Open flashcards. Usage: /flashcard [note name]',
+        suggest: 'notes',
+        execute: (args) => executeWithSmartFind(args, 'notes', (note) => handleFlashcardMode(note))
+    },
+    {
+        name: 'share',
+        description: 'Create a share link. Usage: /share [note name]',
+        suggest: 'notes',
+        execute: (args) => executeWithSmartFind(args, 'notes', (note) => handleShareNote(note))
+    },
+    {
+        name: 'dup',
+        description: 'Duplicate an item. Usage: /dup [item name]',
+        suggest: 'items',
+        execute: (args) => executeWithSmartFind(args, 'items', (item) => {
+            const findResult = findItem(item.id);
+            const newItem = duplicateItem(item);
+            const parentArray = Array.isArray(findResult.parent) ? findResult.parent : findResult.parent.children;
+            parentArray.splice(findResult.index + 1, 0, newItem);
+            showToast(`✅ Duplicated "${item.name}"`, 'success');
+            saveState();
+            buildLunrIndex();
+            render();
+        })
+    },
+    {
+        name: 'go',
+        description: 'Go to a note or folder. Usage: /go [item name]',
+        suggest: 'items',
+        execute: (args) => executeWithSmartFind(args, 'items', (item) => {
+            if (!args && !item) return showToast('❌ Please specify an item to go to.', 'error');
+            state.settings.activeTag = null;
+            if (item.type === 'note') {
+                const { parent } = findItem(item.id);
+                state.settings.activeCollectionId = (Array.isArray(parent) || !parent) ? null : parent.id;
+                state.settings.activeNoteId = item.id;
+            } else { // It's a folder
+                state.settings.activeCollectionId = item.id;
+                state.settings.activeNoteId = null;
+            }
+            showToast(`🚀 Navigated to "${item.name}"`, 'success');
+            saveState();
+            render();
+        })
+    },
+    {
+        name: 'pin',
+        description: 'Toggle pin on a note. Usage: /pin [note name]',
+        suggest: 'notes',
+        execute: (args) => executeWithSmartFind(args, 'notes', (note) => {
+            note.pinned = !note.pinned;
+            showToast(note.pinned ? `📌 Pinned "${note.name}"` : `👎 Unpinned "${note.name}"`, 'success');
+            saveState();
+            render();
+        })
+    },
+    {
+        name: 'tag',
+        description: 'Add a tag to the current note. Usage: /tag [tagname]',
+        execute: (args) => {
+            if (!state.settings.activeNoteId) return showToast('❌ You must be in a note to add a tag.', 'error');
+            if (!args) return showToast('❌ Please specify a tag to add.', 'error');
+
+            const tagName = args.split(' ')[0].replace(/#/g, '');
+            if (!tagName) return;
+
+            app.elements.noteEditorBody.innerHTML += ` #${tagName}`;
+            performImmediateSave();
+            showToast(`🏷️ Tagged with #${tagName}`, 'success');
+        }
+    },
+    {
+        name: 'dn',
+        description: 'Delete a note. Usage: /dn [note name]',
+        suggest: 'notes',
+        execute: (args) => executeWithSmartFind(args, 'notes', async (note) => {
+            const findResult = findItem(note.id);
+            const confirmed = await showConfirm({ title: `Delete "${note.name}"?`, message: 'This cannot be undone.', confirmText: 'Delete' });
+            if (confirmed) {
+                const parentArray = Array.isArray(findResult.parent) ? findResult.parent : findResult.parent.children;
+                parentArray.splice(findResult.index, 1);
+                showToast(`🗑️ Note "${note.name}" deleted.`, 'success');
+                if (state.settings.activeNoteId === note.id) state.settings.activeNoteId = null;
+                saveState();
+                buildLunrIndex();
+                render();
+            }
+        })
+    },
+    {
+        name: 'df',
+        description: 'Delete a folder. Usage: /df [folder name]',
+        suggest: 'folders',
+        execute: (args) => executeWithSmartFind(args, 'folders', async (folder) => {
+            const findResult = findItem(folder.id);
+            const confirmed = await showConfirm({ title: `Delete folder "${folder.name}"?`, message: 'This will delete the folder and <strong>all notes inside</strong>.', confirmText: 'Delete' });
+            if (confirmed) {
+                const parentArray = Array.isArray(findResult.parent) ? findResult.parent : findResult.parent.children;
+                parentArray.splice(findResult.index, 1);
+                showToast(`🗑️ Folder "${folder.name}" deleted.`, 'success');
+                if (state.settings.activeCollectionId === folder.id) state.settings.activeCollectionId = null;
+                saveState();
+                buildLunrIndex();
+                render();
+            }
+        })
+    }
 ];
 
 const openCommandPrompt = () => {
@@ -3809,41 +4035,53 @@ const renderSuggestions = (rawInput) => {
     const input = rawInput.startsWith('/') ? rawInput.slice(1) : rawInput;
     const parts = input.split(' ');
     const commandName = parts[0];
-    const argQuery = parts.slice(1).join(' ');
+    const argQuery = parts.slice(1).join(' ').toLowerCase();
     const command = commands.find(c => c.name === commandName);
 
     // Case 1: Suggesting arguments (notes, folders, etc.)
-    if (command && command.suggest && parts.length > 1) {
-        let itemsToSuggest = [];
-        if (command.suggest === 'items') itemsToSuggest = [...getAllNotes(state.collections), ...getAllFolders(state.collections)];
-        else if (command.suggest === 'notes') itemsToSuggest = getAllNotes(state.collections);
-        else if (command.suggest === 'folders') itemsToSuggest = getAllFolders();
-        
-        const filteredItems = itemsToSuggest
-            .filter(item => item.name.toLowerCase().includes(argQuery.toLowerCase()))
-            .slice(0, 5);
+    if (command && command.suggest && parts.length > 1 && argQuery) {
+        const suggestionMap = new Map();
 
-        if (filteredItems.length === 0) {
-            commandSuggestionsContainer.classList.add('hidden');
-            return;
+        // 1. Get name matches
+        let itemsForNameMatch = [];
+        if (command.suggest === 'items') itemsForNameMatch = [...getAllNotes(state.collections), ...getAllFolders()];
+        else if (command.suggest === 'notes') itemsForNameMatch = getAllNotes(state.collections);
+        else if (command.suggest === 'folders') itemsForNameMatch = getAllFolders();
+        
+        itemsForNameMatch.filter(item => item.name.toLowerCase().includes(argQuery))
+            .forEach(item => suggestionMap.set(item.id, { ...item, matchType: 'name' }));
+
+        // 2. Get content matches (only for notes)
+        if (command.suggest === 'items' || command.suggest === 'notes') {
+            const contentResults = lunrIndex.search(argQuery);
+            contentResults.forEach(res => {
+                if (!suggestionMap.has(res.ref)) {
+                    const item = findItem(res.ref)?.item;
+                    if(item) suggestionMap.set(item.id, { ...item, matchType: 'content', snippet: createContentSnippet(item.content, argQuery) });
+                }
+            });
         }
-        commandSuggestionsContainer.innerHTML = filteredItems.map((item, index) => `
-            <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-item-name="${item.name.replace(/"/g, '&quot;')}">
-                <div class="flex items-center gap-2">
-                    <i data-feather="${item.type === 'folder' ? 'folder' : 'file-text'}" class="w-4 h-4 text-text-secondary"></i>
-                    <span class="cmd-name">${item.name}</span>
-                </div>
-            </div>`).join('');
+
+        const finalSuggestions = Array.from(suggestionMap.values());
+        
+        if (finalSuggestions.length === 0) {
+            commandSuggestionsContainer.innerHTML = `<div class="p-2 text-sm text-text-tertiary">No items match "${argQuery}"</div>`;
+        } else {
+            commandSuggestionsContainer.innerHTML = finalSuggestions.map((item, index) => `
+                <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-item-name="${item.name.replace(/"/g, '&quot;')}">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <i data-feather="${item.matchType === 'content' ? 'search' : (item.type === 'folder' ? 'folder' : 'file-text')}" class="w-4 h-4 text-text-secondary flex-shrink-0"></i>
+                        <span class="cmd-name truncate">${item.name}</span>
+                    </div>
+                    ${item.matchType === 'content' ? `<span class="cmd-desc text-right truncate">${item.snippet || ''}</span>` : ''}
+                </div>`).join('');
+        }
     } 
     // Case 2: Suggesting commands
     else {
-        const filteredCommands = commands
-            .filter(cmd => cmd.name.startsWith(commandName))
-            .slice(0, 5);
-
+        const filteredCommands = commands.filter(cmd => cmd.name.startsWith(commandName));
         if (filteredCommands.length === 0) {
-            commandSuggestionsContainer.classList.add('hidden');
-            return;
+             commandSuggestionsContainer.classList.add('hidden'); return;
         }
         commandSuggestionsContainer.innerHTML = filteredCommands.map((cmd, index) => `
             <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-command-name="${cmd.name}">
@@ -3854,7 +4092,7 @@ const renderSuggestions = (rawInput) => {
     
     commandSuggestionsContainer.classList.remove('hidden');
     feather.replace();
-    suggestionIndex = -1; // Reset selection
+    suggestionIndex = -1;
 };
 
 const executeCommand = (inputValue) => {
@@ -3864,8 +4102,11 @@ const executeCommand = (inputValue) => {
     const commandName = parts[0];
     const args = parts.slice(1).join(' ');
     const command = commands.find(c => c.name === commandName);
-    if (command) command.execute(args);
-    else showToast(`❌ Command not found: ${commandName}`, 'error');
+    if (command) {
+        command.execute(args);
+    } else {
+        showToast(`❌ Command not found: ${commandName}`, 'error');
+    }
     closeCommandPrompt();
 };
 
@@ -3885,7 +4126,8 @@ document.addEventListener('keydown', (e) => {
         if (activeSuggestion) {
             const commandName = commandInput.value.slice(1).split(' ')[0];
             const suggestionValue = activeSuggestion.dataset.itemName || activeSuggestion.dataset.commandName;
-            const finalCommand = `/${commandName} ${suggestionValue || ''}`;
+            const finalCommand = `/${suggestionValue.includes(' ') ? commandName + ' ' + suggestionValue : suggestionValue}`;
+            commandInput.value = finalCommand;
             executeCommand(finalCommand);
         } else {
             executeCommand(commandInput.value);
@@ -3895,19 +4137,13 @@ document.addEventListener('keydown', (e) => {
 
     if (e.key === 'Tab') {
         e.preventDefault();
-        const firstSuggestion = commandSuggestionsContainer.querySelector('.command-suggestion-item');
-        if (activeSuggestion) { // If one is highlighted, use it
+        const suggestionToUse = activeSuggestion || commandSuggestionsContainer.querySelector('.command-suggestion-item');
+        if (suggestionToUse) {
             const commandName = commandInput.value.slice(1).split(' ')[0];
-            const suggestionValue = activeSuggestion.dataset.itemName || activeSuggestion.dataset.commandName;
+            const suggestionValue = suggestionToUse.dataset.itemName || suggestionToUse.dataset.commandName;
             commandInput.value = `/${suggestionValue.includes(' ') ? commandName + ' ' + suggestionValue : suggestionValue} `;
             commandSuggestionsContainer.classList.add('hidden');
-        } else if (firstSuggestion) { // Otherwise, use the first one in the list
-             const commandName = commandInput.value.slice(1).split(' ')[0];
-             const suggestionValue = firstSuggestion.dataset.itemName || firstSuggestion.dataset.commandName;
-             commandInput.value = `/${suggestionValue.includes(' ') ? commandName + ' ' + suggestionValue : suggestionValue} `;
-             commandSuggestionsContainer.classList.add('hidden');
         }
-        // Move cursor to end
         const end = commandInput.value.length;
         commandInput.setSelectionRange(end, end);
         return;
@@ -3917,7 +4153,7 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
         const suggestions = Array.from(commandSuggestionsContainer.querySelectorAll('.command-suggestion-item'));
         if (suggestions.length === 0) return;
-        if(activeSuggestion) activeSuggestion.classList.remove('active');
+        if (activeSuggestion) activeSuggestion.classList.remove('active');
         const direction = e.key === 'ArrowDown' ? 1 : -1;
         suggestionIndex = (suggestionIndex + direction + suggestions.length) % suggestions.length;
         suggestions[suggestionIndex].classList.add('active');
@@ -3929,10 +4165,24 @@ commandInput.addEventListener('input', () => {
     renderSuggestions(commandInput.value);
 });
 
+commandSuggestionsContainer.addEventListener('click', (e) => {
+    const suggestionItem = e.target.closest('.command-suggestion-item');
+    if (suggestionItem) {
+        const commandName = commandInput.value.slice(1).split(' ')[0];
+        const suggestionValue = suggestionItem.dataset.itemName || suggestionItem.dataset.commandName;
+        const finalCommand = `/${suggestionValue.includes(' ') ? commandName + ' ' + suggestionValue : suggestionValue}`;
+        commandInput.value = finalCommand;
+        executeCommand(finalCommand);
+    }
+});
+
 document.addEventListener('click', (e) => {
     if (isCommandPromptOpen && !commandPromptContainer.contains(e.target)) closeCommandPrompt();
 });
 
+// --- END: SLASH COMMAND CONSOLE ---
+
+// --- END: SLASH COMMAND CONSOLE ---
 // --- END: SLASH COMMAND CONSOLE ---
 
 // --- END: SLASH COMMAND CONSOLE ---
