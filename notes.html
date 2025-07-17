@@ -273,11 +273,29 @@
     margin-top: 0;
     overflow: hidden;
 }
+/* Find and replace the old #command-suggestions CSS with this */
+
 #command-suggestions {
-    max-height: 220px; /* Sets a height limit for ~5-6 items */
-    overflow-y: auto;  /* Allows scrolling only when content exceeds the max-height */
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+/* This is the new reusable class for all custom scrollbars */
+.custom-scrollbar {
     scrollbar-width: thin; /* For Firefox */
     scrollbar-color: var(--bg-pane-dark) transparent; /* For Firefox */
+}
+.custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: var(--bg-pane-dark);
+    border-radius: 10px;
+    border: 2px solid var(--bg-pane-light);
 }
 
 /* Hides the default scrollbar and styles a new one for Chrome/Safari/Edge */
@@ -1026,7 +1044,9 @@ window.functions = getFunctions(app,);
                         <button id="new-collection-btn" class="text-text-secondary hover:text-accent-primary transition-colors flex-shrink-0"><i data-feather="plus"></i></button>
                     </div>
                 </header>
-                <div id="collections-list-container" class="flex-grow p-2 overflow-y-auto"></div>
+                <div id="collections-list-container" class="flex-grow p-2 overflow-y-auto custom-scrollbar"></div>
+
+
                 
                 <div id="tag-panel" class="p-2 border-t border-border-color flex-shrink-0">
     <div class="flex justify-between items-center px-2">
@@ -1150,7 +1170,8 @@ window.functions = getFunctions(app,);
 <input type="file" id="file-upload-input" class="hidden" />
 
            
-           <div id="main-content-area" class="flex-grow overflow-y-auto relative flex flex-col">
+           <div id="main-content-area" class="flex-grow overflow-y-auto relative flex flex-col custom-scrollbar">
+
             
                 <div id="board-view" class="notes-view active flex-grow p-4 md:p-5 overflow-x-auto no-scrollbar h-full">
                     <div id="kanban-board" class="flex gap-4 min-h-full"></div>
@@ -3759,6 +3780,8 @@ ${noteContent}`;
 
 // --- START: SLASH COMMAND CONSOLE ---
 
+// --- START: SLASH COMMAND CONSOLE ---
+
 const createContentSnippet = (content, query) => {
     const plainText = content.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ');
     const lowerQuery = query.toLowerCase();
@@ -3804,6 +3827,47 @@ const commandSuggestionsContainer = document.getElementById('command-suggestions
 let isCommandPromptOpen = false;
 let suggestionIndex = -1;
 
+const renderHelpModal = () => {
+    const helpContent = document.getElementById('help-content');
+    helpContent.innerHTML = commands.sort((a,b) => a.name.localeCompare(b.name)).map(cmd => `
+        <div class="flex items-start p-2 rounded-md hover:bg-bg-pane-dark">
+            <code class="font-semibold text-text-primary bg-bg-pane-dark px-2 py-1 rounded-md whitespace-nowrap">/${cmd.name}</code>
+            <p class="ml-4 text-sm text-text-secondary">${cmd.description}</p>
+        </div>
+    `).join('');
+    openModal(document.getElementById('help-modal'));
+    feather.replace();
+};
+
+const renderLinkedNotesModal = (note) => {
+    const modalTitle = document.getElementById('linked-notes-title');
+    const modalContent = document.getElementById('linked-notes-content');
+    modalTitle.innerHTML = `<i data-feather="link" class="w-5 h-5 text-accent-primary"></i> Connections for "${note.name}"`;
+    
+    const allNotes = getAllNotes(state.collections);
+    const outgoingLinks = (note.links || []).map(linkName => allNotes.find(n => n.name === linkName)).filter(Boolean);
+    const incomingLinks = allNotes.filter(n => n.id !== note.id && (n.links || []).some(linkName => linkName === note.name));
+
+    let contentHTML = '';
+    if (outgoingLinks.length > 0) {
+        contentHTML += `<div><h4 class="font-semibold text-text-primary">Links from this note:</h4><ul class="mt-1 space-y-1">` +
+            outgoingLinks.map(n => `<li><a href="#" class="linked-note-jump block p-2 rounded-md hover:bg-bg-pane-dark text-text-secondary" data-note-id="${n.id}">${n.name}</a></li>`).join('') +
+            `</ul></div>`;
+    }
+    if (incomingLinks.length > 0) {
+        contentHTML += `<div><h4 class="font-semibold text-text-primary">Linked here (Backlinks):</h4><ul class="mt-1 space-y-1">` +
+            incomingLinks.map(n => `<li><a href="#" class="linked-note-jump block p-2 rounded-md hover:bg-bg-pane-dark text-text-secondary" data-note-id="${n.id}">${n.name}</a></li>`).join('') +
+            `</ul></div>`;
+    }
+    if (!contentHTML) {
+        contentHTML = `<p class="text-text-secondary">No connections found for this note.</p>`;
+    }
+
+    modalContent.innerHTML = contentHTML;
+    openModal(document.getElementById('linked-notes-modal'));
+    feather.replace();
+};
+
 const executeWithSmartFind = async (args, itemType, action) => {
     let allItems, targetItem = null;
     if (itemType === 'notes') allItems = getAllNotes(state.collections);
@@ -3841,10 +3905,13 @@ const commands = [
     { name: 'nf', description: 'New Folder. Usage: /nf [folder name]', execute: (args)=>{const n=args||'Untitled Folder';const c={id:generateId('c'),name:n,type:'folder',children:[],expanded:true};state.kanbanColumns[c.id]=[{id:generateId('col'),title:'To Do'}];state.collections.push(c);saveState();buildLunrIndex();render();showToast(`✅ Folder "${n}" created`)}},
     { name: 'rename', description: 'Rename item. Usage: /rename [old] to [new]', suggest: 'items', execute: async(args)=>{const s=/\s+to\s+/i;if(!s.test(args))return showToast('❌ Use: /rename [old] to [new]','error');const p=args.split(s);const o=p[0].trim();const n=p[1].trim();if(!o||!n)return showToast('❌ Both names required.','error');const i=findBestMatch(o,[...getAllNotes(state.collections),...getAllFolders()]);if(!i)return showToast(`❌ Not found: "${o}"`,'error');const c=await showConfirm({title:'Confirm Rename',message:`Rename "${i.name}" to "${n}"?`,confirmText:'Rename'});if(c){i.name=n;saveState();buildLunrIndex();render();showToast(`✅ Renamed to "${n}"`)}} },
     { name: 'link', description: 'Link notes. Usage: /link [source] to [target]', suggest: 'notes', execute: (args)=>{const s=/\s+to\s+/i;if(!s.test(args))return showToast('❌ Use: /link [source] to [target]','error');const p=args.split(s);const sN=p[0].trim();const tN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');if(sO.id===tO.id)return showToast('❌ Cannot link a note to itself.','error');sO.content+=`\n<p>[[${tO.name}]]</p>`;updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Linked "${sO.name}" to "${tO.name}"`)}},
-    { name: 'unlink', description: 'Unlink notes. Usage: /unlink [target] from [source]', suggest: 'notes', execute: (args)=>{const s=/\s+from\s+/i;if(!s.test(args))return showToast('❌ Use: /unlink [target] from [source]','error');const p=args.split(s);const tN=p[0].trim();const sN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');const r=new RegExp(`\\[\\[\\s*${tO.name}\\s*\\]\\]`,'gi');if(!r.test(sO.content))return showToast(`❌ Link to "${tO.name}" not found in "${sO.name}".`,'info');sO.content=sO.content.replace(r,'').replace(/<p>\s*<\/p>/gi,'');updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Unlinked "${tO.name}" from "${sO.name}"`)}},
-    { name: 'go', description: 'Go to item or tag. Usage: /go [item] or /go #[tag]', suggest: 'items_or_tags', execute: (args)=>{if(!args)return showToast('❌ Specify item or tag.','error');if(args.startsWith('#')){const tN=args.substring(1).trim();if(!tN)return showToast('❌ Tag name needed.','error');if(!getAllTags().includes(tN))return showToast(`❌ Tag not found: #${tN}`,'error');state.settings.activeTag=tN;state.settings.activeNoteId=null;state.settings.activeCollectionId=null;showToast(`🏷️ Showing notes tagged with #${tN}`);saveState();render();return}executeWithSmartFind(args,'items',(i)=>{state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id}else{state.settings.activeCollectionId=i.id;state.settings.activeNoteId=null}showToast(`🚀 Navigated to "${i.name}"`);saveState();render()})} },
+    { name: 'unlink', description: 'Unlink notes. Usage: /unlink [target] from [source]', suggest: 'notes', execute: (args)=>{const s=/\s+from\s+/i;if(!s.test(args))return showToast('❌ Use: /unlink [target] from [source]','error');const p=args.split(s);const tN=p[0].trim();const sN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');const r=new RegExp(`\\[\\[\\s*${tO.name}\\s*\\]\\]`,'gi');if(!r.test(sO.content))return showToast(`❌ Link to "${tO.name}" not found in "${sO.name}".`,'info');sO.content=sO.content.replace(r,'').replace(/<p>\s*<\/p>|\n\s*\n/gi,'');updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Unlinked "${tO.name}" from "${sO.name}"`)}},
+    { name: 'go', description: 'Go to item or tag. Usage: /go [item] or /go #[tag] [item]', suggest: 'items_or_tags', execute: (args)=>{if(!args)return showToast('❌ Specify item or tag.','error');if(args.startsWith('#')){const tN=args.split(' ')[0].substring(1).trim();const nN=args.substring(tN.length+2).trim();if(!tN)return showToast('❌ Tag name needed.','error');if(!getAllTags().includes(tN))return showToast(`❌ Tag not found: #${tN}`,'error');if(nN){const nT=getAllNotes(state.collections).filter(n=>(n.tags||[]).includes(tN));const t=findBestMatch(nN,nT);if(t){executeWithSmartFind(t.name,'notes',(i)=>{state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id}showToast(`🚀 Navigated to "${i.name}"`);saveState();render()})}else{showToast(`❌ Note "${nN}" not in tag #${tN}.`,'error')}}else{state.settings.activeTag=tN;state.settings.activeNoteId=null;state.settings.activeCollectionId=null;showToast(`🏷️ Showing notes tagged with #${tN}`);saveState();render()}}else{executeWithSmartFind(args,'items',(i)=>{state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id}else{state.settings.activeCollectionId=i.id;state.settings.activeNoteId=null}showToast(`🚀 Navigated to "${i.name}"`);saveState();render()})}} },
     { name: 'theme', description: 'Toggle through color themes.', execute: ()=>document.getElementById('theme-toggle')?.click() },
     { name: 'voice', description: 'Start/stop voice dictation in current note.', execute: ()=>{if(!state.settings.activeNoteId)return showToast('❌ Must be in a note.','error');document.getElementById('dictate-btn')?.click()} },
+    { name: 'linked', description: 'Show all connections for a note. Usage: /linked [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args, 'notes', (note)=>renderLinkedNotesModal(note)) },
+    { name: 'help', description: 'Shows this list of all available commands.', execute: renderHelpModal },
+    { name: 'commands', description: 'Alias for /help.', execute: renderHelpModal },
     { name: 'ask', description: 'Ask Your Notes AI. Usage: /ask [question]', execute: (args)=>{if(!args)return showToast('❌ Question needed.','error');openModal(document.getElementById('global-ai-modal'));document.getElementById('global-ai-input').value=args;document.getElementById('global-ai-ask-btn').click();feather.replace()} },
     { name: 'summary', description: 'Summarize a note. Usage: /summary [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleSummarize(c)})},
     { name: 'quiz', description: 'Generate quiz. Usage: /quiz [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleGenerateQuiz(c,n)})},
@@ -3870,14 +3937,11 @@ const renderSuggestions = (rawInput) => {
     let suggestionsHTML = '';
     const argQuery = argString.toLowerCase();
 
-    // Case 1: Command requires arguments, so we suggest items or tags
-    // The main condition is changed to trigger even with an empty argString
     if (command && command.suggest && parts.length > 1) {
         let finalSuggestions = [];
         const toSeparator = /\s+to\s+/i;
         const fromSeparator = /\s+from\s+/i;
 
-        // Special suggestion logic for multi-part commands
         if ((command.name === 'link' || command.name === 'rename') && toSeparator.test(argString)) {
             const targetQuery = argString.split(toSeparator)[1].toLowerCase() || '';
             finalSuggestions = getAllNotes(state.collections).filter(n => n.name.toLowerCase().includes(targetQuery));
@@ -3885,26 +3949,26 @@ const renderSuggestions = (rawInput) => {
             const sourceQuery = argString.split(fromSeparator)[1].toLowerCase() || '';
             finalSuggestions = getAllNotes(state.collections).filter(n => n.name.toLowerCase().includes(sourceQuery));
         } else if (command.name === 'go' && argString.startsWith('#')) {
-            const tagQuery = argString.substring(1).toLowerCase();
-            finalSuggestions = getAllTags().filter(t => t.toLowerCase().includes(tagQuery)).map(t => ({ id: t, name: t, type: 'tag' }));
-        } 
-        // Default argument suggestion logic (now runs for commands like `/go `)
-        else {
+            const tagArg = argString.substring(1);
+            const tagParts = tagArg.split(/ (.*)/s);
+            const tagName = tagParts[0];
+            const noteQuery = (tagParts[1] || '').toLowerCase();
+
+            if (getAllTags().includes(tagName) && tagParts.length > 1) {
+                const notesInTag = getAllNotes(state.collections).filter(n => (n.tags || []).includes(tagName));
+                finalSuggestions = notesInTag.filter(n => n.name.toLowerCase().includes(noteQuery));
+            } else {
+                finalSuggestions = getAllTags().filter(t => t.toLowerCase().includes(tagArg.toLowerCase())).map(t => ({ id: t, name: t, type: 'tag' }));
+            }
+        } else {
             const suggestionMap = new Map();
             let itemsForNameMatch = [];
+            if (command.suggest.includes('items') || command.suggest.includes('folders')) itemsForNameMatch.push(...getAllFolders());
+            if (command.suggest.includes('items') || command.suggest.includes('notes')) itemsForNameMatch.push(...getAllNotes(state.collections));
             
-            if (command.suggest === 'items' || command.suggest === 'items_or_tags' || command.suggest === 'folders') {
-                itemsForNameMatch.push(...getAllFolders());
-            }
-            if (command.suggest === 'items' || command.suggest === 'items_or_tags' || command.suggest === 'notes') {
-                itemsForNameMatch.push(...getAllNotes(state.collections));
-            }
-            
-            itemsForNameMatch.filter(item => item.name.toLowerCase().includes(argQuery))
-                .forEach(item => suggestionMap.set(item.id, { ...item, matchType: 'name' }));
+            itemsForNameMatch.filter(item => item.name.toLowerCase().includes(argQuery)).forEach(item => suggestionMap.set(item.id, { ...item, matchType: 'name' }));
 
-            // Only search content if there's an actual query
-            if (argQuery && (command.suggest === 'items' || command.suggest === 'items_or_tags' || command.suggest === 'notes')) {
+            if (argQuery && (command.suggest.includes('items') || command.suggest.includes('notes'))) {
                 lunrIndex.search(argQuery).forEach(res => {
                     if (!suggestionMap.has(res.ref)) {
                         const item = findItem(res.ref)?.item;
@@ -3929,9 +3993,7 @@ const renderSuggestions = (rawInput) => {
         } else if (argString) {
             suggestionsHTML = `<div class="p-2 text-sm text-text-tertiary">No items match "${argString}"</div>`;
         }
-
     } 
-    // Case 2: Suggesting commands
     else {
         const filteredCommands = commands.filter(cmd => cmd.name.startsWith(commandName));
         if (filteredCommands.length > 0) {
@@ -3973,8 +4035,9 @@ document.addEventListener('keydown', (e) => {
     const activeSuggestion = commandSuggestionsContainer.querySelector('.command-suggestion-item.active');
     
     const completeAndExecute = (suggestionEl) => {
-        const commandName = commandInput.value.slice(1).split(' ')[0];
-        const argString = commandInput.value.slice(1).substring(commandName.length).trim();
+        const commandParts = commandInput.value.slice(1).split(' ');
+        const commandName = commandParts[0];
+        const argString = commandParts.slice(1).join(' ');
         const itemName = suggestionEl.dataset.itemName;
         const tagName = suggestionEl.dataset.tagName;
         const commandSuggestion = suggestionEl.dataset.commandName;
@@ -3987,12 +4050,15 @@ document.addEventListener('keydown', (e) => {
         } else if (itemName) {
             const toSeparator = /\s+to\s+/i;
             const fromSeparator = /\s+from\s+/i;
-
             if ((commandName === 'link' || commandName === 'rename') && toSeparator.test(argString)) {
                 finalCommand = `/${commandName} ${argString.split(toSeparator)[0]} to ${itemName}`;
             } else if (commandName === 'unlink' && fromSeparator.test(argString)) {
                 finalCommand = `/${commandName} ${argString.split(fromSeparator)[0]} from ${itemName}`;
-            } else {
+            } else if (commandName === 'go' && argString.startsWith('#')) {
+                 const tagPart = argString.split(' ')[0];
+                 finalCommand = `/go ${tagPart} ${itemName}`;
+            }
+            else {
                 finalCommand = `/${commandName} ${itemName}`;
             }
         }
@@ -4031,17 +4097,18 @@ document.addEventListener('keydown', (e) => {
                     completedValue = `/${commandName} ${argString.split(toSeparator)[0]} to ${itemName} `;
                 } else if (commandName === 'unlink' && fromSeparator.test(argString)) {
                     completedValue = `/${commandName} ${argString.split(fromSeparator)[0]} from ${itemName} `;
+                } else if (commandName === 'go' && argString.startsWith('#')) {
+                    completedValue = `/go ${argString.split(' ')[0]} ${itemName} `;
                 } else if (commandName === 'link' || commandName === 'rename') {
                      completedValue = `/${commandName} ${itemName} to `;
                 } else if (commandName === 'unlink') {
                      completedValue = `/${commandName} ${itemName} from `;
-                }
-                else {
+                } else {
                     completedValue = `/${commandName} ${itemName} `;
                 }
             }
             commandInput.value = completedValue;
-            commandSuggestionsContainer.classList.add('hidden');
+            renderSuggestions(completedValue);
             const end = commandInput.value.length;
             commandInput.setSelectionRange(end, end);
         }
@@ -4060,8 +4127,24 @@ document.addEventListener('keydown', (e) => {
 });
 
 commandInput.addEventListener('input', () => { if (!commandInput.value.startsWith('/')) commandInput.value = '/'; renderSuggestions(commandInput.value); });
-commandSuggestionsContainer.addEventListener('click', (e) => { const item = e.target.closest('.command-suggestion-item'); if (item) { const cmd = commandInput.value.slice(1).split(' ')[0]; const val = item.dataset.itemName||item.dataset.tagName||item.dataset.commandName; let finalCmd; const toSep=/\s+to\s+/i; const fromSep=/\s+from\s+/i; const argStr=commandInput.value.slice(1).substring(cmd.length).trim(); if(item.dataset.itemName){if((cmd==='link'||cmd==='rename')&&toSep.test(argStr)){finalCmd=`/${cmd} ${argStr.split(toSep)[0]} to ${val}`}else if(cmd==='unlink'&&fromSep.test(argStr)){finalCmd=`/${cmd} ${argStr.split(fromSep)[0]} from ${val}`}else{finalCmd=`/${cmd} ${val}`}}else{finalCmd=`/${val}`}executeCommand(finalCmd); }});
+commandSuggestionsContainer.addEventListener('click', (e) => { const item = e.target.closest('.command-suggestion-item'); if(item){ const cmdName=commandInput.value.slice(1).split(' ')[0]; const argStr=commandInput.value.slice(1).substring(cmdName.length).trim(); let finalCmd; if(item.dataset.itemName){ const toSep=/\s+to\s+/i; const fromSep=/\s+from\s+/i; if((cmdName==='link'||cmdName==='rename')&&toSep.test(argStr)){finalCmd=`/${cmdName} ${argStr.split(toSep)[0]} to ${item.dataset.itemName}`}else if(cmdName==='unlink'&&fromSep.test(argStr)){finalCmd=`/${cmdName} ${argStr.split(fromSep)[0]} from ${item.dataset.itemName}`}else if(cmdName==='go'&&argStr.startsWith('#')){finalCmd=`/${cmdName} ${argStr.split(' ')[0]} ${item.dataset.itemName}`}else{finalCmd=`/${cmdName} ${item.dataset.itemName}`}}else if(item.dataset.tagName){finalCmd=`/go ${item.dataset.tagName}`}else{finalCmd=`/${item.dataset.commandName}`}executeCommand(finalCmd)} });
 document.addEventListener('click', (e) => { if (isCommandPromptOpen && !commandPromptContainer.contains(e.target)) closeCommandPrompt(); });
+
+document.getElementById('help-close-btn').addEventListener('click', () => closeModal(document.getElementById('help-modal')));
+document.getElementById('linked-notes-close-btn').addEventListener('click', () => closeModal(document.getElementById('linked-notes-modal')));
+document.getElementById('linked-notes-modal').addEventListener('click', (e) => {
+    const link = e.target.closest('.linked-note-jump');
+    if (link) {
+        e.preventDefault();
+        const noteId = link.dataset.noteId;
+        const noteName = findItem(noteId)?.item.name;
+        if(noteName) {
+            closeModal(document.getElementById('linked-notes-modal'));
+            executeCommand(`/go ${noteName}`);
+        }
+    }
+});
+// --- END: SLASH COMMAND CONSOLE ---
 
 // --- END: SLASH COMMAND CONSOLE ---
 
@@ -6163,7 +6246,7 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
 </body>
 <div id="command-prompt-container" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 w-[90%] max-w-lg z-50">
     <div class="relative">
-        <div id="command-suggestions" class="hidden absolute bottom-full left-0 w-full mb-1 bg-bg-pane-dark rounded-md shadow-lg p-1 border border-border-color max-h-60 overflow-y-auto">
+        <div id="command-suggestions" class="hidden absolute bottom-full left-0 w-full mb-1 bg-bg-pane-dark rounded-md shadow-lg p-1 border border-border-color max-h-60 overflow-y-auto custom-scrollbar">
             </div>
         <div class="flex items-center gap-2 bg-bg-pane-dark p-2 rounded-lg shadow-2xl border border-border-color">
             <i data-feather="slash" class="w-5 h-5 text-text-tertiary"></i>
@@ -6171,6 +6254,24 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         </div>
     </div>
 </div>
+<div id="linked-notes-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-lg z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-4 flex-shrink-0">
+        <h3 id="linked-notes-title" class="text-lg font-semibold flex items-center gap-2"><i data-feather="link" class="w-5 h-5 text-accent-primary"></i>Note Connections</h3>
+        <button id="linked-notes-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    <div id="linked-notes-content" class="flex-grow space-y-4 overflow-y-auto">
+        </div>
+</div>
 
+<div id="help-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-2xl z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-4 flex-shrink-0">
+        <h3 class="text-lg font-semibold flex items-center gap-2"><i data-feather="terminal" class="w-5 h-5 text-accent-primary"></i>Command List</h3>
+        <button id="help-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    <div id="help-content" class="flex-grow space-y-2 overflow-y-auto max-h-[60vh] custom-scrollbar">
+
+
+        </div>
+</div>
 </body>
 </html>
