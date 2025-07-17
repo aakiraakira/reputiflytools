@@ -202,12 +202,59 @@
     overflow-y: auto;
     max-height: 65vh; /* Sets a max height relative to the viewport */
 }
+
 /* --- END: Modal Scroll Fix --- */
         
         /* --- UI Polish & Animations --- */
         #note-editor-body {
     overflow-wrap: break-word;
     word-wrap: break-word; /* For older browser compatibility */
+}
+#command-prompt-container {
+    transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+
+#command-prompt-container.hidden {
+    opacity: 0;
+    transform: translate(-50%, 20px) scale(0.95);
+    pointer-events: none;
+}
+
+.command-suggestion-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+    cursor: pointer;
+}
+.command-suggestion-item:hover {
+    background-color: var(--bg-pane-light);
+}
+.command-suggestion-item.active {
+    background-color: var(--accent-primary);
+    color: white;
+}
+.command-suggestion-item .cmd-name {
+    font-weight: 600;
+}
+.command-suggestion-item .cmd-alias {
+    font-size: 0.75rem;
+    background-color: var(--bg-pane-light);
+    color: var(--text-secondary);
+    border-radius: 0.25rem;
+    padding: 2px 6px;
+}
+.command-suggestion-item.active .cmd-alias {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: white;
+}
+.command-suggestion-item .cmd-desc {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+.command-suggestion-item.active .cmd-desc {
+    color: rgba(255, 255, 255, 0.8);
 }
 #note-editor-title {
     overflow-wrap: break-word;
@@ -3668,6 +3715,189 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: SLASH COMMAND CONSOLE ---
+
+const commandPromptContainer = document.getElementById('command-prompt-container');
+const commandInput = document.getElementById('command-input');
+const commandSuggestionsContainer = document.getElementById('command-suggestions');
+let isCommandPromptOpen = false;
+let suggestionIndex = -1;
+
+const commands = [
+    {
+        name: 'nn',
+        description: 'New Note. Usage: /nn [note name]',
+        execute: (args) => {
+            const newNote = createNewNote(true, `<h1>${args || 'Untitled Note'}</h1>`);
+            newNote.name = args || 'Untitled Note';
+            saveState();
+            render();
+            showToast(`✅ Note "${newNote.name}" created`, 'success');
+        }
+    },
+    {
+        name: 'nf',
+        description: 'New Folder. Usage: /nf [folder name]',
+        execute: async (args) => {
+            const folderName = args || 'Untitled Folder';
+            const newCollection = { id: generateId('c'), name: folderName, type: 'folder', children: [], expanded: true };
+            const firstColumnId = generateId('col');
+            state.kanbanColumns[newCollection.id] = [{ id: firstColumnId, title: 'To Do' }];
+            state.collections.push(newCollection);
+            saveState();
+            buildLunrIndex();
+            render();
+            showToast(`✅ Folder "${folderName}" created`, 'success');
+        }
+    },
+    {
+        name: 'ask',
+        description: 'Ask Your Notes AI. Usage: /ask [question]',
+        execute: (args) => {
+            if (!args) return showToast('❌ Please provide a question.', 'error');
+            const aiModalInput = document.getElementById('global-ai-input');
+            const aiModalAskBtn = document.getElementById('global-ai-ask-btn');
+            aiModalInput.value = args;
+            openModal(document.getElementById('global-ai-modal'));
+            aiModalAskBtn.click(); // Automatically trigger the AI search
+            feather.replace();
+        }
+    },
+    {
+        name: 'summary',
+        description: 'Summarize the current active note.',
+        execute: () => {
+            document.getElementById('header-summarize-btn')?.click();
+        }
+    },
+    {
+        name: 'quiz',
+        description: 'Generate an MCQ quiz for the current note.',
+        execute: () => {
+            document.getElementById('header-quiz-btn')?.click();
+        }
+    },
+    {
+        name: 'flashcard',
+        description: 'Open flashcard mode for the current note.',
+        execute: () => {
+            document.getElementById('header-flashcard-btn')?.click();
+        }
+    }
+];
+
+const openCommandPrompt = () => {
+    if (isCommandPromptOpen) return;
+    isCommandPromptOpen = true;
+    commandPromptContainer.classList.remove('hidden');
+    commandInput.value = '/';
+    renderSuggestions('');
+    commandInput.focus();
+    // Move cursor to end
+    setTimeout(() => commandInput.setSelectionRange(commandInput.value.length, commandInput.value.length), 0);
+};
+
+const closeCommandPrompt = () => {
+    if (!isCommandPromptOpen) return;
+    isCommandPromptOpen = false;
+    commandPromptContainer.classList.add('hidden');
+    commandSuggestionsContainer.classList.add('hidden');
+    suggestionIndex = -1;
+};
+
+const renderSuggestions = (query) => {
+    const filteredCommands = commands.filter(cmd => cmd.name.includes(query) || (cmd.alias && cmd.alias.includes(query)));
+
+    if (filteredCommands.length === 0 || query === '') {
+        commandSuggestionsContainer.classList.add('hidden');
+        return;
+    }
+
+    commandSuggestionsContainer.classList.remove('hidden');
+    commandSuggestionsContainer.innerHTML = filteredCommands.map((cmd, index) => `
+        <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-command-name="${cmd.name}">
+            <div class="flex items-center gap-3">
+                <span class="cmd-name">/${cmd.name}</span>
+            </div>
+            <span class="cmd-desc">${cmd.description}</span>
+        </div>
+    `).join('');
+};
+
+const executeCommand = (inputValue) => {
+    // Remove the leading slash to parse the command
+    const cleanInput = inputValue.slice(1).trim();
+    if (!cleanInput) {
+        closeCommandPrompt();
+        return;
+    }
+
+    const parts = cleanInput.split(' ');
+    const commandName = parts[0];
+    const args = parts.slice(1).join(' ');
+
+    const command = commands.find(c => c.name === commandName || c.alias === commandName);
+
+    if (command) {
+        command.execute(args);
+    } else {
+        showToast(`❌ Command not found: ${commandName}`, 'error');
+    }
+    closeCommandPrompt();
+};
+
+document.addEventListener('keydown', (e) => {
+    // Open prompt with Ctrl + /
+    if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+        e.preventDefault();
+        isCommandPromptOpen ? closeCommandPrompt() : openCommandPrompt();
+    }
+
+    if (!isCommandPromptOpen) return;
+
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        closeCommandPrompt();
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        executeCommand(commandInput.value);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const suggestions = commandSuggestionsContainer.querySelectorAll('.command-suggestion-item');
+        if (suggestions.length === 0) return;
+
+        suggestions[suggestionIndex]?.classList.remove('active');
+        
+        if (e.key === 'ArrowDown') {
+            suggestionIndex = (suggestionIndex + 1) % suggestions.length;
+        } else {
+            suggestionIndex = (suggestionIndex - 1 + suggestions.length) % suggestions.length;
+        }
+
+        const selectedSuggestion = suggestions[suggestionIndex];
+        selectedSuggestion.classList.add('active');
+        commandInput.value = `/${selectedSuggestion.dataset.commandName} `;
+    }
+});
+
+commandInput.addEventListener('input', () => {
+    if (!commandInput.value.startsWith('/')) {
+        commandInput.value = '/';
+    }
+    renderSuggestions(commandInput.value.slice(1));
+    suggestionIndex = -1;
+});
+
+// Close prompt if clicking outside of it
+document.addEventListener('click', (e) => {
+    if (isCommandPromptOpen && !commandPromptContainer.contains(e.target)) {
+        closeCommandPrompt();
+    }
+});
+
+// --- END: SLASH COMMAND CONSOLE ---
+
+// --- END: SLASH COMMAND CONSOLE ---
                 // --- Source Snippet Click Listener ---
 document.getElementById('global-ai-modal').addEventListener('click', (e) => {
     const link = e.target.closest('.source-snippet-link');
@@ -5758,6 +5988,16 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
   }
 </script>
 </body>
+<div id="command-prompt-container" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 w-[90%] max-w-lg z-50">
+    <div class="relative">
+        <div id="command-suggestions" class="hidden absolute bottom-full left-0 w-full mb-1 bg-bg-pane-dark rounded-md shadow-lg p-1 border border-border-color max-h-60 overflow-y-auto">
+            </div>
+        <div class="flex items-center gap-2 bg-bg-pane-dark p-2 rounded-lg shadow-2xl border border-border-color">
+            <i data-feather="slash" class="w-5 h-5 text-text-tertiary"></i>
+            <input type="text" id="command-input" class="w-full bg-transparent focus:outline-none text-text-primary" placeholder="Type a command and press Enter...">
+        </div>
+    </div>
+</div>
 
 </body>
 </html>
