@@ -4012,7 +4012,51 @@ const commands = [
                 render();
             }
         }
+    }, // <-- Don't forget to add a comma after the last existing command!
+{
+    name: 'rename',
+    description: 'Rename an item. Usage: /rename [old name] to [new name]',
+    suggest: 'items', // This will suggest items for the [old name] part
+    execute: async (args) => {
+        // 1. Find the separator ' to ' to split old and new names.
+        // We use a regex to handle spaces flexibly.
+        const separator = /\s+to\s+/i; 
+        if (!separator.test(args)) {
+            return showToast('❌ Invalid format. Use: /rename [old name] to [new name]', 'error');
+        }
+
+        const parts = args.split(separator);
+        const oldNameQuery = parts[0].trim();
+        const newName = parts[1].trim();
+
+        if (!oldNameQuery || !newName) {
+            return showToast('❌ Both an old and new name are required.', 'error');
+        }
+
+        // 2. Find the item to rename using our smart find function.
+        const allItems = [...getAllNotes(state.collections), ...getAllFolders()];
+        const itemToRename = findBestMatch(oldNameQuery, allItems);
+
+        if (!itemToRename) {
+            return showToast(`❌ Could not find an item matching "${oldNameQuery}".`, 'error');
+        }
+
+        // 3. Confirm with the user before making the change.
+        const confirmed = await showConfirm({
+            title: 'Confirm Rename',
+            message: `Are you sure you want to rename "${itemToRename.name}" to "${newName}"?`,
+            confirmText: 'Rename'
+        });
+
+        if (confirmed) {
+            itemToRename.name = newName;
+            saveState();
+            buildLunrIndex(); // Rebuild search index with the new name
+            render();
+            showToast(`✅ Renamed to "${newName}"`, 'success');
+        }
     }
+}
 ];
 
 const openCommandPrompt = () => {
