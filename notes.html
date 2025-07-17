@@ -3904,7 +3904,97 @@ const commands = [
                 render();
             }
         }
+    }, // <-- Don't forget to add a comma after the last existing command!
+{
+    name: 'dup',
+    description: 'Duplicate an item. Usage: /dup [item name]',
+    execute: (args) => {
+        let findResult = null;
+        if (args) {
+            const allItems = [...getAllNotes(state.collections), ...getAllFolders(state.collections)];
+            const itemToDup = allItems.find(i => i.name.toLowerCase() === args.toLowerCase());
+            if (itemToDup) findResult = findItem(itemToDup.id);
+        } else {
+            const activeId = state.settings.activeNoteId || state.settings.activeCollectionId;
+            if (activeId) findResult = findItem(activeId);
+        }
+
+        if (!findResult) return showToast('❌ Item not found or specified.', 'error');
+        
+        const newItem = duplicateItem(findResult.item);
+        const parentArray = Array.isArray(findResult.parent) ? findResult.parent : findResult.parent.children;
+        parentArray.splice(findResult.index + 1, 0, newItem);
+
+        showToast(`✅ Duplicated "${findResult.item.name}"`, 'success');
+        saveState();
+        buildLunrIndex();
+        render();
     }
+},
+{
+    name: 'go',
+    description: 'Go to a note or folder. Usage: /go [item name]',
+    execute: (args) => {
+        if (!args) return showToast('❌ Please specify an item to go to.', 'error');
+
+        const allItems = [...getAllNotes(state.collections), ...getAllFolders(state.collections)];
+        const targetItem = allItems.find(i => i.name.toLowerCase() === args.toLowerCase());
+
+        if (!targetItem) return showToast(`❌ Item not found: "${args}"`, 'error');
+        
+        state.settings.activeTag = null;
+        if (targetItem.type === 'note') {
+            const { parent } = findItem(targetItem.id);
+            state.settings.activeCollectionId = (Array.isArray(parent) || !parent) ? null : parent.id;
+            state.settings.activeNoteId = targetItem.id;
+        } else {
+            state.settings.activeCollectionId = targetItem.id;
+            state.settings.activeNoteId = null;
+        }
+
+        showToast(`🚀 Navigated to "${targetItem.name}"`, 'success');
+        saveState();
+        render();
+    }
+},
+{
+    name: 'pin',
+    description: 'Toggle pin on a note. Usage: /pin [note name]',
+    execute: (args) => {
+        let noteToPin = null;
+        if (args) {
+            noteToPin = getAllNotes(state.collections).find(n => n.name.toLowerCase() === args.toLowerCase());
+        } else if (state.settings.activeNoteId) {
+            noteToPin = findItem(state.settings.activeNoteId)?.item;
+        }
+
+        if (!noteToPin) return showToast('❌ Note not found or specified.', 'error');
+        
+        noteToPin.pinned = !noteToPin.pinned;
+        showToast(noteToPin.pinned ? `📌 Pinned "${noteToPin.name}"` : `👎 Unpinned "${noteToPin.name}"`, 'success');
+        saveState();
+        render();
+    }
+},
+{
+    name: 'tag',
+    description: 'Add a tag to the current note. Usage: /tag [tagname]',
+    execute: (args) => {
+        if (!state.settings.activeNoteId) return showToast('❌ You must be in a note to add a tag.', 'error');
+        if (!args) return showToast('❌ Please specify a tag to add.', 'error');
+
+        const tagName = args.split(' ')[0].replace(/#/g, '');
+        if (!tagName) return;
+
+        // Append the tag to the editor's content
+        app.elements.noteEditorBody.innerHTML += ` #${tagName}`;
+        
+        // Use the existing save function to update content, tags, and the UI
+        performImmediateSave();
+        
+        showToast(`🏷️ Tagged with #${tagName}`, 'success');
+    }
+}
 ];
 
 const openCommandPrompt = () => {
