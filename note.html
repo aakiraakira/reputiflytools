@@ -23,6 +23,10 @@
     <script src="https://unpkg.com/vis-network@9.1.2/dist/vis-network.min.js"></script>
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
     <script src="https://cdn.jsdelivr.net/npm/lunr/lunr.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/fuse.js/dist/fuse.min.js"></script> <!-- ADD THIS LINE -->
+ 
+        <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.1/dist/browser-image-compression.js"></script>
+
     <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.1/dist/browser-image-compression.js"></script>
     
 
@@ -3882,23 +3886,20 @@ const createContentSnippet = (content, query) => {
 };
 
 const findBestMatch = (query, items) => {
-    if (!query) return null;
-    const lowerQuery = query.toLowerCase();
-    let bestMatch = null;
-    let highScore = -1;
-    for (const item of items) {
-        const lowerName = item.name.toLowerCase();
-        let score = 0;
-        if (lowerName === lowerQuery) score = 100;
-        else if (lowerName.startsWith(lowerQuery)) score = 50;
-        else if (lowerName.includes(lowerQuery)) score = 20;
-        if (score > 0) score -= lowerName.length / 100;
-        if (score > highScore) {
-            highScore = score;
-            bestMatch = item;
-        }
-    }
-    return bestMatch;
+    if (!query || !items || items.length === 0) return null;
+    
+    // These options tell Fuse.js to search by the 'name' key and to be lenient with typos.
+    const fuseOptions = {
+        keys: ['name'],
+        includeScore: true,
+        threshold: 0.4 
+    };
+
+    const fuse = new Fuse(items, fuseOptions);
+    const results = fuse.search(query);
+    
+    // Return the best match (the first item in the results)
+    return results.length > 0 ? results[0].item : null;
 };
 
 const getAllTags = () => {
@@ -4045,7 +4046,25 @@ const commands = [
                 showToast(`✅ Content cleared from "${note.name}"`, 'success');
             }
         })
-    },
+    },{
+    name: 'notegraph',
+    description: 'Show note graph. Usage: /notegraph [note name]',
+    suggest: 'notes',
+    execute: (args) => {
+        executeWithSmartFind(args, 'notes', (note) => {
+            // This reuses the same logic as the toolbar button
+            const graphBtn = document.getElementById('graph-btn');
+            if (graphBtn) {
+                // Temporarily set the active note to the one we want to graph
+                const originalActiveNote = state.settings.activeNoteId;
+                state.settings.activeNoteId = note.id;
+                graphBtn.click();
+                // Restore the original active note so the UI doesn't jump
+                state.settings.activeNoteId = originalActiveNote;
+            }
+        });
+    }
+},
     { name: 'dn', description: 'Delete a note. Usage: /dn [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',async(n)=>{const r=findItem(n.id);const c=await showConfirm({title:`Delete "${n.name}"?`,message:'This cannot be undone.',confirmText:'Delete'});if(c){const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index,1);showToast(`🗑️ Note deleted.`);if(state.settings.activeNoteId===n.id)state.settings.activeNoteId=null;saveState();buildLunrIndex();render()}})},
     { name: 'df', description: 'Delete folder. Usage: /df [folder name]', suggest: 'folders', execute: (args)=>executeWithSmartFind(args,'folders',async(f)=>{const r=findItem(f.id);const c=await showConfirm({title:`Delete folder "${f.name}"?`,message:'This will delete the folder and <strong>all notes inside</strong>.',confirmText:'Delete'});if(c){const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index,1);showToast(`🗑️ Folder deleted.`);if(state.settings.activeCollectionId===f.id)state.settings.activeCollectionId=null;saveState();buildLunrIndex();render()}})}
 ];
@@ -4085,34 +4104,21 @@ const renderSuggestions = (rawInput) => {
             } else {
                 finalSuggestions = getAllTags().filter(t => t.toLowerCase().includes(tagArg.toLowerCase())).map(t => ({ id: t, name: t, type: 'tag' }));
             }
-        } else if (parts.length > 1) {
-            const noteSuggestionMap = new Map();
-            let folderSuggestions = [];
+        } // ... inside renderSuggestions function
+ else if (parts.length > 1) {
+    let itemsToSearch = [];
+    if (command.suggest.includes('items')) {
+        itemsToSearch = [...getAllNotes(state.collections), ...getAllFolders()];
+    } else if (command.suggest.includes('notes')) {
+        itemsToSearch = getAllNotes(state.collections);
+    } else if (command.suggest.includes('folders')) {
+        itemsToSearch = getAllFolders();
+    }
 
-            // 1. Get NOTE matches first (from name and content)
-            if (command.suggest.includes('items') || command.suggest.includes('notes')) {
-                const allNotes = getAllNotes(state.collections);
-                allNotes.filter(item => item.name.toLowerCase().includes(argQuery)).forEach(item => noteSuggestionMap.set(item.id, { ...item, matchType: 'name' }));
-                if (argQuery) {
-                    lunrIndex.search(argQuery).forEach(res => {
-                        if (!noteSuggestionMap.has(res.ref)) {
-                            const item = findItem(res.ref)?.item;
-                            if (item && item.type === 'note') noteSuggestionMap.set(item.id, { ...item, matchType: 'content', snippet: createContentSnippet(item.content, argQuery) });
-                        }
-                    });
-                }
-            }
-            
-            // 2. Get FOLDER matches
-            if (command.suggest.includes('items') || command.suggest.includes('folders')) {
-                folderSuggestions = getAllFolders()
-                    .filter(item => item.name.toLowerCase().includes(argQuery))
-                    .map(item => ({ ...item, matchType: 'name' }));
-            }
-
-            // 3. Combine with notes prioritized
-            finalSuggestions = [...Array.from(noteSuggestionMap.values()), ...folderSuggestions];
-        }
+    // Use Fuse to get a ranked list of fuzzy-matched items
+    const fuse = new Fuse(itemsToSearch, { keys: ['name'], threshold: 0.5 });
+    finalSuggestions = fuse.search(argQuery).map(result => result.item);
+}
 
         if (finalSuggestions.length > 0) {
             suggestionsHTML = finalSuggestions.slice(0,5).map((item, index) => {
@@ -5538,6 +5544,85 @@ app.elements.noteEditorBody.addEventListener('paste', (e) => {
                             }
                         };
                         new vis.Network(app.modals.graphContainer, { nodes, edges }, options);
+                        const network = new vis.Network(app.modals.graphContainer, { nodes, edges }, options);
+
+                        // --- START: NEW & IMPROVED INTERACTIVITY CODE ---
+                        network.on('click', function(params) {
+                            if (params.nodes.length > 0) {
+                                const noteId = params.nodes[0];
+                                const noteToOpen = findItem(noteId)?.item;
+                                if (noteToOpen) {
+                                    state.settings.activeNoteId = noteId;
+                                    const { parent } = findItem(noteId);
+                                    state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+                                    state.settings.activeTag = null;
+                                    saveState();
+                                    render();
+                                    closeModal(app.modals.graph);
+                                }
+                            }
+                        });
+
+                        const createTooltip = () => {
+                            let tooltip = document.getElementById('note-graph-tooltip');
+                            if (!tooltip) {
+                                tooltip = document.createElement('div');
+                                tooltip.id = 'note-graph-tooltip';
+                                tooltip.style.position = 'absolute';
+                                tooltip.style.visibility = 'hidden';
+                                tooltip.style.backgroundColor = 'var(--bg-pane-dark)';
+                                tooltip.style.border = '1px solid var(--border-color)';
+                                tooltip.style.borderRadius = '8px';
+                                tooltip.style.padding = '12px';
+                                tooltip.style.maxWidth = '300px';
+                                tooltip.style.color = 'var(--text-primary)';
+                                tooltip.style.boxShadow = '0 4px 12px var(--shadow-color)';
+                                tooltip.style.pointerEvents = 'none';
+                                tooltip.style.zIndex = '10000';
+                                tooltip.style.opacity = '0';
+                                tooltip.style.transition = 'opacity 0.2s ease-in-out';
+                                document.body.appendChild(tooltip);
+                            }
+                            return tooltip;
+                        };
+                        
+                        network.on('hoverNode', function(params) {
+                            const noteId = params.node;
+                            const note = findItem(noteId)?.item;
+                            const tooltip = createTooltip();
+
+                            if (note) {
+                                const plainContent = note.content.replace(/<[^>]*>?/gm, '').trim();
+                                const excerpt = plainContent.substring(0, 150) + (plainContent.length > 150 ? '...' : '');
+
+                                tooltip.innerHTML = `
+                                    <h4 style="font-weight: 600; margin: 0 0 5px 0;">${note.name}</h4>
+                                    <p style="font-size: 0.875rem; margin: 0; color: var(--text-secondary);">${excerpt || 'This note is empty.'}</p>
+                                `;
+
+                                tooltip.style.left = `${params.event.pointer.DOM.x + 15}px`;
+                                tooltip.style.top = `${params.event.pointer.DOM.y + 15}px`;
+                                tooltip.style.visibility = 'visible';
+                                tooltip.style.opacity = '1';
+                            }
+                        });
+
+                        network.on('blurNode', function(params) {
+                            const tooltip = document.getElementById('note-graph-tooltip');
+                            if (tooltip) {
+                                tooltip.style.opacity = '0';
+                                tooltip.style.visibility = 'hidden';
+                            }
+                        });
+                        // --- END: NEW & IMPROVED INTERACTIVITY CODE ---
+
+                        network.on('blurNode', function(params) {
+                            let tooltip = document.getElementById('note-graph-tooltip');
+                            if (tooltip) {
+                                tooltip.style.opacity = '0';
+                            }
+                        });
+                        // --- END: ADD THIS NEW CODE ---
                         openModal(app.modals.graph);
 
                     } catch(err) {
@@ -5582,6 +5667,7 @@ app.elements.noteEditorBody.addEventListener('paste', (e) => {
                     app.modals.aiGenerateBtn.disabled = false;
                     app.modals.aiGenerateBtnText.textContent = 'Generate';
                 });
+                
 
                 const handleSummarize = async (noteContent) => {
     const toastId = showToast('Summarizing...', 'loading');
