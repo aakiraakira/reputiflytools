@@ -162,6 +162,11 @@
     color: var(--text-tertiary);
 }
 /* --- END: Final Checklist Alignment Fix --- */
+/* This handles the strikethrough effect */
+.task-list-item.checked .task-list-item-text {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
+}
 
 
         .brand-button {
@@ -5189,6 +5194,27 @@ if (quizBtn) {
                 });
 
                 // This is the core save logic
+                // This listener handles checklist state changes reliably
+app.elements.noteEditorBody.addEventListener('change', (e) => {
+    // Check if the changed element was a checkbox inside a task list
+    if (e.target.matches('.task-list-item input[type="checkbox"]')) {
+        const item = e.target.closest('.task-list-item');
+        if (item) {
+            // Toggle the .checked class for the strikethrough style
+            item.classList.toggle('checked', e.target.checked);
+            
+            // Save the state to the HTML itself so it's preserved on reload
+            if (e.target.checked) {
+                e.target.setAttribute('checked', '');
+            } else {
+                e.target.removeAttribute('checked');
+            }
+            
+            // Trigger the app's save mechanism
+            saveNoteContent();
+        }
+    }
+});
 performImmediateSave = () => {
     if (!state.settings.activeNoteId) return;
     const {item: note} = findItem(state.settings.activeNoteId);
@@ -5224,75 +5250,54 @@ saveNoteContent = debounce(performImmediateSave, 500);
                 app.elements.noteEditorBody.addEventListener('keydown', (e) => {
     const selection = window.getSelection();
     if (!selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    let container = range.startContainer;
+    container = container.nodeType === 3 ? container.parentNode : container;
 
-    // --- START OF NEW, ROBUST BACKSPACE LOGIC ---
-    if (e.key === 'Backspace') {
-        if (selection.isCollapsed && selection.getRangeAt(0).startOffset === 0) {
-            let container = selection.getRangeAt(0).startContainer;
-            let textSpan = (container.nodeType === 3) ? container.parentNode : container;
-            
-            // Handle cases where the cursor is technically on the parent div
-            if (textSpan && !textSpan.classList.contains('task-list-item-text')) {
-                textSpan = textSpan.querySelector('.task-list-item-text');
-            }
-
-            if (textSpan && textSpan.classList.contains('task-list-item-text')) {
-                const taskItem = textSpan.closest('.task-list-item');
-                if (taskItem) {
-                    e.preventDefault(); // Prevent default browser backspace
-
-                    // Create a new paragraph to replace the checklist item
-                    const p = document.createElement('p');
-                    p.innerHTML = textSpan.innerHTML || '<br>'; // Preserve content or create a line break
-
-                    // Replace the checklist item in the DOM
-                    taskItem.parentNode.replaceChild(p, taskItem);
-
-                    // Place the cursor correctly at the beginning of the new paragraph
-                    const newRange = document.createRange();
-                    newRange.selectNodeContents(p);
-                    newRange.collapse(true);
-                    selection.removeAllRanges();
-                    selection.addRange(newRange);
-                    
-                    // Manually trigger an input event so the app saves the change
-                    const inputEvent = new Event('input', { bubbles: true, cancelable: true });
-                    p.dispatchEvent(inputEvent);
-
-                    return; // Stop further execution
+    // --- Consolidated 'Enter' Key Logic ---
+    if (e.key === 'Enter' && !e.shiftKey) {
+        // 1. Prioritize Blockquote Exit Logic
+        const currentBlock = container.closest('p, div');
+        if (currentBlock) {
+            const blockquote = currentBlock.closest('blockquote');
+            if (blockquote && currentBlock.textContent.trim() === '' && (currentBlock.innerHTML === '' || currentBlock.innerHTML === '<br>')) {
+                e.preventDefault();
+                const newP = document.createElement('p');
+                newP.innerHTML = '<br>';
+                blockquote.after(newP);
+                currentBlock.remove();
+                if (blockquote.textContent.trim() === '') {
+                    blockquote.remove();
                 }
+                const newRange = document.createRange();
+                newRange.setStart(newP, 0);
+                selection.removeAllRanges();
+                selection.addRange(newRange);
+                saveNoteContent();
+                return;
             }
         }
-    }
-    // --- END OF NEW, ROBUST BACKSPACE LOGIC ---
 
-    // Handles pressing 'Enter' inside a checklist
-    if (e.key === 'Enter') {
-        const parentChecklist = selection.anchorNode.parentNode.closest('.task-list-item');
+        // 2. Handle Enter in Checklists
+        const parentChecklist = container.closest('.task-list-item');
         if (parentChecklist) {
             e.preventDefault();
             const textContent = parentChecklist.querySelector('.task-list-item-text').innerText.trim();
             if (textContent === '') {
-                // If line is empty, convert it to a normal paragraph
                 const p = document.createElement('p');
                 p.innerHTML = '<br>';
                 parentChecklist.parentNode.replaceChild(p, parentChecklist);
-                const range = document.createRange();
                 range.setStart(p, 0);
                 range.collapse(true);
                 selection.removeAllRanges();
                 selection.addRange(range);
             } else {
-                // If line has text, create a new blank checklist item below it
                 const newChecklist = document.createElement('div');
                 newChecklist.classList.add('task-list-item');
-                const onchangeLogic = `const item=this.closest('.task-list-item'); if(item){item.classList.toggle('checked',this.checked); this.checked?this.setAttribute('checked',''):this.removeAttribute('checked');} const event=new Event('input',{bubbles:true,cancelable:true}); this.dispatchEvent(event);`.replace(/"/g, '&quot;');
-                newChecklist.innerHTML = `<input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
+                // Note: The old 'onchange' attribute is intentionally removed for the new, better fix.
+                newChecklist.innerHTML = `<input type="checkbox" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
                 parentChecklist.after(newChecklist);
-                
-                // Move cursor to the new item
                 const newTextSpan = newChecklist.querySelector('.task-list-item-text');
-                const range = document.createRange();
                 range.selectNodeContents(newTextSpan);
                 range.collapse(false);
                 selection.removeAllRanges();
@@ -5303,36 +5308,26 @@ saveNoteContent = debounce(performImmediateSave, 500);
         }
     }
 
-    // Default behavior for other keys or situations
-    const range = selection.getRangeAt(0);
-    if (e.key === 'Enter' && !e.shiftKey) {
-        let container = selection.anchorNode;
-        container = container.nodeType === 3 ? container.parentNode : container;
-        const blockquote = container.closest('blockquote');
-        if (blockquote && container.textContent.trim() === '' && container.matches('p, div') && container.parentNode === blockquote) {
-            const isLastNode = !container.nextSibling && (container.innerHTML === '' || container.innerHTML === '<br>');
-            if (isLastNode) {
+    // --- Consolidated 'Backspace' Key Logic ---
+    if (e.key === 'Backspace' && selection.isCollapsed && range.startOffset === 0) {
+        const textSpan = container.closest('.task-list-item-text');
+        if (textSpan) {
+            const taskItem = textSpan.closest('.task-list-item');
+            if (taskItem) {
                 e.preventDefault();
-                const newP = document.createElement('p');
-                newP.innerHTML = '<br>';
-                blockquote.after(newP);
-                container.remove();
-                if (!blockquote.textContent.trim()) {
-                    blockquote.remove();
-                }
+                const p = document.createElement('p');
+                p.innerHTML = textSpan.innerHTML || '<br>';
+                taskItem.parentNode.replaceChild(p, taskItem);
                 const newRange = document.createRange();
-                newRange.setStart(newP, 0);
+                newRange.selectNodeContents(p);
                 newRange.collapse(true);
                 selection.removeAllRanges();
                 selection.addRange(newRange);
-                saveNoteContent();
+                p.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
                 return;
             }
         }
-    }
-
-    if (e.key === 'Backspace' && range.collapsed && range.startOffset === 0) {
-        const pre = selection.anchorNode.closest('pre');
+        const pre = container.closest('pre');
         if (pre && pre.textContent.length === 0) {
             const wrapper = pre.closest('.code-block-wrapper');
             if (wrapper) {
@@ -5825,231 +5820,148 @@ app.modals.quizContent.addEventListener('click', e => {
                 });
                 
                 app.toolbar.inline.addEventListener('mousedown', async (e) => {
-                    const button = e.target.closest('button');
-                    if (!button) return;
+    const button = e.target.closest('button');
+    if (!button) return;
 
-                    // If the clicked button is a scroll button, do nothing here.
-                    // This allows its dedicated 'click' listener to handle the action.
-                    if (button.id === 'toolbar-scroll-left' || button.id === 'toolbar-scroll-right') {
-                        return;
-                    }
-                    
-                    // For all other formatting buttons, prevent default behavior.
-                    e.preventDefault();
+    if (button.id === 'toolbar-scroll-left' || button.id === 'toolbar-scroll-right') {
+        return;
+    }
+    
+    e.preventDefault();
 
-                    const command = button.dataset.command;
-                    const value = button.dataset.value;
+    const command = button.dataset.command;
+    const value = button.dataset.value;
 
-                    if (command === 'monospace') {
-// ... (the rest of the function is exactly the same)
-// ... (the rest of the function is exactly the same)
-                        restoreSelectionAndExec(() => {
-                            const selection = window.getSelection();
-                            if (!selection.rangeCount) return;
-
-                            let parent = selection.getRangeAt(0).commonAncestorContainer;
-                            parent = parent.nodeType === 3 ? parent.parentNode : parent;
-                            const codeTag = parent.closest('code:not(pre code)');
-
-                            if (codeTag) {
-                                const content = document.createDocumentFragment();
-                                while(codeTag.firstChild) {
-                                    content.appendChild(codeTag.firstChild);
-                                }
-                                codeTag.parentNode.replaceChild(content, codeTag);
-                            } else {
-                                const selectedText = selection.toString();
-                                if (selectedText) {
-                                    document.execCommand('insertHTML', false, `<code>${selectedText}</code>`);
-                                }
-                            }
-                        });
-                        return;
-                    }
-                    if (command === 'toggleCheckboxes') {
+    if (command === 'monospace') {
         restoreSelectionAndExec(() => {
             const selection = window.getSelection();
             if (!selection.rangeCount) return;
-
-            // Get all checklist items in the note editor
+            let parent = selection.getRangeAt(0).commonAncestorContainer;
+            parent = parent.nodeType === 3 ? parent.parentNode : parent;
+            const codeTag = parent.closest('code:not(pre code)');
+            if (codeTag) {
+                const content = document.createDocumentFragment();
+                while(codeTag.firstChild) { content.appendChild(codeTag.firstChild); }
+                codeTag.parentNode.replaceChild(content, codeTag);
+            } else {
+                const selectedText = selection.toString();
+                if (selectedText) document.execCommand('insertHTML', false, `<code>${selectedText}</code>`);
+            }
+        });
+        return;
+    }
+    if (command === 'toggleCheckboxes') {
+        restoreSelectionAndExec(() => {
+            const selection = window.getSelection();
+            if (!selection.rangeCount) return;
             const allChecklistItems = app.elements.noteEditorBody.querySelectorAll('.task-list-item');
-
-            // Check each item to see if it's included in the user's selection
             allChecklistItems.forEach(item => {
-                // selection.containsNode(item, true) checks for full or partial selection
                 if (selection.containsNode(item, true)) {
-                    // Toggle the class that hides the checkbox
                     item.classList.toggle('checkbox-hidden');
                 }
             });
         });
-        return; // Stop after handling the command
+        return;
     }
-                    
-
-                    if (command === 'formatBlock' && value === 'code') {
-                         restoreSelectionAndExec(() => {
-                            const selection = window.getSelection();
-                            const selectedText = selection.toString();
-                            
-                            let lang = 'plaintext';
-                            if (/<[a-z][\s\S]*>/i.test(selectedText)) lang = 'html';
-                            else if (/\b(function|const|let|var|import|export)\b/.test(selectedText)) lang = 'javascript';
-                            else if (/\b(def|import|class|for|while)\b/.test(selectedText)) lang = 'python';
-
-                            const escapedCode = selectedText.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                            
-                            const codeBlockHTML = `
-                                <div class="code-block-wrapper" contenteditable="false">
-                                    <div class="code-block-header">
-                                        <span class="lang-name">${lang}</span>
-                                        <div class="flex items-center gap-1">
-                                            <button class="copy-code-btn" title="Copy Code">
-                                                <i data-feather="copy" class="w-4 h-4"></i>
-                                                <span>Copy</span>
-                                            </button>
-                                            <button class="delete-block-btn" title="Delete Block">
-                                                <i data-feather="trash-2" class="w-4 h-4"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <pre contenteditable="true"><code>${escapedCode}</code></pre>
-                                </div>
-                                <p><br></p>`;
-                            
-                            document.execCommand('insertHTML', false, codeBlockHTML);
-                            feather.replace();
-                        });
-                        return;
-                    }
-                    // Add this block for the new checklist command
-// Add this new, upgraded block for the checklist command
-// This is the new, upgraded checklist logic
-// This is the new, corrected checklist logic
-// This is the new, upgraded checklist logic
-// This is the final, corrected checklist logic
-// This is the new, safe, and fully corrected checklist logic
-// This is the final, corrected checklist logic for all cases
-// This is the final, corrected logic for the checklist feature
-// This is the new, stable, and final checklist logic
-// This is the final, corrected logic for the checklist feature
-if (command === 'insertChecklist') {
-    restoreSelectionAndExec(() => {
-        const selection = window.getSelection();
-        if (!selection.rangeCount) return;
-        const range = selection.getRangeAt(0);
-        let container = range.commonAncestorContainer;
-        container = container.nodeType === 3 ? container.parentNode : container;
-
-        const currentChecklist = container.closest('.task-list-item');
-        
-        // This improved onchange logic ensures changes are saved reliably
-        const onchangeLogic = `const item=this.closest('.task-list-item'); if(item){item.classList.toggle('checked',this.checked); this.checked?this.setAttribute('checked',''):this.removeAttribute('checked');} const event=new Event('input',{bubbles:true,cancelable:true}); this.dispatchEvent(event);`.replace(/"/g, '&quot;');
-
-        // CASE 1: TOGGLE OFF - If you're inside a checklist, it converts it back to a normal paragraph.
-        if (currentChecklist) {
-            const text = currentChecklist.querySelector('.task-list-item-text').innerText;
-            const p = document.createElement('p');
-            // Sanitize text and handle empty lines
-            p.innerHTML = text.trim() ? text.trim().replace(/</g, "&lt;").replace(/>/g, "&gt;") : '<br>';
-            currentChecklist.parentNode.replaceChild(p, currentChecklist);
+    if (command === 'formatBlock' && value === 'code') {
+         restoreSelectionAndExec(() => {
+            const selection = window.getSelection();
+            const selectedText = selection.toString();
+            let lang = 'plaintext';
+            if (/<[a-z][\s\S]*>/i.test(selectedText)) lang = 'html';
+            else if (/\b(function|const|let|var|import|export)\b/.test(selectedText)) lang = 'javascript';
+            else if (/\b(def|import|class|for|while)\b/.test(selectedText)) lang = 'python';
+            const escapedCode = selectedText.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const codeBlockHTML = `<div class="code-block-wrapper" contenteditable="false"><div class="code-block-header"><span>${lang}</span><div class="flex items-center gap-1"><button class="copy-code-btn" title="Copy Code"><i data-feather="copy" class="w-4 h-4"></i><span>Copy</span></button><button class="delete-block-btn" title="Delete Block"><i data-feather="trash-2" class="w-4 h-4"></i></button></div></div><pre contenteditable="true"><code>${escapedCode}</code></pre></div><p><br></p>`;
+            document.execCommand('insertHTML', false, codeBlockHTML);
+            feather.replace();
+        });
+        return;
+    }
+    if (command === 'insertChecklist') {
+        restoreSelectionAndExec(() => {
+            const selection = window.getSelection();
+            if (!selection.rangeCount) return;
+            const range = selection.getRangeAt(0);
+            let container = range.commonAncestorContainer;
+            container = container.nodeType === 3 ? container.parentNode : container;
+            const currentChecklist = container.closest('.task-list-item');
             
-            // Restore cursor position
-            range.selectNodeContents(p);
-            range.collapse(false);
-            selection.removeAllRanges();
-            selection.addRange(range);
-            return;
-        }
-
-        // CASE 2: TOGGLE ON - Converts the current selection to checklist items.
-        const selectedText = selection.toString();
-        let checklistHTML;
-
-        if (selectedText.trim() === '') {
-            // If nothing is selected, insert one blank checklist item.
-            checklistHTML = `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div>`;
-        } else {
-            // If text is selected, convert each line into a separate checklist item.
-            // This now correctly handles multi-line selections.
-            const lines = selectedText.split('\n');
-            checklistHTML = lines.map(line => {
-                const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
-                if (sanitizedLine === '') return null; // Ignore empty lines in the selection
-                return `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div></div>`;
-            }).filter(Boolean).join('');
-        }
-        
-        // Use the browser's standard 'insertHTML' command to safely replace the selection.
-        document.execCommand('insertHTML', false, checklistHTML);
-    });
-    return;
-}
-                    // Add this block for the new table command
-// Add this new, upgraded block for the table command
-// This new block opens the table creation popup
-// This block now saves the selection before opening the modal
-if (command === 'insertTable') {
-    const selection = window.getSelection();
-    if (selection.rangeCount > 0) {
-        editorSelectionRange = selection.getRangeAt(0).cloneRange();
+            if (currentChecklist) {
+                const text = currentChecklist.querySelector('.task-list-item-text').innerText;
+                const p = document.createElement('p');
+                p.innerHTML = text.trim() ? text.trim().replace(/</g, "&lt;").replace(/>/g, "&gt;") : '<br>';
+                currentChecklist.parentNode.replaceChild(p, currentChecklist);
+                range.selectNodeContents(p);
+                range.collapse(false);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                return;
+            }
+            const selectedText = selection.toString();
+            let checklistHTML;
+            if (selectedText.trim() === '') {
+                checklistHTML = `<div class="task-list-item"><input type="checkbox" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div>`;
+            } else {
+                const lines = selectedText.split('\n');
+                checklistHTML = lines.map(line => {
+                    const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+                    if (sanitizedLine === '') return null;
+                    return `<div class="task-list-item"><input type="checkbox" contenteditable="false"><div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div></div>`;
+                }).filter(Boolean).join('');
+            }
+            document.execCommand('insertHTML', false, checklistHTML);
+        });
+        return;
     }
-    openModal(document.getElementById('table-creator-modal'));
-    return;
-}
-
-                    if (command === 'createLink') {
-                        app.elements.noteEditorBody.focus();
-                        if (editorSelectionRange) {
-                            const selection = window.getSelection();
-                            selection.removeAllRanges();
-                            selection.addRange(editorSelectionRange);
-                        }
-
-                        const selection = window.getSelection();
-                        const parentEl = selection.anchorNode?.parentNode.closest('a');
-
-                        if(parentEl) {
-                            restoreSelectionAndExec(() => {
-                                document.execCommand('unlink');
-                            });
-                        } else {
-                            const selectedText = selection.toString().trim();
-                            const url = await showPrompt({ title: 'Insert Link', message: 'Enter the URL:', placeholder: 'https://example.com' });
-                            if (url) {
-                                restoreSelectionAndExec(() => {
-                                    let finalUrl = url;
-                                    if (!/^(https?:\/\/|mailto:|ftp:\/\/)/i.test(finalUrl)) {
-                                        finalUrl = 'https://' + finalUrl;
-                                    }
-                                    const linkHTML = `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${selectedText || finalUrl}</a>`;
-                                    document.execCommand('insertHTML', false, linkHTML);
-                                });
-                            }
-                        }
-                    } else if (command === 'insertImage') {
-                        const url = await showPrompt({ title: 'Insert Image', message: 'Enter the image URL:', placeholder: 'https://example.com/image.png' });
-                        if (url) {
-                           restoreSelectionAndExec(() => document.execCommand('insertHTML', false, `<img src="${url}" alt="Image">`));
-                        }
-                    } else if (command === 'formatBlock') {
-                         restoreSelectionAndExec(() => {
-                            const selection = window.getSelection();
-                            let parentEl = selection.getRangeAt(0).commonAncestorContainer;
-                            parentEl = parentEl.nodeType === 3 ? parentEl.parentNode : parentEl;
-                            
-                            const isAlreadyBlock = parentEl.closest(value) || (value === 'blockquote' && parentEl.closest('blockquote'));
-                            
-                            if (isAlreadyBlock) {
-                                document.execCommand('formatBlock', false, 'p'); // Revert to paragraph
-                            } else {
-                                document.execCommand(command, false, value);
-                            }
-                        });
-                    } else {
-                        restoreSelectionAndExec(() => document.execCommand(command, false, null));
-                    }
+    if (command === 'insertTable') {
+        const selection = window.getSelection();
+        if (selection.rangeCount > 0) editorSelectionRange = selection.getRangeAt(0).cloneRange();
+        openModal(document.getElementById('table-creator-modal'));
+        return;
+    }
+    if (command === 'createLink') {
+        app.elements.noteEditorBody.focus();
+        if (editorSelectionRange) {
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(editorSelectionRange);
+        }
+        const selection = window.getSelection();
+        const parentEl = selection.anchorNode?.parentNode.closest('a');
+        if(parentEl) {
+            restoreSelectionAndExec(() => { document.execCommand('unlink'); });
+        } else {
+            const selectedText = selection.toString().trim();
+            const url = await showPrompt({ title: 'Insert Link', message: 'Enter the URL:', placeholder: 'https://example.com' });
+            if (url) {
+                restoreSelectionAndExec(() => {
+                    let finalUrl = url;
+                    if (!/^(https?:\/\/|mailto:|ftp:\/\/)/i.test(finalUrl)) finalUrl = 'https://' + finalUrl;
+                    const linkHTML = `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${selectedText || finalUrl}</a>`;
+                    document.execCommand('insertHTML', false, linkHTML);
                 });
+            }
+        }
+    } else if (command === 'insertImage') {
+        const url = await showPrompt({ title: 'Insert Image', message: 'Enter the image URL:', placeholder: 'https://example.com/image.png' });
+        if (url) restoreSelectionAndExec(() => document.execCommand('insertHTML', false, `<img src="${url}" alt="Image">`));
+    } else if (command === 'formatBlock') {
+         restoreSelectionAndExec(() => {
+            const selection = window.getSelection();
+            let parentEl = selection.getRangeAt(0).commonAncestorContainer;
+            parentEl = parentEl.nodeType === 3 ? parentEl.parentNode : parentEl;
+            const isAlreadyBlock = parentEl.closest(value) || (value === 'blockquote' && parentEl.closest('blockquote'));
+            if (isAlreadyBlock) {
+                document.execCommand('formatBlock', false, 'p');
+            } else {
+                document.execCommand(command, false, value);
+            }
+        });
+    } else {
+        restoreSelectionAndExec(() => document.execCommand(command, false, null));
+    }
+});
 
                 app.containers.collectionsList.addEventListener('contextmenu', e => {
                     const itemWrapper = e.target.closest('.collection-item-wrapper');
