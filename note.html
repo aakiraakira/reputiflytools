@@ -162,6 +162,11 @@
     color: var(--text-tertiary);
 }
 /* --- END: Final Checklist Alignment Fix --- */
+/* This handles the strikethrough effect */
+.task-list-item.checked .task-list-item-text {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
+}
 
 
         .brand-button {
@@ -5189,6 +5194,27 @@ if (quizBtn) {
                 });
 
                 // This is the core save logic
+                // This listener handles checklist state changes reliably
+app.elements.noteEditorBody.addEventListener('change', (e) => {
+    // Check if the changed element was a checkbox inside a task list
+    if (e.target.matches('.task-list-item input[type="checkbox"]')) {
+        const item = e.target.closest('.task-list-item');
+        if (item) {
+            // Toggle the .checked class for the strikethrough style
+            item.classList.toggle('checked', e.target.checked);
+            
+            // Save the state to the HTML itself so it's preserved on reload
+            if (e.target.checked) {
+                e.target.setAttribute('checked', '');
+            } else {
+                e.target.removeAttribute('checked');
+            }
+            
+            // Trigger the app's save mechanism
+            saveNoteContent();
+        }
+    }
+});
 performImmediateSave = () => {
     if (!state.settings.activeNoteId) return;
     const {item: note} = findItem(state.settings.activeNoteId);
@@ -5286,7 +5312,7 @@ saveNoteContent = debounce(performImmediateSave, 500);
                 // If line has text, create a new blank checklist item below it
                 const newChecklist = document.createElement('div');
                 newChecklist.classList.add('task-list-item');
-                const onchangeLogic = `const item=this.closest('.task-list-item'); if(item){item.classList.toggle('checked',this.checked); this.checked?this.setAttribute('checked',''):this.removeAttribute('checked');} const event=new Event('input',{bubbles:true,cancelable:true}); this.dispatchEvent(event);`.replace(/"/g, '&quot;');
+                newChecklist.innerHTML = `<input type="checkbox" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
                 newChecklist.innerHTML = `<input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
                 parentChecklist.after(newChecklist);
                 
@@ -5968,7 +5994,7 @@ if (command === 'insertChecklist') {
 
         if (selectedText.trim() === '') {
             // If nothing is selected, insert one blank checklist item.
-            checklistHTML = `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div>`;
+            checklistHTML = `<div class="task-list-item"><input type="checkbox" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div>`;
         } else {
             // If text is selected, convert each line into a separate checklist item.
             // This now correctly handles multi-line selections.
@@ -5976,7 +6002,7 @@ if (command === 'insertChecklist') {
             checklistHTML = lines.map(line => {
                 const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
                 if (sanitizedLine === '') return null; // Ignore empty lines in the selection
-                return `<div class="task-list-item"><input type="checkbox" onchange="${onchangeLogic}" contenteditable="false"><div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div></div>`;
+                return `<div class="task-list-item"><input type="checkbox" contenteditable="false"><div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div></div>`;
             }).filter(Boolean).join('');
         }
         
