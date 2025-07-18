@@ -3737,17 +3737,22 @@ ${combinedContent}`;
 function renderQuizModal(quizArray) {
     let quizHTML = '<div class="space-y-6">';
     quizArray.forEach((q, index) => {
+        const isMultiSelect = q.type === 'msq';
+        // The correct answer is now stringified to be stored in the data attribute
+        const correctAnswer = JSON.stringify(q.answer); 
+
         quizHTML += `
-            <div class="quiz-question-container border-b border-border-color pb-4" data-correct-answer="${q.answer}">
-                <p class="font-semibold text-text-primary">${index + 1}. ${q.question}</p>
+            <div class="quiz-question-container border-b border-border-color pb-4" data-correct-answer='${correctAnswer}' data-question-type="${q.type || 'mcq'}">
+                <p class="font-semibold text-text-primary">${index + 1}. ${q.question} ${isMultiSelect ? '<span class="text-xs font-normal text-text-tertiary">(Select all that apply)</span>' : ''}</p>
                 <div class="mt-3 space-y-2">
                     ${Object.entries(q.options).map(([key, value]) => `
-                        <label class="block flex items-center p-2 rounded-md border border-border-color cursor-pointer hover:bg-bg-pane-dark transition-colors duration-200">
-                            <input type="radio" name="question-${index}" value="${key}" class="mr-3 shrink-0">
+                        <label class="block flex items-start p-2 rounded-md border border-border-color cursor-pointer hover:bg-bg-pane-dark transition-colors duration-200">
+                            <input type="${isMultiSelect ? 'checkbox' : 'radio'}" name="question-${index}" value="${key}" class="mr-3 mt-1 shrink-0">
                             <span>${key}: ${value}</span>
                         </label>
                     `).join('')}
                 </div>
+                ${isMultiSelect ? `<button class="submit-msq-btn mt-3 px-3 py-1 text-sm brand-button rounded-md">Submit Answer</button>` : ''}
                 <p class="quiz-feedback text-sm mt-2 h-5 font-medium"></p>
             </div>
         `;
@@ -3763,17 +3768,35 @@ function renderQuizModal(quizArray) {
  * @param {string} noteContent - The plain text content of the note.
  */
 const handleGenerateQuiz = async (noteContent, note) => {
-    // Step 1: Check if a valid cached quiz exists.
-    // A quiz is valid if it exists AND the note hasn't been modified since the quiz was made.
+    // Check for a valid cached quiz first.
     if (note.cachedQuiz && note.cachedQuiz.sourceModifiedAt === note.modifiedAt) {
         showToast('Loading Quiz!', 'info');
         renderQuizModal(note.cachedQuiz.data);
-        return; // Stop here and use the cached version.
+        return;
     }
 
-    // If no valid cache, proceed to generate a new quiz.
-    const toastId = showToast('Generating New Quiz...', 'loading');
-    const prompt = `Based on the following text, generate a multiple-choice quiz with 3-5 questions. For each question, provide 4 options (A, B, C, D) and indicate the correct answer. Return the result as a single, valid JSON object with a key "quiz" which is an array of objects. Each object in the array must have three keys: "question" (string), "options" (an object with A, B, C, D keys), and "answer" (a string with the key of the correct option, e.g., "A"). Do not include any text, notes, or markdown formatting like \`\`\`json before or after the JSON object.
+    // NEW: Determine quiz length based on content
+    const contentLength = noteContent.length;
+    let numQuestions = 3;
+    if (contentLength > 1000) numQuestions = 5;
+    if (contentLength > 2500) numQuestions = 7;
+
+    const toastId = showToast(`Generating quiz...`, 'loading');
+    
+    // NEW: Enhanced prompt for smarter, varied, and multi-select questions
+    const prompt = `Based on the following text, generate a multiple-choice quiz with exactly ${numQuestions} questions.
+
+Instructions for the AI:
+1.  Create a mix of question types: some for simple fact recall, and others that test understanding of concepts, consequences, or relationships between ideas in the text.
+2.  For some questions, allow for multiple correct answers (multi-select).
+3.  Return the result as a single, valid JSON object with a key "quiz" which is an array of objects.
+4.  Each question object MUST have four keys:
+    - "question" (string): The question text.
+    - "options" (object): An object with A, B, C, D keys for the options.
+    - "answer" (string OR array of strings): For single-answer questions, this is a string (e.g., "A"). For multi-select questions, this is an array of strings (e.g., ["B", "D"]).
+    - "type" (string): Use "mcq" for single-answer questions and "msq" for multi-select questions.
+5.  Do not include any text, notes, or markdown formatting like \`\`\`json before or after the JSON object itself.
+
 Text:
 ---
 ${noteContent}`;
@@ -3789,18 +3812,16 @@ ${noteContent}`;
 
             if (quizData.quiz && Array.isArray(quizData.quiz)) {
                  renderQuizModal(quizData.quiz);
-
-                 // Step 2: Save the new quiz result to the note object in the database.
                  note.cachedQuiz = {
-                     sourceModifiedAt: note.modifiedAt, // Save the timestamp of the note version we used
+                     sourceModifiedAt: note.modifiedAt,
                      data: quizData.quiz
                  };
-                 saveState(); // Save the note, now with the cached quiz data
+                 saveState();
             } else {
                 throw new Error("Invalid quiz data structure.");
             }
         } catch (err) {
-            console.error("Failed to parse quiz JSON:", err);
+            console.error("Failed to parse quiz JSON:", err, "Raw Response:", jsonResponse);
             showToast('Failed to generate a valid quiz.', 'error');
         }
     }
@@ -5563,13 +5584,12 @@ app.elements.noteEditorBody.addEventListener('paste', (e) => {
 app.modals.quizDoneBtn.addEventListener('click', () => closeModal(app.modals.quiz));
 
 app.modals.quizContent.addEventListener('change', e => {
-    if (e.target.type === 'radio') {
+    if (e.target.type === 'radio') { // Logic for single-choice questions
         const questionContainer = e.target.closest('.quiz-question-container');
         const selectedAnswer = e.target.value;
-        const correctAnswer = questionContainer.dataset.correctAnswer;
+        const correctAnswer = JSON.parse(questionContainer.dataset.correctAnswer);
         const feedbackEl = questionContainer.querySelector('.quiz-feedback');
 
-        // Disable all options for this question after an answer is selected
         questionContainer.querySelectorAll('input[type="radio"]').forEach(radio => {
             radio.disabled = true;
             radio.parentElement.classList.add('cursor-not-allowed', 'opacity-60');
@@ -5583,12 +5603,43 @@ app.modals.quizContent.addEventListener('change', e => {
             feedbackEl.textContent = `Incorrect. The correct answer is ${correctAnswer}.`;
             feedbackEl.className = 'quiz-feedback text-sm mt-2 h-5 font-medium text-red-500';
             e.target.parentElement.classList.add('bg-red-500/20', 'border-red-500');
-
-            // Highlight the correct answer as well
             const correctLabel = questionContainer.querySelector(`input[value="${correctAnswer}"]`).parentElement;
             correctLabel.classList.remove('opacity-60');
             correctLabel.classList.add('bg-green-500/20', 'border-green-500');
         }
+    }
+});
+
+// Add this new click listener right after the 'change' listener above
+app.modals.quizContent.addEventListener('click', e => {
+    if (e.target.classList.contains('submit-msq-btn')) { // Logic for multi-select questions
+        const questionContainer = e.target.closest('.quiz-question-container');
+        const correctAnswers = new Set(JSON.parse(questionContainer.dataset.correctAnswer));
+        const selectedAnswers = new Set(Array.from(questionContainer.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value));
+        const feedbackEl = questionContainer.querySelector('.quiz-feedback');
+
+        // Check for perfect match
+        const isCorrect = correctAnswers.size === selectedAnswers.size && [...correctAnswers].every(answer => selectedAnswers.has(answer));
+
+        questionContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.disabled = true;
+            const label = cb.parentElement;
+            label.classList.add('cursor-not-allowed', 'opacity-60');
+            if (correctAnswers.has(cb.value)) {
+                label.classList.add('bg-green-500/20', 'border-green-500');
+            } else if (selectedAnswers.has(cb.value)) {
+                label.classList.add('bg-red-500/20', 'border-red-500');
+            }
+        });
+
+        if (isCorrect) {
+            feedbackEl.textContent = 'Correct!';
+            feedbackEl.className = 'quiz-feedback text-sm mt-2 h-5 font-medium text-green-500';
+        } else {
+            feedbackEl.textContent = `Incorrect. The correct answer(s): ${Array.from(correctAnswers).join(', ')}.`;
+            feedbackEl.className = 'quiz-feedback text-sm mt-2 h-5 font-medium text-red-500';
+        }
+        e.target.style.display = 'none'; // Hide submit button after answering
     }
 });
 
