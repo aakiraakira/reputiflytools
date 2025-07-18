@@ -167,6 +167,28 @@
     text-decoration: line-through;
     color: var(--text-tertiary);
 }
+/* --- START: Share Note Checklist Fix --- */
+#public-note-content .task-list-item {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    margin: 0.5rem 0;
+    list-style: none;
+    padding-left: 0;
+}
+
+#public-note-content .task-list-item input[type="checkbox"] {
+    flex-shrink: 0;
+    width: 1.25rem;
+    height: 1.25rem;
+    pointer-events: none; /* Makes checkbox unclickable on the read-only page */
+}
+
+#public-note-content .task-list-item.checked .task-list-item-text {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
+}
+/* --- END: Share Note Checklist Fix --- */
 
 
         .brand-button {
@@ -1915,48 +1937,42 @@ const handlePublicNoteView = async (noteId) => {
     publicView.classList.remove('hidden');
     document.getElementById('chatbot-fab').style.display = 'none';
     
-
-    // --- DEBUG LINE 1: Let's see what ID we are looking for ---
-    console.log("Attempting to fetch public note with ID:", noteId);
-
     try {
         const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
         const docRef = doc(window.db, "publishedNotes", noteId);
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
-            // This goes inside the 'if (docSnap.exists())' block
-document.getElementById('copy-note-btn').addEventListener('click', () => {
-    const noteText = document.getElementById('public-note-content').innerText;
-    navigator.clipboard.writeText(noteText)
-        .then(() => showToast('Note content copied!', 'success'))
-        .catch(() => showToast('Failed to copy content.', 'error'));
-});
-            // --- DEBUG LINE 2: This will run if the note is found ---
-            console.log("SUCCESS: Document found. Displaying note.");
-            // This goes inside the if (docSnap.exists()) block
-const noteContentDiv = document.getElementById('public-note-content');
-noteContentDiv.addEventListener('click', (e) => {
-    const copyBtn = e.target.closest('.copy-code-btn');
-    if (copyBtn) {
-        const codeBlock = copyBtn.closest('.code-block-wrapper').querySelector('pre, code');
-        if (codeBlock) {
-            navigator.clipboard.writeText(codeBlock.innerText)
-                .then(() => showToast('Code copied!', 'success'))
-                .catch(() => showToast('Failed to copy code.', 'error'));
-        }
-    }
-});
+            document.getElementById('copy-note-btn').addEventListener('click', () => {
+                const noteText = document.getElementById('public-note-content').innerText;
+                navigator.clipboard.writeText(noteText)
+                    .then(() => showToast('Note content copied!', 'success'))
+                    .catch(() => showToast('Failed to copy content.', 'error'));
+            });
+            
+            const noteContentDiv = document.getElementById('public-note-content');
+            noteContentDiv.addEventListener('click', (e) => {
+                const copyBtn = e.target.closest('.copy-code-btn');
+                if (copyBtn) {
+                    const codeBlock = copyBtn.closest('.code-block-wrapper').querySelector('pre, code');
+                    if (codeBlock) {
+                        navigator.clipboard.writeText(codeBlock.innerText)
+                            .then(() => showToast('Code copied!', 'success'))
+                            .catch(() => showToast('Failed to copy code.', 'error'));
+                    }
+                }
+            });
 
             const noteData = docSnap.data();
             document.getElementById('public-note-title').textContent = noteData.name;
+            
             let html = marked.parse(noteData.content || '');
-            document.getElementById('public-note-content').innerHTML = html;
+            // NEW: This line removes all "contenteditable" attributes, making checklists read-only
+            html = html.replace(/ contenteditable="true"/g, ''); 
+            
+            noteContentDiv.innerHTML = html;
             document.title = `${noteData.name} | Reputifly Notes`;
         } else {
-            // --- DEBUG LINE 3: This will run if the note is NOT found ---
-            console.log("FAILURE: Document not found in 'publishedNotes' collection.");
-
             document.getElementById('public-note-title').textContent = 'Note Not Found';
             document.getElementById('public-note-content').innerHTML = '<p>The link you followed may be broken or the note may have been deleted.</p>';
         }
