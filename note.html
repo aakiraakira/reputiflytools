@@ -4064,7 +4064,68 @@ const commands = [
             }
         });
     }
+},// ... inside the 'commands' array
+{
+    name: 'move',
+    description: 'Move a note to a folder. Usage: /move [note] to [folder]',
+    suggest: 'items', // This will suggest both notes and folders
+    execute: (args) => {
+        const separator = /\s+to\s+/i;
+        if (!separator.test(args)) {
+            return showToast('❌ Invalid format. Use: /move [note name] to [folder name]', 'error');
+        }
+
+        const [noteName, folderName] = args.split(separator).map(s => s.trim());
+
+        if (!noteName || !folderName) {
+            return showToast('❌ Both a note and folder name are required.', 'error');
+        }
+
+        const allNotes = getAllNotes(state.collections);
+        const allFolders = getAllFolders();
+
+        const noteToMove = findBestMatch(noteName, allNotes);
+        const targetFolder = findBestMatch(folderName, allFolders);
+
+        if (!noteToMove) {
+            return showToast(`❌ Note not found: "${noteName}"`, 'error');
+        }
+        if (!targetFolder) {
+            return showToast(`❌ Target folder not found: "${folderName}"`, 'error');
+        }
+
+        // Find the note in the state tree to remove it from its current location
+        const sourceResult = findItem(noteToMove.id);
+        if (!sourceResult) return; // Should not happen, but a good safeguard
+
+        const sourceArray = Array.isArray(sourceResult.parent) ? sourceResult.parent : sourceResult.parent.children;
+        
+        // Check if the note is already in the target folder
+        if (sourceResult.parent && sourceResult.parent.id === targetFolder.id) {
+            return showToast(`Note is already in "${targetFolder.name}".`, 'info');
+        }
+
+        // Remove the note from its original array
+        const [movedNote] = sourceArray.splice(sourceResult.index, 1);
+
+        // Add the note to the target folder's children array
+        if (!targetFolder.children) {
+            targetFolder.children = [];
+        }
+        targetFolder.children.unshift(movedNote);
+
+        // Update the note's Kanban status to the first column of the new folder
+        movedNote.status = state.kanbanColumns[targetFolder.id]?.[0]?.id || null;
+        movedNote.modifiedAt = new Date().toISOString();
+
+        // Save changes and update the UI
+        saveState();
+        buildLunrIndex();
+        render();
+        showToast(`✅ Moved "${movedNote.name}" to "${targetFolder.name}"`, 'success');
+    }
 },
+// ... rest of the commands
     { name: 'dn', description: 'Delete a note. Usage: /dn [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',async(n)=>{const r=findItem(n.id);const c=await showConfirm({title:`Delete "${n.name}"?`,message:'This cannot be undone.',confirmText:'Delete'});if(c){const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index,1);showToast(`🗑️ Note deleted.`);if(state.settings.activeNoteId===n.id)state.settings.activeNoteId=null;saveState();buildLunrIndex();render()}})},
     { name: 'df', description: 'Delete folder. Usage: /df [folder name]', suggest: 'folders', execute: (args)=>executeWithSmartFind(args,'folders',async(f)=>{const r=findItem(f.id);const c=await showConfirm({title:`Delete folder "${f.name}"?`,message:'This will delete the folder and <strong>all notes inside</strong>.',confirmText:'Delete'});if(c){const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index,1);showToast(`🗑️ Folder deleted.`);if(state.settings.activeCollectionId===f.id)state.settings.activeCollectionId=null;saveState();buildLunrIndex();render()}})}
 ];
@@ -4086,25 +4147,48 @@ const renderSuggestions = (rawInput) => {
         let finalSuggestions = [];
         const toSeparator = /\s+to\s+/i;
         const fromSeparator = /\s+from\s+/i;
+        if ((command.name === 'move' || command.name === 'rename' || command.name === 'link') && toSeparator.test(argString)) {
+        const targetQuery = argString.split(toSeparator)[1].toLowerCase() || '';
+        let itemsToSuggest = [];
 
-        if ((command.name === 'link' || command.name === 'rename') && toSeparator.test(argString)) {
-            const targetQuery = argString.split(toSeparator)[1].toLowerCase() || '';
-            finalSuggestions = getAllNotes(state.collections).filter(n => n.name.toLowerCase().includes(targetQuery));
-        } else if (command.name === 'unlink' && fromSeparator.test(argString)) {
-            const sourceQuery = argString.split(fromSeparator)[1].toLowerCase() || '';
-            finalSuggestions = getAllNotes(state.collections).filter(n => n.name.toLowerCase().includes(sourceQuery));
+        if (command.name === 'move') {
+            // For /move, ONLY suggest folders as the destination
+            itemsToSuggest = getAllFolders();
+        } else { // for /rename and /link
+            itemsToSuggest = (command.suggest === 'notes') ? getAllNotes(state.collections) : [...getAllNotes(state.collections), ...getAllFolders()];
+        }
+        
+        const fuse = new Fuse(itemsToSuggest, { keys: ['name'], threshold: 0.5 });
+        finalSuggestions = fuse.search(targetQuery).map(result => result.item);
+    } 
+    // This block handles the SECOND argument for /unlink
+    else if (command.name === 'unlink' && fromSeparator.test(argString)) {
+        const sourceQuery = argString.split(fromSeparator)[1].toLowerCase() || '';
+        const fuse = new Fuse(getAllNotes(state.collections), { keys: ['name'], threshold: 0.5 });
+        finalSuggestions = fuse.search(sourceQuery).map(result => result.item);
+    }
+    // This block handles the FIRST argument for all other commands
+    else if (parts.length > 1) {
+        let itemsToSearch = [];
+        if (command.suggest.includes('items')) {
+            itemsToSearch = [...getAllNotes(state.collections), ...getAllFolders()];
+        } else if (command.suggest.includes('notes')) {
+            itemsToSearch = getAllNotes(state.collections);
+        } else if (command.suggest.includes('folders')) {
+            itemsToSearch = getAllFolders();
         } else if (command.name === 'go' && argString.startsWith('#')) {
-            const tagArg = argString.substring(1);
-            const tagParts = tagArg.split(/ (.*)/s);
-            const tagName = tagParts[0];
-            const noteQuery = (tagParts[1] || '').toLowerCase();
-            if (getAllTags().includes(tagName) && tagParts.length > 1) {
-                const notesInTag = getAllNotes(state.collections).filter(n => (n.tags || []).includes(tagName));
-                finalSuggestions = notesInTag.filter(n => n.name.toLowerCase().includes(noteQuery));
-            } else {
-                finalSuggestions = getAllTags().filter(t => t.toLowerCase().includes(tagArg.toLowerCase())).map(t => ({ id: t, name: t, type: 'tag' }));
-            }
-        } // ... inside renderSuggestions function
+            // Special handling for tag suggestions
+            const tagQuery = argString.substring(1);
+            itemsToSearch = getAllTags().map(t => ({ id: t, name: t, type: 'tag' }));
+            const fuse = new Fuse(itemsToSearch, { keys: ['name'], threshold: 0.5 });
+            finalSuggestions = fuse.search(tagQuery).map(result => result.item);
+        }
+        
+        if (itemsToSearch.length > 0) {
+            const fuse = new Fuse(itemsToSearch, { keys: ['name'], threshold: 0.5 });
+            finalSuggestions = fuse.search(argQuery).map(result => result.item);
+        }
+    } // ... inside renderSuggestions function
  else if (parts.length > 1) {
     let itemsToSearch = [];
     if (command.suggest.includes('items')) {
