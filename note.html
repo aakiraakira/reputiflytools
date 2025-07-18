@@ -188,11 +188,50 @@
     
 }
 
-
-#public-note-content .task-list-item.checked .task-list-item-text {
-    text-decoration: line-through;
-    color: var(--text-tertiary);
+/* --- START: Public Page Code Block Style Fix --- */
+/* --- START: FINAL Public Page Code Block Style Fix --- */
+#public-note-content .code-block-wrapper {
+    background-color: #211F30; /* A dark background matching your reputify theme */
+    border: 1px solid #2A2837;
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 1.5em 0;
 }
+#public-note-content .code-block-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: rgba(0,0,0,0.2);
+    padding: 0.5rem 1rem;
+    color: #A0A0B8;
+    font-size: 0.8rem;
+}
+.exit-code-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 5px;
+    transition: background-color 0.2s, color 0.2s;
+}
+.exit-code-btn:hover {
+    background-color: var(--bg-pane-light);
+    color: var(--accent-primary);
+}
+#public-note-content .code-block-wrapper pre {
+    margin: 0 !important;
+    padding: 1em !important;
+}
+/* This is the most important part: it makes the inner code block transparent */
+#public-note-content .code-block-wrapper pre code.hljs {
+    background: transparent !important;
+    padding: 0 !important;
+}
+/* --- END: FINAL Public Page Code Block Style Fix --- */
 /* --- END: Share Note Checklist Fix --- */
 
 
@@ -686,7 +725,7 @@
         }
         
         /* Editor Code Block Styles */
-        #note-editor-body .code-block-wrapper, #markdown-preview .code-block-wrapper {
+        #note-editor-body .code-block-wrapper, #markdown-preview .code-block-wrapper, #public-note-content .code-block-wrapper {
             background-color: #211F30;
             border-radius: 8px;
             margin: 1.5em 0;
@@ -724,14 +763,14 @@
         .copy-code-btn:hover { color: var(--text-primary); }
         .delete-block-btn:hover { color: #ef4444; }
 
-        #note-editor-body .code-block-wrapper pre, #markdown-preview .code-block-wrapper pre {
+        #note-editor-body .code-block-wrapper pre, #markdown-preview .code-block-wrapper pre, #public-note-content .code-block-wrapper pre {
             margin: 0 !important;
             padding: 1em !important;
             background-color: transparent !important;
             white-space: pre-wrap;
             word-wrap: break-word;
         }
-        #note-editor-body .code-block-wrapper pre code, #markdown-preview .code-block-wrapper pre code {
+        #note-editor-body .code-block-wrapper pre code, #markdown-preview .code-block-wrapper pre code, #public-note-content .code-block-wrapper pre code {
             padding: 0 !important;
             background-color: transparent !important;
             font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace !important;
@@ -1977,6 +2016,7 @@ const handlePublicNoteView = async (noteId) => {
             html = html.replace(/ contenteditable="true"/g, ''); 
             
             noteContentDiv.innerHTML = html;
+            hljs.highlightAll();
             document.title = `${noteData.name} | Reputifly Notes`;
             noteContentDiv.addEventListener('change', (e) => {
     if (e.target.matches('.task-list-item input[type="checkbox"]')) {
@@ -2245,6 +2285,52 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
             let lunrIndex;
             let hasInitialized = false;
             let askYourNotesHistory = [];
+            const showToast = (message, type = 'info') => {
+                const id = generateId('toast');
+                const toast = document.createElement('div');
+                const colors = {
+                    info: 'bg-bg-pane-dark text-text-primary',
+                    success: 'bg-green-500 text-white',
+                    error: 'bg-red-500 text-white',
+                    loading: 'bg-blue-500 text-white animate-pulse'
+                }
+                toast.id = id;
+                toast.className = `toast-item ${colors[type]} rounded-full px-4 py-2 text-sm shadow-lg transition-all duration-300 transform translate-y-[-20px] opacity-0`;
+                toast.textContent = message;
+                
+                app.containers.toast.appendChild(toast);
+                app.containers.toast.style.pointerEvents = 'auto';
+
+                setTimeout(() => {
+                    toast.classList.remove('translate-y-[-20px]', 'opacity-0');
+                }, 10);
+                
+                if (type !== 'loading') {
+                    setTimeout(() => {
+                        toast.classList.add('opacity-0', 'scale-90');
+                        toast.addEventListener('transitionend', () => {
+                             if(toast.parentElement) toast.parentElement.removeChild(toast);
+                             if (app.containers.toast.childElementCount === 0) {
+                                app.containers.toast.style.pointerEvents = 'none';
+                             }
+                        });
+                    }, 3000);
+                }
+                return id;
+            };
+            
+            const dismissToast = (toastId) => {
+                const toast = document.getElementById(toastId);
+                if (toast) {
+                    toast.classList.add('opacity-0', 'scale-90');
+                    toast.addEventListener('transitionend', () => {
+                         if(toast.parentElement) toast.parentElement.removeChild(toast);
+                         if (app.containers.toast.childElementCount === 0) {
+                            app.containers.toast.style.pointerEvents = 'none';
+                         }
+                    });
+                }
+            };
             function saveCurrentNoteImmediately() {
     if (!state.settings.activeNoteId) return;
     const findResult = findItem(state.settings.activeNoteId);
@@ -2715,52 +2801,7 @@ const handleFileUpload = async (file) => {
                 };
             };
             
-            const showToast = (message, type = 'info') => {
-                const id = generateId('toast');
-                const toast = document.createElement('div');
-                const colors = {
-                    info: 'bg-bg-pane-dark text-text-primary',
-                    success: 'bg-green-500 text-white',
-                    error: 'bg-red-500 text-white',
-                    loading: 'bg-blue-500 text-white animate-pulse'
-                }
-                toast.id = id;
-                toast.className = `toast-item ${colors[type]} rounded-full px-4 py-2 text-sm shadow-lg transition-all duration-300 transform translate-y-[-20px] opacity-0`;
-                toast.textContent = message;
-                
-                app.containers.toast.appendChild(toast);
-                app.containers.toast.style.pointerEvents = 'auto';
-
-                setTimeout(() => {
-                    toast.classList.remove('translate-y-[-20px]', 'opacity-0');
-                }, 10);
-                
-                if (type !== 'loading') {
-                    setTimeout(() => {
-                        toast.classList.add('opacity-0', 'scale-90');
-                        toast.addEventListener('transitionend', () => {
-                             if(toast.parentElement) toast.parentElement.removeChild(toast);
-                             if (app.containers.toast.childElementCount === 0) {
-                                app.containers.toast.style.pointerEvents = 'none';
-                             }
-                        });
-                    }, 3000);
-                }
-                return id;
-            };
             
-            const dismissToast = (toastId) => {
-                const toast = document.getElementById(toastId);
-                if (toast) {
-                    toast.classList.add('opacity-0', 'scale-90');
-                    toast.addEventListener('transitionend', () => {
-                         if(toast.parentElement) toast.parentElement.removeChild(toast);
-                         if (app.containers.toast.childElementCount === 0) {
-                            app.containers.toast.style.pointerEvents = 'none';
-                         }
-                    });
-                }
-            };
             
             const formatDateTime = (isoString) => {
                  return new Date(isoString).toLocaleString(undefined, {
@@ -4636,7 +4677,12 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                         <div class="code-block-wrapper">
                             <div class="code-block-header">
                                 <span class="lang-name">${validLang}</span>
-                                <div class="flex items-center gap-1">
+                                <div class="flex items-center gap-2">
+                                    <!-- THIS IS THE NEW EXIT BUTTON -->
+                                    <button class="exit-code-btn" title="Exit Code Block">
+                                        <i data-feather="arrow-down-left" class="w-4 h-4"></i>
+                                        <span>Exit</span>
+                                    </button>
                                     <button class="copy-code-btn" title="Copy Code">
                                         <i data-feather="copy" class="w-4 h-4"></i>
                                         <span>Copy</span>
@@ -5197,6 +5243,28 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                 });
                 
                 app.containers.mainContentArea.addEventListener('click', (e) => {
+                    const exitBtn = e.target.closest('.exit-code-btn');
+                    if (exitBtn) {
+                        const wrapper = exitBtn.closest('.code-block-wrapper');
+                        if (wrapper) {
+                            // Create a new empty paragraph after the code block
+                            const newP = document.createElement('p');
+                            newP.innerHTML = '<br>';
+                            wrapper.after(newP);
+                            
+                            // Place the user's cursor in the new paragraph
+                            const selection = window.getSelection();
+                            const range = document.createRange();
+                            range.setStart(newP, 0);
+                            range.collapse(true);
+                            selection.removeAllRanges();
+                            selection.addRange(range);
+                            
+                            // Save the change
+                            saveNoteContent();
+                        }
+                        return; // Stop further execution
+                    }
                     // Add this block to handle backlink clicks
 const backlink = e.target.closest('.backlink-item');
 if (backlink) {
@@ -5214,12 +5282,32 @@ if (backlink) {
                     const deleteBlockBtn = e.target.closest('.delete-block-btn');
                     if (deleteBlockBtn) {
                         const wrapper = deleteBlockBtn.closest('.code-block-wrapper');
-                        if(wrapper) {
+                        if (wrapper) {
+                            const parentEditor = wrapper.parentNode;
+                            const wasLastElement = (wrapper.nextElementSibling === null);
+
+                            // If there's an empty <p> tag right after, remove it too for cleanup
                             const nextEl = wrapper.nextElementSibling;
-                            if(nextEl && nextEl.tagName === 'P' && (nextEl.innerHTML === '<br>' || nextEl.innerHTML === '')) {
+                            if (nextEl && nextEl.tagName === 'P' && (nextEl.innerHTML === '<br>' || nextEl.innerHTML === '')) {
                                 nextEl.remove();
                             }
+                            
                             wrapper.remove();
+
+                            // ** THE FIX **: If the deleted block was the last element, add a new paragraph.
+                            if (wasLastElement) {
+                                const newP = document.createElement('p');
+                                newP.innerHTML = '<br>';
+                                parentEditor.appendChild(newP);
+                                // Place the cursor in the new paragraph
+                                const selection = window.getSelection();
+                                const range = document.createRange();
+                                range.setStart(newP, 0);
+                                range.collapse(true);
+                                selection.removeAllRanges();
+                                selection.addRange(range);
+                            }
+
                             saveNoteContent();
                             showToast('Code block deleted', 'info');
                         }
@@ -5363,7 +5451,8 @@ saveNoteContent = debounce(performImmediateSave, 500);
                     updateStatsDebounced();
                 });
 
-                app.elements.noteEditorBody.addEventListener('keydown', (e) => {
+                // REPLACE your entire existing 'noteEditorBody' keydown listener with this one
+app.elements.noteEditorBody.addEventListener('keydown', (e) => {
     const selection = window.getSelection();
     if (!selection.rangeCount) return;
     const range = selection.getRangeAt(0);
@@ -5372,7 +5461,6 @@ saveNoteContent = debounce(performImmediateSave, 500);
 
     // --- Consolidated 'Enter' Key Logic ---
     if (e.key === 'Enter' && !e.shiftKey) {
-        // 1. Prioritize Blockquote Exit Logic
         const currentBlock = container.closest('p, div');
         if (currentBlock) {
             const blockquote = currentBlock.closest('blockquote');
@@ -5382,9 +5470,7 @@ saveNoteContent = debounce(performImmediateSave, 500);
                 newP.innerHTML = '<br>';
                 blockquote.after(newP);
                 currentBlock.remove();
-                if (blockquote.textContent.trim() === '') {
-                    blockquote.remove();
-                }
+                if (blockquote.textContent.trim() === '') blockquote.remove();
                 const newRange = document.createRange();
                 newRange.setStart(newP, 0);
                 selection.removeAllRanges();
@@ -5394,7 +5480,6 @@ saveNoteContent = debounce(performImmediateSave, 500);
             }
         }
 
-        // 2. Handle Enter in Checklists
         const parentChecklist = container.closest('.task-list-item');
         if (parentChecklist) {
             e.preventDefault();
@@ -5410,7 +5495,6 @@ saveNoteContent = debounce(performImmediateSave, 500);
             } else {
                 const newChecklist = document.createElement('div');
                 newChecklist.classList.add('task-list-item');
-                // Note: The old 'onchange' attribute is intentionally removed for the new, better fix.
                 newChecklist.innerHTML = `<input type="checkbox" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
                 parentChecklist.after(newChecklist);
                 const newTextSpan = newChecklist.querySelector('.task-list-item-text');
@@ -5451,6 +5535,34 @@ saveNoteContent = debounce(performImmediateSave, 500);
                 wrapper.remove();
                 saveNoteContent();
                 return;
+            }
+        }
+    }
+
+    // --- CORRECTED Code Block Escape Logic ---
+    if (e.key === 'ArrowDown') {
+        const pre = container.closest('pre');
+        if (pre) {
+            const codeEl = pre.querySelector('code');
+            const selection = window.getSelection();
+            if (codeEl && selection.isCollapsed) {
+                const range = selection.getRangeAt(0);
+                const textContent = codeEl.textContent || '';
+                // Check if cursor is at the very end of the code block
+                if (range.startOffset === textContent.length) {
+                    const wrapper = pre.closest('.code-block-wrapper');
+                    // Check if there's no element after the code block
+                    if (wrapper && !wrapper.nextElementSibling) {
+                        e.preventDefault();
+                        const newP = document.createElement('p');
+                        newP.innerHTML = '<br>';
+                        wrapper.after(newP);
+                        const newRange = document.createRange();
+                        newRange.setStart(newP, 0);
+                        selection.removeAllRanges();
+                        selection.addRange(newRange);
+                    }
+                }
             }
         }
     }
