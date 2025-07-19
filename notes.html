@@ -2123,6 +2123,7 @@ const handleShareNote = async (noteToShare) => {
 };
 
 const handlePublicNoteView = async (noteId) => {
+    // --- Initial Setup ---
     document.getElementById('theme-color-meta')?.setAttribute('content', '#100F1B');
     document.body.classList.remove('overflow-hidden');
     document.getElementById('app-container').style.display = 'none';
@@ -2130,57 +2131,128 @@ const handlePublicNoteView = async (noteId) => {
     const publicView = document.getElementById('public-note-view');
     publicView.classList.remove('hidden');
     document.getElementById('chatbot-fab').style.display = 'none';
-    
+
     try {
         const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
         const docRef = doc(window.db, "publishedNotes", noteId);
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
-            document.getElementById('copy-note-btn').addEventListener('click', () => {
-                const noteText = document.getElementById('public-note-content').innerText;
-                navigator.clipboard.writeText(noteText)
-                    .then(() => showToast('Note content copied!', 'success'))
-                    .catch(() => showToast('Failed to copy content.', 'error'));
-            });
-            
-            
+            const noteData = docSnap.data();
+            document.getElementById('public-note-title').textContent = noteData.name;
+            document.title = `${noteData.name} | Reputifly Notes`;
+
             const noteContentDiv = document.getElementById('public-note-content');
+            let html = marked.parse(noteData.content || '');
+
+            // --- Prepare HTML for Interactivity ---
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+            
+            // **THE FIX for the triangle bug is here**
+            tempDiv.querySelectorAll('table').forEach(table => {
+                // This now ONLY selects the last row of the header, ignoring the filter row.
+                table.querySelectorAll('thead tr:last-child th').forEach(th => {
+                    th.classList.add('sortable-header');
+                    th.dataset.sortDir = 'none';
+                });
+                const tbody = table.querySelector('tbody');
+                if (tbody) {
+                    table._originalRows = Array.from(tbody.querySelectorAll('tr'));
+                }
+            });
+            html = tempDiv.innerHTML.replace(/ contenteditable="true"/g, '');
+
+            noteContentDiv.innerHTML = html;
+
+            // --- Attach All Event Listeners ---
+
+            // **THE FIX for the search is here**
+            const searchInput = document.getElementById('public-note-search');
+            if (searchInput) {
+                searchInput.addEventListener('input', () => {
+                    // Check if the Fuse library is available
+                    if (typeof Fuse === 'undefined') {
+                        console.error('Fuse.js library is not loaded.');
+                        showToast('Search library failed to load.', 'error');
+                        return;
+                    }
+                    const query = searchInput.value.trim();
+                    noteContentDiv.querySelectorAll('table').forEach(table => {
+                        const tbody = table.querySelector('tbody');
+                        if (!tbody) return;
+
+                        const rows = Array.from(tbody.querySelectorAll('tr'));
+                        if (!query) {
+                            rows.forEach(row => row.style.display = '');
+                            return;
+                        }
+                        const searchData = rows.map((row, index) => ({ id: index, text: row.innerText }));
+                        const fuse = new Fuse(searchData, { keys: ['text'], threshold: 0.4, ignoreLocation: true });
+                        const results = fuse.search(query);
+                        const visibleRowIds = new Set(results.map(r => r.item.id));
+                        rows.forEach((row, index) => {
+                            row.style.display = visibleRowIds.has(index) ? '' : 'none';
+                        });
+                    });
+                });
+            }
+
+            // Delegated Click Listener for Sorting and Code Copying
             noteContentDiv.addEventListener('click', (e) => {
+                const header = e.target.closest('th.sortable-header');
+                if (header) {
+                    const table = header.closest('table');
+                    const tbody = table.querySelector('tbody');
+                    if (!tbody) return;
+                    const headers = Array.from(header.parentElement.children);
+                    const colIndex = headers.indexOf(header);
+                    const currentDir = header.dataset.sortDir;
+                    const newDir = currentDir === 'asc' ? 'desc' : (currentDir === 'desc' ? 'none' : 'asc');
+                    if (!table._originalRows) { table._originalRows = Array.from(tbody.querySelectorAll('tr')); }
+                    headers.forEach(h => { h.dataset.sortDir = 'none'; h.querySelector('.sort-indicator')?.remove(); });
+                    if (newDir === 'none') {
+                        tbody.append(...table._originalRows);
+                    } else {
+                        const rows = Array.from(tbody.querySelectorAll('tr'));
+                        const isNumeric = rows.every(row => { const cellText = row.children[colIndex]?.innerText.trim() || ''; return cellText === '' || !isNaN(parseFloat(cellText.replace(/[^0-9.-]+/g, ""))); });
+                        rows.sort((rowA, rowB) => {
+                            const cellA = rowA.children[colIndex]?.innerText.trim() || '';
+                            const cellB = rowB.children[colIndex]?.innerText.trim() || '';
+                            if (isNumeric) { const numA = parseFloat(cellA.replace(/[^0-9.-]+/g, "")) || 0; const numB = parseFloat(cellB.replace(/[^0-9.-]+/g, "")) || 0; return newDir === 'asc' ? numA - numB : numB - numA; }
+                            return newDir === 'asc' ? cellA.localeCompare(cellB) : cellB.localeCompare(cellA);
+                        });
+                        tbody.append(...rows);
+                        header.dataset.sortDir = newDir;
+                        header.insertAdjacentHTML('beforeend', `<span class="sort-indicator">${newDir === 'asc' ? '▲' : '▼'}</span>`);
+                    }
+                    return;
+                }
                 const copyBtn = e.target.closest('.copy-code-btn');
                 if (copyBtn) {
-                    const codeBlock = copyBtn.closest('.code-block-wrapper').querySelector('pre, code');
-                    if (codeBlock) {
-                        navigator.clipboard.writeText(codeBlock.innerText)
-                            .then(() => showToast('Code copied!', 'success'))
-                            .catch(() => showToast('Failed to copy code.', 'error'));
-                    }
+                    const codeBlock = copyBtn.closest('.code-block-wrapper')?.querySelector('pre, code');
+                    if (codeBlock) { navigator.clipboard.writeText(codeBlock.innerText).then(() => showToast('Code copied!', 'success')).catch(() => showToast('Failed to copy code.', 'error')); }
                 }
             });
 
-            const noteData = docSnap.data();
-            document.getElementById('public-note-title').textContent = noteData.name;
-            
-            let html = marked.parse(noteData.content || '');
-            // NEW: This line removes all "contenteditable" attributes, making checklists read-only
-            html = html.replace(/ contenteditable="true"/g, ''); 
-            
-            noteContentDiv.innerHTML = html;
-            hljs.highlightAll();
-            document.title = `${noteData.name} | Reputifly Notes`;
+            // Other existing listeners
             noteContentDiv.addEventListener('change', (e) => {
-    if (e.target.matches('.task-list-item input[type="checkbox"]')) {
-        const item = e.target.closest('.task-list-item');
-        if (item) {
-            item.classList.toggle('checked', e.target.checked);
-        }
-    }
-});
-        } else {
+                if (e.target.matches('.task-list-item input[type="checkbox"]')) {
+                    const item = e.target.closest('.task-list-item');
+                    if (item) item.classList.toggle('checked', e.target.checked);
+                }
+            });
+            document.getElementById('copy-note-btn').addEventListener('click', () => {
+                navigator.clipboard.writeText(noteContentDiv.innerText).then(() => showToast('Note content copied!', 'success')).catch(() => showToast('Failed to copy content.', 'error'));
+            });
+
+            hljs.highlightAll();
+
+        } else { // Note not found
             document.getElementById('public-note-title').textContent = 'Note Not Found';
             document.getElementById('public-note-content').innerHTML = '<p>The link you followed may be broken or the note may have been deleted.</p>';
         }
-    } catch (error) {
+    } catch (error) { // Error handling
         console.error("Error fetching public note:", error);
         document.getElementById('public-note-title').textContent = 'Error';
         document.getElementById('public-note-content').innerHTML = '<p>Could not load the note due to an error.</p>';
