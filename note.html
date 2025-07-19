@@ -355,6 +355,53 @@
     color: #A0A0B8;
     font-size: 0.8rem;
 }
+/* --- START: Table Filter Toggle CSS --- */
+
+/* New wrapper to hold the filter and the toggle button */
+.table-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem; /* 8px */
+}
+
+/* Makes the filter input container grow to fill available space */
+.table-header-controls .table-filter-wrapper {
+    flex-grow: 1;
+}
+
+/* Styles for the new collapse/expand button */
+.toggle-filter-btn {
+    padding: 0.25rem; /* 4px */
+    border-radius: 0.25rem; /* 4px */
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    flex-shrink: 0; /* Prevents the button from shrinking */
+    transition: all 0.2s ease;
+}
+
+.toggle-filter-btn:hover {
+    background-color: var(--bg-pane-dark);
+    color: var(--text-primary);
+}
+
+/* The transition for the icon's rotation */
+.toggle-filter-btn > i {
+    transition: transform 0.2s ease-in-out;
+}
+
+/* Hides the filter input when the table is collapsed */
+table.filter-collapsed .table-filter-wrapper {
+    display: none;
+}
+
+/* Rotates the chevron icon down when the table is collapsed */
+table.filter-collapsed .toggle-filter-btn > i {
+    transform: rotate(180deg);
+}
+
+/* --- END: Table Filter Toggle CSS --- */
 .exit-code-btn {
     display: flex;
     align-items: center;
@@ -3879,19 +3926,21 @@ const upgradePastedTables = (html) => {
     if (tables.length === 0) return html;
 
     tables.forEach(table => {
-        // Ensure editable cells and add sorting classes
         table.querySelectorAll('th, td').forEach(cell => cell.setAttribute('contenteditable', 'true'));
         const headers = table.querySelectorAll('th');
+        const headerRow = table.querySelector('thead tr');
+        const colCount = headerRow ? headerRow.children.length : 1;
+
         headers.forEach(th => {
             th.classList.add('sortable-header');
             th.dataset.sortDir = 'none';
         });
-        
-        // Add the filter row with icon to pasted tables
+
         const thead = table.querySelector('thead');
         if (thead) {
             const filterRow = document.createElement('tr');
-            filterRow.innerHTML = `<th colspan="${headers.length}" contenteditable="false"><div class="table-filter-wrapper"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div></th>`;
+            // This is the updated filter row HTML with the toggle button
+            filterRow.innerHTML = `<th colspan="${colCount}" contenteditable="false"><div class="table-header-controls"><div class="table-filter-wrapper"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div><button class="toggle-filter-btn" title="Toggle Filter"><i data-feather="chevrons-up" class="w-4 h-4"></i></button></div></th>`;
             thead.prepend(filterRow);
         }
     });
@@ -4421,7 +4470,7 @@ const commands = [
         }
 
         let tableHTML = '<table style="width:100%"><thead>';
-        tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="table-filter-wrapper"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div></th></tr>`;
+tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="table-header-controls"><div class="table-filter-wrapper"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div><button class="toggle-filter-btn" title="Toggle Filter"><i data-feather="chevrons-up" class="w-4 h-4"></i></button></div></th></tr>`;
         tableHTML += '<tr>';
         for (let i = 0; i < cols; i++) {
             tableHTML += `<th class="sortable-header" data-sort-dir="none" contenteditable="true">Header ${i + 1}</th>`;
@@ -7047,6 +7096,18 @@ tableContextMenu.addEventListener('click', (e) => {
 });
 
 app.elements.noteEditorBody.addEventListener('click', (e) => {
+// Add this block inside the noteEditorBody 'click' event listener
+
+    const toggleBtn = e.target.closest('.toggle-filter-btn');
+    if (toggleBtn) {
+        e.preventDefault();
+        const table = toggleBtn.closest('table');
+        if (table) {
+            table.classList.toggle('filter-collapsed');
+            saveNoteContent(); // Save the new state of the table
+        }
+        return; // Stop further actions
+    }
     const sortableHeader = e.target.closest('th.sortable-header');
     if (sortableHeader) {
         const table = sortableHeader.closest('table');
