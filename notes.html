@@ -7025,16 +7025,43 @@ app.elements.noteEditorBody.addEventListener('mousedown', (e) => {
 });
 
 // Table Filtering Logic
+// Fuzzy Table Filtering Logic
 app.elements.noteEditorBody.addEventListener('input', (e) => {
     const filterInput = e.target.closest('.table-filter-input');
     if(filterInput) {
         const table = filterInput.closest('table');
         const tbody = table.querySelector('tbody');
-        const filterText = filterInput.value.toLowerCase();
-        
-        tbody.querySelectorAll('tr').forEach(row => {
-            const rowText = row.innerText.toLowerCase();
-            row.style.display = rowText.includes(filterText) ? '' : 'none';
+        const filterText = filterInput.value; // No need for toLowerCase() with Fuse.js
+
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+
+        // If the filter is empty, show all rows and exit
+        if (!filterText.trim()) {
+            rows.forEach(row => row.style.display = '');
+            return;
+        }
+
+        // Get all rows to create the search data
+        const searchData = rows.map((row, index) => ({
+            id: index, // Use index as a reference
+            text: row.innerText
+        }));
+
+        // Configure Fuse.js for fuzzy searching
+        const fuseOptions = {
+            keys: ['text'],
+            includeScore: true,
+            threshold: 0.4 // Adjust threshold for desired fuzziness (0.0 = perfect match, 1.0 = match anything)
+        };
+        const fuse = new Fuse(searchData, fuseOptions);
+
+        // Perform the search
+        const results = fuse.search(filterText);
+        const visibleRowIds = new Set(results.map(result => result.item.id));
+
+        // Show/hide rows based on search results
+        rows.forEach((row, index) => {
+            row.style.display = visibleRowIds.has(index) ? '' : 'none';
         });
     }
 });
