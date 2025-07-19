@@ -2145,58 +2145,30 @@ const handlePublicNoteView = async (noteId) => {
             const noteContentDiv = document.getElementById('public-note-content');
             let html = marked.parse(noteData.content || '');
 
-            // --- Prepare HTML for Interactivity ---
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = html;
             
-            // **THE FIX for the triangle bug is here**
+            // **THIS IS THE FIX TO REMOVE THE FILTER BAR**
             tempDiv.querySelectorAll('table').forEach(table => {
-                // This now ONLY selects the last row of the header, ignoring the filter row.
-                table.querySelectorAll('thead tr:last-child th').forEach(th => {
+                // Find and remove the filter row, which is the first row in the table head
+                const filterRow = table.querySelector('thead tr:first-child');
+                if (filterRow && filterRow.querySelector('.table-filter-input')) {
+                    filterRow.remove();
+                }
+
+                // Add sortable class to the actual header row
+                table.querySelectorAll('thead tr th').forEach(th => {
                     th.classList.add('sortable-header');
                     th.dataset.sortDir = 'none';
                 });
+                
                 const tbody = table.querySelector('tbody');
                 if (tbody) {
                     table._originalRows = Array.from(tbody.querySelectorAll('tr'));
                 }
             });
             html = tempDiv.innerHTML.replace(/ contenteditable="true"/g, '');
-
             noteContentDiv.innerHTML = html;
-
-            // --- Attach All Event Listeners ---
-
-            // **THE FIX for the search is here**
-            const searchInput = document.getElementById('public-note-search');
-            if (searchInput) {
-                searchInput.addEventListener('input', () => {
-                    // Check if the Fuse library is available
-                    if (typeof Fuse === 'undefined') {
-                        console.error('Fuse.js library is not loaded.');
-                        showToast('Search library failed to load.', 'error');
-                        return;
-                    }
-                    const query = searchInput.value.trim();
-                    noteContentDiv.querySelectorAll('table').forEach(table => {
-                        const tbody = table.querySelector('tbody');
-                        if (!tbody) return;
-
-                        const rows = Array.from(tbody.querySelectorAll('tr'));
-                        if (!query) {
-                            rows.forEach(row => row.style.display = '');
-                            return;
-                        }
-                        const searchData = rows.map((row, index) => ({ id: index, text: row.innerText }));
-                        const fuse = new Fuse(searchData, { keys: ['text'], threshold: 0.4, ignoreLocation: true });
-                        const results = fuse.search(query);
-                        const visibleRowIds = new Set(results.map(r => r.item.id));
-                        rows.forEach((row, index) => {
-                            row.style.display = visibleRowIds.has(index) ? '' : 'none';
-                        });
-                    });
-                });
-            }
 
             // Delegated Click Listener for Sorting and Code Copying
             noteContentDiv.addEventListener('click', (e) => {
@@ -2205,24 +2177,24 @@ const handlePublicNoteView = async (noteId) => {
                     const table = header.closest('table');
                     const tbody = table.querySelector('tbody');
                     if (!tbody) return;
+                    const rowsToSort = Array.from(tbody.querySelectorAll('tr'));
                     const headers = Array.from(header.parentElement.children);
                     const colIndex = headers.indexOf(header);
                     const currentDir = header.dataset.sortDir;
                     const newDir = currentDir === 'asc' ? 'desc' : (currentDir === 'desc' ? 'none' : 'asc');
-                    if (!table._originalRows) { table._originalRows = Array.from(tbody.querySelectorAll('tr')); }
                     headers.forEach(h => { h.dataset.sortDir = 'none'; h.querySelector('.sort-indicator')?.remove(); });
+
                     if (newDir === 'none') {
-                        tbody.append(...table._originalRows);
+                        if(table._originalRows) tbody.append(...table._originalRows);
                     } else {
-                        const rows = Array.from(tbody.querySelectorAll('tr'));
-                        const isNumeric = rows.every(row => { const cellText = row.children[colIndex]?.innerText.trim() || ''; return cellText === '' || !isNaN(parseFloat(cellText.replace(/[^0-9.-]+/g, ""))); });
-                        rows.sort((rowA, rowB) => {
+                        const isNumeric = rowsToSort.every(row => { const cellText = row.children[colIndex]?.innerText.trim() || ''; return cellText === '' || !isNaN(parseFloat(cellText.replace(/[^0-9.-]+/g, ""))); });
+                        rowsToSort.sort((rowA, rowB) => {
                             const cellA = rowA.children[colIndex]?.innerText.trim() || '';
                             const cellB = rowB.children[colIndex]?.innerText.trim() || '';
                             if (isNumeric) { const numA = parseFloat(cellA.replace(/[^0-9.-]+/g, "")) || 0; const numB = parseFloat(cellB.replace(/[^0-9.-]+/g, "")) || 0; return newDir === 'asc' ? numA - numB : numB - numA; }
                             return newDir === 'asc' ? cellA.localeCompare(cellB) : cellB.localeCompare(cellA);
                         });
-                        tbody.append(...rows);
+                        tbody.append(...rowsToSort);
                         header.dataset.sortDir = newDir;
                         header.insertAdjacentHTML('beforeend', `<span class="sort-indicator">${newDir === 'asc' ? '▲' : '▼'}</span>`);
                     }
@@ -2248,11 +2220,11 @@ const handlePublicNoteView = async (noteId) => {
 
             hljs.highlightAll();
 
-        } else { // Note not found
+        } else {
             document.getElementById('public-note-title').textContent = 'Note Not Found';
             document.getElementById('public-note-content').innerHTML = '<p>The link you followed may be broken or the note may have been deleted.</p>';
         }
-    } catch (error) { // Error handling
+    } catch (error) {
         console.error("Error fetching public note:", error);
         document.getElementById('public-note-title').textContent = 'Error';
         document.getElementById('public-note-content').innerHTML = '<p>Could not load the note due to an error.</p>';
@@ -5062,6 +5034,22 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                 });
                 
                 app.elements.mobileSidebarOverlay.addEventListener('click', () => toggleMobileSidebar(false));
+                app.elements.mobileMoreButton.addEventListener('click', (e) => {
+    e.stopPropagation(); // This is crucial to prevent the menu from closing itself
+    const dropdown = app.containers.mobileControlsDropdown;
+    const isHidden = dropdown.classList.contains('hidden');
+    if (isHidden) {
+        // Show the dropdown with animation
+        dropdown.classList.remove('hidden');
+        setTimeout(() => {
+             dropdown.classList.remove('scale-95', 'opacity-0');
+        }, 10);
+    } else {
+        // Hide the dropdown with animation
+        dropdown.classList.add('scale-95', 'opacity-0');
+        setTimeout(() => dropdown.classList.add('hidden'), 100);
+    }
+});
 
                 app.containers.collectionsList.addEventListener('click', (e) => {
                     const itemLink = e.target.closest('.collection-item');
