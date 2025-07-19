@@ -223,12 +223,13 @@
     content: '';
 }
 /* --- NEW: Cell Focus Outline --- */
-#note-editor-body td:focus,
-#note-editor-body th:focus {
+/* --- CORRECTED: Cell Focus Outline --- */
+#note-editor-body td[contenteditable="true"]:focus,
+#note-editor-body th[contenteditable="true"]:focus {
     outline: 2px solid var(--accent-primary) !important;
     outline-offset: -2px; /* Pulls outline inside the cell */
+    position: relative; /* Ensures outline is drawn on top */
     z-index: 5;
-    position: relative;
 }
 .column-resizer {
     position: absolute;
@@ -2404,6 +2405,40 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
 
             let state = {};
             let isSearchActive = false;
+            // ADD THIS NEW BLOCK FOR THE FORMULA ENGINE
+const evaluateFormula = (formulaString, table) => {
+    if (!formulaString.startsWith('=')) return 'Invalid Formula';
+    let expression = formulaString.slice(1).trim();
+    const headers = Array.from(table.querySelectorAll('thead tr:last-child th')).map(th => th.innerText.trim());
+    const funcRegex = /(SUM|AVG|COUNT)\(([^)]+)\)/gi;
+    expression = expression.replace(funcRegex, (match, funcName, colName) => {
+        const colIndex = headers.findIndex(h => h.toLowerCase() === colName.trim().toLowerCase());
+        if (colIndex === -1) return `Error: Column '${colName}' not found`;
+        const values = Array.from(table.querySelectorAll('tbody tr'))
+            .map(row => parseFloat((row.children[colIndex]?.innerText || '').replace(/[^0-9.-]+/g, "")))
+            .filter(n => !isNaN(n));
+        if (values.length === 0 && funcName.toUpperCase() !== 'COUNT') return 0;
+        switch (funcName.toUpperCase()) {
+            case 'SUM': return values.reduce((a, b) => a + b, 0);
+            case 'AVG': return values.length > 0 ? (values.reduce((a, b) => a + b, 0) / values.length) : 0;
+            case 'COUNT': return values.length;
+            default: return `Error: Unknown function '${funcName}'`;
+        }
+    });
+    const sanitizedExpression = expression.replace(/[^0-9.+\-*/()\s.]/g, '');
+    if (sanitizedExpression !== expression) return 'Error: Invalid characters in formula';
+    try {
+        const result = new Function('return ' + sanitizedExpression)();
+        return result.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    } catch (error) {
+        return 'Error';
+    }
+};
+const recalculateAllFormulas = (table) => {
+    table.querySelectorAll('tfoot [data-formula]').forEach(cell => {
+        cell.textContent = evaluateFormula(cell.dataset.formula, table);
+    });
+};
             let editorSelectionRange = null;
             let speechRecognizer = null;
             let isDictating = false;
@@ -3817,6 +3852,7 @@ ${combinedContent}`;
             // ADD THIS NEW HELPER FUNCTION
 // REPLACE THE OLD 'upgradePastedTables' FUNCTION
 // REPLACE 'upgradePastedTables' FUNCTION
+// REPLACE 'upgradePastedTables' FUNCTION
 const upgradePastedTables = (html) => {
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = html;
@@ -3824,7 +3860,6 @@ const upgradePastedTables = (html) => {
     if (tables.length === 0) return html;
 
     tables.forEach(table => {
-        // Ensure editable cells and add sorting classes
         table.querySelectorAll('th, td').forEach(cell => cell.setAttribute('contenteditable', 'true'));
         const headers = table.querySelectorAll('th');
         headers.forEach(th => {
@@ -3832,11 +3867,16 @@ const upgradePastedTables = (html) => {
             th.dataset.sortDir = 'none';
         });
         
-        // Add the filter row to pasted tables
         const thead = table.querySelector('thead');
         if (thead) {
             const filterRow = document.createElement('tr');
-            filterRow.innerHTML = `<th colspan="${headers.length}" contenteditable="false"><input class="table-filter-input" placeholder="Filter table..."/></th>`;
+            filterRow.innerHTML = `<th colspan="${headers.length}" contenteditable="false">
+                <div class="table-filter-wrapper">
+                    <i data-feather="filter" class="w-4 h-4 filter-icon"></i>
+                    <input class="table-filter-input" placeholder="Filter this table..." />
+                    <button class="table-filter-clear-btn"><i data-feather="x" class="w-4 h-4"></i></button>
+                </div>
+            </th>`;
             thead.prepend(filterRow);
         }
     });
@@ -4715,13 +4755,20 @@ document.getElementById('table-cancel-btn').addEventListener('click', () => {
 // REPLACE THE OLD 'table-create-btn' LISTENER WITH THIS
 // REPLACE THE OLD 'table-create-btn' LISTENER
 // REPLACE 'table-create-btn' LISTENER
+// REPLACE 'table-create-btn' LISTENER
 document.getElementById('table-create-btn').addEventListener('click', () => {
     const rows = parseInt(document.getElementById('table-rows').value) || 3;
     const cols = parseInt(document.getElementById('table-cols').value) || 2;
 
     let tableHTML = '<table style="width:100%"><thead>';
-    // Add Filter Row
-    tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><input class="table-filter-input" placeholder="Filter table..."/></th></tr>`;
+    // Add Nicer Filter Row
+    tableHTML += `<tr><th colspan="${cols}" contenteditable="false">
+        <div class="table-filter-wrapper">
+            <i data-feather="filter" class="w-4 h-4 filter-icon"></i>
+            <input class="table-filter-input" placeholder="Filter this table..." />
+            <button class="table-filter-clear-btn"><i data-feather="x" class="w-4 h-4"></i></button>
+        </div>
+    </th></tr>`;
     // Add Header Row
     tableHTML += '<tr>';
     for (let i = 0; i < cols; i++) {
@@ -4738,7 +4785,10 @@ document.getElementById('table-create-btn').addEventListener('click', () => {
     }
     tableHTML += '</tbody></table><p><br></p>';
 
-    restoreSelectionAndExec(() => document.execCommand('insertHTML', false, tableHTML));
+    restoreSelectionAndExec(() => {
+        document.execCommand('insertHTML', false, tableHTML);
+        feather.replace(); // To render new icons in filter bar
+    });
     closeModal(document.getElementById('table-creator-modal'));
 });
                 setupInNoteSearchListeners();
@@ -6800,6 +6850,71 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
 // START: Final Table Interaction Logic (ALL FEATURES)
 
 let tableContextMenu = document.getElementById('table-context-menu');
+// ADD THIS NEW BLOCK FOR THE FORMULA ENGINE
+/**
+ * Parses and evaluates a formula string like "=SUM(Cost) / COUNT(Items)".
+ * @param {string} formulaString The formula to evaluate.
+ * @param {HTMLTableElement} table The table element context.
+ * @returns {string} The calculated result or an error message.
+ */
+const evaluateFormula = (formulaString, table) => {
+    if (!formulaString.startsWith('=')) return 'Invalid Formula';
+
+    let expression = formulaString.slice(1).trim();
+    const headers = Array.from(table.querySelectorAll('thead tr:last-child th')).map(th => th.innerText.trim());
+
+    // Regex to find all instances of FUNCTION(ColumnName)
+    const funcRegex = /(SUM|AVG|COUNT)\(([^)]+)\)/gi;
+
+    // Replace function calls with their calculated values
+    expression = expression.replace(funcRegex, (match, funcName, colName) => {
+        const colIndex = headers.findIndex(h => h.toLowerCase() === colName.trim().toLowerCase());
+        if (colIndex === -1) return `Error: Column '${colName}' not found`;
+        
+        const values = Array.from(table.querySelectorAll('tbody tr'))
+            .map(row => {
+                const cellText = row.children[colIndex]?.innerText || '';
+                // Smart parsing: removes $, commas, and whitespace before converting to number
+                return parseFloat(cellText.replace(/[^0-9.-]+/g, ""));
+            })
+            .filter(n => !isNaN(n));
+
+        if (values.length === 0 && funcName.toUpperCase() !== 'COUNT') return 0;
+
+        switch (funcName.toUpperCase()) {
+            case 'SUM': return values.reduce((a, b) => a + b, 0);
+            case 'AVG': return values.length > 0 ? (values.reduce((a, b) => a + b, 0) / values.length) : 0;
+            case 'COUNT': return values.length;
+            default: return `Error: Unknown function '${funcName}'`;
+        }
+    });
+
+    // Sanitize the final expression to prevent security risks
+    const sanitizedExpression = expression.replace(/[^0-9.+\-*/()\s.]/g, '');
+    if (sanitizedExpression !== expression) {
+        return 'Error: Invalid characters in formula';
+    }
+
+    try {
+        // Safely evaluate the final mathematical expression
+        const result = new Function('return ' + sanitizedExpression)();
+        return result.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    } catch (error) {
+        return 'Error';
+    }
+};
+
+/**
+ * Finds all cells with a data-formula attribute in a table and recalculates them.
+ * @param {HTMLTableElement} table The table to recalculate.
+ */
+const recalculateAllFormulas = (table) => {
+    const formulaCells = table.querySelectorAll('tfoot [data-formula]');
+    formulaCells.forEach(cell => {
+        const formula = cell.dataset.formula;
+        cell.textContent = evaluateFormula(formula, table);
+    });
+};
 let activeTableRow = null;
 let activeTableColIndex = -1;
 let activeTableForAction = null;
@@ -6811,24 +6926,31 @@ const hideTableContextMenu = () => {
     }
 };
 
+// REPLACE your existing 'contextmenu' listener with this one
 app.elements.noteEditorBody.addEventListener('contextmenu', (e) => {
     closeContextMenu();
     const row = e.target.closest('tbody tr');
-    const col = e.target.closest('thead tr:last-child th'); // Target the actual header row
+    const colHeader = e.target.closest('thead tr:last-child th');
+    const footerCell = e.target.closest('tfoot td');
 
-    if (row || col) {
+    if (row || colHeader || footerCell) {
         e.preventDefault();
         activeTableForAction = e.target.closest('table');
-        document.querySelectorAll('.table-menu-item.with-submenu').forEach(item => item.classList.remove('hover'));
-
+        
         if (row) {
             activeTableRow = row;
             document.getElementById('table-row-actions').style.display = 'block';
             document.getElementById('table-col-actions').style.display = 'none';
         } else {
-            activeTableColIndex = Array.from(col.parentElement.children).indexOf(col);
+            activeTableColIndex = footerCell ? footerCell.cellIndex : Array.from(colHeader.parentElement.children).indexOf(colHeader);
             document.getElementById('table-row-actions').style.display = 'none';
             document.getElementById('table-col-actions').style.display = 'block';
+
+            const calculateMenuItem = tableContextMenu.querySelector('.table-menu-item .submenu [data-action="calculate"]')?.closest('.with-submenu');
+            if (calculateMenuItem) {
+                let isNumeric = Array.from(activeTableForAction.querySelectorAll('tbody tr')).some(r => isFinite(r.children[activeTableColIndex]?.innerText.replace(/[^0-9.-]+/g, "")));
+                calculateMenuItem.style.display = isNumeric ? 'flex' : 'none';
+            }
         }
         
         tableContextMenu.style.top = `${e.clientY}px`;
@@ -6841,56 +6963,83 @@ app.elements.noteEditorBody.addEventListener('contextmenu', (e) => {
     }
 });
 
-tableContextMenu.addEventListener('click', (e) => {
+// REPLACE your existing 'tableContextMenu.addEventListener' with this one
+tableContextMenu.addEventListener('click', async (e) => {
     const button = e.target.closest('[data-action]');
     if (!button || !activeTableForAction) return;
 
     const action = button.dataset.action;
-    const colCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
-    
+    let colCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
+
+    const ensureTfoot = () => {
+        let tfoot = activeTableForAction.querySelector('tfoot');
+        if (!tfoot) {
+            tfoot = activeTableForAction.createTFoot().insertRow(0);
+            for (let i = 0; i < colCount; i++) tfoot.insertCell();
+        }
+        return tfoot.rows[0];
+    };
+
     const actions = {
-        'add-row-above': () => activeTableRow.before(actions.createRow()),
-        'add-row-below': () => activeTableRow.after(actions.createRow()),
+        'calculate': () => {
+            const type = button.dataset.calc.toUpperCase();
+            const headerText = activeTableForAction.querySelector(`thead tr:last-child th:nth-child(${activeTableColIndex + 1})`)?.innerText;
+            if (!headerText) return showToast("Column header is empty.", "error");
+            const formula = `=${type}(${headerText})`;
+            const footerRow = ensureTfoot();
+            const footerCell = footerRow.cells[activeTableColIndex];
+            footerCell.dataset.formula = formula;
+            recalculateAllFormulas(activeTableForAction);
+        },
+        'custom-formula': async () => {
+            const footerRow = ensureTfoot();
+            const footerCell = footerRow.cells[activeTableColIndex];
+            const existingFormula = footerCell.dataset.formula || '';
+            const formula = await showPrompt({
+                title: 'Enter Custom Formula',
+                message: 'Use functions like SUM(), AVG(), COUNT() with column names. E.g., =SUM(Cost) * 1.1',
+                initialValue: existingFormula,
+                placeholder: '=SUM(Column Name)'
+            });
+            if (formula) {
+                if (formula.startsWith('=')) {
+                    footerCell.dataset.formula = formula;
+                    recalculateAllFormulas(activeTableForAction);
+                } else {
+                    showToast("Formula must start with '='.", "error");
+                }
+            } else if (formula === '') {
+                delete footerCell.dataset.formula;
+                footerCell.textContent = '';
+            }
+        },
+        // Other actions like 'add-row-above', etc. will be added back from your original code.
+    };
+    
+    // This part adds back all the other menu functions from your file
+    const originalActions = {
+        'add-row-above': () => activeTableRow.before(originalActions.createRow()),
+        'add-row-below': () => activeTableRow.after(originalActions.createRow()),
         'duplicate-row': () => activeTableRow.after(activeTableRow.cloneNode(true)),
         'delete-row': () => activeTableRow.remove(),
         'highlight': () => {
             const color = button.dataset.color;
-            activeTableRow.className = ''; // Clear other colors
+            activeTableRow.className = '';
             if (color !== 'none') activeTableRow.classList.add(`bg-highlight-${color}`);
         },
-        'add-col-left': () => actions.addColumn(activeTableColIndex),
-        'add-col-right': () => actions.addColumn(activeTableColIndex + 1),
+        'add-col-left': () => originalActions.addColumn(activeTableColIndex),
+        'add-col-right': () => originalActions.addColumn(activeTableColIndex + 1),
         'duplicate-col': () => {
             activeTableForAction.querySelectorAll('tr').forEach(row => {
                 const cellToClone = row.children[activeTableColIndex];
                 if (cellToClone) cellToClone.after(cellToClone.cloneNode(true));
             });
+            originalActions.updateFilterColspan(colCount + 1);
         },
         'delete-col': () => {
             if (colCount <= 1) return showToast("Cannot delete the last column.", "error");
             activeTableForAction.querySelectorAll('tr').forEach(row => row.children[activeTableColIndex]?.remove());
-        },
-        'calculate': () => {
-            const type = button.dataset.calc;
-            let tfoot = activeTableForAction.querySelector('tfoot');
-            if (!tfoot) {
-                tfoot = activeTableForAction.createTFoot().insertRow(0);
-                for(let i = 0; i < colCount; i++) tfoot.insertCell();
-            }
-            const footerCell = tfoot.rows[0].cells[activeTableColIndex];
-            if (type === 'clear') return footerCell.innerHTML = '';
-            
-            const values = Array.from(activeTableForAction.querySelectorAll('tbody tr'))
-                .map(row => parseFloat(row.children[activeTableColIndex]?.innerText.replace(/[^0-9.-]+/g, "")))
-                .filter(n => !isNaN(n));
-            
-            if (values.length === 0) return showToast("No numbers found in column.", "info");
-
-            let result = '';
-            if (type === 'sum') result = `Sum: ${values.reduce((a, b) => a + b, 0).toLocaleString()}`;
-            if (type === 'avg') result = `Avg: ${(values.reduce((a, b) => a + b, 0) / values.length).toLocaleString()}`;
-            if (type === 'count') result = `Count: ${values.length}`;
-            footerCell.textContent = result;
+            originalActions.updateFilterColspan(colCount - 1);
         },
         'createRow': () => {
             const newRow = document.createElement('tr');
@@ -6898,26 +7047,28 @@ tableContextMenu.addEventListener('click', (e) => {
             return newRow;
         },
         'addColumn': (index) => {
-            activeTableForAction.querySelectorAll('tr').forEach(row => {
-                const isHeader = row.parentElement.tagName === 'THEAD';
-                const cellType = isHeader ? 'th' : 'td';
-                const newCell = document.createElement(cellType);
+            activeTableForAction.querySelectorAll('tr:not(:first-child)').forEach(row => {
+                const newCell = document.createElement(row.parentElement.tagName === 'THEAD' ? 'th' : 'td');
                 newCell.setAttribute('contenteditable', 'true');
-                if (isHeader) {
+                if (row.parentElement.tagName === 'THEAD') {
                     newCell.classList.add('sortable-header');
                     newCell.dataset.sortDir = 'none';
                     newCell.textContent = 'Header';
                 }
                 row.insertBefore(newCell, row.children[index]);
             });
-            // Update colspan for filter row
+            originalActions.updateFilterColspan(colCount + 1);
+        },
+        'updateFilterColspan': (newColCount) => {
             const filterHeader = activeTableForAction.querySelector('thead tr:first-child th');
-            if(filterHeader) filterHeader.setAttribute('colspan', colCount + 1);
+            if(filterHeader) filterHeader.setAttribute('colspan', newColCount);
         }
     };
+    
+    const finalActions = { ...originalActions, ...actions };
 
-    if (actions[action]) {
-        actions[action]();
+    if (finalActions[action]) {
+        finalActions[action]();
         saveNoteContent();
         hideTableContextMenu();
     }
@@ -7016,19 +7167,50 @@ app.elements.noteEditorBody.addEventListener('mousedown', (e) => {
         }
     }
 });
+// ADD THIS LINE
+const debouncedRecalculate = debounce((table) => {
+    recalculateAllFormulas(table);
+    saveNoteContent();
+}, 300);
 
 // Table Filtering Logic
 app.elements.noteEditorBody.addEventListener('input', (e) => {
+    // --- ADDED: Recalculation logic ---
+    const table = e.target.closest('table');
+    if (table) {
+        debouncedRecalculate(table);
+    }
+    // --- End of new logic ---
+
     const filterInput = e.target.closest('.table-filter-input');
     if(filterInput) {
-        const table = filterInput.closest('table');
+        const table = filterInput.closest('table'); // Ensure table is defined here as well
         const tbody = table.querySelector('tbody');
         const filterText = filterInput.value.toLowerCase();
-        
-        tbody.querySelectorAll('tr').forEach(row => {
+
+        let visibleCount = 0;
+        tbody.querySelectorAll('tr:not(.no-results-row)').forEach(row => {
             const rowText = row.innerText.toLowerCase();
-            row.style.display = rowText.includes(filterText) ? '' : 'none';
+            const isVisible = rowText.includes(filterText);
+            row.style.display = isVisible ? '' : 'none';
+            if(isVisible) visibleCount++;
         });
+
+        let noResultsRow = tbody.querySelector('.no-results-row');
+        if (visibleCount === 0 && filterText) {
+            if (!noResultsRow) {
+                noResultsRow = tbody.insertRow();
+                noResultsRow.className = 'no-results-row';
+                const cell = noResultsRow.insertCell();
+                cell.colSpan = 100;
+                cell.textContent = 'No results found.';
+                cell.style.textAlign = 'center';
+                cell.style.padding = '1rem';
+                cell.style.color = 'var(--text-tertiary)';
+            }
+        } else if (noResultsRow) {
+            noResultsRow.remove();
+        }
     }
 });
 
@@ -7257,10 +7439,10 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
                 <div class="table-menu-item" data-action="calculate" data-calc="sum">Sum</div>
                 <div class="table-menu-item" data-action="calculate" data-calc="avg">Average</div>
                 <div class="table-menu-item" data-action="calculate" data-calc="count">Count</div>
-                <hr class="my-1 border-border-color">
-                <div class="table-menu-item" data-action="calculate" data-calc="clear">Clear Calculation</div>
              </div>
         </div>
+        <hr class="my-1 border-border-color">
+        <div class="table-menu-item" data-action="custom-formula"><i data-feather="bar-chart-2"></i>Custom Formula</div>
         <hr class="my-1 border-border-color">
         <div class="table-menu-item text-red-500" data-action="delete-col"><i data-feather="trash-2"></i>Delete Column</div>
     </div>
