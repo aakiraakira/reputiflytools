@@ -4548,6 +4548,58 @@ tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="tabl
         feather.replace();
         showToast(`✅ Table (${rows}x${cols}) created.`);
     }
+},{
+    name: 'recalculate',
+    description: 'Recalculate a column with a custom formula. Usage: /recalculate [column name]',
+    suggest: 'none', // No suggestions are needed as it operates on the current note's table
+    execute: (args) => {
+        const columnName = args.trim();
+        if (!columnName) {
+            return showToast('❌ You must specify a column name.', 'error');
+        }
+
+        const activeNoteId = state.settings.activeNoteId;
+        if (!activeNoteId) {
+            return showToast('❌ You must be in a note to use this command.', 'error');
+        }
+
+        // The table exists in the live DOM of the editor, so we query it directly
+        const editorBody = app.elements.noteEditorBody;
+        const table = editorBody.querySelector('table');
+
+        if (!table) {
+            return showToast('❌ No table found in the current note.', 'error');
+        }
+
+        const headers = Array.from(table.querySelectorAll('thead tr:last-child th'));
+        let targetHeader = null;
+        let targetColIndex = -1;
+
+        // Find the specified column by its text content (case-insensitive)
+        for (let i = 0; i < headers.length; i++) {
+            if (headers[i].innerText.trim().toLowerCase() === columnName.toLowerCase()) {
+                targetHeader = headers[i];
+                targetColIndex = i;
+                break;
+            }
+        }
+
+        if (!targetHeader) {
+            return showToast(`❌ Column "${columnName}" not found in the table.`, 'error');
+        }
+
+        const formula = targetHeader.dataset.formula;
+
+        if (!formula) {
+            return showToast(`❌ No custom formula is set for the "${columnName}" column.`, 'info');
+        }
+
+        // Reuse the existing function to perform the calculation
+        performCustomFormula(table, targetColIndex, formula);
+
+        // This function will also save the note, so no need to call saveState() here
+        showToast(`✅ Recalculated column "${columnName}".`, 'success');
+    }
 },
 // ... rest of the commands
     { name: 'dn', description: 'Delete a note. Usage: /dn [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',async(n)=>{const r=findItem(n.id);const c=await showConfirm({title:`Delete "${n.name}"?`,message:'This cannot be undone.',confirmText:'Delete'});if(c){const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index,1);showToast(`🗑️ Note deleted.`);if(state.settings.activeNoteId===n.id)state.settings.activeNoteId=null;saveState();buildLunrIndex();render()}})},
