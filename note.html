@@ -2022,6 +2022,38 @@ const getAllFolders = (items = state.collections) => {
     }
     return folders;
 };
+/**
+ * Finds all HTML tables in a string and converts them to a plain-text Markdown format.
+ * @param {string} htmlString - The HTML content of a note.
+ * @returns {string} The content with tables converted to Markdown.
+ */
+function convertTablesToMarkdown(htmlString) {
+    if (!htmlString || !htmlString.includes('<table')) return htmlString;
+
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlString;
+
+    tempDiv.querySelectorAll('table').forEach(table => {
+        let markdownTable = '\n';
+        // Process Header
+        const headers = table.querySelectorAll('thead tr:last-child th');
+        if (headers.length > 0) {
+            markdownTable += `| ${Array.from(headers).map(th => th.innerText.trim()).join(' | ')} |\n`;
+            markdownTable += `| ${Array(headers.length).fill('---').join(' | ')} |\n`;
+        }
+        
+        // Process Body
+        const rows = table.querySelectorAll('tbody tr');
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            markdownTable += `| ${Array.from(cells).map(td => td.innerText.trim()).join(' | ')} |\n`;
+        });
+
+        table.outerHTML = markdownTable; // Replace the HTML table with the Markdown version
+    });
+
+    return tempDiv.innerHTML;
+}
 const handleGlobalAIQuery = async () => {
     const askBtn = document.getElementById('global-ai-ask-btn');
     const answerContainer = document.getElementById('global-ai-answer-container');
@@ -2053,7 +2085,10 @@ const handleGlobalAIQuery = async () => {
         return;
     }
 
-    const context = topNotes.map(note => `--- Note: "${note.name}" ---\n${note.content.replace(/<[^>]*>?/gm, '')}`).join('\n\n');
+    const context = topNotes.map(note => {
+    const contentWithMarkdownTables = convertTablesToMarkdown(note.content);
+    return `--- Note: "${note.name}" ---\n${contentWithMarkdownTables.replace(/<[^>]*>?/gm, '')}`;
+}).join('\n\n');
     const historyContext = askYourNotesHistory.map(item => `Previous Question: ${item.question}\nPrevious Answer: ${item.answer}`).join('\n\n');
     
     const prompt = `You are a helpful assistant.
