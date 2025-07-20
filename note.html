@@ -28,6 +28,7 @@
         <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.1/dist/browser-image-compression.js"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.1/dist/browser-image-compression.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     
 
     <script>
@@ -1469,7 +1470,7 @@ window.functions = getFunctions(app,);
          </div>
      </div>
 </header>
-<input type="file" id="file-upload-input" class="hidden" />
+<input type="file" id="file-upload-input" class="hidden" accept=".csv, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, image/*, .pdf, .txt, .md" />
 
            
            <div id="main-content-area" class="flex-grow overflow-y-auto relative flex flex-col custom-scrollbar">
@@ -1822,6 +1823,55 @@ function findItem(itemId, tree = state.collections) {
     }
     return null;
 }
+const handleSpreadsheetUpload = (file) => {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+            if (json.length === 0) {
+                showToast('Spreadsheet is empty.', 'error');
+                return;
+            }
+
+            const [headers, ...rows] = json;
+            const cols = headers.length;
+
+            let tableHTML = '<table style="width:100%"><thead>';
+            tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="table-header-controls"><div class="table-filter-wrapper"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div><button class="toggle-filter-btn" title="Toggle Filter"><i data-feather="chevrons-up" class="w-4 h-4"></i></button></div></th></tr>`;
+            tableHTML += '<tr>';
+            headers.forEach(header => {
+                tableHTML += `<th class="sortable-header" data-sort-dir="none" contenteditable="true">${header}</th>`;
+            });
+            tableHTML += '</tr></thead><tbody>';
+
+            rows.forEach(row => {
+                tableHTML += '<tr>';
+                for (let i = 0; i < cols; i++) {
+                    tableHTML += `<td contenteditable="true">${row[i] || ''}</td>`;
+                }
+                tableHTML += '</tr>';
+            });
+
+            tableHTML += '</tbody></table><p><br></p>';
+
+            restoreSelectionAndExec(() => document.execCommand('insertHTML', false, tableHTML));
+            feather.replace();
+            showToast(`✅ Table imported from ${file.name}`);
+
+        } catch (err) {
+            console.error("Spreadsheet parsing error:", err);
+            showToast("Failed to parse the spreadsheet file.", "error");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+};
 /**
  * Renders the flashcard data into the modal and handles the UI logic.
  * @param {Array<Object>} cards - An array of flashcard objects [{front, back}].
@@ -2955,6 +3005,15 @@ async function loadState() {
 const handleFileUpload = async (file) => {
     const user = window.auth.currentUser;
     if (!file || !user) return;
+    const spreadsheetTypes = [
+        'text/csv',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
+    if (spreadsheetTypes.includes(file.type)) {
+        handleSpreadsheetUpload(file);
+        return; // Stop further execution
+    }
 
     // --- Overall file size limit ---
     const OVERALL_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
@@ -5956,58 +6015,74 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                 // NEW: Enhanced paste event listener
 // REPLACE THE OLD 'paste' LISTENER WITH THIS UPGRADED VERSION
 app.elements.noteEditorBody.addEventListener('paste', (e) => {
-    // First, check for pasting image files
+    // Check for image files first (existing logic)
     const files = e.clipboardData.files;
     let handledFile = false;
     for (const file of files) {
         if (file.type.startsWith('image/')) {
-            // This reuses your existing function for uploading files
             handleFileUpload(file);
             e.preventDefault();
             handledFile = true;
         }
     }
-    if (handledFile) {
-        return; // Stop if we handled a file paste
-    }
+    if (handledFile) return;
 
-    // --- Logic for Pasted Text & Tables ---
     e.preventDefault();
-
     let pastedHtml = e.clipboardData.getData('text/html');
+    const plainText = e.clipboardData.getData('text/plain');
+
+    // --- START: NEW SPREADSHEET PASTE LOGIC ---
+    // Check if the plain text is tab-separated and has multiple lines, which is typical for spreadsheets.
+    if (plainText.includes('\t') && plainText.includes('\n')) {
+        const lines = plainText.trim().split('\n').map(line => line.split('\t'));
+        const cols = lines[0].length;
+
+        // Ensure it's a consistent table structure
+        if (lines.every(line => line.length === cols)) {
+            let tableHTML = '<table style="width:100%"><thead>';
+            tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="table-header-controls"><div class="table-filter-wrapper"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div><button class="toggle-filter-btn" title="Toggle Filter"><i data-feather="chevrons-up" class="w-4 h-4"></i></button></div></th></tr>`;
+            
+            const [headers, ...rows] = lines;
+            tableHTML += '<tr>';
+            headers.forEach(header => tableHTML += `<th class="sortable-header" data-sort-dir="none" contenteditable="true">${header}</th>`);
+            tableHTML += '</tr></thead><tbody>';
+
+            rows.forEach(row => {
+                tableHTML += '<tr>';
+                row.forEach(cell => tableHTML += `<td contenteditable="true">${cell}</td>`);
+                tableHTML += '</tr>';
+            });
+            tableHTML += '</tbody></table><p><br></p>';
+            
+            document.execCommand('insertHTML', false, tableHTML);
+            feather.replace();
+            saveNoteContent();
+            return; // Exit after handling the spreadsheet paste
+        }
+    }
+    // --- END: NEW SPREADSHEET PASTE LOGIC ---
+
+    // Fallback to existing logic for other HTML or plain text pastes
     if (!pastedHtml) {
-        const plainText = e.clipboardData.getData('text/plain');
         pastedHtml = `<p>${plainText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, '</p><p>')}</p>`;
     }
 
-    // Sanitize the HTML to remove conflicting styles
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = pastedHtml;
     tempDiv.querySelectorAll('*').forEach(el => {
         el.removeAttribute('style');
         el.removeAttribute('class');
-        // Also remove obsolete <font> tags
         if (el.tagName.toLowerCase() === 'font') {
             const parent = el.parentNode;
-            while (el.firstChild) {
-                parent.insertBefore(el.firstChild, el);
-            }
+            while (el.firstChild) parent.insertBefore(el.firstChild, el);
             parent.removeChild(el);
         }
     });
     const sanitizedHtml = tempDiv.innerHTML;
-
-    // *** THIS IS THE KEY UPGRADE ***
-    // Automatically add interactive features to any pasted tables
     const finalHtml = upgradePastedTables(sanitizedHtml);
 
-    // Insert the clean, upgraded HTML into the editor
     document.execCommand('insertHTML', false, finalHtml);
-
-    // Render any new Feather icons that were added to the table
     feather.replace();
-
-    // Save the new content
     saveNoteContent();
 });
 
@@ -7039,23 +7114,39 @@ tableContextMenu.addEventListener('click', (e) => {
             const type = button.dataset.calc;
             let tfoot = activeTableForAction.querySelector('tfoot');
             if (!tfoot) {
-                tfoot = activeTableForAction.createTFoot().insertRow(0);
-                for(let i = 0; i < colCount; i++) tfoot.insertCell();
+                // Correctly create the tfoot, then the row, then add cells to the row.
+                tfoot = activeTableForAction.createTFoot();
+                const newRow = tfoot.insertRow(0);
+                for(let i = 0; i < colCount; i++) {
+                    newRow.insertCell();
+                }
             }
             const footerCell = tfoot.rows[0].cells[activeTableColIndex];
-            if (type === 'clear') return footerCell.innerHTML = '';
             
-            const values = Array.from(activeTableForAction.querySelectorAll('tbody tr'))
-                .map(row => parseFloat(row.children[activeTableColIndex]?.innerText.replace(/[^0-9.-]+/g, "")))
-                .filter(n => !isNaN(n));
-            
-            if (values.length === 0) return showToast("No numbers found in column.", "info");
+            // Store the calculation type for live updates
+            if (type === 'clear') {
+                footerCell.innerHTML = '';
+                footerCell.removeAttribute('data-calc-type');
+            } else {
+                footerCell.dataset.calcType = type;
+                performStandardCalculation(activeTableForAction, activeTableColIndex, type);
+            }
+        },
+        'custom-calc': async () => {
+            const formula = await showPrompt({
+                title: 'Custom Column Formula',
+                message: 'Enter formula using column names (e.g., Cost * Quantity) or letters (A-Z).',
+                placeholder: 'e.g., Cost * 0.07'
+            });
+            if (!formula) return;
 
-            let result = '';
-            if (type === 'sum') result = `Sum: ${values.reduce((a, b) => a + b, 0).toLocaleString()}`;
-            if (type === 'avg') result = `Avg: ${(values.reduce((a, b) => a + b, 0) / values.length).toLocaleString()}`;
-            if (type === 'count') result = `Count: ${values.length}`;
-            footerCell.textContent = result;
+            const targetHeader = activeTableForAction.querySelector(`thead tr:last-child th:nth-child(${activeTableColIndex + 1})`);
+            if (targetHeader) {
+                // Store the formula for live updates
+                targetHeader.dataset.formula = formula;
+                performCustomFormula(activeTableForAction, activeTableColIndex, formula);
+                showToast(`Live formula applied to column.`, 'success');
+            }
         },
         'createRow': () => {
     // Dynamically get the number of columns from the table's header row.
@@ -7200,7 +7291,18 @@ app.elements.noteEditorBody.addEventListener('mousedown', (e) => {
         }
     }
 });
-
+// --- NEW: Live Calculation Trigger ---
+app.elements.noteEditorBody.addEventListener('input', (e) => {
+    // Check if the edit happened inside a table cell
+    const cell = e.target.closest('td');
+    if (cell) {
+        const table = cell.closest('table');
+        if (table) {
+            // Use the debounced function to update calculations
+            debouncedLiveCalculate(table);
+        }
+    }
+});
 // Table Filtering Logic
 // Fuzzy Table Filtering Logic
 app.elements.noteEditorBody.addEventListener('input', (e) => {
@@ -7248,6 +7350,115 @@ document.addEventListener('click', (e) => {
     if (!e.target.closest('#table-context-menu')) hideTableContextMenu();
     if (!e.target.closest('#context-menu')) closeContextMenu();
 });
+// --- START: NEW Live Calculation Logic ---
+
+/**
+ * A debounced function to trigger live updates for a table.
+ * This prevents calculations from running on every single keystroke.
+ */
+const debouncedLiveCalculate = debounce((table) => {
+    updateTableCalculations(table);
+}, 400); // 400ms delay
+
+/**
+ * Main function to update all calculations for a given table.
+ * It checks for both footer calculations (sum, avg) and custom column formulas.
+ */
+function updateTableCalculations(table) {
+    if (!table) return;
+
+    // 1. Update footer calculations (Sum, Average, Count)
+    const tfoot = table.querySelector('tfoot');
+    if (tfoot) {
+        tfoot.querySelectorAll('td[data-calc-type]').forEach((cell, index) => {
+            performStandardCalculation(table, index, cell.dataset.calcType);
+        });
+    }
+
+    // 2. Update custom formula columns
+    table.querySelectorAll('thead th[data-formula]').forEach((header, index) => {
+        performCustomFormula(table, index, header.dataset.formula);
+    });
+    
+    // This ensures the note is saved after calculations are updated
+    saveNoteContent();
+}
+
+/**
+ * Performs a standard calculation (sum, avg, count) for a specific column.
+ */
+function performStandardCalculation(table, colIndex, calcType) {
+    const tfoot = table.querySelector('tfoot');
+    if (!tfoot || !calcType) return;
+    
+    const footerCell = tfoot.rows[0].cells[colIndex];
+    if (!footerCell) return;
+
+    const values = Array.from(table.querySelectorAll('tbody tr'))
+        .map(row => parseFloat(row.children[colIndex]?.innerText.replace(/[^0-9.-]+/g, "")))
+        .filter(n => !isNaN(n));
+
+    if (values.length === 0) {
+        footerCell.innerHTML = ''; // Clear if no numbers
+        return;
+    }
+
+    let result = '';
+    if (calcType === 'sum') result = `Sum: ${values.reduce((a, b) => a + b, 0).toLocaleString()}`;
+    if (calcType === 'avg') result = `Avg: ${(values.reduce((a, b) => a + b, 0) / values.length).toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+    if (calcType === 'count') result = `Count: ${values.length}`;
+    footerCell.textContent = result;
+}
+
+/**
+ * Applies a custom formula to every row in a target column.
+ */
+function performCustomFormula(table, targetColIndex, formula) {
+    const headers = Array.from(table.querySelectorAll('thead tr:last-child th'))
+        .map(th => th.innerText.trim());
+
+    const formulaRegex = /(.+?)\s*([+\-*/])\s*(.+)/;
+    const match = formula.match(formulaRegex);
+    if (!match) return; // Invalid formula stored
+
+    const [, col1Raw, operator, col2Raw] = match.map(s => s.trim());
+    
+    const getIndex = (operand) => {
+        let op = operand.replace(/[()]/g, '').trim();
+        if (/^[A-Z]$/i.test(op)) return op.toUpperCase().charCodeAt(0) - 65;
+        const lowerOp = op.toLowerCase();
+        return headers.findIndex(h => h.toLowerCase() === lowerOp);
+    };
+
+    const col1Index = getIndex(col1Raw);
+    const col2Index = getIndex(col2Raw);
+    const col2Value = (col2Index === -1) ? parseFloat(col2Raw.replace(/[$,]/g, '')) : null;
+    
+    if (col1Index === -1 || (col2Index === -1 && isNaN(col2Value))) return; // Invalid columns in formula
+
+    table.querySelectorAll('tbody tr').forEach(row => {
+        const getNumericValue = (index) => parseFloat(row.children[index]?.innerText.replace(/[$,]/g, ''));
+        const val1 = getNumericValue(col1Index);
+        const val2 = col2Index !== -1 ? getNumericValue(col2Index) : col2Value;
+        const targetCell = row.children[targetColIndex];
+
+        if (isNaN(val1) || isNaN(val2) || !targetCell) {
+            if(targetCell) targetCell.innerText = '';
+            return;
+        }
+
+        let result;
+        switch (operator) {
+            case '+': result = val1 + val2; break;
+            case '-': result = val1 - val2; break;
+            case '*': result = val1 * val2; break;
+            case '/': result = val2 !== 0 ? val1 / val2 : 'Error'; break;
+            default: return;
+        }
+        targetCell.innerText = typeof result === 'number' ? result.toLocaleString(undefined, { maximumFractionDigits: 2 }) : result;
+    });
+}
+// --- END: NEW Live Calculation Logic ---
 
 // END: Final Table Interaction Logic
 
@@ -7448,12 +7659,13 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
         <div class="table-menu-item with-submenu">
             <i data-feather="edit-3"></i><span>Highlight Row</span><i data-feather="chevron-right" class="submenu-arrow"></i>
             <div class="submenu">
-                <div class="table-menu-item" data-action="highlight" data-color="none"><i data-feather="x-circle"></i>Clear Highlight</div>
-                <div class="table-menu-item" data-action="highlight" data-color="yellow"><span class="color-swatch bg-yellow-400/30"></span>Yellow</div>
-                <div class="table-menu-item" data-action="highlight" data-color="green"><span class="color-swatch bg-green-400/30"></span>Green</div>
-                <div class="table-menu-item" data-action="highlight" data-color="blue"><span class="color-swatch bg-blue-400/30"></span>Blue</div>
-                <div class="table-menu-item" data-action="highlight" data-color="red"><span class="color-swatch bg-red-400/30"></span>Red</div>
-            </div>
+   <div class="table-menu-item" data-action="calculate" data-calc="sum">Sum</div>
+   <div class="table-menu-item" data-action="calculate" data-calc="avg">Average</div>
+   <div class="table-menu-item" data-action="calculate" data-calc="count">Count</div>
+   <div class="table-menu-item" data-action="custom-calc"><i data-feather="function-square"></i>Custom Formula...</div>
+   <hr class="my-1 border-border-color">
+   <div class="table-menu-item" data-action="calculate" data-calc="clear">Clear Calculation</div>
+</div>
         </div>
         <hr class="my-1 border-border-color">
         <div class="table-menu-item text-red-500" data-action="delete-row"><i data-feather="trash-2"></i>Delete Row</div>
@@ -7468,6 +7680,7 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
                 <div class="table-menu-item" data-action="calculate" data-calc="sum">Sum</div>
                 <div class="table-menu-item" data-action="calculate" data-calc="avg">Average</div>
                 <div class="table-menu-item" data-action="calculate" data-calc="count">Count</div>
+                <div class="table-menu-item" data-action="custom-calc">Custom Calculation</div>
                 <hr class="my-1 border-border-color">
                 <div class="table-menu-item" data-action="calculate" data-calc="clear">Clear Calculation</div>
              </div>
