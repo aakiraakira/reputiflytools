@@ -7087,7 +7087,7 @@ tableContextMenu.addEventListener('click', (e) => {
 
     const action = button.dataset.action;
     const colCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
-    
+
     const actions = {
         'add-row-above': () => activeTableRow.before(actions.createRow()),
         'add-row-below': () => activeTableRow.after(actions.createRow()),
@@ -7114,16 +7114,16 @@ tableContextMenu.addEventListener('click', (e) => {
             const type = button.dataset.calc;
             let tfoot = activeTableForAction.querySelector('tfoot');
             if (!tfoot) {
-                // Correctly create the tfoot, then the row, then add cells to the row.
                 tfoot = activeTableForAction.createTFoot();
                 const newRow = tfoot.insertRow(0);
-                for(let i = 0; i < colCount; i++) {
-                    newRow.insertCell();
+                for (let i = 0; i < colCount; i++) {
+                    const newCell = newRow.insertCell();
+                    // FIX #1: Make the calculation cell non-editable
+                    newCell.contentEditable = false;
                 }
             }
             const footerCell = tfoot.rows[0].cells[activeTableColIndex];
-            
-            // Store the calculation type for live updates
+
             if (type === 'clear') {
                 footerCell.innerHTML = '';
                 footerCell.removeAttribute('data-calc-type');
@@ -7133,50 +7133,55 @@ tableContextMenu.addEventListener('click', (e) => {
             }
         },
         'custom-calc': async () => {
+            // FIX #2: Get the existing formula before showing the prompt
+            const targetHeader = activeTableForAction.querySelector(`thead tr:last-child th:nth-child(${activeTableColIndex + 1})`);
+            const existingFormula = targetHeader?.dataset.formula || '';
+
             const formula = await showPrompt({
                 title: 'Custom Column Formula',
                 message: 'Enter formula using column names (e.g., Cost * Quantity) or letters (A-Z).',
-                placeholder: 'e.g., Cost * 0.07'
+                placeholder: 'e.g., Cost * 0.07',
+                initialValue: existingFormula // And use it as the initial value
             });
-            if (!formula) return;
 
-            const targetHeader = activeTableForAction.querySelector(`thead tr:last-child th:nth-child(${activeTableColIndex + 1})`);
+            // If user cancels, formula will be null. If they clear the input and confirm, it will be an empty string.
+            if (formula === null) return;
+            
             if (targetHeader) {
-                // Store the formula for live updates
                 targetHeader.dataset.formula = formula;
                 performCustomFormula(activeTableForAction, activeTableColIndex, formula);
-                showToast(`Live formula applied to column.`, 'success');
+                if (formula) {
+                   showToast(`Live formula updated.`, 'success');
+                } else {
+                   showToast(`Formula cleared for column.`, 'info');
+                }
             }
         },
         'createRow': () => {
-    // Dynamically get the number of columns from the table's header row.
-    const currentHeaderCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
-    const newRow = document.createElement('tr');
-    // Add a <br> tag to each cell to give it a default height, making it easier to click.
-    newRow.innerHTML = Array(currentHeaderCount).fill('<td contenteditable="true"><br></td>').join('');
-    return newRow;
-},
+            const currentHeaderCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
+            const newRow = document.createElement('tr');
+            newRow.innerHTML = Array(currentHeaderCount).fill('<td contenteditable="true"><br></td>').join('');
+            return newRow;
+        },
         'addColumn': (index) => {
-    // Select ONLY the actual header row and all body rows, ignoring the filter row.
-    activeTableForAction.querySelectorAll('thead tr:last-child, tbody tr').forEach(row => {
-        const isHeaderRow = row.parentElement.tagName === 'THEAD';
-        const cellType = isHeaderRow ? 'th' : 'td';
-        const newCell = document.createElement(cellType);
-        newCell.setAttribute('contenteditable', 'true');
-        if (isHeaderRow) {
-            newCell.classList.add('sortable-header');
-            newCell.dataset.sortDir = 'none';
-            newCell.textContent = 'Header';
-        }
-        row.insertBefore(newCell, row.children[index]);
-    });
-    // Update colspan for the filter row AFTER adding the new column
-    const newColCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
-    const filterHeader = activeTableForAction.querySelector('thead tr:first-child th');
-    if(filterHeader) {
-        filterHeader.setAttribute('colspan', newColCount);
-    }
-},
+            activeTableForAction.querySelectorAll('thead tr:last-child, tbody tr').forEach(row => {
+                const isHeaderRow = row.parentElement.tagName === 'THEAD';
+                const cellType = isHeaderRow ? 'th' : 'td';
+                const newCell = document.createElement(cellType);
+                newCell.setAttribute('contenteditable', 'true');
+                if (isHeaderRow) {
+                    newCell.classList.add('sortable-header');
+                    newCell.dataset.sortDir = 'none';
+                    newCell.textContent = 'Header';
+                }
+                row.insertBefore(newCell, row.children[index]);
+            });
+            const newColCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
+            const filterHeader = activeTableForAction.querySelector('thead tr:first-child th');
+            if (filterHeader) {
+                filterHeader.setAttribute('colspan', newColCount);
+            }
+        },
     };
 
     if (actions[action]) {
