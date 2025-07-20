@@ -7064,6 +7064,97 @@ tableContextMenu.addEventListener('click', (e) => {
     // Add a <br> tag to each cell to give it a default height, making it easier to click.
     newRow.innerHTML = Array(currentHeaderCount).fill('<td contenteditable="true"><br></td>').join('');
     return newRow;
+},'custom-calc': async () => {
+    // Get header names from the current table to map names to indices
+    const headers = Array.from(activeTableForAction.querySelectorAll('thead tr:last-child th'))
+        .map(th => th.innerText.trim());
+
+    const formula = await showPrompt({
+        title: 'Custom Column Formula',
+        message: 'Enter formula using column names (e.g., Cost - Number) or letters (A-Z). Supported operators: +, -, *, /',
+        placeholder: 'e.g., Cost - Number'
+    });
+
+    if (!formula) return;
+
+    // Use a simpler regex to split the formula into three parts
+    const formulaRegex = /(.+?)\s*([+\-*/])\s*(.+)/;
+    const match = formula.match(formulaRegex);
+
+    if (!match) {
+        showToast('Invalid formula. Use format: Column1 Op Column2', 'error');
+        return;
+    }
+
+    const [, col1Raw, operator, col2Raw] = match.map(s => s.trim());
+
+    // This helper function can find a column's index by its Letter OR its Name
+    const getIndexForOperand = (operand) => {
+        let op = operand.replace(/[()]/g, '').trim(); // Allow for (Cost) or Cost
+        // Try matching by letter first
+        if (/^[A-Z]$/i.test(op)) {
+            const index = op.toUpperCase().charCodeAt(0) - 65;
+            return index < headers.length ? index : -1;
+        }
+        // Then try matching by header name (case-insensitive)
+        const lowerOp = op.toLowerCase();
+        return headers.findIndex(h => h.toLowerCase() === lowerOp);
+    };
+
+    const col1Index = getIndexForOperand(col1Raw);
+    const col2Index = getIndexForOperand(col2Raw);
+    
+    // If the second part isn't a valid column, treat it as a number
+    const col2Value = (col2Index === -1) ? parseFloat(col2Raw.replace(/[$,]/g, '')) : null;
+
+    const targetColIndex = activeTableColIndex;
+
+    // --- Idiot-Proofing & Validation ---
+    if (col1Index === -1) {
+        return showToast(`Column "${col1Raw}" not found.`, 'error');
+    }
+    if (col2Index === -1 && isNaN(col2Value)) {
+        return showToast(`Column or value "${col2Raw}" not found or invalid.`, 'error');
+    }
+    if (col1Index === targetColIndex || col2Index === targetColIndex) {
+        return showToast('Target column cannot be used in its own formula.', 'error');
+    }
+
+    // --- Row-by-row Calculation Logic (Unchanged) ---
+    activeTableForAction.querySelectorAll('tbody tr').forEach(row => {
+        const getNumericValue = (index) => {
+            const cell = row.children[index];
+            if (!cell) return NaN;
+            const cleanText = cell.innerText.replace(/[$,]/g, '');
+            return parseFloat(cleanText);
+        };
+
+        const val1 = getNumericValue(col1Index);
+        const val2 = col2Index !== -1 ? getNumericValue(col2Index) : col2Value;
+
+        // If either value isn't a number, clear the target cell and skip
+        if (isNaN(val1) || isNaN(val2)) {
+            const targetCell = row.children[targetColIndex];
+            if(targetCell) targetCell.innerText = '';
+            return;
+        }
+
+        let result;
+        switch (operator) {
+            case '+': result = val1 + val2; break;
+            case '-': result = val1 - val2; break;
+            case '*': result = val1 * val2; break;
+            case '/': result = val2 !== 0 ? val1 / val2 : 'Error'; break;
+            default: return;
+        }
+
+        const targetCell = row.children[targetColIndex];
+        if (targetCell) {
+            targetCell.innerText = typeof result === 'number' ? result.toLocaleString(undefined, { maximumFractionDigits: 2 }) : result;
+        }
+    });
+
+    showToast(`Calculation applied to column ${headers[targetColIndex]}.`, 'success');
 },
         'addColumn': (index) => {
     // Select ONLY the actual header row and all body rows, ignoring the filter row.
@@ -7448,12 +7539,13 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
         <div class="table-menu-item with-submenu">
             <i data-feather="edit-3"></i><span>Highlight Row</span><i data-feather="chevron-right" class="submenu-arrow"></i>
             <div class="submenu">
-                <div class="table-menu-item" data-action="highlight" data-color="none"><i data-feather="x-circle"></i>Clear Highlight</div>
-                <div class="table-menu-item" data-action="highlight" data-color="yellow"><span class="color-swatch bg-yellow-400/30"></span>Yellow</div>
-                <div class="table-menu-item" data-action="highlight" data-color="green"><span class="color-swatch bg-green-400/30"></span>Green</div>
-                <div class="table-menu-item" data-action="highlight" data-color="blue"><span class="color-swatch bg-blue-400/30"></span>Blue</div>
-                <div class="table-menu-item" data-action="highlight" data-color="red"><span class="color-swatch bg-red-400/30"></span>Red</div>
-            </div>
+   <div class="table-menu-item" data-action="calculate" data-calc="sum">Sum</div>
+   <div class="table-menu-item" data-action="calculate" data-calc="avg">Average</div>
+   <div class="table-menu-item" data-action="calculate" data-calc="count">Count</div>
+   <div class="table-menu-item" data-action="custom-calc"><i data-feather="function-square"></i>Custom Formula...</div>
+   <hr class="my-1 border-border-color">
+   <div class="table-menu-item" data-action="calculate" data-calc="clear">Clear Calculation</div>
+</div>
         </div>
         <hr class="my-1 border-border-color">
         <div class="table-menu-item text-red-500" data-action="delete-row"><i data-feather="trash-2"></i>Delete Row</div>
@@ -7470,6 +7562,7 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
                 <div class="table-menu-item" data-action="calculate" data-calc="count">Count</div>
                 <hr class="my-1 border-border-color">
                 <div class="table-menu-item" data-action="calculate" data-calc="clear">Clear Calculation</div>
+                <div class="table-menu-item" data-action="custom-calc"><i data-feather="function-square"></i>Custom Calculation</div>
              </div>
         </div>
         <hr class="my-1 border-border-color">
