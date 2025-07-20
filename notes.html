@@ -29,6 +29,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.1/dist/browser-image-compression.js"></script>
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     
 
     <script>
@@ -6768,28 +6769,30 @@ app.modals.quizContent.addEventListener('click', e => {
     if (command === 'insertChecklist') {
     restoreSelectionAndExec(() => {
         // This HTML defines the new, self-contained widget
-        const checklistWidgetHTML = `
-            <div class="checklist-container" contenteditable="false">
-                <div class="checklist-header">
-                    <button class="checklist-header-btn" data-action="edit" title="Edit Checklist">
-                        <i data-feather="edit" class="w-4 h-4"></i>
-                    </button>
-                    <button class="checklist-header-btn delete" data-action="delete" title="Delete Checklist">
-                        <i data-feather="trash-2" class="w-4 h-4"></i>
-                    </button>
-                </div>
-                <ul class="checklist-body">
-                    <li class="checklist-item" data-checked="false">
-                        <input type="checkbox" class="checklist-item-checkbox" onclick="return false;">
-                        <span class="checklist-item-text">First item</span>
-                    </li>
-                    <li class="checklist-item" data-checked="false">
-                        <input type="checkbox" class="checklist-item-checkbox" onclick="return false;">
-                        <span class="checklist-item-text">Second item</span>
-                    </li>
-                </ul>
-            </div>
-            <p><br></p> `;
+        // REPLACE THE checklistWidgetHTML VARIABLE
+const checklistWidgetHTML = `
+    <div class="checklist-container" contenteditable="false">
+        <div class="checklist-header">
+            <h4 class="checklist-title font-semibold text-text-primary flex-grow pl-1">Untitled Checklist</h4>
+            <button class="checklist-header-btn" data-action="edit" title="Edit Checklist">
+                <i data-feather="edit" class="w-4 h-4"></i>
+            </button>
+            <button class="checklist-header-btn delete" data-action="delete" title="Delete Checklist">
+                <i data-feather="trash-2" class="w-4 h-4"></i>
+            </button>
+        </div>
+        <ul class="checklist-body">
+            <li class="checklist-item" data-checked="false">
+                <input type="checkbox" class="checklist-item-checkbox" onclick="return false;">
+                <span class="checklist-item-text">First item</span>
+            </li>
+            <li class="checklist-item" data-checked="false">
+                <input type="checkbox" class="checklist-item-checkbox" onclick="return false;">
+                <span class="checklist-item-text">Second item</span>
+            </li>
+        </ul>
+    </div>
+    <p><br></p> `;
         document.execCommand('insertHTML', false, checklistWidgetHTML);
         feather.replace();
     });
@@ -7150,11 +7153,17 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
 let activeChecklistElement = null; // A reference to the .checklist-container div being edited
 
 // Function to open the checklist editing modal
+// REPLACE THE ENTIRE openChecklistModal FUNCTION
 const openChecklistModal = (checklistContainer) => {
     activeChecklistElement = checklistContainer;
     const modal = document.getElementById('checklist-edit-modal');
     const itemsContainer = document.getElementById('checklist-modal-items');
-    itemsContainer.innerHTML = ''; // Clear previous items
+    const titleInput = document.getElementById('checklist-modal-title-input');
+    itemsContainer.innerHTML = '';
+
+    // Set the title in the modal
+    const currentTitle = checklistContainer.querySelector('.checklist-title')?.textContent || 'Untitled Checklist';
+    titleInput.value = currentTitle;
 
     const items = checklistContainer.querySelectorAll('.checklist-item');
     items.forEach(item => {
@@ -7165,9 +7174,17 @@ const openChecklistModal = (checklistContainer) => {
 
     openModal(modal);
     feather.replace();
+
+    // --- NEW: Initialize SortableJS ---
+    new Sortable(itemsContainer, {
+        animation: 150, // Animation speed
+        handle: '.handle', // The class of the element to use as a drag handle
+        ghostClass: 'bg-bg-pane-light' // The class for the drop placeholder
+    });
 };
 
 // Helper to add a new item row inside the modal
+// REPLACE THE ENTIRE addChecklistItemToModal FUNCTION
 const addChecklistItemToModal = (text = '', checked = false) => {
     const itemsContainer = document.getElementById('checklist-modal-items');
     const newItemRow = document.createElement('div');
@@ -7185,10 +7202,13 @@ const addChecklistItemToModal = (text = '', checked = false) => {
 };
 
 // Function to save changes from the modal back to the editor
+// REPLACE THE ENTIRE saveChecklistFromModal FUNCTION
 const saveChecklistFromModal = () => {
     if (!activeChecklistElement) return;
 
     const modalItems = document.querySelectorAll('#checklist-modal-items .checklist-modal-item');
+    const newTitle = document.getElementById('checklist-modal-title-input').value.trim() || 'Untitled Checklist';
+
     const newItemsHTML = Array.from(modalItems).map(itemRow => {
         const text = itemRow.querySelector('input[type="text"]').value;
         const isChecked = itemRow.querySelector('input[type="checkbox"]').checked;
@@ -7201,11 +7221,15 @@ const saveChecklistFromModal = () => {
     }).join('');
 
     const body = activeChecklistElement.querySelector('.checklist-body');
+    const titleEl = activeChecklistElement.querySelector('.checklist-title');
+
     if (body) {
         body.innerHTML = newItemsHTML;
     }
+    if (titleEl) {
+        titleEl.textContent = newTitle;
+    }
 
-    // This is crucial: we update the main note editor's content and then save
     performImmediateSave();
     closeModal(document.getElementById('checklist-edit-modal'));
     activeChecklistElement = null;
@@ -7942,7 +7966,12 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
         </h3>
         <button id="checklist-modal-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
     </header>
-    
+
+    <div class="mb-4 flex-shrink-0">
+        <label for="checklist-modal-title-input" class="text-sm font-medium text-text-secondary">Checklist Title</label>
+        <input type="text" id="checklist-modal-title-input" class="w-full mt-1 bg-bg-pane-dark border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none">
+    </div>
+
     <div id="checklist-modal-items" class="flex-grow space-y-2 overflow-y-auto custom-scrollbar pr-2">
         </div>
 
