@@ -139,39 +139,103 @@
 /* --- START: Simplified Checklist Styles --- */
 /* --- START: Enhanced Checklist Styles --- */
 /* --- START: Final Checklist Alignment Fix --- */
-.task-list-item {
-    display: flex;
-    align-items: center; /* This is the key change for perfect vertical alignment */
-    gap: 0.8rem; /* Increased gap slightly for better spacing */
-    margin: 0.5rem 0;
-    list-style: none;
-    padding-left: 0;
+/* --- START: Final Checklist Alignment Fix --- */
+/* --- START: New Checklist Container Styles --- */
+.checklist-container {
+    background-color: var(--bg-pane-dark);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    margin: 1em 0;
+    padding: 0.75rem 1rem;
+    user-select: none; /* Prevent text selection in view mode */
 }
 
-.task-list-item input[type="checkbox"] {
-    flex-shrink: 0;
-    width: 1.25rem;
-    height: 1.25rem;
+.checklist-header {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+}
+
+.checklist-header-btn {
+    padding: 0.25rem;
+    border-radius: 0.25rem;
+    color: var(--text-tertiary);
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.checklist-header-btn:hover {
+    background-color: var(--bg-pane-light);
+    color: var(--text-primary);
+}
+.checklist-header-btn.delete:hover {
+    color: #ef4444; /* red-500 */
+}
+
+.checklist-body {
+    padding-left: 0;
+    margin: 0;
+    list-style: none;
+}
+
+.checklist-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.25rem 0;
     cursor: pointer;
 }
 
-.task-list-item-text {
-    outline: none;
-    flex-grow: 1;
-    /* The padding-top is removed as it's no longer needed */
+.checklist-item-checkbox {
+    width: 1.25rem;
+    height: 1.25rem;
+    flex-shrink: 0;
 }
 
-/* This handles the strikethrough effect */
-.task-list-item.checked .task-list-item-text {
+.checklist-item-text {
+    flex-grow: 1;
+    color: var(--text-secondary);
+    transition: color 0.2s;
+}
+
+.checklist-item.checked .checklist-item-text {
     text-decoration: line-through;
     color: var(--text-tertiary);
 }
+
+/* Styles for the Edit Modal */
+.checklist-modal-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.checklist-modal-item input[type="text"] {
+    flex-grow: 1;
+    background-color: var(--bg-pane-dark);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 6px 10px;
+    color: var(--text-primary);
+    outline: none;
+}
+.checklist-modal-item input[type="text"]:focus {
+    border-color: var(--accent-primary);
+}
+.checklist-modal-item-btn {
+    padding: 0.25rem;
+    color: var(--text-tertiary);
+    cursor: pointer;
+}
+.checklist-modal-item-btn:hover {
+    color: var(--text-primary);
+}
+/* --- END: New Checklist Container Styles --- */
 /* --- END: Final Checklist Alignment Fix --- */
-/* This handles the strikethrough effect */
-.task-list-item.checked .task-list-item-text {
-    text-decoration: line-through;
-    color: var(--text-tertiary);
-}
 /* --- START: Share Note Checklist Fix --- */
 #public-note-content .task-list-item {
     display: flex;
@@ -2022,6 +2086,38 @@ const getAllFolders = (items = state.collections) => {
     }
     return folders;
 };
+/**
+ * Finds all HTML tables in a string and converts them to a plain-text Markdown format.
+ * @param {string} htmlString - The HTML content of a note.
+ * @returns {string} The content with tables converted to Markdown.
+ */
+function convertTablesToMarkdown(htmlString) {
+    if (!htmlString || !htmlString.includes('<table')) return htmlString;
+
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlString;
+
+    tempDiv.querySelectorAll('table').forEach(table => {
+        let markdownTable = '\n';
+        // Process Header
+        const headers = table.querySelectorAll('thead tr:last-child th');
+        if (headers.length > 0) {
+            markdownTable += `| ${Array.from(headers).map(th => th.innerText.trim()).join(' | ')} |\n`;
+            markdownTable += `| ${Array(headers.length).fill('---').join(' | ')} |\n`;
+        }
+        
+        // Process Body
+        const rows = table.querySelectorAll('tbody tr');
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            markdownTable += `| ${Array.from(cells).map(td => td.innerText.trim()).join(' | ')} |\n`;
+        });
+
+        table.outerHTML = markdownTable; // Replace the HTML table with the Markdown version
+    });
+
+    return tempDiv.innerHTML;
+}
 const handleGlobalAIQuery = async () => {
     const askBtn = document.getElementById('global-ai-ask-btn');
     const answerContainer = document.getElementById('global-ai-answer-container');
@@ -2053,7 +2149,10 @@ const handleGlobalAIQuery = async () => {
         return;
     }
 
-    const context = topNotes.map(note => `--- Note: "${note.name}" ---\n${note.content.replace(/<[^>]*>?/gm, '')}`).join('\n\n');
+    const context = topNotes.map(note => {
+    const contentWithMarkdownTables = convertTablesToMarkdown(note.content);
+    return `--- Note: "${note.name}" ---\n${contentWithMarkdownTables.replace(/<[^>]*>?/gm, '')}`;
+}).join('\n\n');
     const historyContext = askYourNotesHistory.map(item => `Previous Question: ${item.question}\nPrevious Answer: ${item.answer}`).join('\n\n');
     
     const prompt = `You are a helpful assistant.
@@ -4548,6 +4647,89 @@ tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="tabl
         feather.replace();
         showToast(`✅ Table (${rows}x${cols}) created.`);
     }
+},{
+    name: 'recalculate',
+    description: 'Usage: /recalculate [column name] or /recalculate for all.',
+    suggest: 'none',
+    execute: (args) => {
+        const columnName = args ? args.trim() : null;
+
+        const activeNoteId = state.settings.activeNoteId;
+        if (!activeNoteId) {
+            return showToast('❌ You must be in a note to use this command.', 'error');
+        }
+
+        const editorBody = app.elements.noteEditorBody;
+        const table = editorBody.querySelector('table');
+
+        if (!table) {
+            return showToast('❌ No table found in the current note.', 'error');
+        }
+
+        // If a column name is provided, recalculate that specific column
+        if (columnName) {
+            const headers = Array.from(table.querySelectorAll('thead tr:last-child th'));
+            let targetHeader = null;
+            let targetColIndex = -1;
+
+            for (let i = 0; i < headers.length; i++) {
+                if (headers[i].innerText.trim().toLowerCase() === columnName.toLowerCase()) {
+                    targetHeader = headers[i];
+                    targetColIndex = i;
+                    break;
+                }
+            }
+
+            if (!targetHeader) {
+                return showToast(`❌ Column "${columnName}" not found in the table.`, 'error');
+            }
+
+            const formula = targetHeader.dataset.formula;
+            if (!formula) {
+                return showToast(`❌ No custom formula is set for the "${columnName}" column.`, 'info');
+            }
+
+            performCustomFormula(table, targetColIndex, formula);
+            showToast(`✅ Recalculated column "${columnName}".`, 'success');
+
+        } else {
+            // If no column name, recalculate all columns with a formula
+            const headersWithFormulas = Array.from(table.querySelectorAll('thead tr:last-child th[data-formula]'));
+            
+            if (headersWithFormulas.length === 0) {
+                return showToast('No columns with formulas found in this table.', 'info');
+            }
+
+            const allHeaders = Array.from(table.querySelectorAll('thead tr:last-child th'));
+
+            headersWithFormulas.forEach(header => {
+                const formula = header.dataset.formula;
+                if (formula) {
+                    const colIndex = allHeaders.indexOf(header);
+                    if (colIndex > -1) {
+                        performCustomFormula(table, colIndex, formula);
+                    }
+                }
+            });
+
+            showToast(`✅ Recalculated all ${headersWithFormulas.length} formula column(s).`, 'success');
+        }
+    }
+},{
+    name: 'recalc',
+    description: 'Alias for /recalculate. Updates all table calculations.',
+    execute: (args) => {
+        // This just finds and runs the main /recalculate command's logic
+        commands.find(c => c.name === 'recalculate').execute(args);
+    }
+},
+{
+    name: 'rc',
+    description: 'Alias for /recalculate. Updates all table calculations.',
+    execute: (args) => {
+        // This also finds and runs the main /recalculate command's logic
+        commands.find(c => c.name === 'recalculate').execute(args);
+    }
 },
 // ... rest of the commands
     { name: 'dn', description: 'Delete a note. Usage: /dn [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',async(n)=>{const r=findItem(n.id);const c=await showConfirm({title:`Delete "${n.name}"?`,message:'This cannot be undone.',confirmText:'Delete'});if(c){const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index,1);showToast(`🗑️ Note deleted.`);if(state.settings.activeNoteId===n.id)state.settings.activeNoteId=null;saveState();buildLunrIndex();render()}})},
@@ -4562,7 +4744,8 @@ const renderSuggestions = (rawInput) => {
     const parts = input.split(' ');
     const commandName = parts[0];
     const argString = parts.slice(1).join(' ');
-    const command = commands.find(c => c.name === commandName);
+        const command = commands.find(c => c.name.toLowerCase() === commandName.toLowerCase());
+
 
     let suggestionsHTML = '';
     const argQuery = argString.toLowerCase();
@@ -4645,15 +4828,17 @@ const renderSuggestions = (rawInput) => {
 
     } 
     else {
-        const filteredCommands = commands.filter(cmd => cmd.name.startsWith(commandName)).slice(0,5);
-        if (filteredCommands.length > 0) {
-            suggestionsHTML = filteredCommands.map((cmd, index) => `
-                <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-command-name="${cmd.name}">
-                    <div class="flex items-center gap-3"><span class="cmd-name">/${cmd.name}</span></div>
-                    <span class="cmd-desc">${cmd.description}</span>
-                </div>`).join('');
-        }
+    // FIX 2: Filter commands case-insensitively
+    const lowerCaseCommandName = commandName.toLowerCase();
+    const filteredCommands = commands.filter(cmd => cmd.name.toLowerCase().startsWith(lowerCaseCommandName)).slice(0, 5);
+    if (filteredCommands.length > 0) {
+        suggestionsHTML = filteredCommands.map((cmd, index) => `
+            <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-command-name="${cmd.name}">
+                <div class="flex items-center gap-3"><span class="cmd-name">/${cmd.name}</span></div>
+                <span class="cmd-desc">${cmd.description}</span>
+            </div>`).join('');
     }
+}
     
     if (suggestionsHTML) {
         commandSuggestionsContainer.innerHTML = suggestionsHTML;
@@ -4671,7 +4856,8 @@ const executeCommand = (inputValue) => {
     const parts = cleanInput.split(' ');
     const commandName = parts[0];
     const args = parts.slice(1).join(' ');
-    const command = commands.find(c => c.name === commandName);
+    // This comparison is now case-insensitive
+    const command = commands.find(c => c.name.toLowerCase() === commandName.toLowerCase());
     if (command) command.execute(args);
     else showToast(`❌ Command not found: ${commandName}`, 'error');
     closeCommandPrompt();
@@ -4700,7 +4886,7 @@ document.addEventListener('keydown', (e) => {
         } else if (itemName) {
             const toSeparator = /\s+to\s+/i;
             const fromSeparator = /\s+from\s+/i;
-            if ((commandName === 'link' || commandName === 'rename') && toSeparator.test(argString)) {
+            if ((commandName === 'move' || commandName === 'link' || commandName === 'rename') && toSeparator.test(argString)) {
                 finalCommand = `/${commandName} ${argString.split(toSeparator)[0]} to ${itemName}`;
             } else if (commandName === 'unlink' && fromSeparator.test(argString)) {
                 finalCommand = `/${commandName} ${argString.split(fromSeparator)[0]} from ${itemName}`;
@@ -4743,13 +4929,13 @@ document.addEventListener('keydown', (e) => {
             } else if (itemName) {
                 const toSeparator = /\s+to\s+/i;
                 const fromSeparator = /\s+from\s+/i;
-                 if ((commandName === 'link' || commandName === 'rename') && toSeparator.test(argString)) {
+                 if ((commandName === 'move' || commandName === 'link' || commandName === 'rename') && toSeparator.test(argString)) {
                     completedValue = `/${commandName} ${argString.split(toSeparator)[0]} to ${itemName} `;
                 } else if (commandName === 'unlink' && fromSeparator.test(argString)) {
                     completedValue = `/${commandName} ${argString.split(fromSeparator)[0]} from ${itemName} `;
                 } else if (commandName === 'go' && argString.startsWith('#')) {
                     completedValue = `/go ${argString.split(' ')[0]} ${itemName} `;
-                } else if (commandName === 'link' || commandName === 'rename') {
+                } else if (commandName === 'move' || commandName === 'link' || commandName === 'rename') {
                      completedValue = `/${commandName} ${itemName} to `;
                 } else if (commandName === 'unlink') {
                      completedValue = `/${commandName} ${itemName} from `;
@@ -4777,7 +4963,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 commandInput.addEventListener('input', () => { if (!commandInput.value.startsWith('/')) commandInput.value = '/'; renderSuggestions(commandInput.value); });
-commandSuggestionsContainer.addEventListener('click', (e) => { const item = e.target.closest('.command-suggestion-item'); if(item){ const cmdName=commandInput.value.slice(1).split(' ')[0]; const argStr=commandInput.value.slice(1).substring(cmdName.length).trim(); let finalCmd; if(item.dataset.itemName){ const toSep=/\s+to\s+/i; const fromSep=/\s+from\s+/i; if((cmdName==='link'||cmdName==='rename')&&toSep.test(argStr)){finalCmd=`/${cmdName} ${argStr.split(toSep)[0]} to ${item.dataset.itemName}`}else if(cmdName==='unlink'&&fromSep.test(argStr)){finalCmd=`/${cmdName} ${argStr.split(fromSep)[0]} from ${item.dataset.itemName}`}else if(cmdName==='go'&&argStr.startsWith('#')){finalCmd=`/${cmdName} ${argStr.split(' ')[0]} ${item.dataset.itemName}`}else{finalCmd=`/${cmdName} ${item.dataset.itemName}`}}else if(item.dataset.tagName){finalCmd=`/go ${item.dataset.tagName}`}else{finalCmd=`/${item.dataset.commandName}`}executeCommand(finalCmd)} });
+commandSuggestionsContainer.addEventListener('click', (e) => { const item = e.target.closest('.command-suggestion-item'); if(item){ const cmdName=commandInput.value.slice(1).split(' ')[0]; const argStr=commandInput.value.slice(1).substring(cmdName.length).trim(); let finalCmd; if(item.dataset.itemName){ const toSep=/\s+to\s+/i; const fromSep=/\s+from\s+/i; if((cmdName==='move'||cmdName==='link'||cmdName==='rename')&&toSep.test(argStr)){finalCmd=`/${cmdName} ${argStr.split(toSep)[0]} to ${item.dataset.itemName}`}else if(cmdName==='unlink'&&fromSep.test(argStr)){finalCmd=`/${cmdName} ${argStr.split(fromSep)[0]} from ${item.dataset.itemName}`}else if(cmdName==='go'&&argStr.startsWith('#')){finalCmd=`/${cmdName} ${argStr.split(' ')[0]} ${item.dataset.itemName}`}else{finalCmd=`/${cmdName} ${item.dataset.itemName}`}}else if(item.dataset.tagName){finalCmd=`/go ${item.dataset.tagName}`}else{finalCmd=`/${item.dataset.commandName}`}executeCommand(finalCmd)} });
 document.addEventListener('click', (e) => { if (isCommandPromptOpen && !commandPromptContainer.contains(e.target)) closeCommandPrompt(); });
 
 document.getElementById('help-close-btn').addEventListener('click', () => closeModal(document.getElementById('help-modal')));
@@ -5804,21 +5990,15 @@ if (quizBtn) {
                 // This is the core save logic
                 // This listener handles checklist state changes reliably
 app.elements.noteEditorBody.addEventListener('change', (e) => {
-    // Check if the changed element was a checkbox inside a task list
     if (e.target.matches('.task-list-item input[type="checkbox"]')) {
         const item = e.target.closest('.task-list-item');
         if (item) {
-            // Toggle the .checked class for the strikethrough style
             item.classList.toggle('checked', e.target.checked);
-            
-            // Save the state to the HTML itself so it's preserved on reload
             if (e.target.checked) {
-                e.target.setAttribute('checked', '');
+                e.target.setAttribute('checked', 'true');
             } else {
                 e.target.removeAttribute('checked');
             }
-            
-            // Trigger the app's save mechanism
             saveNoteContent();
         }
     }
@@ -5857,55 +6037,43 @@ saveNoteContent = debounce(performImmediateSave, 500);
 
                 // REPLACE your entire existing 'noteEditorBody' keydown listener with this one
 app.elements.noteEditorBody.addEventListener('keydown', (e) => {
-    // --- START: ADD THIS NEW CODE BLOCK for Ctrl+Enter ---
-// REPLACE WITH THIS FINAL VERSION
-// --- START: Generalized Ctrl+Enter Escape Logic ---
-if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-    const selection = window.getSelection();
-    if (!selection.rangeCount) return;
-    let container = selection.getRangeAt(0).startContainer;
-    const node = container.nodeType === 3 ? container.parentNode : container;
-
-    // Find the block-level element we want to escape FROM.
-    // This now includes blockquotes, tables, AND checklists.
-    let elementToEscape = node.closest('.code-block-wrapper, blockquote, table, .task-list-item');
-
-    // Handle inline 'code' separately by finding its parent block.
-    if (!elementToEscape) {
-        const inlineCode = node.closest('code');
-        // Ensure it's not code within a code-block wrapper
-        if (inlineCode && !inlineCode.closest('.code-block-wrapper')) {
-            elementToEscape = inlineCode.closest('p, div, li'); // Find the block parent
-        }
-    }
-    
-    if (elementToEscape) {
-        e.preventDefault();
-        const newP = document.createElement('p');
-        newP.innerHTML = '<br>';
-        // Insert the new paragraph AFTER the element we escaped.
-        elementToEscape.after(newP);
-        
-        // Move the cursor to the new paragraph.
-        const newRange = document.createRange();
-        newRange.setStart(newP, 0);
-        selection.removeAllRanges();
-        selection.addRange(newRange);
-        saveNoteContent();
-        return;
-    }
-}
-// --- END: Generalized Ctrl+Enter Escape Logic ---
-// --- END: ADD THIS NEW CODE BLOCK ---
     const selection = window.getSelection();
     if (!selection.rangeCount) return;
     const range = selection.getRangeAt(0);
     let container = range.startContainer;
-    container = container.nodeType === 3 ? container.parentNode : container;
+    const node = container.nodeType === 3 ? container.parentNode : container;
 
-    // --- Consolidated 'Enter' Key Logic ---
+    // --- START: Generalized Ctrl+Enter Escape Logic ---
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        let elementToEscape = node.closest('.code-block-wrapper, blockquote, table, .task-list-item');
+        if (!elementToEscape) {
+            const inlineCode = node.closest('code:not(pre code)');
+            if (inlineCode) {
+                elementToEscape = inlineCode.closest('p, div, li');
+            }
+        }
+        if (elementToEscape) {
+            e.preventDefault();
+            const newP = document.createElement('p');
+            newP.innerHTML = '<br>';
+            elementToEscape.after(newP);
+            const newRange = document.createRange();
+            newRange.setStart(newP, 0);
+            selection.removeAllRanges();
+            selection.addRange(newRange);
+            saveNoteContent();
+            return;
+        }
+    }
+    // --- END: Generalized Ctrl+Enter Escape Logic ---
+
+    // --- START: NEW, ROBUST Checklist 'Enter' and 'Backspace' Logic ---
+    
+    // --- END: NEW, ROBUST Checklist 'Enter' and 'Backspace' Logic ---
+
+    // ... (the rest of the keydown logic for blockquotes, code blocks, etc. remains the same)
     if (e.key === 'Enter' && !e.shiftKey) {
-        const currentBlock = container.closest('p, div');
+        const currentBlock = node.closest('p, div');
         if (currentBlock) {
             const blockquote = currentBlock.closest('blockquote');
             if (blockquote && currentBlock.textContent.trim() === '' && (currentBlock.innerHTML === '' || currentBlock.innerHTML === '<br>')) {
@@ -5923,55 +6091,9 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                 return;
             }
         }
-
-        const parentChecklist = container.closest('.task-list-item');
-        if (parentChecklist) {
-            e.preventDefault();
-            const textContent = parentChecklist.querySelector('.task-list-item-text').innerText.trim();
-            if (textContent === '') {
-                const p = document.createElement('p');
-                p.innerHTML = '<br>';
-                parentChecklist.parentNode.replaceChild(p, parentChecklist);
-                range.setStart(p, 0);
-                range.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(range);
-            } else {
-                const newChecklist = document.createElement('div');
-                newChecklist.classList.add('task-list-item');
-                newChecklist.innerHTML = `<input type="checkbox" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div>`;
-                parentChecklist.after(newChecklist);
-                const newTextSpan = newChecklist.querySelector('.task-list-item-text');
-                range.selectNodeContents(newTextSpan);
-                range.collapse(false);
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
-            saveNoteContent();
-            return;
-        }
     }
-
-    // --- Consolidated 'Backspace' Key Logic ---
     if (e.key === 'Backspace' && selection.isCollapsed && range.startOffset === 0) {
-        const textSpan = container.closest('.task-list-item-text');
-        if (textSpan) {
-            const taskItem = textSpan.closest('.task-list-item');
-            if (taskItem) {
-                e.preventDefault();
-                const p = document.createElement('p');
-                p.innerHTML = textSpan.innerHTML || '<br>';
-                taskItem.parentNode.replaceChild(p, taskItem);
-                const newRange = document.createRange();
-                newRange.selectNodeContents(p);
-                newRange.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(newRange);
-                p.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-                return;
-            }
-        }
-        const pre = container.closest('pre');
+        const pre = node.closest('pre');
         if (pre && pre.textContent.length === 0) {
             const wrapper = pre.closest('.code-block-wrapper');
             if (wrapper) {
@@ -5982,20 +6104,15 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
             }
         }
     }
-
-    // --- CORRECTED Code Block Escape Logic ---
     if (e.key === 'ArrowDown') {
-        const pre = container.closest('pre');
+        const pre = node.closest('pre');
         if (pre) {
             const codeEl = pre.querySelector('code');
-            const selection = window.getSelection();
             if (codeEl && selection.isCollapsed) {
                 const range = selection.getRangeAt(0);
                 const textContent = codeEl.textContent || '';
-                // Check if cursor is at the very end of the code block
                 if (range.startOffset === textContent.length) {
                     const wrapper = pre.closest('.code-block-wrapper');
-                    // Check if there's no element after the code block
                     if (wrapper && !wrapper.nextElementSibling) {
                         e.preventDefault();
                         const newP = document.createElement('p');
@@ -6649,41 +6766,35 @@ app.modals.quizContent.addEventListener('click', e => {
         return;
     }
     if (command === 'insertChecklist') {
-        restoreSelectionAndExec(() => {
-            const selection = window.getSelection();
-            if (!selection.rangeCount) return;
-            const range = selection.getRangeAt(0);
-            let container = range.commonAncestorContainer;
-            container = container.nodeType === 3 ? container.parentNode : container;
-            const currentChecklist = container.closest('.task-list-item');
-            
-            if (currentChecklist) {
-                const text = currentChecklist.querySelector('.task-list-item-text').innerText;
-                const p = document.createElement('p');
-                p.innerHTML = text.trim() ? text.trim().replace(/</g, "&lt;").replace(/>/g, "&gt;") : '<br>';
-                currentChecklist.parentNode.replaceChild(p, currentChecklist);
-                range.selectNodeContents(p);
-                range.collapse(false);
-                selection.removeAllRanges();
-                selection.addRange(range);
-                return;
-            }
-            const selectedText = selection.toString();
-            let checklistHTML;
-            if (selectedText.trim() === '') {
-                checklistHTML = `<div class="task-list-item"><input type="checkbox" contenteditable="false"><div class="task-list-item-text" contenteditable="true">&nbsp;</div></div>`;
-            } else {
-                const lines = selectedText.split('\n');
-                checklistHTML = lines.map(line => {
-                    const sanitizedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
-                    if (sanitizedLine === '') return null;
-                    return `<div class="task-list-item"><input type="checkbox" contenteditable="false"><div class="task-list-item-text" contenteditable="true">${sanitizedLine}</div></div>`;
-                }).filter(Boolean).join('');
-            }
-            document.execCommand('insertHTML', false, checklistHTML);
-        });
-        return;
-    }
+    restoreSelectionAndExec(() => {
+        // This HTML defines the new, self-contained widget
+        const checklistWidgetHTML = `
+            <div class="checklist-container" contenteditable="false">
+                <div class="checklist-header">
+                    <button class="checklist-header-btn" data-action="edit" title="Edit Checklist">
+                        <i data-feather="edit" class="w-4 h-4"></i>
+                    </button>
+                    <button class="checklist-header-btn delete" data-action="delete" title="Delete Checklist">
+                        <i data-feather="trash-2" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                <ul class="checklist-body">
+                    <li class="checklist-item" data-checked="false">
+                        <input type="checkbox" class="checklist-item-checkbox" onclick="return false;">
+                        <span class="checklist-item-text">First item</span>
+                    </li>
+                    <li class="checklist-item" data-checked="false">
+                        <input type="checkbox" class="checklist-item-checkbox" onclick="return false;">
+                        <span class="checklist-item-text">Second item</span>
+                    </li>
+                </ul>
+            </div>
+            <p><br></p> `;
+        document.execCommand('insertHTML', false, checklistWidgetHTML);
+        feather.replace();
+    });
+    return;
+}
     if (command === 'insertTable') {
         const selection = window.getSelection();
         if (selection.rangeCount > 0) editorSelectionRange = selection.getRangeAt(0).cloneRange();
@@ -7034,7 +7145,122 @@ if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
                         setTimeout(() => dropdown.classList.add('hidden'), 100);
                     }
                 });
-                
+                // --- START: New Checklist Widget Logic ---
+
+let activeChecklistElement = null; // A reference to the .checklist-container div being edited
+
+// Function to open the checklist editing modal
+const openChecklistModal = (checklistContainer) => {
+    activeChecklistElement = checklistContainer;
+    const modal = document.getElementById('checklist-edit-modal');
+    const itemsContainer = document.getElementById('checklist-modal-items');
+    itemsContainer.innerHTML = ''; // Clear previous items
+
+    const items = checklistContainer.querySelectorAll('.checklist-item');
+    items.forEach(item => {
+        const text = item.querySelector('.checklist-item-text').textContent;
+        const checked = item.classList.contains('checked');
+        addChecklistItemToModal(text, checked);
+    });
+
+    openModal(modal);
+    feather.replace();
+};
+
+// Helper to add a new item row inside the modal
+const addChecklistItemToModal = (text = '', checked = false) => {
+    const itemsContainer = document.getElementById('checklist-modal-items');
+    const newItemRow = document.createElement('div');
+    newItemRow.className = 'checklist-modal-item';
+    newItemRow.innerHTML = `
+        <i data-feather="grip-vertical" class="handle cursor-grab text-text-tertiary"></i>
+        <input type="checkbox" class="checklist-modal-item-checkbox w-5 h-5" ${checked ? 'checked' : ''}>
+        <input type="text" class="flex-grow" value="${text.replace(/"/g, '&quot;')}">
+        <button class="checklist-modal-item-btn" data-action="delete-item" title="Delete Item">
+            <i data-feather="x" class="w-4 h-4"></i>
+        </button>
+    `;
+    itemsContainer.appendChild(newItemRow);
+    feather.replace();
+};
+
+// Function to save changes from the modal back to the editor
+const saveChecklistFromModal = () => {
+    if (!activeChecklistElement) return;
+
+    const modalItems = document.querySelectorAll('#checklist-modal-items .checklist-modal-item');
+    const newItemsHTML = Array.from(modalItems).map(itemRow => {
+        const text = itemRow.querySelector('input[type="text"]').value;
+        const isChecked = itemRow.querySelector('input[type="checkbox"]').checked;
+        return `
+            <li class="checklist-item ${isChecked ? 'checked' : ''}" data-checked="${isChecked}">
+                <input type="checkbox" class="checklist-item-checkbox" ${isChecked ? 'checked' : ''} onclick="return false;">
+                <span class="checklist-item-text">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</span>
+            </li>
+        `;
+    }).join('');
+
+    const body = activeChecklistElement.querySelector('.checklist-body');
+    if (body) {
+        body.innerHTML = newItemsHTML;
+    }
+
+    // This is crucial: we update the main note editor's content and then save
+    performImmediateSave();
+    closeModal(document.getElementById('checklist-edit-modal'));
+    activeChecklistElement = null;
+    showToast('Checklist updated!', 'success');
+};
+
+// Event listeners for the modal buttons
+document.getElementById('checklist-modal-add-item-btn').addEventListener('click', () => {
+    addChecklistItemToModal();
+    // Focus the new input
+    const allInputs = document.querySelectorAll('#checklist-modal-items input[type="text"]');
+    allInputs[allInputs.length - 1].focus();
+});
+
+document.getElementById('checklist-modal-items').addEventListener('click', (e) => {
+    const deleteBtn = e.target.closest('[data-action="delete-item"]');
+    if (deleteBtn) {
+        deleteBtn.closest('.checklist-modal-item').remove();
+    }
+});
+document.getElementById('checklist-modal-save-btn').addEventListener('click', saveChecklistFromModal);
+document.getElementById('checklist-modal-cancel-btn').addEventListener('click', () => closeModal(document.getElementById('checklist-edit-modal')));
+document.getElementById('checklist-modal-close-btn').addEventListener('click', () => closeModal(document.getElementById('checklist-edit-modal')));
+
+// Main event listener for interacting with the widget in the editor
+app.elements.noteEditorBody.addEventListener('click', (e) => {
+    const checklistContainer = e.target.closest('.checklist-container');
+    if (!checklistContainer) return;
+
+    const editBtn = e.target.closest('.checklist-header-btn[data-action="edit"]');
+    const deleteBtn = e.target.closest('.checklist-header-btn[data-action="delete"]');
+    const item = e.target.closest('.checklist-item');
+
+    if (editBtn) {
+        e.preventDefault();
+        openChecklistModal(checklistContainer);
+    } else if (deleteBtn) {
+        e.preventDefault();
+        checklistContainer.remove();
+        performImmediateSave();
+        showToast('Checklist deleted.', 'info');
+    } else if (item) {
+        e.preventDefault();
+        const checkbox = item.querySelector('.checklist-item-checkbox');
+        const isChecked = !item.classList.contains('checked');
+        
+        item.classList.toggle('checked', isChecked);
+        checkbox.checked = isChecked;
+        item.dataset.checked = isChecked; // Persist state in the HTML
+        
+        performImmediateSave();
+    }
+});
+
+// --- END: New Checklist Widget Logic ---
                 // START: New Table Interaction Logic (Context Menu & Sorting)
 
 // START: Final Table Interaction Logic (ALL FEATURES)
@@ -7087,7 +7313,7 @@ tableContextMenu.addEventListener('click', (e) => {
 
     const action = button.dataset.action;
     const colCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
-    
+
     const actions = {
         'add-row-above': () => activeTableRow.before(actions.createRow()),
         'add-row-below': () => activeTableRow.after(actions.createRow()),
@@ -7114,69 +7340,82 @@ tableContextMenu.addEventListener('click', (e) => {
             const type = button.dataset.calc;
             let tfoot = activeTableForAction.querySelector('tfoot');
             if (!tfoot) {
-                // Correctly create the tfoot, then the row, then add cells to the row.
                 tfoot = activeTableForAction.createTFoot();
                 const newRow = tfoot.insertRow(0);
-                for(let i = 0; i < colCount; i++) {
-                    newRow.insertCell();
+                for (let i = 0; i < colCount; i++) {
+                    const newCell = newRow.insertCell();
+                    // FIX #1: Make the calculation cell non-editable
+                    newCell.contentEditable = false;
                 }
             }
             const footerCell = tfoot.rows[0].cells[activeTableColIndex];
-            
-            // Store the calculation type for live updates
+
             if (type === 'clear') {
-                footerCell.innerHTML = '';
-                footerCell.removeAttribute('data-calc-type');
-            } else {
+    footerCell.innerHTML = '';
+    footerCell.removeAttribute('data-calc-type');
+
+    // Check if any other calculations exist in the footer
+    const allFooterCells = Array.from(footerCell.parentElement.children);
+    const hasOtherCalcs = allFooterCells.some(cell => cell.hasAttribute('data-calc-type'));
+
+    if (!hasOtherCalcs) {
+        tfoot.remove(); // Remove the entire footer if it's now empty
+    }
+} else {
                 footerCell.dataset.calcType = type;
                 performStandardCalculation(activeTableForAction, activeTableColIndex, type);
             }
         },
         'custom-calc': async () => {
+            // FIX #2: Get the existing formula before showing the prompt
+            const targetHeader = activeTableForAction.querySelector(`thead tr:last-child th:nth-child(${activeTableColIndex + 1})`);
+            const existingFormula = targetHeader?.dataset.formula || '';
+
             const formula = await showPrompt({
                 title: 'Custom Column Formula',
                 message: 'Enter formula using column names (e.g., Cost * Quantity) or letters (A-Z).',
-                placeholder: 'e.g., Cost * 0.07'
+                placeholder: 'e.g., Cost * 0.07',
+                initialValue: existingFormula // And use it as the initial value
             });
-            if (!formula) return;
 
-            const targetHeader = activeTableForAction.querySelector(`thead tr:last-child th:nth-child(${activeTableColIndex + 1})`);
+            // If user cancels, formula will be null. If they clear the input and confirm, it will be an empty string.
+            if (formula === null) return;
+            
             if (targetHeader) {
-                // Store the formula for live updates
                 targetHeader.dataset.formula = formula;
                 performCustomFormula(activeTableForAction, activeTableColIndex, formula);
-                showToast(`Live formula applied to column.`, 'success');
+                if (formula) {
+                   showToast(`Live formula updated.`, 'success');
+                } else {
+                   showToast(`Formula cleared for column.`, 'info');
+                }
             }
         },
         'createRow': () => {
-    // Dynamically get the number of columns from the table's header row.
-    const currentHeaderCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
-    const newRow = document.createElement('tr');
-    // Add a <br> tag to each cell to give it a default height, making it easier to click.
-    newRow.innerHTML = Array(currentHeaderCount).fill('<td contenteditable="true"><br></td>').join('');
-    return newRow;
-},
+            const currentHeaderCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
+            const newRow = document.createElement('tr');
+            newRow.innerHTML = Array(currentHeaderCount).fill('<td contenteditable="true"><br></td>').join('');
+            return newRow;
+        },
         'addColumn': (index) => {
-    // Select ONLY the actual header row and all body rows, ignoring the filter row.
-    activeTableForAction.querySelectorAll('thead tr:last-child, tbody tr').forEach(row => {
-        const isHeaderRow = row.parentElement.tagName === 'THEAD';
-        const cellType = isHeaderRow ? 'th' : 'td';
-        const newCell = document.createElement(cellType);
-        newCell.setAttribute('contenteditable', 'true');
-        if (isHeaderRow) {
-            newCell.classList.add('sortable-header');
-            newCell.dataset.sortDir = 'none';
-            newCell.textContent = 'Header';
-        }
-        row.insertBefore(newCell, row.children[index]);
-    });
-    // Update colspan for the filter row AFTER adding the new column
-    const newColCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
-    const filterHeader = activeTableForAction.querySelector('thead tr:first-child th');
-    if(filterHeader) {
-        filterHeader.setAttribute('colspan', newColCount);
-    }
-},
+            activeTableForAction.querySelectorAll('thead tr:last-child, tbody tr').forEach(row => {
+                const isHeaderRow = row.parentElement.tagName === 'THEAD';
+                const cellType = isHeaderRow ? 'th' : 'td';
+                const newCell = document.createElement(cellType);
+                newCell.setAttribute('contenteditable', 'true');
+                if (isHeaderRow) {
+                    newCell.classList.add('sortable-header');
+                    newCell.dataset.sortDir = 'none';
+                    newCell.textContent = 'Header';
+                }
+                row.insertBefore(newCell, row.children[index]);
+            });
+            const newColCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
+            const filterHeader = activeTableForAction.querySelector('thead tr:first-child th');
+            if (filterHeader) {
+                filterHeader.setAttribute('colspan', newColCount);
+            }
+        },
     };
 
     if (actions[action]) {
@@ -7422,18 +7661,24 @@ function performCustomFormula(table, targetColIndex, formula) {
     if (!match) return; // Invalid formula stored
 
     const [, col1Raw, operator, col2Raw] = match.map(s => s.trim());
-    
+
     const getIndex = (operand) => {
         let op = operand.replace(/[()]/g, '').trim();
-        if (/^[A-Z]$/i.test(op)) return op.toUpperCase().charCodeAt(0) - 65;
+        // 1. Check by Header Name (case-insensitive)
         const lowerOp = op.toLowerCase();
-        return headers.findIndex(h => h.toLowerCase() === lowerOp);
+        const headerIndex = headers.findIndex(h => h.toLowerCase() === lowerOp);
+        if (headerIndex !== -1) return headerIndex;
+
+        // 2. Fallback to Letter (A, B, C...)
+        if (/^[A-Z]$/i.test(op)) return op.toUpperCase().charCodeAt(0) - 65;
+
+        return -1; // Not found
     };
 
     const col1Index = getIndex(col1Raw);
     const col2Index = getIndex(col2Raw);
     const col2Value = (col2Index === -1) ? parseFloat(col2Raw.replace(/[$,]/g, '')) : null;
-    
+
     if (col1Index === -1 || (col2Index === -1 && isNaN(col2Value))) return; // Invalid columns in formula
 
     table.querySelectorAll('tbody tr').forEach(row => {
@@ -7653,23 +7898,23 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
 <!-- START: New Table Context Menu -->
 <div id="table-context-menu" class="context-menu fixed z-50 bg-bg-pane-light shadow-2xl rounded-md p-1 border border-border-color hidden origin-top-left scale-95 opacity-0 text-sm">
     <div id="table-row-actions">
-        <div class="table-menu-item" data-action="add-row-above"><i data-feather="arrow-up"></i>Insert Row Above</div>
-        <div class="table-menu-item" data-action="add-row-below"><i data-feather="arrow-down"></i>Insert Row Below</div>
-        <div class="table-menu-item" data-action="duplicate-row"><i data-feather="copy"></i>Duplicate Row</div>
-        <div class="table-menu-item with-submenu">
-            <i data-feather="edit-3"></i><span>Highlight Row</span><i data-feather="chevron-right" class="submenu-arrow"></i>
-            <div class="submenu">
-   <div class="table-menu-item" data-action="calculate" data-calc="sum">Sum</div>
-   <div class="table-menu-item" data-action="calculate" data-calc="avg">Average</div>
-   <div class="table-menu-item" data-action="calculate" data-calc="count">Count</div>
-   <div class="table-menu-item" data-action="custom-calc"><i data-feather="function-square"></i>Custom Formula...</div>
-   <hr class="my-1 border-border-color">
-   <div class="table-menu-item" data-action="calculate" data-calc="clear">Clear Calculation</div>
-</div>
+    <div class="table-menu-item" data-action="add-row-above"><i data-feather="arrow-up"></i>Insert Row Above</div>
+    <div class="table-menu-item" data-action="add-row-below"><i data-feather="arrow-down"></i>Insert Row Below</div>
+    <div class="table-menu-item" data-action="duplicate-row"><i data-feather="copy"></i>Duplicate Row</div>
+    <div class="table-menu-item with-submenu">
+        <i data-feather="edit-3"></i><span>Highlight Row</span><i data-feather="chevron-right" class="submenu-arrow"></i>
+        <div class="submenu">
+            <div class="table-menu-item" data-action="highlight" data-color="yellow"><span class="color-swatch bg-highlight-yellow"></span>Yellow</div>
+            <div class="table-menu-item" data-action="highlight" data-color="green"><span class="color-swatch bg-highlight-green"></span>Green</div>
+            <div class="table-menu-item" data-action="highlight" data-color="blue"><span class="color-swatch bg-highlight-blue"></span>Blue</div>
+            <div class="table-menu-item" data-action="highlight" data-color="red"><span class="color-swatch bg-highlight-red"></span>Red</div>
+            <hr class="my-1 border-border-color">
+            <div class="table-menu-item" data-action="highlight" data-color="none">Clear Highlight</div>
         </div>
-        <hr class="my-1 border-border-color">
-        <div class="table-menu-item text-red-500" data-action="delete-row"><i data-feather="trash-2"></i>Delete Row</div>
     </div>
+    <hr class="my-1 border-border-color">
+    <div class="table-menu-item text-red-500" data-action="delete-row"><i data-feather="trash-2"></i>Delete Row</div>
+</div>
     <div id="table-col-actions" class="hidden">
         <div class="table-menu-item" data-action="add-col-left"><i data-feather="arrow-left"></i>Insert Column Left</div>
         <div class="table-menu-item" data-action="add-col-right"><i data-feather="arrow-right"></i>Insert Column Right</div>
@@ -7688,6 +7933,30 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
         <hr class="my-1 border-border-color">
         <div class="table-menu-item text-red-500" data-action="delete-col"><i data-feather="trash-2"></i>Delete Column</div>
     </div>
+</div>
+<div id="checklist-edit-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-lg z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-4 flex-shrink-0">
+        <h3 class="text-lg font-semibold flex items-center gap-2">
+            <i data-feather="check-square" class="w-5 h-5 text-accent-primary"></i>
+            <span>Edit Checklist</span>
+        </h3>
+        <button id="checklist-modal-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    
+    <div id="checklist-modal-items" class="flex-grow space-y-2 overflow-y-auto custom-scrollbar pr-2">
+        </div>
+
+    <div class="mt-4 flex-shrink-0">
+        <button id="checklist-modal-add-item-btn" class="w-full flex items-center justify-center gap-2 p-2 rounded-md text-sm text-text-secondary hover:bg-bg-pane-dark transition-colors">
+            <i data-feather="plus" class="w-4 h-4"></i>
+            <span>Add Item</span>
+        </button>
+    </div>
+
+    <footer class="flex justify-end gap-3 mt-6 flex-shrink-0">
+        <button id="checklist-modal-cancel-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Cancel</button>
+        <button id="checklist-modal-save-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Save Changes</button>
+    </footer>
 </div>
 <!-- END: New Table Context Menu -->
 </body>
