@@ -15,7 +15,7 @@
 // --- 1. Configuration ---
 
 // IMPORTANT: Increment this version number every time you update the service worker file.
-const CACHE_NAME = 'reputifly-notes-cache-v27';
+const CACHE_NAME = 'reputifly-notes-cache-v28';
 
 // A comprehensive list of all files that make up the application's "shell".
 const APP_SHELL_URLS = [
