@@ -7125,9 +7125,17 @@ tableContextMenu.addEventListener('click', (e) => {
             const footerCell = tfoot.rows[0].cells[activeTableColIndex];
 
             if (type === 'clear') {
-                footerCell.innerHTML = '';
-                footerCell.removeAttribute('data-calc-type');
-            } else {
+    footerCell.innerHTML = '';
+    footerCell.removeAttribute('data-calc-type');
+
+    // Check if any other calculations exist in the footer
+    const allFooterCells = Array.from(footerCell.parentElement.children);
+    const hasOtherCalcs = allFooterCells.some(cell => cell.hasAttribute('data-calc-type'));
+
+    if (!hasOtherCalcs) {
+        tfoot.remove(); // Remove the entire footer if it's now empty
+    }
+} else {
                 footerCell.dataset.calcType = type;
                 performStandardCalculation(activeTableForAction, activeTableColIndex, type);
             }
@@ -7427,18 +7435,24 @@ function performCustomFormula(table, targetColIndex, formula) {
     if (!match) return; // Invalid formula stored
 
     const [, col1Raw, operator, col2Raw] = match.map(s => s.trim());
-    
+
     const getIndex = (operand) => {
         let op = operand.replace(/[()]/g, '').trim();
-        if (/^[A-Z]$/i.test(op)) return op.toUpperCase().charCodeAt(0) - 65;
+        // 1. Check by Header Name (case-insensitive)
         const lowerOp = op.toLowerCase();
-        return headers.findIndex(h => h.toLowerCase() === lowerOp);
+        const headerIndex = headers.findIndex(h => h.toLowerCase() === lowerOp);
+        if (headerIndex !== -1) return headerIndex;
+
+        // 2. Fallback to Letter (A, B, C...)
+        if (/^[A-Z]$/i.test(op)) return op.toUpperCase().charCodeAt(0) - 65;
+
+        return -1; // Not found
     };
 
     const col1Index = getIndex(col1Raw);
     const col2Index = getIndex(col2Raw);
     const col2Value = (col2Index === -1) ? parseFloat(col2Raw.replace(/[$,]/g, '')) : null;
-    
+
     if (col1Index === -1 || (col2Index === -1 && isNaN(col2Value))) return; // Invalid columns in formula
 
     table.querySelectorAll('tbody tr').forEach(row => {
