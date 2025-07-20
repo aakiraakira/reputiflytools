@@ -4550,20 +4550,16 @@ tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="tabl
     }
 },{
     name: 'recalculate',
-    description: 'Recalculate a column with a custom formula. Usage: /recalculate [column name]',
-    suggest: 'none', // No suggestions are needed as it operates on the current note's table
+    description: 'Usage: /recalculate [column name] or /recalculate for all.',
+    suggest: 'none',
     execute: (args) => {
-        const columnName = args.trim();
-        if (!columnName) {
-            return showToast('❌ You must specify a column name.', 'error');
-        }
+        const columnName = args ? args.trim() : null;
 
         const activeNoteId = state.settings.activeNoteId;
         if (!activeNoteId) {
             return showToast('❌ You must be in a note to use this command.', 'error');
         }
 
-        // The table exists in the live DOM of the editor, so we query it directly
         const editorBody = app.elements.noteEditorBody;
         const table = editorBody.querySelector('table');
 
@@ -4571,34 +4567,54 @@ tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="tabl
             return showToast('❌ No table found in the current note.', 'error');
         }
 
-        const headers = Array.from(table.querySelectorAll('thead tr:last-child th'));
-        let targetHeader = null;
-        let targetColIndex = -1;
+        // If a column name is provided, recalculate that specific column
+        if (columnName) {
+            const headers = Array.from(table.querySelectorAll('thead tr:last-child th'));
+            let targetHeader = null;
+            let targetColIndex = -1;
 
-        // Find the specified column by its text content (case-insensitive)
-        for (let i = 0; i < headers.length; i++) {
-            if (headers[i].innerText.trim().toLowerCase() === columnName.toLowerCase()) {
-                targetHeader = headers[i];
-                targetColIndex = i;
-                break;
+            for (let i = 0; i < headers.length; i++) {
+                if (headers[i].innerText.trim().toLowerCase() === columnName.toLowerCase()) {
+                    targetHeader = headers[i];
+                    targetColIndex = i;
+                    break;
+                }
             }
+
+            if (!targetHeader) {
+                return showToast(`❌ Column "${columnName}" not found in the table.`, 'error');
+            }
+
+            const formula = targetHeader.dataset.formula;
+            if (!formula) {
+                return showToast(`❌ No custom formula is set for the "${columnName}" column.`, 'info');
+            }
+
+            performCustomFormula(table, targetColIndex, formula);
+            showToast(`✅ Recalculated column "${columnName}".`, 'success');
+
+        } else {
+            // If no column name, recalculate all columns with a formula
+            const headersWithFormulas = Array.from(table.querySelectorAll('thead tr:last-child th[data-formula]'));
+            
+            if (headersWithFormulas.length === 0) {
+                return showToast('No columns with formulas found in this table.', 'info');
+            }
+
+            const allHeaders = Array.from(table.querySelectorAll('thead tr:last-child th'));
+
+            headersWithFormulas.forEach(header => {
+                const formula = header.dataset.formula;
+                if (formula) {
+                    const colIndex = allHeaders.indexOf(header);
+                    if (colIndex > -1) {
+                        performCustomFormula(table, colIndex, formula);
+                    }
+                }
+            });
+
+            showToast(`✅ Recalculated all ${headersWithFormulas.length} formula column(s).`, 'success');
         }
-
-        if (!targetHeader) {
-            return showToast(`❌ Column "${columnName}" not found in the table.`, 'error');
-        }
-
-        const formula = targetHeader.dataset.formula;
-
-        if (!formula) {
-            return showToast(`❌ No custom formula is set for the "${columnName}" column.`, 'info');
-        }
-
-        // Reuse the existing function to perform the calculation
-        performCustomFormula(table, targetColIndex, formula);
-
-        // This function will also save the note, so no need to call saveState() here
-        showToast(`✅ Recalculated column "${columnName}".`, 'success');
     }
 },
 // ... rest of the commands
