@@ -1622,7 +1622,7 @@ window.functions = getFunctions(app,);
                         <button id="graph-btn" class="p-2 hover:bg-bg-main" title="Show Note Graph"><i data-feather="git-merge" class="w-4 h-4"></i></button>
                         <button id="header-checkpoint-btn" class="p-2 hover:bg-bg-main" title="Save Checkpoint"><i data-feather="flag" class="w-4 h-4"></i></button>
 
-                        <button id="history-btn" class="p-2 hover:bg-bg-main" title="Version History"><i data-feather="history" class="w-4 h-4"></i></button>
+                        <button id="history-btn" class="p-2 hover:bg-bg-main" title="Version History"><i data-feather="clock" class="w-4 h-4"></i></button>
                         <button id="editor-mode-toggle" class="p-2 hover:bg-bg-main disabled:opacity-50 disabled:cursor-not-allowed" title="Toggle Markdown Preview"><i data-feather="eye" class="w-4 h-4"></i></button>
                         <button data-command="ocr" class="p-2 hover:bg-bg-main" title="Scan Image for Text"><i data-feather="camera" class="w-4 h-4"></i></button>
                         <input type="file" id="ocr-file-input" class="hidden" accept="image/*">
@@ -2112,13 +2112,16 @@ return `
     <div class="version-item flex items-start gap-2 ${index === 0 && !searchInput.value ? 'active' : ''}" data-version-index="${index}" title="${formattedDate}">
         <input type="checkbox" class="version-compare-checkbox mt-1.5 flex-shrink-0">
         <div class="flex-grow">
-            <div class="flex justify-between items-center">
-                <div>
-                    <div class="version-timestamp">${relativeTime}</div>
-                    <div class="version-fulldate">${formattedDate}</div>
-                </div>
-                ${version.message ? `<div class="version-message">${version.message.replace(/</g, "&lt;")}</div>` : ''}
-            </div>
+            <div class="flex justify-between items-center gap-2">
+    <div>
+        <div class="version-timestamp">${relativeTime}</div>
+        <div class="version-fulldate">${formattedDate}</div>
+    </div>
+    <div class="flex items-center gap-2 ml-auto">
+        ${version.message ? `<div class="version-message flex-shrink-0">${version.message.replace(/</g, "&lt;")}</div>` : ''}
+        <button class="delete-version-btn p-1 rounded hover:bg-bg-main text-text-tertiary hover:text-red-500" title="Delete this version"><i data-feather="trash-2" class="w-4 h-4 pointer-events-none"></i></button>
+    </div>
+</div>
             <div class="version-preview mt-2 text-xs text-text-secondary italic border-l-2 border-border-color pl-2">${preview || 'Empty Note'}</div>
         </div>
     </div>
@@ -2294,6 +2297,34 @@ modal.addEventListener('keydown', handleKeyboardNav);
     openModal(modal);
     feather.replace();
 };
+// --- START: Version Deletion Logic ---
+document.getElementById('version-history-modal').addEventListener('click', (e) => {
+    const deleteBtn = e.target.closest('.delete-version-btn');
+    if (deleteBtn) {
+        e.stopPropagation(); // Prevent the version item from being selected
+        e.preventDefault();
+
+        const versionItem = deleteBtn.closest('.version-item');
+        const versionIndex = parseInt(versionItem.dataset.versionIndex, 10);
+        const noteId = state.settings.activeNoteId;
+        const versions = state.versions?.[noteId];
+
+        if (versions && typeof versions[versionIndex] !== 'undefined') {
+            // Remove the version from the array in the state
+            versions.splice(versionIndex, 1);
+            
+            // Save the updated state to the database
+            saveState();
+
+            // Provide feedback to the user
+            showToast('Version deleted.', 'success');
+
+            // Refresh the modal content to reflect the deletion
+            openVersionHistoryModal();
+        }
+    }
+});
+// --- END: Version Deletion Logic ---
 const saveNoteVersion = (noteId, content, message = null) => {
     if (!state.versions) state.versions = {};
     if (!state.versions[noteId]) state.versions[noteId] = [];
@@ -5041,6 +5072,37 @@ const commands = [
     { name: 'quiz', description: 'Generate quiz. Usage: /quiz [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleGenerateQuiz(c,n)})},
     { name: 'flashcard', description: 'Open flashcards. Usage: /flashcard [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>handleFlashcardMode(n))},
     { name: 'share', description: 'Create share link. Usage: /share [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>handleShareNote(n))},
+    {
+        name: 'checkpoint',
+        description: 'Save a manual version of the current note. Usage: /checkpoint [message]',
+        execute: (args) => {
+            const noteId = state.settings.activeNoteId;
+            if (!noteId) {
+                return showToast('❌ You must be in a note to save a checkpoint.', 'error');
+            }
+            if (!args) {
+                return showToast('❌ A message is required for the checkpoint.', 'error');
+            }
+            performImmediateSave();
+            const { item: note } = findItem(noteId);
+            if (note) {
+                saveNoteVersion(note.id, note.content, args);
+                saveState();
+                showToast(`✅ Checkpoint saved: "${args}"`, 'success');
+            }
+        }
+    },
+    {
+        name: 'history',
+        description: 'Open version history for a note. Usage: /history [note name]',
+        suggest: 'notes',
+        execute: (args) => {
+            executeWithSmartFind(args, 'notes', (note) => {
+                state.settings.activeNoteId = note.id;
+                openVersionHistoryModal();
+            });
+        }
+    },
     { name: 'dup', description: 'Duplicate an item. Usage: /dup [item name]', suggest: 'items', execute: (args)=>executeWithSmartFind(args,'items',(i)=>{const r=findItem(i.id);const nI=duplicateItem(i);const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index+1,0,nI);showToast(`✅ Duplicated "${i.name}"`);saveState();buildLunrIndex();render()})},
     { name: 'pin', description: 'Toggle pin on a note. Usage: /pin [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{n.pinned=!n.pinned;showToast(n.pinned?`📌 Pinned "${n.name}"`:`👎 Unpinned "${n.name}"`);saveState();render()})},
     { name: 'tag', description: 'Add a tag to current note. Usage: /tag [tagname]', execute: (args)=>{if(!state.settings.activeNoteId)return showToast('❌ Must be in a note.','error');if(!args)return showToast('❌ Tag name needed.','error');const tN=args.split(' ')[0].replace(/#/g,'');if(!tN)return;app.elements.noteEditorBody.innerHTML+=` #${tN}`;performImmediateSave();showToast(`🏷️ Tagged with #${tN}`)}},
