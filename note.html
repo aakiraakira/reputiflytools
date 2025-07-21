@@ -241,6 +241,33 @@
     color: var(--text-primary);
 }
 /* --- END: New Checklist Container Styles --- */
+.checklist-progress-container {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem; 
+}
+
+.checklist-progress-bar {
+    flex-grow: 1;
+    height: 8px;
+    background-color: var(--bg-pane-light);
+    border-radius: 9999px;
+    overflow: hidden;
+}
+
+.checklist-progress-fill {
+    height: 100%;
+    background-color: var(--accent-primary);
+    border-radius: 9999px;
+    transition: width 0.3s ease-in-out;
+}
+
+.checklist-progress-text {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+}
 /* --- END: Final Checklist Alignment Fix --- */
 /* --- START: Share Note Checklist Fix --- */
 #public-note-content .task-list-item {
@@ -508,9 +535,17 @@ table.filter-collapsed .toggle-filter-btn > i {
 /* --- START: Checklist Modal Handle Style --- */
 /* --- START: Checklist Modal Handle Style --- */
 .checklist-modal-item .handle {
-    touch-action: none; /* Improves drag experience on mobile */
-    cursor: grab;       /* ADD THIS LINE for the drag cursor on desktop */
+    display: inline-flex;
+    touch-action: none;
+    cursor: grab;
 }
+
+/* Style for the item being dragged */
+.checklist-modal-item.dragging {
+    opacity: 0.5;
+    background-color: var(--bg-pane-dark);
+}
+/* --- END: Checklist Modal Handle Style --- */
 /* --- END: Checklist Modal Handle Style --- */
 /* --- END: Checklist Modal Handle Style --- */
 /* --- END: Checklist Interaction Fix --- */
@@ -1890,6 +1925,18 @@ window.functions = getFunctions(app,);
 // ==================================================================
 //  START: CORRECT FUNCTION BLOCK
 // ==================================================================
+const updateChecklistProgress = (checklistContainer) => {
+    if (!checklistContainer) return;
+    const items = checklistContainer.querySelectorAll('.checklist-item');
+    const checkedItems = checklistContainer.querySelectorAll('.checklist-item.checked');
+    const total = items.length;
+    const checkedCount = checkedItems.length;
+    const percentage = total > 0 ? Math.round((checkedCount / total) * 100) : 0;
+    const fillEl = checklistContainer.querySelector('.checklist-progress-fill');
+    const textEl = checklistContainer.querySelector('.checklist-progress-text');
+    if (fillEl) fillEl.style.width = `${percentage}%`;
+    if (textEl) textEl.textContent = `${percentage}% Complete`;
+};
 
 // --- 1. HELPER FUNCTIONS (Lowest Level) ---
 // These are needed by other functions, so they must come first.
@@ -3855,6 +3902,7 @@ if (themeMeta) {
     const editorBody = app.elements.noteEditorBody;
 
     if (!note) {
+        app.elements.noteEditorBody.querySelectorAll('.checklist-container').forEach(updateChecklistProgress);
         state.settings.activeNoteId = null;
         if (highlightControls) highlightControls.classList.add('hidden');
         renderMainView();
@@ -4586,30 +4634,36 @@ const commands = [
     name: 'checklist',
     description: 'Adds a new interactive checklist to the current note.',
     execute: () => {
-        if (!state.settings.activeNoteId) {
-            return showToast('❌ You must be in a note to add a checklist.', 'error');
-        }
-
-        restoreSelectionAndExec(() => {
-            const checklistWidgetHTML = `
-    <div class="checklist-container" contenteditable="false">
-        <div class="checklist-header">
-            <h4 class="checklist-title font-semibold text-text-primary flex-grow">Untitled Checklist</h4>
-            <button class="checklist-header-btn" data-action="edit" title="Edit Checklist"><i data-feather="edit" class="w-4 h-4"></i></button>
-            <button class="checklist-header-btn delete" data-action="delete" title="Delete Checklist"><i data-feather="trash-2" class="w-4 h-4"></i></button>
-        </div>
-        <ul class="checklist-body">
-            <li class="checklist-item" data-checked="false"><input type="checkbox" class="checklist-item-checkbox" onclick="return false;"><span class="checklist-item-text" contenteditable="false">First item</span></li>
-            <li class="checklist-item" data-checked="false"><input type="checkbox" class="checklist-item-checkbox" onclick="return false;"><span class="checklist-item-text" contenteditable="false">Second item</span></li>
-        </ul>
-    </div>
-    <p><br></p>
-`;
-            document.execCommand('insertHTML', false, checklistWidgetHTML);
-            feather.replace();
-        });
-        showToast('✅ Checklist added.');
+    if (!state.settings.activeNoteId) {
+        return showToast('❌ You must be in a note to add a checklist.', 'error');
     }
+
+    restoreSelectionAndExec(() => {
+        const newDefaultChecklistHTML = `
+<div class="checklist-container" contenteditable="false">
+    <div class="checklist-header">
+        <h4 class="checklist-title font-semibold text-text-primary flex-grow">Untitled Checklist</h4>
+        <button class="checklist-header-btn" data-action="edit" title="Edit Checklist"><i data-feather="edit" class="w-4 h-4"></i></button>
+        <button class="checklist-header-btn delete" data-action="delete" title="Delete Checklist"><i data-feather="trash-2" class="w-4 h-4"></i></button>
+    </div>
+    <div class="checklist-progress-container">
+        <div class="checklist-progress-bar">
+            <div class="checklist-progress-fill" style="width: 0%;"></div>
+        </div>
+        <span class="checklist-progress-text">0% Complete</span>
+    </div>
+    <ul class="checklist-body">
+        <li class="checklist-item" data-checked="false"><input type="checkbox" class="checklist-item-checkbox" onclick="return false;"><span class="checklist-item-text" contenteditable="false">New item</span></li>
+    </ul>
+</div>
+<p><br></p>
+`;
+        // THE FIX: Use the 'newDefaultChecklistHTML' variable defined above.
+        document.execCommand('insertHTML', false, newDefaultChecklistHTML);
+        feather.replace();
+    });
+    showToast('✅ Checklist added.');
+}
 },// ... inside the 'commands' array
 {
     name: 'move',
@@ -5883,25 +5937,31 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
     document.getElementById('file-upload-input').click();
     break;
     case 'mobile-add-checklist':
-                restoreSelectionAndExec(() => {
-                    const checklistWidgetHTML = `
-                        <div class="checklist-container" contenteditable="false">
-                            <div class="checklist-header">
-                                <h4 class="checklist-title font-semibold text-text-primary flex-grow">Untitled Checklist</h4>
-                                <button class="checklist-header-btn" data-action="edit" title="Edit Checklist"><i data-feather="edit" class="w-4 h-4"></i></button>
-                                <button class="checklist-header-btn delete" data-action="delete" title="Delete Checklist"><i data-feather="trash-2" class="w-4 h-4"></i></button>
-                            </div>
-                            <ul class="checklist-body">
-                                <li class="checklist-item" data-checked="false"><input type="checkbox" class="checklist-item-checkbox" onclick="return false;"><span class="checklist-item-text">First item</span></li>
-                                <li class="checklist-item" data-checked="false"><input type="checkbox" class="checklist-item-checkbox" onclick="return false;"><span class="checklist-item-text">Second item</span></li>
-                            </ul>
-                        </div>
-                        <p><br></p> 
-                    `;
-                    document.execCommand('insertHTML', false, checklistWidgetHTML);
-                    feather.replace();
-                });
-                break;
+    restoreSelectionAndExec(() => {
+        const newDefaultChecklistHTML = `
+<div class="checklist-container" contenteditable="false">
+    <div class="checklist-header">
+        <h4 class="checklist-title font-semibold text-text-primary flex-grow">Untitled Checklist</h4>
+        <button class="checklist-header-btn" data-action="edit" title="Edit Checklist"><i data-feather="edit" class="w-4 h-4"></i></button>
+        <button class="checklist-header-btn delete" data-action="delete" title="Delete Checklist"><i data-feather="trash-2" class="w-4 h-4"></i></button>
+    </div>
+    <div class="checklist-progress-container">
+        <div class="checklist-progress-bar">
+            <div class="checklist-progress-fill" style="width: 0%;"></div>
+        </div>
+        <span class="checklist-progress-text">0% Complete</span>
+    </div>
+    <ul class="checklist-body">
+        <li class="checklist-item" data-checked="false"><input type="checkbox" class="checklist-item-checkbox" onclick="return false;"><span class="checklist-item-text" contenteditable="false">New item</span></li>
+    </ul>
+</div>
+<p><br></p>
+`;
+        // THE FIX: Use the 'newDefaultChecklistHTML' variable.
+        document.execCommand('insertHTML', false, newDefaultChecklistHTML);
+        feather.replace();
+    });
+    break;
         }
     } 
     // Handle view switching, which doesn't need an active note
@@ -6855,32 +6915,27 @@ app.modals.quizContent.addEventListener('click', e => {
     }
     if (command === 'insertChecklist') {
     restoreSelectionAndExec(() => {
-        // This HTML defines the new, self-contained widget
-        // REPLACE THE checklistWidgetHTML VARIABLE
-const checklistWidgetHTML = `
-    <div class="checklist-container" contenteditable="false">
-        <div class="checklist-header">
-            <h4 class="checklist-title font-semibold text-text-primary flex-grow">Untitled Checklist</h4>
-            <button class="checklist-header-btn" data-action="edit" title="Edit Checklist">
-                <i data-feather="edit" class="w-4 h-4"></i>
-            </button>
-            <button class="checklist-header-btn delete" data-action="delete" title="Delete Checklist">
-                <i data-feather="trash-2" class="w-4 h-4"></i>
-            </button>
-        </div>
-        <ul class="checklist-body">
-            <li class="checklist-item" data-checked="false">
-                <input type="checkbox" class="checklist-item-checkbox" onclick="return false;">
-                <span class="checklist-item-text" contenteditable="false">First item</span>
-            </li>
-            <li class="checklist-item" data-checked="false">
-                <input type="checkbox" class="checklist-item-checkbox" onclick="return false;">
-                <span class="checklist-item-text" contenteditable="false">Second item</span>
-            </li>
-        </ul>
+        const newDefaultChecklistHTML = `
+<div class="checklist-container" contenteditable="false">
+    <div class="checklist-header">
+        <h4 class="checklist-title font-semibold text-text-primary flex-grow">Untitled Checklist</h4>
+        <button class="checklist-header-btn" data-action="edit" title="Edit Checklist"><i data-feather="edit" class="w-4 h-4"></i></button>
+        <button class="checklist-header-btn delete" data-action="delete" title="Delete Checklist"><i data-feather="trash-2" class="w-4 h-4"></i></button>
     </div>
-    <p><br></p> `;
-        document.execCommand('insertHTML', false, checklistWidgetHTML);
+    <div class="checklist-progress-container">
+        <div class="checklist-progress-bar">
+            <div class="checklist-progress-fill" style="width: 0%;"></div>
+        </div>
+        <span class="checklist-progress-text">0% Complete</span>
+    </div>
+    <ul class="checklist-body">
+        <li class="checklist-item" data-checked="false"><input type="checkbox" class="checklist-item-checkbox" onclick="return false;"><span class="checklist-item-text" contenteditable="false">New item</span></li>
+    </ul>
+</div>
+<p><br></p>
+`;
+        // THE FIX: Use the 'newDefaultChecklistHTML' variable.
+        document.execCommand('insertHTML', false, newDefaultChecklistHTML);
         feather.replace();
     });
     return;
@@ -7262,22 +7317,50 @@ const openChecklistModal = (checklistContainer) => {
     openModal(modal);
     feather.replace();
 
-    // THIS IS THE CRUCIAL PART THAT ACTIVATES DRAGGING
-    new Sortable(itemsContainer, {
-        animation: 150,
-        handle: '.handle', // Tells SortableJS to only drag by the handle
-        ghostClass: 'bg-bg-pane-light' // Adds a nice background to the placeholder
+    // --- NEW DRAG-AND-DROP LOGIC (NO SortableJS) ---
+    let draggedItem = null;
+
+    itemsContainer.addEventListener('dragstart', (e) => {
+        draggedItem = e.target.closest('.checklist-modal-item');
+        if (!draggedItem) return;
+        // Add a class for visual feedback while dragging
+        setTimeout(() => draggedItem.classList.add('dragging'), 0);
+    });
+
+    itemsContainer.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        const targetItem = e.target.closest('.checklist-modal-item');
+        if (!targetItem || targetItem === draggedItem) return;
+
+        const rect = targetItem.getBoundingClientRect();
+        // Determine if dragging over the top or bottom half of the item
+        const isAfter = e.clientY > rect.top + rect.height / 2;
+
+        if (isAfter) {
+            targetItem.after(draggedItem);
+        } else {
+            targetItem.before(draggedItem);
+        }
+    });
+
+    itemsContainer.addEventListener('dragend', (e) => {
+        if (draggedItem) {
+            // Clean up the visual class
+            draggedItem.classList.remove('dragging');
+            draggedItem = null;
+        }
     });
 };
-
 // Helper to add a new item row inside the modal
 // REPLACE THE ENTIRE addChecklistItemToModal FUNCTION
 // REPLACE THIS ENTIRE FUNCTION...
 const addChecklistItemToModal = (text = '', checked = false) => {
     const itemsContainer = document.getElementById('checklist-modal-items');
     const newItemRow = document.createElement('div');
+    // Make the entire row draggable
     newItemRow.className = 'checklist-modal-item';
-    // The key change is adding the icon with the 'handle' class
+    newItemRow.setAttribute('draggable', 'true');
+
     newItemRow.innerHTML = `
         <i data-feather="grip-vertical" class="handle text-text-tertiary"></i>
         <input type="checkbox" class="checklist-modal-item-checkbox w-5 h-5" ${checked ? 'checked' : ''}>
@@ -7289,6 +7372,7 @@ const addChecklistItemToModal = (text = '', checked = false) => {
     itemsContainer.appendChild(newItemRow);
     feather.replace();
 };
+
 
 // Function to save changes from the modal back to the editor
 // REPLACE THE ENTIRE saveChecklistFromModal FUNCTION
@@ -7318,6 +7402,7 @@ const saveChecklistFromModal = () => {
     if (titleEl) {
         titleEl.textContent = newTitle;
     }
+    updateChecklistProgress(activeChecklistElement);
 
     saveNoteContent();
     closeModal(document.getElementById('checklist-edit-modal'));
@@ -7361,16 +7446,30 @@ app.elements.noteEditorBody.addEventListener('click', (e) => {
         performImmediateSave();
         showToast('Checklist deleted.', 'info');
     } else if (item) {
-        e.preventDefault();
-        const checkbox = item.querySelector('.checklist-item-checkbox');
-        const isChecked = !item.classList.contains('checked');
-        
-        item.classList.toggle('checked', isChecked);
-        checkbox.checked = isChecked;
-        item.dataset.checked = isChecked; // Persist state in the HTML
-        
-        performImmediateSave();
+    e.preventDefault();
+    const checkbox = item.querySelector('.checklist-item-checkbox');
+    const checklistContainer = item.closest('.checklist-container');
+    const isChecked = !item.classList.contains('checked');
+
+    // Update classes and data attributes
+    item.classList.toggle('checked', isChecked);
+    item.dataset.checked = isChecked;
+
+    // --- THIS IS THE FIX ---
+    // Explicitly set the 'checked' attribute for reliable serialization
+    if (isChecked) {
+        checkbox.setAttribute('checked', 'checked');
+    } else {
+        checkbox.removeAttribute('checked');
     }
+    // Also set the property for immediate visual feedback
+    checkbox.checked = isChecked;
+    // --- END OF FIX ---
+
+    // Update progress and save
+    updateChecklistProgress(checklistContainer);
+    performImmediateSave();
+}
 });
 
 // --- END: New Checklist Widget Logic ---
