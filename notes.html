@@ -608,7 +608,27 @@ table.filter-collapsed .toggle-filter-btn > i {
 /* --- END: Checklist Interaction Fix --- */
 /* --- END: FINAL Public Page Code Block Style Fix --- */
 /* --- END: Share Note Checklist Fix --- */
+.version-group-header {
+    font-size: 0.75rem; /* 12px */
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    padding: 1rem 0.5rem 0.25rem;
+    position: sticky;
+    top: 0;
+    background-color: var(--bg-pane-dark);
+    z-index: 1;
+}
 
+.version-item .version-message {
+    margin-top: 0.375rem; /* 6px */
+    display: inline-block;
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-word;
+    border-radius: 6px; /* Less rounded corners */
+    line-height: 1.4;
+}
 
         .brand-button {
     background-image: linear-gradient(to right, var(--brand-grad-from), var(--brand-grad-to));
@@ -2092,48 +2112,82 @@ const openVersionHistoryModal = () => {
     const listContainer = document.getElementById('version-list-container');
     const searchInput = document.getElementById('version-search-input');
     const allVersions = state.versions?.[noteId] || [];
+    const formatDateHeader = (isoString) => {
+    const date = new Date(isoString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    today.setHours(0, 0, 0, 0);
+    yesterday.setHours(0, 0, 0, 0);
+    date.setHours(0, 0, 0, 0);
+
+    if (date.getTime() === today.getTime()) return 'Today';
+    if (date.getTime() === yesterday.getTime()) return 'Yesterday';
+    
+    return date.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+};
 
     // Helper function to render the list of versions
     const renderVersionList = (filteredVersions) => {
-        if (filteredVersions.length === 0) {
-            listContainer.innerHTML = `<p class="p-4 text-sm text-center text-text-tertiary">No matching versions found.</p>`;
-            document.getElementById('version-content-viewer').innerHTML = ''; // Clear viewer
-            document.getElementById('version-restore-btn').style.display = 'none';
-        } else {
-            document.getElementById('version-restore-btn').style.display = 'inline-flex';
-            listContainer.innerHTML = filteredVersions.map((version) => {
-                const index = allVersions.indexOf(version); // Get original index for data consistency
-                const formattedDate = new Date(version.savedAt).toLocaleString();
-                const relativeTime = formatRelativeTime(version.savedAt);
-                const plainText = version.content.replace(/<[^>]*>?/gm, ' ').trim();
-const preview = plainText.substring(0, 75) + (plainText.length > 75 ? '...' : '');
+    if (filteredVersions.length === 0) {
+        listContainer.innerHTML = `<p class="p-4 text-sm text-center text-text-tertiary">No matching versions found.</p>`;
+        document.getElementById('version-content-viewer').innerHTML = '';
+        document.getElementById('version-restore-btn').style.display = 'none';
+        return;
+    }
 
-return `
-    <div class="version-item flex items-start gap-2 ${index === 0 && !searchInput.value ? 'active' : ''}" data-version-index="${index}" title="${formattedDate}">
-        <input type="checkbox" class="version-compare-checkbox mt-1.5 flex-shrink-0">
-        <div class="flex-grow">
-            <div class="flex justify-between items-center gap-2">
-    <div>
-        <div class="version-timestamp">${relativeTime}</div>
-        <div class="version-fulldate">${formattedDate}</div>
-    </div>
-    <div class="flex items-center gap-2 ml-auto">
-        ${version.message ? `<div class="version-message flex-shrink-0">${version.message.replace(/</g, "&lt;")}</div>` : ''}
-        <button class="delete-version-btn p-1 rounded hover:bg-bg-main text-text-tertiary hover:text-red-500" title="Delete this version"><i data-feather="trash-2" class="w-4 h-4 pointer-events-none"></i></button>
-    </div>
-</div>
-            <div class="version-preview mt-2 text-xs text-text-secondary italic border-l-2 border-border-color pl-2">${preview || 'Empty Note'}</div>
-        </div>
-    </div>
-`;
-            }).join('');
-            
-            // Display the diff for the first item in the filtered list
-            displayVersionDiff(filteredVersions[0].content);
-            listContainer.querySelector('.version-item')?.classList.add('active');
+    const groupedVersions = {};
+    filteredVersions.forEach(version => {
+        const header = formatDateHeader(version.savedAt);
+        if (!groupedVersions[header]) {
+            groupedVersions[header] = [];
         }
-        feather.replace();
-    };
+        const originalIndex = allVersions.indexOf(version);
+        groupedVersions[header].push({ ...version, originalIndex });
+    });
+
+    let finalHTML = '';
+    for (const header in groupedVersions) {
+        finalHTML += `<h4 class="version-group-header">${header}</h4>`;
+        finalHTML += groupedVersions[header].map(versionData => {
+            const { savedAt, message, content, originalIndex } = versionData;
+            const index = originalIndex;
+            const formattedDate = new Date(savedAt).toLocaleString();
+            const relativeTime = formatRelativeTime(savedAt);
+            const plainText = content.replace(/<[^>]*>?/gm, ' ').trim();
+            const preview = plainText.substring(0, 75) + (plainText.length > 75 ? '...' : '');
+
+            return `
+            <div class="version-item flex items-start gap-2 ${index === 0 && !searchInput.value ? 'active' : ''}" data-version-index="${index}" title="${formattedDate}">
+                <input type="checkbox" class="version-compare-checkbox mt-1.5 flex-shrink-0">
+                <div class="flex-grow">
+                    <div class="flex justify-between items-center gap-2">
+                        <div>
+                            <div class="version-timestamp">${relativeTime}</div>
+                            <div class="version-fulldate">${formattedDate}</div>
+                        </div>
+                        <button class="delete-version-btn p-1 rounded hover:bg-bg-main text-text-tertiary hover:text-red-500" title="Delete this version"><i data-feather="trash-2" class="w-4 h-4 pointer-events-none"></i></button>
+                    </div>
+                    ${message ? `<div class="version-message">${message.replace(/</g, "&lt;")}</div>` : ''}
+                    <div class="version-preview mt-2 text-xs text-text-secondary italic border-l-2 border-border-color pl-2">${preview || 'Empty Note'}</div>
+                </div>
+            </div>
+            `;
+        }).join('');
+    }
+
+    document.getElementById('version-restore-btn').style.display = 'inline-flex';
+    listContainer.innerHTML = finalHTML;
+
+    displayVersionDiff(filteredVersions[0].content);
+    listContainer.querySelector('.version-item')?.classList.add('active');
+    feather.replace();
+};
 
     // Initial render
     searchInput.value = ''; // Clear search on open
