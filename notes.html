@@ -1546,6 +1546,8 @@ window.functions = getFunctions(app,);
                     </div>
                     <div class="flex items-center gap-2 flex-shrink-0">
                         <div id="view-switcher-container" class="view-switcher bg-bg-pane-dark p-1 rounded-lg flex">
+                            <button class="view-btn px-2.5 py-1 rounded" title="Gallery View" data-view="gallery"><i data-feather="grid" class="w-4 h-4"></i></button>
+
                             <button class="view-btn px-2.5 py-1 rounded" title="Calendar View" data-view="calendar"><i data-feather="calendar" class="w-4 h-4"></i></button>
 
                           <button class="view-btn px-2.5 py-1 rounded" title="Board View" data-view="board"><i data-feather="trello" class="w-4 h-4"></i></button>
@@ -1692,6 +1694,8 @@ window.functions = getFunctions(app,);
                     <div id="kanban-board" class="flex gap-4 min-h-full"></div>
                 </div>
                 <div id="calendar-view" class="notes-view hidden flex-grow p-4 md:p-5 flex flex-col"></div>
+                <div id="gallery-view" class="notes-view hidden flex-grow p-4 md:p-5"></div>
+
                 <div id="list-view" class="notes-view hidden flex-grow p-4 md:p-5">
                     <div id="notes-list-content" class="space-y-3"></div>
                 </div>
@@ -1710,7 +1714,7 @@ window.functions = getFunctions(app,);
     </div>
 </div>
                     <div class="p-4 md:p-8 md:pb-4 flex-shrink-0">
-                        <div id="note-properties-container" class="px-4 md:px-8 text-sm text-text-tertiary border-b border-border-color"></div>
+                        <div id="note-properties-container" class="px-4 md:px-8 text-sm text-text-tertiary mb-4 py-2"></div>
 
                         
 <textarea id="note-editor-title" placeholder="Untitled Note" class="text-3xl md:text-4xl font-bold bg-transparent focus:outline-none mb-4 w-full overflow-hidden resize-none" rows="1"></textarea>
@@ -4303,7 +4307,9 @@ if (themeMeta) {
                         renderKanbanView();
                     }else if (state.settings.activeView === 'calendar') { // ADD THIS BLOCK
     renderCalendarView();
-} else {
+} else if (state.settings.activeView === 'gallery') { // ADD THIS BLOCK
+    renderGalleryView();
+}else {
                         renderListView();
                     }
                 } else {
@@ -4504,6 +4510,79 @@ function renderCalendarView() {
     html += '</div>';
     calendarView.innerHTML = html;
     feather.replace();
+}
+// END OF NEW FUNCTION
+// ADD THIS ENTIRE NEW FUNCTION
+function renderGalleryView() {
+    const galleryView = document.getElementById('gallery-view');
+    galleryView.classList.remove('hidden');
+
+    const collectionId = state.settings.activeCollectionId;
+    const collection = findItem(collectionId)?.item;
+
+    if (!collection || collection.type !== 'folder') {
+        galleryView.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="grid" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">Gallery View</h3><p>This view is only available for folders.</p></div>`;
+        feather.replace();
+        return;
+    }
+
+    const notes = (collection.children || []).filter(note => note.type === 'note');
+
+    if (notes.length === 0) {
+        galleryView.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="inbox" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">No Notes Here</h3><p>Create a new note to see it in the gallery.</p></div>`;
+        feather.replace();
+        return;
+    }
+
+    const cardsHTML = notes.map(note => {
+        // --- Smart Cover Image Logic ---
+        let coverImageHTML = '';
+        let coverImageFound = false;
+        // 1. Look for a specific "Cover Image" or "Image" property
+        const coverProp = Object.values(note.properties || {}).find(p => p.type === 'image' && p.value);
+        if (coverProp) {
+            coverImageHTML = `<div class="h-32 bg-cover bg-center" style="background-image: url('${coverProp.value}')"></div>`;
+            coverImageFound = true;
+        } else {
+            // 2. If not found, look for the first image in the note's content
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = note.content;
+            const firstImage = tempDiv.querySelector('img');
+            if (firstImage) {
+                coverImageHTML = `<div class="h-32 bg-cover bg-center" style="background-image: url('${firstImage.src}')"></div>`;
+                coverImageFound = true;
+            } else {
+                // 3. Fallback if no image is found
+                const plainContent = note.content.replace(/<[^>]*>?/gm, '').trim();
+                const excerpt = plainContent.substring(0, 100) + (plainContent.length > 100 ? '...' : '');
+                coverImageHTML = `<div class="h-32 p-3 text-sm text-text-secondary overflow-hidden">${excerpt || 'Empty Note'}</div>`;
+            }
+        }
+
+        // --- Property Display Logic ---
+        const statusProp = Object.values(note.properties || {}).find(p => p.type === 'select' && p.value);
+        let propertiesHTML = '';
+        if (statusProp) {
+            const colorClass = getSelectColor(statusProp.value);
+            propertiesHTML += `<div class="mt-2"><span class="rounded px-2 py-0.5 text-xs ${colorClass}">${statusProp.value}</span></div>`;
+        }
+
+        return `
+            <a href="#" class="gallery-card-item block bg-bg-pane-light border border-border-color rounded-lg overflow-hidden transition-all hover:shadow-lg hover:-translate-y-1" data-note-id="${note.id}">
+                ${coverImageHTML}
+                <div class="p-3">
+                    <h4 class="font-semibold text-text-primary truncate">${note.name}</h4>
+                    ${propertiesHTML}
+                </div>
+            </a>
+        `;
+    }).join('');
+
+    galleryView.innerHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            ${cardsHTML}
+        </div>
+    `;
 }
 // END OF NEW FUNCTION
             function renderKanbanView() {
@@ -4803,60 +4882,63 @@ function renderNoteProperties(note) {
     };
     const allProps = { ...defaultProps, ...(note.properties || {}) };
 
-    let propertiesHTML = Object.entries(allProps).map(([name, prop]) => {
-        let valueHTML = '';
-        const isReadOnly = prop.readonly;
+    // REPLACE the entire block that starts with 'let propertiesHTML = ...'
 
-        // REPLACE THE OLD switch BLOCK WITH THIS NEW ONE
-// Located inside the renderNoteProperties function
-switch (prop.type) {
-    case 'date':
-        // FIX: Added class="prop-value" and the critical data-prop-name attribute
-        valueHTML = `<span class="prop-value" data-prop-name="${name}">${formatDateTime(prop.value) || 'Empty'}</span>`;
-        break;
-    case 'text':
-    case 'number':
-        valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`;
-        break;
-    case 'select':
-        if (prop.value) {
-            const colorClass = getSelectColor(prop.value);
-            valueHTML = `<span class="prop-value rounded px-2 py-0.5 ${colorClass}" data-prop-name="${name}">${prop.value}</span>`;
-        } else {
-            valueHTML = `<span class="prop-value text-text-tertiary" data-prop-name="${name}">Empty</span>`;
-        }
-        break;
-    default:
-        valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`;
-}
+let propertiesHTML = Object.entries(allProps).map(([name, prop]) => {
+    let valueHTML = '';
+    const isReadOnly = prop.readonly;
 
-        return `
-            <div class="property-row group flex items-center py-1.5">
-                <div class="prop-name w-28 text-text-secondary flex-shrink-0 flex items-center gap-2">
-                    <i data-feather="${prop.type === 'date' ? 'calendar' : 'type'}" class="w-4 h-4"></i>
-                    <span>${name}</span>
-                </div>
-                <div class="prop-value-container flex-grow text-text-primary font-medium ${isReadOnly ? '' : 'cursor-pointer hover:bg-bg-pane-dark rounded px-2 -mx-2'}">
-                    ${valueHTML}
-                </div>
-                ${!isReadOnly ? `
-                <button class="delete-prop-btn opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-bg-pane-dark" data-prop-name="${name}" title="Delete Property">
-                    <i data-feather="x" class="w-4 h-4 text-text-tertiary"></i>
-                </button>
-                ` : '<div class="w-8"></div>' /* Placeholder for alignment */ }
+    switch (prop.type) {
+        case 'date':
+            valueHTML = `<span class="prop-value" data-prop-name="${name}">${formatDateTime(prop.value) || 'Empty'}</span>`;
+            break;
+        case 'text':
+        case 'number':
+        case 'image': // Group image with text/number as it's an input
+            valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`;
+            break;
+        case 'select':
+            if (prop.value) {
+                const colorClass = getSelectColor(prop.value);
+                valueHTML = `<span class="prop-value rounded px-2 py-0.5 ${colorClass}" data-prop-name="${name}">${prop.value}</span>`;
+            } else {
+                valueHTML = `<span class="prop-value text-text-tertiary" data-prop-name="${name}">Empty</span>`;
+            }
+            break;
+        default:
+            valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`;
+    }
+
+    // Define icons for each property type
+    const icons = { 'text': 'type', 'number': 'hash', 'date': 'calendar', 'select': 'chevron-down', 'image': 'image' };
+
+    return `
+        <div class="property-row group flex items-center py-2 hover:bg-bg-pane-dark -mx-2 px-2 rounded-md">
+            <div class="prop-name w-32 text-text-tertiary flex-shrink-0 flex items-center gap-2 cursor-pointer">
+                <i data-feather="${icons[prop.type] || 'type'}" class="w-4 h-4"></i>
+                <span>${name}</span>
             </div>
-        `;
-    }).join('');
-
-    // Add the "Add Property" button
-    propertiesHTML += `
-        <div class="py-1.5">
-            <button id="add-property-btn" class="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors">
-                <i data-feather="plus" class="w-4 h-4"></i>
-                <span>Add a property</span>
+            <div class="prop-value-container flex-grow text-text-primary font-medium ${isReadOnly ? '' : 'cursor-pointer'}">
+                ${valueHTML}
+            </div>
+            ${!isReadOnly ? `
+            <button class="delete-prop-btn opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-bg-main" data-prop-name="${name}" title="Delete Property">
+                <i data-feather="x" class="w-4 h-4 text-text-tertiary"></i>
             </button>
+            ` : '<div class="w-8"></div>' }
         </div>
     `;
+}).join('');
+
+// A nicer "Add a property" button
+propertiesHTML += `
+    <div class="add-property-wrapper mt-1">
+        <button id="add-property-btn" class="flex items-center gap-2 text-sm text-text-tertiary hover:text-text-primary transition-colors p-2 -mx-2 hover:bg-bg-pane-dark rounded-md w-full">
+            <i data-feather="plus" class="w-4 h-4"></i>
+            <span>Add a property</span>
+        </button>
+    </div>
+`;
 
     container.innerHTML = propertiesHTML;
 }
@@ -5286,6 +5368,17 @@ document.getElementById('calendar-view').addEventListener('click', e => {
         render();
     }
 });
+// ADD THIS NEW EVENT LISTENER INSIDE init()
+document.getElementById('gallery-view').addEventListener('click', e => {
+    const cardItem = e.target.closest('.gallery-card-item');
+    if (cardItem) {
+        e.preventDefault();
+        const noteId = cardItem.dataset.noteId;
+        state.settings.activeNoteId = noteId;
+        saveState();
+        render();
+    }
+});
                 // ADD THIS ENTIRE EVENT LISTENER BLOCK
 // START: CORRECTED AND UNIFIED PROPERTY INTERACTION LOGIC
 const propertiesContainer = document.getElementById('note-properties-container');
@@ -5354,7 +5447,7 @@ propertiesContainer.addEventListener('click', async (e) => {
             menu.classList.remove('hidden');
             setTimeout(() => menu.classList.remove('scale-95', 'opacity-0'), 10);
             filterInput.focus();
-            filterInput.oninput = () => renderOptions(filterInput.value);
+            filterInput.oninput = debounce(() => renderOptions(filterInput.value), 150);
 
         } else { // Handles 'date', 'text', 'number'
             const originalValue = prop.value || '';
@@ -5434,13 +5527,55 @@ propertiesMenu.addEventListener('click', async (e) => {
     propertiesMenu.classList.add('scale-95', 'opacity-0');
     setTimeout(() => propertiesMenu.classList.add('hidden'), 100);
 });
+// ADD THIS ENTIRE NEW EVENT LISTENER BLOCK
+document.getElementById('select-property-menu').addEventListener('click', (e) => {
+    const button = e.target.closest('.select-option-item');
+    if (!button) return;
+
+    const menu = document.getElementById('select-property-menu');
+    const propName = menu.dataset.propName;
+    const note = findItem(state.settings.activeNoteId)?.item;
+    if (!note || !propName) return;
+
+    const prop = note.properties[propName];
+    const value = button.dataset.value;
+    
+    // This part handles creating a new option if it doesn't exist
+    if (button.dataset.action === 'create') {
+        if (!prop.options) prop.options = [];
+        prop.options.push({ name: value });
+    }
+    
+    // This sets the note's property value to the selected option
+    prop.value = value;
+    
+    saveState();
+    renderNoteProperties(note);
+    feather.replace();
+
+    // Hide the menu after selection
+    menu.classList.add('scale-95', 'opacity-0');
+    setTimeout(() => menu.classList.add('hidden'), 100);
+});
 // END: CORRECTED AND UNIFIED PROPERTY INTERACTION LOGIC
 
 // Global click to hide the properties menu
+// ADD THIS NEW, UPGRADED BLOCK
+// Global click listener to hide any open property-related menus
 document.addEventListener('click', (e) => {
+    const propertiesMenu = document.getElementById('properties-menu');
+    const selectMenu = document.getElementById('select-property-menu');
+
+    // Hide the main "Add Property" menu if clicking away
     if (!propertiesMenu.classList.contains('hidden') && !e.target.closest('#add-property-btn') && !e.target.closest('#properties-menu')) {
         propertiesMenu.classList.add('scale-95', 'opacity-0');
         setTimeout(() => propertiesMenu.classList.add('hidden'), 100);
+    }
+
+    // Hide the "Select Option" menu if clicking away from it or its trigger
+    if (!selectMenu.classList.contains('hidden') && !e.target.closest('.prop-value-container') && !e.target.closest('#select-property-menu')) {
+        selectMenu.classList.add('scale-95', 'opacity-0');
+        setTimeout(() => selectMenu.classList.add('hidden'), 100);
     }
 });
 // END OF EVENT LISTENER BLOCK
@@ -9355,6 +9490,10 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
     <button data-prop-type="select" class="w-full text-left px-3 py-1.5 hover:bg-bg-pane-dark rounded flex items-center gap-2">
         <i data-feather="chevron-down" class="w-4 h-4"></i>Select
     </button>
+    <button data-prop-type="image" class="w-full text-left px-3 py-1.5 hover:bg-bg-pane-dark rounded flex items-center gap-2">
+    <i data-feather="image" class="w-4 h-4"></i>Image URL
+</button>
+
 </div>
 <div id="select-property-menu" class="context-menu fixed z-[60] bg-bg-pane-light shadow-2xl rounded-md p-2 w-56 border border-border-color hidden origin-top-left scale-95 opacity-0 text-sm flex flex-col">
     <div class="px-2 pb-1">
