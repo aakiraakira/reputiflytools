@@ -2432,7 +2432,7 @@ document.getElementById('version-sidebar').addEventListener('click', (e) => {
 // --- Integrated Version Restore Logic ---
 let restoreConfirmTimeout; // Holds the timer for reverting the confirm button
 
-document.getElementById('version-restore-btn').addEventListener('click', (e) => {
+document.getElementById('version-restore-btn').addEventListener('click', async (e) => {
     const restoreBtn = e.currentTarget;
     const noteId = state.settings.activeNoteId;
     const activeItem = document.querySelector('#version-sidebar .version-item.active');
@@ -2448,29 +2448,37 @@ document.getElementById('version-restore-btn').addEventListener('click', (e) => 
         const versionToRestore = versions[selectedIndex];
 
         if (versionToRestore) {
-            const { item: note } = findItem(noteId);
-            if (note) {
-                // --- START: THIS IS THE FIX ---
-                // 1. Directly update the note's content and modification date in the state
-                note.content = versionToRestore.content;
-                note.modifiedAt = new Date().toISOString();
-                updateNoteLinks(note); // Also update tags and links
-                updateNoteTags(note);
+    const { item: note } = findItem(noteId);
+    if (note) {
+        // 1. Create a checkpoint of the current content BEFORE overwriting it.
+        saveNoteVersion(
+            note.id,
+            note.content, // The current content being replaced
+            `Automatic checkpoint before restore`
+        );
 
-                // 2. Update the editor UI
-                app.elements.noteEditorBody.innerHTML = note.content;
+        // 2. Overwrite the note's content with the restored version.
+        note.content = versionToRestore.content;
+        note.modifiedAt = new Date().toISOString();
+        updateNoteLinks(note);
+        updateNoteTags(note);
 
-                // 3. Explicitly save the updated state to the database
-                saveState();
+        // 3. Create a second log to show that a restore happened.
+        saveNoteVersion(
+            note.id,
+            note.content, // The newly restored content
+            `Restored from version ${formatRelativeTime(versionToRestore.savedAt)}`
+        );
 
-                // 4. Rebuild the search index with the new content
-                buildLunrIndex();
-                // --- END: THIS IS THE FIX ---
+        // 4. Update the UI and save everything to the database.
+        app.elements.noteEditorBody.innerHTML = note.content;
+        await saveState(); // Await ensures the save completes before proceeding
+        buildLunrIndex();
 
-                closeVersionHistoryModal();
-                showToast('Note restored successfully!', 'success');
-            }
-        }
+        closeVersionHistoryModal();
+        showToast('Note restored successfully!', 'success');
+    }
+}
 
         // Reset button after restoring
         restoreBtn.classList.remove('confirm-state');
