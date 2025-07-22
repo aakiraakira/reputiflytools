@@ -3737,6 +3737,8 @@ console.log(\`Total: \${calculateTotal(cart)}\`); // Total: 45</code></pre></div
             if (typeof node.createdAt === 'undefined') node.createdAt = now;
             if (typeof node.modifiedAt === 'undefined') node.modifiedAt = node.createdAt;
                     if (typeof node.properties === 'undefined') node.properties = {}; // ADD THIS LINE
+                    if (typeof node.propertiesCollapsed === 'undefined') node.propertiesCollapsed = false; // ADD THIS LINE
+
 
         }
         if (node.children) {
@@ -4869,6 +4871,7 @@ if (backlinks.length > 0) {
     updateEditorStats();
     feather.replace();
 }
+// REPLACE the entire renderNoteProperties function
 function renderNoteProperties(note) {
     const container = document.getElementById('note-properties-container');
     if (!container || !note) {
@@ -4876,71 +4879,57 @@ function renderNoteProperties(note) {
         return;
     }
 
-    const defaultProps = {
-        'Created': { type: 'date', value: note.createdAt, readonly: true },
-        'Modified': { type: 'date', value: note.modifiedAt, readonly: true }
-    };
-    const allProps = { ...defaultProps, ...(note.properties || {}) };
+    const isCollapsed = note.propertiesCollapsed;
 
-    // REPLACE the entire block that starts with 'let propertiesHTML = ...'
-
-let propertiesHTML = Object.entries(allProps).map(([name, prop]) => {
-    let valueHTML = '';
-    const isReadOnly = prop.readonly;
-
-    switch (prop.type) {
-        case 'date':
-            valueHTML = `<span class="prop-value" data-prop-name="${name}">${formatDateTime(prop.value) || 'Empty'}</span>`;
-            break;
-        case 'text':
-        case 'number':
-        case 'image': // Group image with text/number as it's an input
-            valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`;
-            break;
-        case 'select':
-            if (prop.value) {
-                const colorClass = getSelectColor(prop.value);
-                valueHTML = `<span class="prop-value rounded px-2 py-0.5 ${colorClass}" data-prop-name="${name}">${prop.value}</span>`;
-            } else {
-                valueHTML = `<span class="prop-value text-text-tertiary" data-prop-name="${name}">Empty</span>`;
-            }
-            break;
-        default:
-            valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`;
-    }
-
-    // Define icons for each property type
-    const icons = { 'text': 'type', 'number': 'hash', 'date': 'calendar', 'select': 'chevron-down', 'image': 'image' };
-
-    return `
-        <div class="property-row group flex items-center py-2 hover:bg-bg-pane-dark -mx-2 px-2 rounded-md">
-            <div class="prop-name w-32 text-text-tertiary flex-shrink-0 flex items-center gap-2 cursor-pointer">
-                <i data-feather="${icons[prop.type] || 'type'}" class="w-4 h-4"></i>
-                <span>${name}</span>
-            </div>
-            <div class="prop-value-container flex-grow text-text-primary font-medium ${isReadOnly ? '' : 'cursor-pointer'}">
-                ${valueHTML}
-            </div>
-            ${!isReadOnly ? `
-            <button class="delete-prop-btn opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-bg-main" data-prop-name="${name}" title="Delete Property">
-                <i data-feather="x" class="w-4 h-4 text-text-tertiary"></i>
-            </button>
-            ` : '<div class="w-8"></div>' }
+    // --- Header with Collapse Button ---
+    let headerHTML = `
+        <div id="properties-header" class="flex items-center text-text-tertiary hover:text-text-primary cursor-pointer -mx-2 px-2 py-1 rounded-md hover:bg-bg-pane-dark">
+            <i data-feather="chevron-right" class="w-4 h-4 transition-transform duration-200 ${!isCollapsed ? 'rotate-90' : ''}"></i>
+            <span class="ml-1 text-xs font-semibold uppercase">Properties</span>
         </div>
     `;
-}).join('');
 
-// A nicer "Add a property" button
-propertiesHTML += `
-    <div class="add-property-wrapper mt-1">
-        <button id="add-property-btn" class="flex items-center gap-2 text-sm text-text-tertiary hover:text-text-primary transition-colors p-2 -mx-2 hover:bg-bg-pane-dark rounded-md w-full">
-            <i data-feather="plus" class="w-4 h-4"></i>
-            <span>Add a property</span>
-        </button>
-    </div>
-`;
+    let propertiesHTML = '';
+    if (!isCollapsed) {
+        const defaultProps = {
+            'Created': { type: 'date', value: note.createdAt, readonly: true },
+            'Modified': { type: 'date', value: note.modifiedAt, readonly: true }
+        };
+        const allProps = { ...defaultProps, ...(note.properties || {}) };
 
-    container.innerHTML = propertiesHTML;
+        propertiesHTML = Object.entries(allProps).map(([name, prop]) => {
+            // ... (the entire mapping logic from our last step remains the same)
+            let valueHTML = '';
+            const isReadOnly = prop.readonly;
+            const icons = { 'text': 'type', 'number': 'hash', 'date': 'calendar', 'select': 'chevron-down', 'image': 'image' };
+
+            switch (prop.type) {
+                 case 'date': valueHTML = `<span class="prop-value" data-prop-name="${name}">${formatDateTime(prop.value) || 'Empty'}</span>`; break;
+                 case 'text': case 'number': case 'image': valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`; break;
+                 case 'select':
+                    if (prop.value) { valueHTML = `<span class="prop-value rounded px-2 py-0.5 ${getSelectColor(prop.value)}" data-prop-name="${name}">${prop.value}</span>`; } 
+                    else { valueHTML = `<span class="prop-value text-text-tertiary" data-prop-name="${name}">Empty</span>`; }
+                    break;
+                 default: valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`;
+            }
+
+            return `<div class="property-row group flex items-center py-2 hover:bg-bg-pane-dark -mx-2 px-2 rounded-md">
+                        <div class="prop-name w-32 text-text-tertiary flex-shrink-0 flex items-center gap-2 cursor-pointer">
+                            <i data-feather="${icons[prop.type] || 'type'}" class="w-4 h-4"></i><span>${name}</span>
+                        </div>
+                        <div class="prop-value-container flex-grow text-text-primary font-medium ${isReadOnly ? '' : 'cursor-pointer'}">${valueHTML}</div>
+                        ${!isReadOnly ? `<button class="delete-prop-btn opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-bg-main" data-prop-name="${name}" title="Delete Property"><i data-feather="x" class="w-4 h-4 text-text-tertiary"></i></button>` : '<div class="w-8"></div>' }
+                    </div>`;
+        }).join('');
+
+        propertiesHTML += `<div class="add-property-wrapper mt-1">
+                            <button id="add-property-btn" class="flex items-center gap-2 text-sm text-text-tertiary hover:text-text-primary transition-colors p-2 -mx-2 hover:bg-bg-pane-dark rounded-md w-full">
+                                <i data-feather="plus" class="w-4 h-4"></i><span>Add a property</span>
+                            </button>
+                        </div>`;
+    }
+
+    container.innerHTML = headerHTML + propertiesHTML;
 }
 function renderBacklinksState() {
     const isCollapsed = state.settings.backlinksCollapsed;
@@ -5133,6 +5122,8 @@ const upgradePastedTables = (html) => {
     links: [],
     tags: [],
     properties: {}, // ADD THIS LINE
+        propertiesCollapsed: false, // ADD THIS LINE
+
 };
 
                 if (initialContent) {
@@ -5386,8 +5377,17 @@ const propertiesMenu = document.getElementById('properties-menu');
 
 // --- Unified Click Listener for the Properties Container ---
 propertiesContainer.addEventListener('click', async (e) => {
+    
+    
     const note = findItem(state.settings.activeNoteId)?.item;
     if (!note) return;
+    if (e.target.closest('#properties-header')) {
+        note.propertiesCollapsed = !note.propertiesCollapsed;
+        saveState();
+        renderNoteProperties(note);
+        feather.replace();
+        return; // Exit after handling the toggle
+    }
 
     // Action: Handle "Add a property" button
     if (e.target.closest('#add-property-btn')) {
