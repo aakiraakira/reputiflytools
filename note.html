@@ -2429,6 +2429,7 @@ document.getElementById('version-sidebar').addEventListener('click', (e) => {
 });
 
 // --- Integrated Version Restore Logic ---
+// --- Integrated Version Restore Logic ---
 let restoreConfirmTimeout; // Holds the timer for reverting the confirm button
 
 document.getElementById('version-restore-btn').addEventListener('click', (e) => {
@@ -2438,9 +2439,9 @@ document.getElementById('version-restore-btn').addEventListener('click', (e) => 
 
     if (!noteId || !activeItem) return;
 
-    // If the button is already in the "Confirm?" state, proceed with the restore
+    // If the button is in the "Confirm?" state, proceed with the restore
     if (restoreBtn.classList.contains('confirm-state')) {
-        clearTimeout(restoreConfirmTimeout); // Stop the timer
+        clearTimeout(restoreConfirmTimeout); // Stop the revert timer
 
         const versions = state.versions?.[noteId] || [];
         const selectedIndex = parseInt(activeItem.dataset.versionIndex);
@@ -2449,16 +2450,31 @@ document.getElementById('version-restore-btn').addEventListener('click', (e) => 
         if (versionToRestore) {
             const { item: note } = findItem(noteId);
             if (note) {
+                // --- START: THIS IS THE FIX ---
+                // 1. Directly update the note's content and modification date in the state
                 note.content = versionToRestore.content;
+                note.modifiedAt = new Date().toISOString();
+                updateNoteLinks(note); // Also update tags and links
+                updateNoteTags(note);
+
+                // 2. Update the editor UI
                 app.elements.noteEditorBody.innerHTML = note.content;
-                performImmediateSave();
-                closeVersionHistoryModal(); // Replace the old lines with this one
+
+                // 3. Explicitly save the updated state to the database
+                saveState();
+
+                // 4. Rebuild the search index with the new content
+                buildLunrIndex();
+                // --- END: THIS IS THE FIX ---
+
+                closeVersionHistoryModal();
                 showToast('Note restored successfully!', 'success');
             }
         }
+
         // Reset button after restoring
         restoreBtn.classList.remove('confirm-state');
-        restoreBtn.textContent = 'Restore this version';
+        restoreBtn.textContent = 'Restore'; // Correctly matches your button's text
 
     } else {
         // First click: Change the button to a "Confirm?" state
@@ -2468,7 +2484,7 @@ document.getElementById('version-restore-btn').addEventListener('click', (e) => 
         // Set a timer to automatically revert the button if not clicked again
         restoreConfirmTimeout = setTimeout(() => {
             restoreBtn.classList.remove('confirm-state');
-            restoreBtn.textContent = 'Restore this version';
+            restoreBtn.textContent = 'Restore'; // Correctly matches your button's text
         }, 3000); // Reverts after 3 seconds
     }
 });
