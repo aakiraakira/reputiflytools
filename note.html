@@ -1546,6 +1546,10 @@ window.functions = getFunctions(app,);
                     </div>
                     <div class="flex items-center gap-2 flex-shrink-0">
                         <div id="view-switcher-container" class="view-switcher bg-bg-pane-dark p-1 rounded-lg flex">
+                            <button class="view-btn px-2.5 py-1 rounded" title="Gallery View" data-view="gallery"><i data-feather="grid" class="w-4 h-4"></i></button>
+
+                            <button class="view-btn px-2.5 py-1 rounded" title="Calendar View" data-view="calendar"><i data-feather="calendar" class="w-4 h-4"></i></button>
+
                           <button class="view-btn px-2.5 py-1 rounded" title="Board View" data-view="board"><i data-feather="trello" class="w-4 h-4"></i></button>
                           <button class="view-btn px-2.5 py-1 rounded" title="List View" data-view="list"><i data-feather="list" class="w-4 h-4"></i></button>
                         </div>
@@ -1685,8 +1689,13 @@ window.functions = getFunctions(app,);
 
             
                 <div id="board-view" class="notes-view active flex-grow p-4 md:p-5 overflow-x-auto no-scrollbar h-full">
+                    
+
                     <div id="kanban-board" class="flex gap-4 min-h-full"></div>
                 </div>
+                <div id="calendar-view" class="notes-view hidden flex-grow p-4 md:p-5 flex flex-col"></div>
+                <div id="gallery-view" class="notes-view hidden flex-grow p-4 md:p-5"></div>
+
                 <div id="list-view" class="notes-view hidden flex-grow p-4 md:p-5">
                     <div id="notes-list-content" class="space-y-3"></div>
                 </div>
@@ -1705,6 +1714,8 @@ window.functions = getFunctions(app,);
     </div>
 </div>
                     <div class="p-4 md:p-8 md:pb-4 flex-shrink-0">
+                        <div id="note-properties-container" class="px-4 md:px-8 text-sm text-text-tertiary mb-4 py-2"></div>
+
                         
 <textarea id="note-editor-title" placeholder="Untitled Note" class="text-3xl md:text-4xl font-bold bg-transparent focus:outline-none mb-4 w-full overflow-hidden resize-none" rows="1"></textarea>
                     </div>
@@ -3725,6 +3736,10 @@ console.log(\`Total: \${calculateTotal(cart)}\`); // Total: 45</code></pre></div
             const now = new Date().toISOString();
             if (typeof node.createdAt === 'undefined') node.createdAt = now;
             if (typeof node.modifiedAt === 'undefined') node.modifiedAt = node.createdAt;
+                    if (typeof node.properties === 'undefined') node.properties = {}; // ADD THIS LINE
+                    if (typeof node.propertiesCollapsed === 'undefined') node.propertiesCollapsed = false; // ADD THIS LINE
+
+
         }
         if (node.children) {
             // Ensure children is an array before trying to loop through it
@@ -3938,6 +3953,15 @@ const handleFileUpload = async (file) => {
                     hour: 'numeric', minute: '2-digit', hour12: true
                  }).replace(/, /g, ', ');
             };
+            // ADD THIS NEW HELPER FUNCTION
+function getSelectColor(optionName) {
+    const colors = ['bg-blue-500/20 text-blue-400', 'bg-green-500/20 text-green-400', 'bg-yellow-500/20 text-yellow-400', 'bg-red-500/20 text-red-400', 'bg-purple-500/20 text-purple-400', 'bg-pink-500/20 text-pink-400'];
+    let hash = 0;
+    for (let i = 0; i < optionName.length; i++) {
+        hash = optionName.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash % colors.length)];
+}
             
             async function callGeminiAPI(payload, elementForError) {
                 // Clear any previous errors
@@ -4283,7 +4307,11 @@ if (themeMeta) {
                     
                     if (state.settings.activeView === 'board') {
                         renderKanbanView();
-                    } else {
+                    }else if (state.settings.activeView === 'calendar') { // ADD THIS BLOCK
+    renderCalendarView();
+} else if (state.settings.activeView === 'gallery') { // ADD THIS BLOCK
+    renderGalleryView();
+}else {
                         renderListView();
                     }
                 } else {
@@ -4406,6 +4434,159 @@ if (themeMeta) {
     });
     feather.replace();
 }
+// ADD THIS ENTIRE NEW FUNCTION
+function renderCalendarView() {
+    const calendarView = document.getElementById('calendar-view');
+    calendarView.classList.remove('hidden');
+
+    const collectionId = state.settings.activeCollectionId;
+    const collection = findItem(collectionId)?.item;
+
+    if (!collection || collection.type !== 'folder') {
+        calendarView.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="calendar" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">Calendar View</h3><p>Create Date properties in your notes to see them here.</p></div>`;
+        feather.replace();
+        return;
+    }
+
+    const today = new Date();
+    if (!state.calendar) state.calendar = {};
+    if (!state.calendar[collectionId]) {
+        state.calendar[collectionId] = { month: today.getMonth(), year: today.getFullYear() };
+    }
+
+    let { month, year } = state.calendar[collectionId];
+    const firstDayOfMonth = new Date(year, month, 1);
+    const lastDayOfMonth = new Date(year, month + 1, 0);
+    const daysInMonth = lastDayOfMonth.getDate();
+    const startingDay = firstDayOfMonth.getDay(); // 0 = Sunday, 1 = Monday, ...
+
+    const notesWithDates = (collection.children || [])
+        .filter(note => note.type === 'note')
+        .map(note => {
+            const dateProp = Object.values(note.properties || {}).find(p => p.type === 'date' && p.value);
+            return dateProp ? { ...note, eventDate: new Date(dateProp.value) } : null;
+        }).filter(Boolean);
+
+    const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    let html = `
+        <header class="flex justify-between items-center mb-4 flex-shrink-0">
+            <h3 class="text-xl font-semibold text-text-primary">${firstDayOfMonth.toLocaleString('default', { month: 'long' })} ${year}</h3>
+            <div class="flex items-center gap-2">
+                <button id="calendar-prev-month" class="p-2 rounded-md hover:bg-bg-pane-dark"><i data-feather="chevron-left" class="w-5 h-5"></i></button>
+                <button id="calendar-next-month" class="p-2 rounded-md hover:bg-bg-pane-dark"><i data-feather="chevron-right" class="w-5 h-5"></i></button>
+            </div>
+        </header>
+        <div class="grid grid-cols-7 gap-px bg-border-color border border-border-color rounded-lg flex-grow min-h-0">
+            ${daysOfWeek.map(day => `<div class="text-center font-semibold text-sm py-2 bg-bg-pane-dark text-text-secondary">${day}</div>`).join('')}
+    `;
+
+    for (let i = 0; i < startingDay; i++) { html += `<div class="bg-bg-pane-light"></div>`; }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const currentDate = new Date(year, month, day);
+        const notesForDay = notesWithDates.filter(note => {
+            const eventDate = note.eventDate;
+            return eventDate.getDate() === currentDate.getDate() &&
+                   eventDate.getMonth() === currentDate.getMonth() &&
+                   eventDate.getFullYear() === currentDate.getFullYear();
+        });
+
+        html += `
+            <div class="relative p-2 bg-bg-main min-h-[100px] overflow-y-auto custom-scrollbar">
+                <div class="font-semibold text-text-secondary">${day}</div>
+                <div class="mt-1 space-y-1">
+                ${notesForDay.map(note => `
+                    <a href="#" class="calendar-event-item block text-sm p-1.5 rounded-md bg-bg-pane-dark hover:bg-bg-pane-light border-l-4 border-accent-primary" data-note-id="${note.id}">
+                        ${note.name}
+                    </a>
+                `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    const remainingCells = (7 - ((startingDay + daysInMonth) % 7)) % 7;
+    for (let i = 0; i < remainingCells; i++) { html += `<div class="bg-bg-pane-light"></div>`; }
+
+    html += '</div>';
+    calendarView.innerHTML = html;
+    feather.replace();
+}
+// END OF NEW FUNCTION
+// ADD THIS ENTIRE NEW FUNCTION
+function renderGalleryView() {
+    const galleryView = document.getElementById('gallery-view');
+    galleryView.classList.remove('hidden');
+
+    const collectionId = state.settings.activeCollectionId;
+    const collection = findItem(collectionId)?.item;
+
+    if (!collection || collection.type !== 'folder') {
+        galleryView.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="grid" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">Gallery View</h3><p>This view is only available for folders.</p></div>`;
+        feather.replace();
+        return;
+    }
+
+    const notes = (collection.children || []).filter(note => note.type === 'note');
+
+    if (notes.length === 0) {
+        galleryView.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="inbox" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">No Notes Here</h3><p>Create a new note to see it in the gallery.</p></div>`;
+        feather.replace();
+        return;
+    }
+
+    const cardsHTML = notes.map(note => {
+        // --- Smart Cover Image Logic ---
+        let coverImageHTML = '';
+        let coverImageFound = false;
+        // 1. Look for a specific "Cover Image" or "Image" property
+        const coverProp = Object.values(note.properties || {}).find(p => p.type === 'image' && p.value);
+        if (coverProp) {
+            coverImageHTML = `<div class="h-32 bg-cover bg-center" style="background-image: url('${coverProp.value}')"></div>`;
+            coverImageFound = true;
+        } else {
+            // 2. If not found, look for the first image in the note's content
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = note.content;
+            const firstImage = tempDiv.querySelector('img');
+            if (firstImage) {
+                coverImageHTML = `<div class="h-32 bg-cover bg-center" style="background-image: url('${firstImage.src}')"></div>`;
+                coverImageFound = true;
+            } else {
+                // 3. Fallback if no image is found
+                const plainContent = note.content.replace(/<[^>]*>?/gm, '').trim();
+                const excerpt = plainContent.substring(0, 100) + (plainContent.length > 100 ? '...' : '');
+                coverImageHTML = `<div class="h-32 p-3 text-sm text-text-secondary overflow-hidden">${excerpt || 'Empty Note'}</div>`;
+            }
+        }
+
+        // --- Property Display Logic ---
+        const statusProp = Object.values(note.properties || {}).find(p => p.type === 'select' && p.value);
+        let propertiesHTML = '';
+        if (statusProp) {
+            const colorClass = getSelectColor(statusProp.value);
+            propertiesHTML += `<div class="mt-2"><span class="rounded px-2 py-0.5 text-xs ${colorClass}">${statusProp.value}</span></div>`;
+        }
+
+        return `
+            <a href="#" class="gallery-card-item block bg-bg-pane-light border border-border-color rounded-lg overflow-hidden transition-all hover:shadow-lg hover:-translate-y-1" data-note-id="${note.id}">
+                ${coverImageHTML}
+                <div class="p-3">
+                    <h4 class="font-semibold text-text-primary truncate">${note.name}</h4>
+                    ${propertiesHTML}
+                </div>
+            </a>
+        `;
+    }).join('');
+
+    galleryView.innerHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            ${cardsHTML}
+        </div>
+    `;
+}
+// END OF NEW FUNCTION
             function renderKanbanView() {
                 app.views.board.classList.remove('hidden');
                 const collectionId = state.settings.activeCollectionId;
@@ -4547,6 +4728,13 @@ if (themeMeta) {
     app.containers.noteEditor.classList.remove('hidden');
     const note = findItem(state.settings.activeNoteId)?.item;
     const highlightControls = document.getElementById('highlight-controls');
+    renderNoteProperties(note); // ADD THIS LINE
+
+    // ADD THIS ENTIRE BLOCK TO RENDER PROPERTIES
+// ADD THIS ENTIRE NEW FUNCTION
+
+// END OF NEW FUNCTION
+// END OF NEW BLOCK
     const editorBody = app.elements.noteEditorBody;
 
     if (!note) {
@@ -4682,6 +4870,66 @@ if (backlinks.length > 0) {
 
     updateEditorStats();
     feather.replace();
+}
+// REPLACE the entire renderNoteProperties function
+function renderNoteProperties(note) {
+    const container = document.getElementById('note-properties-container');
+    if (!container || !note) {
+        if(container) container.innerHTML = '';
+        return;
+    }
+
+    const isCollapsed = note.propertiesCollapsed;
+
+    // --- Header with Collapse Button ---
+    let headerHTML = `
+        <div id="properties-header" class="flex items-center text-text-tertiary hover:text-text-primary cursor-pointer -mx-2 px-2 py-1 rounded-md hover:bg-bg-pane-dark">
+            <i data-feather="chevron-right" class="w-4 h-4 transition-transform duration-200 ${!isCollapsed ? 'rotate-90' : ''}"></i>
+            <span class="ml-1 text-xs font-semibold uppercase">Properties</span>
+        </div>
+    `;
+
+    let propertiesHTML = '';
+    if (!isCollapsed) {
+        const defaultProps = {
+            'Created': { type: 'date', value: note.createdAt, readonly: true },
+            'Modified': { type: 'date', value: note.modifiedAt, readonly: true }
+        };
+        const allProps = { ...defaultProps, ...(note.properties || {}) };
+
+        propertiesHTML = Object.entries(allProps).map(([name, prop]) => {
+            // ... (the entire mapping logic from our last step remains the same)
+            let valueHTML = '';
+            const isReadOnly = prop.readonly;
+            const icons = { 'text': 'type', 'number': 'hash', 'date': 'calendar', 'select': 'chevron-down', 'image': 'image' };
+
+            switch (prop.type) {
+                 case 'date': valueHTML = `<span class="prop-value" data-prop-name="${name}">${formatDateTime(prop.value) || 'Empty'}</span>`; break;
+                 case 'text': case 'number': case 'image': valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`; break;
+                 case 'select':
+                    if (prop.value) { valueHTML = `<span class="prop-value rounded px-2 py-0.5 ${getSelectColor(prop.value)}" data-prop-name="${name}">${prop.value}</span>`; } 
+                    else { valueHTML = `<span class="prop-value text-text-tertiary" data-prop-name="${name}">Empty</span>`; }
+                    break;
+                 default: valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`;
+            }
+
+            return `<div class="property-row group flex items-center py-2 hover:bg-bg-pane-dark -mx-2 px-2 rounded-md">
+                        <div class="prop-name w-32 text-text-tertiary flex-shrink-0 flex items-center gap-2 cursor-pointer">
+                            <i data-feather="${icons[prop.type] || 'type'}" class="w-4 h-4"></i><span>${name}</span>
+                        </div>
+                        <div class="prop-value-container flex-grow text-text-primary font-medium ${isReadOnly ? '' : 'cursor-pointer'}">${valueHTML}</div>
+                        ${!isReadOnly ? `<button class="delete-prop-btn opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-bg-main" data-prop-name="${name}" title="Delete Property"><i data-feather="x" class="w-4 h-4 text-text-tertiary"></i></button>` : '<div class="w-8"></div>' }
+                    </div>`;
+        }).join('');
+
+        propertiesHTML += `<div class="add-property-wrapper mt-1">
+                            <button id="add-property-btn" class="flex items-center gap-2 text-sm text-text-tertiary hover:text-text-primary transition-colors p-2 -mx-2 hover:bg-bg-pane-dark rounded-md w-full">
+                                <i data-feather="plus" class="w-4 h-4"></i><span>Add a property</span>
+                            </button>
+                        </div>`;
+    }
+
+    container.innerHTML = headerHTML + propertiesHTML;
 }
 function renderBacklinksState() {
     const isCollapsed = state.settings.backlinksCollapsed;
@@ -4866,14 +5114,17 @@ const upgradePastedTables = (html) => {
 
                 const now = new Date().toISOString();
                 const newNote = {
-                    id: generateId('n'), name: 'Untitled Note', type: 'note', content: initialContent,
-                    status: parentId ? state.kanbanColumns[parentId]?.[0]?.id || null : null,
-                    createdAt: now,
-                    modifiedAt: now,
-                    pinned: false,
-                    links: [],
-                    tags: []
-                };
+    id: generateId('n'), name: 'Untitled Note', type: 'note', content: initialContent,
+    status: parentId ? state.kanbanColumns[parentId]?.[0]?.id || null : null,
+    createdAt: now,
+    modifiedAt: now,
+    pinned: false,
+    links: [],
+    tags: [],
+    properties: {}, // ADD THIS LINE
+        propertiesCollapsed: false, // ADD THIS LINE
+
+};
 
                 if (initialContent) {
                    updateNoteLinks(newNote);
@@ -5077,6 +5328,257 @@ ${noteContent}`;
 };
 
             async function init() {
+                // ADD THIS NEW EVENT LISTENER INSIDE init()
+document.getElementById('calendar-view').addEventListener('click', e => {
+    const prevBtn = e.target.closest('#calendar-prev-month');
+    const nextBtn = e.target.closest('#calendar-next-month');
+    const eventItem = e.target.closest('.calendar-event-item');
+
+    const collectionId = state.settings.activeCollectionId;
+    if (!collectionId) return;
+
+    if (prevBtn) {
+        state.calendar[collectionId].month--;
+        if (state.calendar[collectionId].month < 0) {
+            state.calendar[collectionId].month = 11;
+            state.calendar[collectionId].year--;
+        }
+        renderCalendarView();
+    } else if (nextBtn) {
+        state.calendar[collectionId].month++;
+        if (state.calendar[collectionId].month > 11) {
+            state.calendar[collectionId].month = 0;
+            state.calendar[collectionId].year++;
+        }
+        renderCalendarView();
+    } else if (eventItem) {
+        e.preventDefault();
+        const noteId = eventItem.dataset.noteId;
+        state.settings.activeNoteId = noteId;
+        saveState();
+        render();
+    }
+});
+// ADD THIS NEW EVENT LISTENER INSIDE init()
+document.getElementById('gallery-view').addEventListener('click', e => {
+    const cardItem = e.target.closest('.gallery-card-item');
+    if (cardItem) {
+        e.preventDefault();
+        const noteId = cardItem.dataset.noteId;
+        state.settings.activeNoteId = noteId;
+        saveState();
+        render();
+    }
+});
+                // ADD THIS ENTIRE EVENT LISTENER BLOCK
+// START: CORRECTED AND UNIFIED PROPERTY INTERACTION LOGIC
+const propertiesContainer = document.getElementById('note-properties-container');
+const propertiesMenu = document.getElementById('properties-menu');
+
+// --- Unified Click Listener for the Properties Container ---
+propertiesContainer.addEventListener('click', async (e) => {
+    
+    
+    const note = findItem(state.settings.activeNoteId)?.item;
+    if (!note) return;
+    if (e.target.closest('#properties-header')) {
+        note.propertiesCollapsed = !note.propertiesCollapsed;
+        saveState();
+        renderNoteProperties(note);
+        feather.replace();
+        return; // Exit after handling the toggle
+    }
+
+    // Action: Handle "Add a property" button
+    if (e.target.closest('#add-property-btn')) {
+        const btnRect = e.target.closest('#add-property-btn').getBoundingClientRect();
+        propertiesMenu.style.top = `${btnRect.bottom + 5}px`;
+        propertiesMenu.style.left = `${btnRect.left}px`;
+        propertiesMenu.classList.remove('hidden');
+        setTimeout(() => propertiesMenu.classList.remove('scale-95', 'opacity-0'), 10);
+        feather.replace();
+        return;
+    }
+
+    // Action: Handle "Delete" button for a property
+    const deleteBtn = e.target.closest('.delete-prop-btn');
+    if (deleteBtn) {
+        const propName = deleteBtn.dataset.propName;
+        delete note.properties[propName];
+        saveState();
+        renderNoteProperties(note);
+        feather.replace();
+        return;
+    }
+
+    // Action: Handle clicking a property value to edit it
+    const valueContainer = e.target.closest('.prop-value-container');
+    if (valueContainer && !valueContainer.dataset.editing) {
+        const propValueEl = valueContainer.querySelector('[data-prop-name]');
+        if (!propValueEl) return;
+
+        const propName = propValueEl.dataset.propName;
+        const prop = note.properties[propName];
+        if (!prop || prop.readonly) return;
+
+        valueContainer.dataset.editing = "true";
+
+        if (prop.type === 'select') {
+            const menu = document.getElementById('select-property-menu');
+            const filterInput = document.getElementById('select-property-filter');
+            const optionsContainer = document.getElementById('select-property-options');
+
+            const renderOptions = (filter = '') => {
+                const lowerFilter = filter.toLowerCase();
+                const filteredOptions = (prop.options || []).filter(opt => opt.name.toLowerCase().includes(lowerFilter));
+                let optionsHTML = filteredOptions.map(opt => `<button class="select-option-item w-full text-left rounded px-2 py-1 hover:bg-bg-pane-dark" data-value="${opt.name}"><span class="rounded px-2 py-0.5 ${getSelectColor(opt.name)}">${opt.name}</span></button>`).join('');
+                if (filter && !filteredOptions.some(opt => opt.name.toLowerCase() === lowerFilter)) {
+                    optionsHTML += `<button class="select-option-item w-full text-left rounded px-2 py-1 hover:bg-bg-pane-dark" data-action="create" data-value="${filter}"><span class="text-text-secondary">Create:</span> <span class="rounded px-2 py-0.5 ${getSelectColor(filter)}">${filter}</span></button>`;
+                }
+                optionsContainer.innerHTML = optionsHTML;
+            };
+
+            renderOptions();
+            filterInput.value = '';
+            const valueRect = propValueEl.getBoundingClientRect();
+            menu.style.top = `${valueRect.bottom + 5}px`;
+            menu.style.left = `${valueRect.left}px`;
+            menu.dataset.propName = propName;
+            menu.classList.remove('hidden');
+            setTimeout(() => menu.classList.remove('scale-95', 'opacity-0'), 10);
+            filterInput.focus();
+            filterInput.oninput = debounce(() => renderOptions(filterInput.value), 150);
+
+        } else { // Handles 'date', 'text', 'number'
+            const originalValue = prop.value || '';
+            let inputHTML = '';
+            if (prop.type === 'date') {
+                const dateForInput = originalValue ? new Date(originalValue).toISOString().split('T')[0] : '';
+                inputHTML = `<input type="date" value="${dateForInput}" class="prop-edit-input bg-transparent focus:outline-none w-full" data-prop-name="${propName}" data-prop-type="${prop.type}">`;
+            } else {
+                const inputType = prop.type === 'number' ? 'number' : 'text';
+                inputHTML = `<input type="${inputType}" value="${originalValue}" class="prop-edit-input bg-transparent focus:outline-none w-full" data-prop-name="${propName}" data-prop-type="${prop.type}">`;
+            }
+            valueContainer.innerHTML = inputHTML;
+            const input = valueContainer.querySelector('input');
+            input.focus();
+            input.select();
+        }
+    }
+});
+
+// --- Save changes when an input loses focus (blur) ---
+// --- Save changes when an input loses focus (blur) ---
+propertiesContainer.addEventListener('blur', (e) => {
+    if (e.target.classList.contains('prop-edit-input')) {
+        const note = findItem(state.settings.activeNoteId)?.item;
+        const input = e.target;
+        const propName = input.dataset.propName;
+        const propType = input.dataset.propType;
+
+        if (note && propName) {
+            input.closest('.prop-value-container')?.removeAttribute('data-editing');
+            let newValue = input.value;
+            
+            // This is the fix: convert the date string to a full ISO string
+            if (propType === 'date' && newValue) {
+                const parts = newValue.split('-'); // e.g., "2025-07-23" -> ["2025", "07", "23"]
+                // Create date in UTC to avoid timezone off-by-one errors
+                newValue = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).toISOString();
+            }
+
+            note.properties[propName].value = newValue;
+            saveState();
+            renderNoteProperties(note);
+            feather.replace();
+        }
+    }
+}, true);
+
+// --- Handle adding a new property from the menu ---
+propertiesMenu.addEventListener('click', async (e) => {
+    const button = e.target.closest('button');
+    if (!button) return;
+    const propType = button.dataset.propType;
+
+    const propName = await showPrompt({
+        title: 'New Property',
+        message: `Enter a name for the new "${propType}" property:`,
+        placeholder: 'e.g., Status, Priority...'
+    });
+
+    if (propName) {
+        const note = findItem(state.settings.activeNoteId)?.item;
+        if (note) {
+            if (!note.properties) note.properties = {};
+            // If the new property is a date, initialize with a valid date. Otherwise, empty string.
+            const initialValue = propType === 'date' ? new Date().toISOString() : '';
+            note.properties[propName] = { type: propType, value: initialValue };
+            
+            if (propType === 'select') {
+                note.properties[propName].options = [];
+            }
+            saveState();
+            renderNoteProperties(note);
+            feather.replace();
+        }
+    }
+
+    propertiesMenu.classList.add('scale-95', 'opacity-0');
+    setTimeout(() => propertiesMenu.classList.add('hidden'), 100);
+});
+// ADD THIS ENTIRE NEW EVENT LISTENER BLOCK
+document.getElementById('select-property-menu').addEventListener('click', (e) => {
+    const button = e.target.closest('.select-option-item');
+    if (!button) return;
+
+    const menu = document.getElementById('select-property-menu');
+    const propName = menu.dataset.propName;
+    const note = findItem(state.settings.activeNoteId)?.item;
+    if (!note || !propName) return;
+
+    const prop = note.properties[propName];
+    const value = button.dataset.value;
+    
+    // This part handles creating a new option if it doesn't exist
+    if (button.dataset.action === 'create') {
+        if (!prop.options) prop.options = [];
+        prop.options.push({ name: value });
+    }
+    
+    // This sets the note's property value to the selected option
+    prop.value = value;
+    
+    saveState();
+    renderNoteProperties(note);
+    feather.replace();
+
+    // Hide the menu after selection
+    menu.classList.add('scale-95', 'opacity-0');
+    setTimeout(() => menu.classList.add('hidden'), 100);
+});
+// END: CORRECTED AND UNIFIED PROPERTY INTERACTION LOGIC
+
+// Global click to hide the properties menu
+// ADD THIS NEW, UPGRADED BLOCK
+// Global click listener to hide any open property-related menus
+document.addEventListener('click', (e) => {
+    const propertiesMenu = document.getElementById('properties-menu');
+    const selectMenu = document.getElementById('select-property-menu');
+
+    // Hide the main "Add Property" menu if clicking away
+    if (!propertiesMenu.classList.contains('hidden') && !e.target.closest('#add-property-btn') && !e.target.closest('#properties-menu')) {
+        propertiesMenu.classList.add('scale-95', 'opacity-0');
+        setTimeout(() => propertiesMenu.classList.add('hidden'), 100);
+    }
+
+    // Hide the "Select Option" menu if clicking away from it or its trigger
+    if (!selectMenu.classList.contains('hidden') && !e.target.closest('.prop-value-container') && !e.target.closest('#select-property-menu')) {
+        selectMenu.classList.add('scale-95', 'opacity-0');
+        setTimeout(() => selectMenu.classList.add('hidden'), 100);
+    }
+});
+// END OF EVENT LISTENER BLOCK
                 // --- START: SLASH COMMAND CONSOLE ---
                 // --- START: SLASH COMMAND CONSOLE ---
 
@@ -8951,6 +9453,7 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
             <button id="version-history-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
         </div>
     </header>
+    
 
     <div class="flex flex-col md:flex-row flex-grow min-h-0">
         <div id="version-sidebar" class="w-full md:w-80 bg-bg-pane-dark p-2 flex flex-col flex-shrink-0 border-b md:border-b-0 md:border-r border-border-color">
@@ -8972,6 +9475,32 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
         <div id="version-content-viewer" class="flex-grow p-6 overflow-y-auto custom-scrollbar prose max-w-none">
             </div>
     </div>
+</div>
+<div id="properties-menu" class="context-menu fixed z-50 bg-bg-pane-light shadow-2xl rounded-md p-2 w-48 border border-border-color hidden origin-top-left scale-95 opacity-0 text-sm">
+    <div class="text-xs text-text-tertiary px-2 pt-1 pb-2 font-semibold uppercase">Property Type</div>
+    <button data-prop-type="text" class="w-full text-left px-3 py-1.5 hover:bg-bg-pane-dark rounded flex items-center gap-2">
+        <i data-feather="type" class="w-4 h-4"></i>Text
+    </button>
+    <button data-prop-type="number" class="w-full text-left px-3 py-1.5 hover:bg-bg-pane-dark rounded flex items-center gap-2">
+        <i data-feather="hash" class="w-4 h-4"></i>Number
+    </button>
+    <button data-prop-type="date" class="w-full text-left px-3 py-1.5 hover:bg-bg-pane-dark rounded flex items-center gap-2">
+        <i data-feather="calendar" class="w-4 h-4"></i>Date
+    </button>
+    <button data-prop-type="select" class="w-full text-left px-3 py-1.5 hover:bg-bg-pane-dark rounded flex items-center gap-2">
+        <i data-feather="chevron-down" class="w-4 h-4"></i>Select
+    </button>
+    <button data-prop-type="image" class="w-full text-left px-3 py-1.5 hover:bg-bg-pane-dark rounded flex items-center gap-2">
+    <i data-feather="image" class="w-4 h-4"></i>Image URL
+</button>
+
+</div>
+<div id="select-property-menu" class="context-menu fixed z-[60] bg-bg-pane-light shadow-2xl rounded-md p-2 w-56 border border-border-color hidden origin-top-left scale-95 opacity-0 text-sm flex flex-col">
+    <div class="px-2 pb-1">
+        <input type="text" id="select-property-filter" placeholder="Find or create an option..." class="w-full bg-bg-main border border-border-color rounded-md py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent-primary">
+    </div>
+    <div id="select-property-options" class="flex-grow overflow-y-auto custom-scrollbar space-y-1 py-1">
+        </div>
 </div>
 </body>
 </html>
