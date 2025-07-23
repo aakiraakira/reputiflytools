@@ -1537,16 +1537,7 @@ body.mobile-editor-active #mobile-sticky-toolbar {
 
         /* Mobile-specific overrides */
         @media (max-width: 767px) {
-            #notes-list-pane {
-                position: fixed;
-                top: 0;
-                left: 0;
-                bottom: 0;
-                z-index: 40; /* Higher z-index for mobile overlay */
-                transform: translateX(-100%);
-                width: 280px !important; /* Fixed width for mobile overlay */
-                border-right-width: 1px;
-            }
+            
             #search-bar-container {
         padding-left: 0.75rem;  /* 12px */
         padding-right: 0.75rem; /* 12px */
@@ -2011,6 +2002,7 @@ window.functions = getFunctions(app,);
                 <div id="gallery-view" class="notes-view hidden flex-grow p-4 md:p-5"></div>
 
                 <div id="list-view" class="notes-view hidden flex-grow p-4 pb-24 md:p-5">
+                    <div id="dashboard-view" class="notes-view hidden flex-grow p-4 md:p-5 overflow-y-auto custom-scrollbar"></div>
                     <div id="notes-list-content" class="space-y-4"></div>
                 </div>
                 <div id="note-editor-view" class="notes-view hidden flex-grow flex flex-col pb-24 md:pb-1">
@@ -4745,42 +4737,75 @@ if (themeMeta) {
                 }
                 
                 const isNoteActive = !!state.settings.activeNoteId;
-                const isTagActive = !!state.settings.activeTag;
-                const activeCollection = findItem(state.settings.activeCollectionId)?.item;
-
-                if (isTagActive) {
-                    app.elements.currentViewTitle.textContent = `Tag: #${state.settings.activeTag}`;
-                } else {
-                    app.elements.currentViewTitle.textContent = activeCollection?.name || "All Notes";
-                }
-                
-                const showListControls = !isNoteActive && (state.settings.activeView === 'list' || !activeCollection || isTagActive);
-
-                app.elements.viewSwitcher.style.display = isNoteActive || !activeCollection || isTagActive ? 'none' : 'flex';
-                app.elements.listViewControls.style.display = showListControls ? 'flex' : 'none';
-                
-
-                if (isNoteActive) {
-                    renderNoteEditor();
-                } else if (isTagActive) {
-                    renderListView();
-                } else if (activeCollection) {
-                     document.querySelectorAll('#view-switcher-container .view-btn').forEach(b => b.classList.remove('active'));
-                     document.querySelector(`#view-switcher-container .view-btn[data-view="${state.settings.activeView}"]`)?.classList.add('active');
-                    
-                    if (state.settings.activeView === 'board') {
-                        renderKanbanView();
-                    }else if (state.settings.activeView === 'calendar') { // ADD THIS BLOCK
-    renderCalendarView();
-} else if (state.settings.activeView === 'gallery') { // ADD THIS BLOCK
-    renderGalleryView();
-}else {
-                        renderListView();
-                    }
-                } else {
-                     renderListView();
-                }
+                // START: Replacement Code
+if (isNoteActive) {
+    renderNoteEditor();
+} else {
+    renderDashboardView(); 
+}
+// END: Replacement Code
             }
+            // START: New Dashboard Rendering Function
+function renderDashboardView() {
+    document.querySelectorAll('.notes-view').forEach(v => v.classList.add('hidden'));
+    app.elements.currentViewTitle.textContent = 'Dashboard'; // Set the header title
+
+    const dashboardView = document.getElementById('dashboard-view');
+    dashboardView.classList.remove('hidden');
+    dashboardView.scrollTop = 0;
+
+    // --- 1. "Jump back in" Section ---
+    const allNotes = getAllNotes(state.collections);
+    const recentNotes = [...allNotes].sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt)).slice(0, 5);
+
+    let jumpBackInHTML = '';
+    if (recentNotes.length > 0) {
+        const recentCardsHTML = recentNotes.map(note => {
+            let coverHTML = '';
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = note.content;
+            const firstImage = tempDiv.querySelector('img');
+
+            if (firstImage) {
+                coverHTML = `<div class="h-20 bg-cover bg-center" style="background-image: url('${firstImage.src}')"></div>`;
+            } else {
+                const plainContent = note.content.replace(/<[^>]*>?/gm, '').trim();
+                const excerpt = plainContent.substring(0, 70) + (plainContent.length > 70 ? '...' : '');
+                coverHTML = `<div class="h-20 p-2 text-xs text-text-secondary overflow-hidden">${excerpt || 'Empty Note'}</div>`;
+            }
+
+            return `
+                <a href="#" class="list-note-item block w-40 h-32 flex-shrink-0 bg-bg-pane-light border border-border-color rounded-lg overflow-hidden transition-all hover:shadow-md" data-note-id="${note.id}">
+                    ${coverHTML}
+                    <h4 class="font-semibold text-sm text-text-primary p-2 truncate">${note.name}</h4>
+                </a>
+            `;
+        }).join('');
+
+        jumpBackInHTML = `
+            <div class="mb-6">
+                <h3 class="font-semibold text-text-secondary mb-2">Jump back in</h3>
+                <div class="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
+                    ${recentCardsHTML}
+                </div>
+            </div>
+        `;
+    }
+
+    // --- 2. "Private" Notes List Section ---
+    const collectionsHTML = `<ul class="space-y-1">${renderCollectionsList(state.collections, 0)}</ul>`;
+    const privateSectionHTML = `
+        <div>
+            <h3 class="font-semibold text-text-secondary mb-2">Private</h3>
+            ${collectionsHTML}
+        </div>
+    `;
+
+    // --- 3. Combine and Render ---
+    dashboardView.innerHTML = jumpBackInHTML + privateSectionHTML;
+    feather.replace();
+}
+// END: New Dashboard Rendering Function
             
             function renderMobileControls() {
     const activeCollection = findItem(state.settings.activeCollectionId)?.item;
