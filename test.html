@@ -1748,19 +1748,30 @@ window.functions = getFunctions(app,);
                     <div id="search-results-list"></div>
                 </div>
            </div>
-           <div id="mobile-editor-toolbar" class="hidden md:hidden bg-bg-pane-light border-t border-border-color p-2 sticky bottom-0 z-20">
-    <div class="overflow-x-auto no-scrollbar">
-        <div class="flex items-center gap-1 whitespace-nowrap">
-            <button data-command="bold" class="p-3 hover:bg-bg-main rounded"><i data-feather="bold" class="w-5 h-5"></i></button>
-            <button data-command="italic" class="p-3 hover:bg-bg-main rounded"><i data-feather="italic" class="w-5 h-5"></i></button>
-            <button data-command="createLink" class="p-3 hover:bg-bg-main rounded"><i data-feather="link" class="w-5 h-5"></i></button>
-            <div class="w-px h-6 bg-border-color mx-1"></div>
-            <button data-command="formatBlock" data-value="h1" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H1</button>
-            <button data-command="formatBlock" data-value="h2" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H2</button>
-            <button data-command="formatBlock" data-value="h3" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H3</button>
-            <div class="w-px h-6 bg-border-color mx-1"></div>
-            <button data-command="insertChecklist" class="p-3 hover:bg-bg-main rounded" title="Checklist"><i data-feather="check-square" class="w-5 h-5"></i></button>
-            <button data-command="formatBlock" data-value="blockquote" class="p-3 hover:bg-bg-main rounded" title="Quote"><strong>&ldquo;</strong></button>
+           <div id="mobile-editor-toolbar" class="hidden md:hidden bg-bg-pane-light border-t border-border-color sticky bottom-0 z-20">
+    <div id="mobile-toolbar-default-panel" class="p-2">
+        <div class="overflow-x-auto no-scrollbar">
+            <div class="flex items-center gap-1 whitespace-nowrap">
+                <button data-command="toggle-inserter" class="p-3 hover:bg-bg-main rounded"><i data-feather="plus" class="w-5 h-5"></i></button>
+                <div class="w-px h-6 bg-border-color mx-1"></div>
+                <button data-command="formatBlock" data-value="h1" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H1</button>
+                <button data-command="formatBlock" data-value="h2" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H2</button>
+                <button data-command="formatBlock" data-value="h3" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H3</button>
+                <div class="w-px h-6 bg-border-color mx-1"></div>
+                <button data-command="insertChecklist" class="p-3 hover:bg-bg-main rounded" title="Checklist"><i data-feather="check-square" class="w-5 h-5"></i></button>
+                <button data-command="formatBlock" data-value="blockquote" class="p-3 hover:bg-bg-main rounded" title="Quote"><strong>&ldquo;</strong></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="mobile-toolbar-selection-panel" class="hidden p-2">
+        <div class="overflow-x-auto no-scrollbar">
+            <div class="flex items-center gap-1 whitespace-nowrap">
+                <button data-command="bold" class="p-3 hover:bg-bg-main rounded"><i data-feather="bold" class="w-5 h-5"></i></button>
+                <button data-command="italic" class="p-3 hover:bg-bg-main rounded"><i data-feather="italic" class="w-5 h-5"></i></button>
+                <button data-command="createLink" class="p-3 hover:bg-bg-main rounded"><i data-feather="link" class="w-5 h-5"></i></button>
+                <button data-command="formatBlock" data-value="code" class="p-3 hover:bg-bg-main rounded" title="Code Block"><i data-feather="code" class="w-5 h-5"></i></button>
+            </div>
         </div>
     </div>
 </div>
@@ -5409,31 +5420,55 @@ ${noteContent}`;
 };
 
             async function init() {
-                // --- START: Mobile Editor Toolbar Listener ---
+                // --- START: Mobile Toolbar Selection-Aware Logic ---
+document.addEventListener('selectionchange', () => {
+    // Only run this logic on mobile screens
+    if (window.innerWidth >= 768) return;
+
+    const selection = window.getSelection();
+    const defaultPanel = document.getElementById('mobile-toolbar-default-panel');
+    const selectionPanel = document.getElementById('mobile-toolbar-selection-panel');
+
+    if (!defaultPanel || !selectionPanel) return;
+
+    // Check if the selection is actually inside our note editor
+    const isEditing = app.elements.noteEditorBody.contains(selection.anchorNode);
+
+    if (selection.isCollapsed || !isEditing) {
+        // If there's no selection (just a cursor) or not editing, show the default panel
+        defaultPanel.classList.remove('hidden');
+        selectionPanel.classList.add('hidden');
+    } else {
+        // If text is selected, show the formatting panel
+        defaultPanel.classList.add('hidden');
+        selectionPanel.classList.remove('hidden');
+    }
+});
+// --- END: Mobile Toolbar Selection-Aware Logic ---
+                // --- START: Unified Mobile Toolbar Listener ---
 const mobileToolbar = document.getElementById('mobile-editor-toolbar');
 if (mobileToolbar) {
     mobileToolbar.addEventListener('mousedown', async (e) => {
         const button = e.target.closest('button');
         if (!button) return;
 
-        e.preventDefault(); // This prevents the editor from losing focus when a button is tapped
+        e.preventDefault(); // Prevents the editor from losing focus
 
         const command = button.dataset.command;
         const value = button.dataset.value;
 
-        // Re-use the same robust logic from the desktop toolbar
+        // Re-use the same robust logic from the desktop toolbar by simulating a click
         const desktopButton = app.toolbar.inline.querySelector(`[data-command="${command}"][data-value="${value || ''}"]`)
                            || app.toolbar.inline.querySelector(`[data-command="${command}"]`);
 
         if (desktopButton) {
-            // We can simply simulate a click on the corresponding desktop button
             desktopButton.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
         } else {
-             // Fallback for any simple commands that might not be on the desktop toolbar
              restoreSelectionAndExec(() => document.execCommand(command, false, value));
         }
     });
 }
+// --- END: Unified Mobile Toolbar Listener ---
 // --- END: Mobile Editor Toolbar Listener ---
                 // --- START: Date Property Click-to-Calendar Listener ---
 app.containers.notesListContent.addEventListener('click', (e) => {
