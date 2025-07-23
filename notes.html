@@ -3381,6 +3381,8 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
                     };
             let lunrIndex;
             let hasInitialized = false;
+            let isExecutingCommand = false; // ADD THIS LINE
+
             let askYourNotesHistory = [];
             const showToast = (message, type = 'info') => {
                 const id = generateId('toast');
@@ -8410,6 +8412,7 @@ app.modals.quizContent.addEventListener('click', e => {
                 });
 
                 document.addEventListener('selectionchange', () => {
+                    if (isExecutingCommand) return; 
                     if (document.activeElement !== app.elements.noteEditorBody) {
                         app.toolbar.inline.style.opacity = '0';
                         app.toolbar.inline.style.pointerEvents = 'none';
@@ -8471,132 +8474,137 @@ const originalButton = originalToolbar.querySelector(selector);
         return;
     }
 
-
-    
     e.preventDefault();
 
-    const command = button.dataset.command;
-    const value = button.dataset.value;
+    isExecutingCommand = true; // Lock is activated
+    try {
+        const command = button.dataset.command;
+        const value = button.dataset.value;
 
-    if (command === 'monospace') {
-        restoreSelectionAndExec(() => {
-            const selection = window.getSelection();
-            if (!selection.rangeCount) return;
-            let parent = selection.getRangeAt(0).commonAncestorContainer;
-            parent = parent.nodeType === 3 ? parent.parentNode : parent;
-            const codeTag = parent.closest('code:not(pre code)');
-            if (codeTag) {
-                const content = document.createDocumentFragment();
-                while(codeTag.firstChild) { content.appendChild(codeTag.firstChild); }
-                codeTag.parentNode.replaceChild(content, codeTag);
-            } else {
-                const selectedText = selection.toString();
-                if (selectedText) document.execCommand('insertHTML', false, `<code>${selectedText}</code>`);
-            }
-        });
-        return;
-    }
-    if (command === 'toggleCheckboxes') {
-        restoreSelectionAndExec(() => {
-            const selection = window.getSelection();
-            if (!selection.rangeCount) return;
-            const allChecklistItems = app.elements.noteEditorBody.querySelectorAll('.task-list-item');
-            allChecklistItems.forEach(item => {
-                if (selection.containsNode(item, true)) {
-                    item.classList.toggle('checkbox-hidden');
+        if (command === 'monospace') {
+            restoreSelectionAndExec(() => {
+                const selection = window.getSelection();
+                if (!selection.rangeCount) return;
+                let parent = selection.getRangeAt(0).commonAncestorContainer;
+                parent = parent.nodeType === 3 ? parent.parentNode : parent;
+                const codeTag = parent.closest('code:not(pre code)');
+                if (codeTag) {
+                    const content = document.createDocumentFragment();
+                    while(codeTag.firstChild) { content.appendChild(codeTag.firstChild); }
+                    codeTag.parentNode.replaceChild(content, codeTag);
+                } else {
+                    const selectedText = selection.toString();
+                    if (selectedText) document.execCommand('insertHTML', false, `<code>${selectedText}</code>`);
                 }
             });
-        });
-        return;
-    }
-    if (command === 'formatBlock' && value === 'code') {
-         restoreSelectionAndExec(() => {
-            const selection = window.getSelection();
-            const selectedText = selection.toString();
-            let lang = 'plaintext';
-            if (/<[a-z][\s\S]*>/i.test(selectedText)) lang = 'html';
-            else if (/\b(function|const|let|var|import|export)\b/.test(selectedText)) lang = 'javascript';
-            else if (/\b(def|import|class|for|while)\b/.test(selectedText)) lang = 'python';
-            const escapedCode = selectedText.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            const codeBlockHTML = `<div class="code-block-wrapper" contenteditable="false"><div class="code-block-header"><span>${lang}</span><div class="flex items-center gap-1"><button class="copy-code-btn" title="Copy Code"><i data-feather="copy" class="w-4 h-4"></i><span>Copy</span></button><button class="delete-block-btn" title="Delete Block"><i data-feather="trash-2" class="w-4 h-4"></i></button></div></div><pre contenteditable="true"><code>${escapedCode}</code></pre></div><p><br></p>`;
-            document.execCommand('insertHTML', false, codeBlockHTML);
-            feather.replace();
-        });
-        return;
-    }
-    if (command === 'insertChecklist') {
-    restoreSelectionAndExec(() => {
-        const newDefaultChecklistHTML = `
-<div class="checklist-container" contenteditable="false">
-    <div class="checklist-header">
-        <h4 class="checklist-title font-semibold text-text-primary flex-grow">Untitled Checklist</h4>
-        <button class="checklist-header-btn" data-action="edit" title="Edit Checklist"><i data-feather="edit" class="w-4 h-4"></i></button>
-        <button class="checklist-header-btn delete" data-action="delete" title="Delete Checklist"><i data-feather="trash-2" class="w-4 h-4"></i></button>
-    </div>
-    <div class="checklist-progress-container">
-        <div class="checklist-progress-bar">
-            <div class="checklist-progress-fill" style="width: 0%;"></div>
-        </div>
-        <span class="checklist-progress-text">0% Complete</span>
-    </div>
-    <ul class="checklist-body">
-        <li class="checklist-item" data-checked="false"><input type="checkbox" class="checklist-item-checkbox" onclick="return false;"><span class="checklist-item-text" contenteditable="false">New item</span></li>
-    </ul>
-</div>
-<p><br></p>
-`;
-        // THE FIX: Use the 'newDefaultChecklistHTML' variable.
-        document.execCommand('insertHTML', false, newDefaultChecklistHTML);
-        feather.replace();
-    });
-    return;
-}
-    if (command === 'insertTable') {
-        const selection = window.getSelection();
-        if (selection.rangeCount > 0) editorSelectionRange = selection.getRangeAt(0).cloneRange();
-        openModal(document.getElementById('table-creator-modal'));
-        return;
-    }
-    if (command === 'createLink') {
-        app.elements.noteEditorBody.focus();
-        if (editorSelectionRange) {
-            const selection = window.getSelection();
-            selection.removeAllRanges();
-            selection.addRange(editorSelectionRange);
+            return;
         }
-        const selection = window.getSelection();
-        const parentEl = selection.anchorNode?.parentNode.closest('a');
-        if(parentEl) {
-            restoreSelectionAndExec(() => { document.execCommand('unlink'); });
-        } else {
-            const selectedText = selection.toString().trim();
-            const url = await showPrompt({ title: 'Insert Link', message: 'Enter the URL:', placeholder: 'https://example.com' });
-            if (url) {
-                restoreSelectionAndExec(() => {
-                    let finalUrl = url;
-                    if (!/^(https?:\/\/|mailto:|ftp:\/\/)/i.test(finalUrl)) finalUrl = 'https://' + finalUrl;
-                    const linkHTML = `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${selectedText || finalUrl}</a>`;
-                    document.execCommand('insertHTML', false, linkHTML);
+        if (command === 'toggleCheckboxes') {
+            restoreSelectionAndExec(() => {
+                const selection = window.getSelection();
+                if (!selection.rangeCount) return;
+                const allChecklistItems = app.elements.noteEditorBody.querySelectorAll('.task-list-item');
+                allChecklistItems.forEach(item => {
+                    if (selection.containsNode(item, true)) {
+                        item.classList.toggle('checkbox-hidden');
+                    }
                 });
-            }
+            });
+            return;
         }
-    } else if (command === 'insertImage') {
-        const url = await showPrompt({ title: 'Insert Image', message: 'Enter the image URL:', placeholder: 'https://example.com/image.png' });
-        if (url) restoreSelectionAndExec(() => document.execCommand('insertHTML', false, `<img src="${url}" alt="Image">`));
-    } else if (command === 'formatBlock') {
-         restoreSelectionAndExec(() => {
+        if (command === 'formatBlock' && value === 'code') {
+             restoreSelectionAndExec(() => {
+                const selection = window.getSelection();
+                const selectedText = selection.toString();
+                let lang = 'plaintext';
+                if (/<[a-z][\s\S]*>/i.test(selectedText)) lang = 'html';
+                else if (/\b(function|const|let|var|import|export)\b/.test(selectedText)) lang = 'javascript';
+                else if (/\b(def|import|class|for|while)\b/.test(selectedText)) lang = 'python';
+                const escapedCode = selectedText.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                const codeBlockHTML = `<div class="code-block-wrapper" contenteditable="false"><div class="code-block-header"><span>${lang}</span><div class="flex items-center gap-1"><button class="copy-code-btn" title="Copy Code"><i data-feather="copy" class="w-4 h-4"></i><span>Copy</span></button><button class="delete-block-btn" title="Delete Block"><i data-feather="trash-2" class="w-4 h-4"></i></button></div></div><pre contenteditable="true"><code>${escapedCode}</code></pre></div><p><br></p>`;
+                document.execCommand('insertHTML', false, codeBlockHTML);
+                feather.replace();
+            });
+            return;
+        }
+        if (command === 'insertChecklist') {
+            restoreSelectionAndExec(() => {
+                const newDefaultChecklistHTML = `
+                <div class="checklist-container" contenteditable="false">
+                    <div class="checklist-header">
+                        <h4 class="checklist-title font-semibold text-text-primary flex-grow">Untitled Checklist</h4>
+                        <button class="checklist-header-btn" data-action="edit" title="Edit Checklist"><i data-feather="edit" class="w-4 h-4"></i></button>
+                        <button class="checklist-header-btn delete" data-action="delete" title="Delete Checklist"><i data-feather="trash-2" class="w-4 h-4"></i></button>
+                    </div>
+                    <div class="checklist-progress-container">
+                        <div class="checklist-progress-bar">
+                            <div class="checklist-progress-fill" style="width: 0%;"></div>
+                        </div>
+                        <span class="checklist-progress-text">0% Complete</span>
+                    </div>
+                    <ul class="checklist-body">
+                        <li class="checklist-item" data-checked="false"><input type="checkbox" class="checklist-item-checkbox" onclick="return false;"><span class="checklist-item-text" contenteditable="false">New item</span></li>
+                    </ul>
+                </div>
+                <p><br></p>
+                `;
+                document.execCommand('insertHTML', false, newDefaultChecklistHTML);
+                feather.replace();
+            });
+            return;
+        }
+        if (command === 'insertTable') {
             const selection = window.getSelection();
-            let parentEl = selection.getRangeAt(0).commonAncestorContainer;
-            parentEl = parentEl.nodeType === 3 ? parentEl.parentNode : parentEl;
-            const isAlreadyBlock = parentEl.closest(value) || (value === 'blockquote' && parentEl.closest('blockquote'));
-            if (isAlreadyBlock) {
-                document.execCommand('formatBlock', false, 'p');
-            } else {
-                document.execCommand(command, false, value);
+            if (selection.rangeCount > 0) editorSelectionRange = selection.getRangeAt(0).cloneRange();
+            openModal(document.getElementById('table-creator-modal'));
+            return;
+        }
+        if (command === 'createLink') {
+            app.elements.noteEditorBody.focus();
+            if (editorSelectionRange) {
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(editorSelectionRange);
             }
+            const selection = window.getSelection();
+            const parentEl = selection.anchorNode?.parentNode.closest('a');
+            if(parentEl) {
+                restoreSelectionAndExec(() => { document.execCommand('unlink'); });
+            } else {
+                const selectedText = selection.toString().trim();
+                const url = await showPrompt({ title: 'Insert Link', message: 'Enter the URL:', placeholder: 'https://example.com' });
+                if (url) {
+                    restoreSelectionAndExec(() => {
+                        let finalUrl = url;
+                        if (!/^(https?:\/\/|mailto:|ftp:\/\/)/i.test(finalUrl)) finalUrl = 'https://' + finalUrl;
+                        const linkHTML = `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${selectedText || finalUrl}</a>`;
+                        document.execCommand('insertHTML', false, linkHTML);
+                    });
+                }
+            }
+        } else if (command === 'insertImage') {
+            const url = await showPrompt({ title: 'Insert Image', message: 'Enter the image URL:', placeholder: 'https://example.com/image.png' });
+            if (url) restoreSelectionAndExec(() => document.execCommand('insertHTML', false, `<img src="${url}" alt="Image">`));
+        } else if (command === 'formatBlock') {
+             restoreSelectionAndExec(() => {
+                const selection = window.getSelection();
+                let parentEl = selection.getRangeAt(0).commonAncestorContainer;
+                parentEl = parentEl.nodeType === 3 ? parentEl.parentNode : parentEl;
+                const isAlreadyBlock = parentEl.closest(value) || (value === 'blockquote' && parentEl.closest('blockquote'));
+                if (isAlreadyBlock) {
+                    document.execCommand('formatBlock', false, 'p');
+                } else {
+                    document.execCommand(command, false, value);
+                }
+            });
+        } else {
+            restoreSelectionAndExec(() => document.execCommand(command, false, null));
+        }
+    } finally {
+        // Lock is released on the next browser frame
+        requestAnimationFrame(() => {
+            isExecutingCommand = false;
         });
-    } else {
-        restoreSelectionAndExec(() => document.execCommand(command, false, null));
     }
 });
 
