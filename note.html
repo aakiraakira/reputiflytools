@@ -30,6 +30,8 @@
     <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.1/dist/browser-image-compression.js"></script>
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/diff_match_patch/20121119/diff_match_patch.js"></script>
     
 
@@ -1618,6 +1620,10 @@ window.functions = getFunctions(app,);
                                 <i data-feather="book" class="w-5 h-5"></i>
                                 <span>Web Clipper</span>
                             </button>
+                            <button id="toggle-properties-btn" class="settings-footer-item">
+                            <i data-feather="eye" class="w-5 h-5"></i>
+                            <span>Hide Properties</span>
+                        </button>
                         </div>
                     </div>
                     <input type="file" id="import-file-input" class="hidden" accept=".json">
@@ -1730,11 +1736,11 @@ window.functions = getFunctions(app,);
     </div>
 </div>
                     <div class="p-4 md:p-8 md:pb-4 flex-shrink-0">
-                        <div id="note-properties-container" class="px-4 md:px-8 text-sm text-text-tertiary mb-4 py-2"></div>
+    <div id="note-properties-container" class="text-sm text-text-tertiary mb-4 py-2"></div>
 
-                        
-<textarea id="note-editor-title" placeholder="Untitled Note" class="text-3xl md:text-4xl font-bold bg-transparent focus:outline-none mb-4 w-full overflow-hidden resize-none" rows="1"></textarea>
-                    </div>
+
+    <textarea id="note-editor-title" placeholder="Untitled Note" class="text-3xl md:text-4xl font-bold bg-transparent focus:outline-none mb-4 w-full overflow-hidden resize-none" rows="1"></textarea>
+</div>
                     <div id="note-editor-body" contenteditable="true" class="flex-grow text-lg leading-relaxed focus:outline-none px-4 md:px-8 pt-2 md:pt-4 pb-4 md:pb-8" data-placeholder="Start writing or drop an image..."></div>
                     <div id="markdown-preview" class="hidden flex-grow text-lg leading-relaxed focus:outline-none p-4 md:p-8 prose"></div>
                     <div id="backlinks-pane" class="hidden p-4 md:px-8 border-t border-border-color">
@@ -2090,7 +2096,8 @@ const displayVersionDiff = (selectedVersionContent) => {
 
     // Finally, set the viewer's content to our processed HTML.
     viewer.innerHTML = ''; // Clear previous content
-    viewer.appendChild(tempDiv);
+    // Sanitize the historical content before adding it to the viewer
+viewer.innerHTML = DOMPurify.sanitize(selectedVersionContent);
     
     // Re-render Feather icons inside the new preview content.
     feather.replace();
@@ -3032,7 +3039,8 @@ const handlePublicNoteView = async (noteId) => {
                 }
             });
             html = tempDiv.innerHTML.replace(/ contenteditable="true"/g, '');
-            noteContentDiv.innerHTML = html;
+            // CRITICAL: Sanitize all public-facing content to prevent XSS
+noteContentDiv.innerHTML = DOMPurify.sanitize(html);
 
             // Delegated Click Listener for Sorting and Code Copying
             noteContentDiv.addEventListener('click', (e) => {
@@ -3707,6 +3715,8 @@ console.log(\`Total: \${calculateTotal(cart)}\`); // Total: 45</code></pre></div
         tagsCollapsed: false,
         backlinksCollapsed: false,
         chatbotVisible: true,
+        propertiesVisible: true,
+
     },
     kanbanColumns: {
         'c1': [{ id: 'col1', title: 'To Do' }, { id: 'col2', title: 'In Progress' }, { id: 'col3', title: 'Done' }]
@@ -3772,6 +3782,8 @@ console.log(\`Total: \${calculateTotal(cart)}\`); // Total: 45</code></pre></div
     if (!loadedState) loadedState = {};
     if (!loadedState.settings) loadedState.settings = {};
         if (typeof loadedState.settings.chatbotVisible === 'undefined') loadedState.settings.chatbotVisible = true; // ADD THIS LINE
+        if (typeof loadedState.settings.propertiesVisible === 'undefined') loadedState.settings.propertiesVisible = true;
+
 
 
     // THIS IS THE KEY FIX: Ensure .collections is always an array.
@@ -4140,6 +4152,18 @@ function getSelectColor(optionName) {
         fab.style.display = 'none'; // Use style.display for direct control
         toggleBtn.querySelector('span').textContent = 'Show Chatbot Button';
     }
+    const propertiesBtn = document.getElementById('toggle-properties-btn');
+if (propertiesBtn) {
+    const icon = propertiesBtn.querySelector('i');
+    const text = propertiesBtn.querySelector('span');
+    if (state.settings.propertiesVisible) {
+        text.textContent = 'Hide Properties';
+        icon.setAttribute('data-feather', 'eye-off');
+    } else {
+        text.textContent = 'Show Properties';
+        icon.setAttribute('data-feather', 'eye');
+    }
+}
     // --- END: NEW CONSOLIDATED LOGIC ---
 
 
@@ -4805,6 +4829,13 @@ function renderListView() {
             function renderNoteEditor() {
     app.containers.noteEditor.classList.remove('hidden');
     const note = findItem(state.settings.activeNoteId)?.item;
+    const propertiesContainer = document.getElementById('note-properties-container');
+    if (state.settings.propertiesVisible) {
+        propertiesContainer.classList.remove('hidden');
+        renderNoteProperties(note); // Render properties only if visible
+    } else {
+        propertiesContainer.classList.add('hidden');
+    }
     const highlightControls = document.getElementById('highlight-controls');
     renderNoteProperties(note); // ADD THIS LINE
 
@@ -4841,7 +4872,8 @@ function renderListView() {
     } else {
         editorBody.classList.remove('hidden');
         app.elements.markdownPreview.classList.add('hidden');
-        editorBody.innerHTML = contentToRender;
+        // Sanitize the content before rendering to prevent XSS attacks
+editorBody.innerHTML = DOMPurify.sanitize(contentToRender);
         app.toolbar.editorModeToggle.classList.remove('active');
     }
 
@@ -6639,6 +6671,11 @@ document.getElementById('chatbot-toggle-btn').addEventListener('click', () => {
     // Save the new state
     saveState();
     // Re-render the entire UI with the new state
+    render();
+});
+document.getElementById('toggle-properties-btn').addEventListener('click', () => {
+    state.settings.propertiesVisible = !state.settings.propertiesVisible;
+    saveState();
     render();
 });
                 // --- START: Inline Toolbar Scroll Logic ---
