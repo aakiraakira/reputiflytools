@@ -1660,12 +1660,12 @@ window.functions = getFunctions(app,);
                  </select>
                </div>
                <div class="editor-toolbar flex items-center bg-bg-pane-dark p-1 rounded-lg">
-                   <button id="header-summarize-btn" style="display: none;" class="p-2 hover:bg-bg-main rounded-l-md" title="AI Summary"><i data-feather="zap" class="w-4 h-4"></i></button>
-                   <button id="header-quiz-btn" style="display: none;" class="p-2 hover:bg-bg-main" title="MCQ Quiz"><i data-feather="help-circle" class="w-4 h-4"></i></button>
-                   <button id="header-share-btn" style="display: none;" class="p-2 hover:bg-bg-main" title="Share Note (Read-only)"><i data-feather="share-2" class="w-4 h-4"></i></button>
-                   <button id="header-flashcard-btn" style="display: none;" class="p-2 hover:bg-bg-main" title="Flashcard Mode">
-                        <i data-feather="copy" class="w-4 h-4"></i>
-                   </button>
+                   <button id="header-summarize-btn" class="p-2 hover:bg-bg-main rounded-l-md" title="AI Summary"><i data-feather="zap" class="w-4 h-4"></i></button>
+<button id="header-quiz-btn" class="p-2 hover:bg-bg-main" title="MCQ Quiz"><i data-feather="help-circle" class="w-4 h-4"></i></button>
+<button id="header-share-btn" class="p-2 hover:bg-bg-main" title="Share Note (Read-only)"><i data-feather="share-2" class="w-4 h-4"></i></button>
+<button id="header-flashcard-btn" class="p-2 hover:bg-bg-main" title="Flashcard Mode">
+    <i data-feather="copy" class="w-4 h-4"></i>
+</button>
 
                    <div id="expandable-toolbar-buttons" class="hidden items-center">
                         <button id="dictate-btn" class="p-2 hover:bg-bg-main" title="Dictate Text"><i data-feather="mic" class="w-4 h-4"></i></button>
@@ -1714,7 +1714,7 @@ window.functions = getFunctions(app,);
         <button data-command="italic" class="p-2 hover:bg-bg-main rounded flex-shrink-0"><i data-feather="italic" class="w-4 h-4"></i></button>
         <button data-command="createLink" class="p-2 hover:bg-bg-main rounded flex-shrink-0"><i data-feather="link" class="w-4 h-4"></i></button>
         <button data-command="insertImage" class="p-2 hover:bg-bg-main rounded flex-shrink-0"><i data-feather="image" class="w-4 h-4"></i></button>
-        <button id="attach-file-btn" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Attach File"><i data-feather="paperclip" class="w-4 h-4"></i></button>
+        <button id="mobile-attach-file-btn" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Attach File"><i data-feather="paperclip" class="w-4 h-4"></i></button>
         <button data-command="formatBlock" data-value="code" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Code Block"><i data-feather="code" class="w-4 h-4"></i></button>
         <button data-command="formatBlock" data-value="blockquote" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Quote"><strong>&ldquo;</strong></button>
         <button data-command="insertTable" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Insert Table"><i data-feather="grid" class="w-4 h-4"></i></button>
@@ -4149,6 +4149,104 @@ function getSelectColor(optionName) {
         app.modals.confirmConfirmBtn.addEventListener('click', confirmHandler);
         app.modals.confirmCancelBtn.addEventListener('click', cancelHandler);
         app.modals.backdrop.addEventListener('click', backdropHandler);
+    });
+};
+// ADD THIS ENTIRE FUNCTION
+const openLinkModal = () => {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('link-modal');
+        const input = document.getElementById('link-modal-input');
+        const resultsContainer = document.getElementById('link-modal-results');
+        const closeBtn = document.getElementById('link-modal-close-btn');
+
+        // Store the selection when the modal opens
+        const savedRange = editorSelectionRange ? editorSelectionRange.cloneRange() : null;
+
+        const allNotes = getAllNotes(state.collections);
+        const fuse = new Fuse(allNotes, { keys: ['name'], threshold: 0.4 });
+
+        const cleanupAndClose = (result = null) => {
+            input.removeEventListener('input', handleSearch);
+            resultsContainer.removeEventListener('click', handleResultClick);
+            closeBtn.removeEventListener('click', () => cleanupAndClose());
+            document.removeEventListener('keydown', handleEsc);
+            closeModal(modal);
+            resolve({ result, range: savedRange });
+        };
+
+        const renderResults = (items, isUrl = false) => {
+            if (isUrl) {
+                resultsContainer.innerHTML = `
+                    <div class="link-modal-item p-2 rounded-md hover:bg-bg-pane-dark cursor-pointer" data-url="${items}">
+                        <div class="flex items-center gap-3">
+                            <i data-feather="link" class="w-5 h-5 text-text-secondary flex-shrink-0"></i>
+                            <div class="min-w-0">
+                                <div class="font-semibold text-text-primary truncate">Link to web page</div>
+                                <div class="text-sm text-text-secondary truncate">${items}</div>
+                            </div>
+                        </div>
+                    </div>`;
+            } else {
+                if (items.length === 0) {
+                    resultsContainer.innerHTML = `<p class="p-4 text-center text-sm text-text-tertiary">No notes found.</p>`;
+                    return;
+                }
+                resultsContainer.innerHTML = items.map(note => {
+                    const findResult = findItem(note.id);
+                    const parentName = (findResult && findResult.parent && !Array.isArray(findResult.parent)) ? findResult.parent.name : 'Uncategorized';
+                    return `
+                        <div class="link-modal-item p-2 rounded-md hover:bg-bg-pane-dark cursor-pointer" data-note-id="${note.id}" data-note-name="${note.name.replace(/"/g, '&quot;')}">
+                            <div class="flex items-center gap-3">
+                                <i data-feather="file-text" class="w-5 h-5 text-text-secondary flex-shrink-0"></i>
+                                <div class="min-w-0">
+                                    <div class="font-semibold text-text-primary truncate">${note.name}</div>
+                                    <div class="text-sm text-text-secondary truncate">${parentName}</div>
+                                </div>
+                            </div>
+                        </div>`;
+                }).join('');
+            }
+            feather.replace();
+        };
+
+        const handleSearch = () => {
+            const query = input.value.trim();
+            if (query.match(/^(https?|ftp):\/\//)) {
+                renderResults(query, true);
+            } else if (query === "") {
+                const recentNotes = [...allNotes].sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt)).slice(0, 5);
+                renderResults(recentNotes);
+            } else {
+                const searchResults = fuse.search(query).map(result => result.item);
+                renderResults(searchResults);
+            }
+        };
+
+        const handleResultClick = (e) => {
+            const item = e.target.closest('.link-modal-item');
+            if (!item) return;
+
+            if (item.dataset.noteId) {
+                cleanupAndClose({ type: 'internal', id: item.dataset.noteId, name: item.dataset.noteName });
+            } else if (item.dataset.url) {
+                cleanupAndClose({ type: 'external', url: item.dataset.url });
+            }
+        };
+        
+        const handleEsc = (e) => {
+            if (e.key === 'Escape') {
+                cleanupAndClose();
+            }
+        };
+
+        input.value = '';
+        handleSearch(); // Initial render with recents
+        openModal(modal);
+        input.focus();
+        input.addEventListener('input', handleSearch);
+        resultsContainer.addEventListener('click', handleResultClick);
+        closeBtn.addEventListener('click', () => cleanupAndClose());
+        document.addEventListener('keydown', handleEsc, { once: true });
     });
 };
             
@@ -8553,6 +8651,8 @@ const originalButton = originalToolbar.querySelector(selector);
             });
             return;
         }
+        // ... (other if statements are above this) ...
+
         if (command === 'insertTable') {
             const selection = window.getSelection();
             if (selection.rangeCount > 0) editorSelectionRange = selection.getRangeAt(0).cloneRange();
@@ -8560,29 +8660,34 @@ const originalButton = originalToolbar.querySelector(selector);
             return;
         }
         if (command === 'createLink') {
-            app.elements.noteEditorBody.focus();
-            if (editorSelectionRange) {
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(editorSelectionRange);
+    const selection = window.getSelection();
+    const parentEl = selection.anchorNode?.parentNode.closest('a');
+
+    if (parentEl) {
+        restoreSelectionAndExec(() => { document.execCommand('unlink'); });
+    } else {
+        const selectedText = selection.toString().trim();
+        const { result, range } = await openLinkModal();
+
+        if (result && range) {
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            let linkHTML = '';
+            if (result.type === 'internal') {
+                linkHTML = `<a href="#" class="internal-link" data-note-id="${result.id}">${selectedText || result.name}</a>`;
+            } else { 
+                let finalUrl = result.url;
+                if (!/^(https?|ftp):\/\//i.test(finalUrl)) finalUrl = 'https://' + finalUrl;
+                linkHTML = `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${selectedText || finalUrl}</a>`;
             }
-            const selection = window.getSelection();
-            const parentEl = selection.anchorNode?.parentNode.closest('a');
-            if(parentEl) {
-                restoreSelectionAndExec(() => { document.execCommand('unlink'); });
-            } else {
-                const selectedText = selection.toString().trim();
-                const url = await showPrompt({ title: 'Insert Link', message: 'Enter the URL:', placeholder: 'https://example.com' });
-                if (url) {
-                    restoreSelectionAndExec(() => {
-                        let finalUrl = url;
-                        if (!/^(https?:\/\/|mailto:|ftp:\/\/)/i.test(finalUrl)) finalUrl = 'https://' + finalUrl;
-                        const linkHTML = `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${selectedText || finalUrl}</a>`;
-                        document.execCommand('insertHTML', false, linkHTML);
-                    });
-                }
-            }
-        } else if (command === 'insertImage') {
+            
+            document.execCommand('insertHTML', false, linkHTML);
+            performImmediateSave();
+            render();
+        }
+    }
+} else if (command === 'insertImage') { // CORRECTED TO 'else if'
             const url = await showPrompt({ title: 'Insert Image', message: 'Enter the image URL:', placeholder: 'https://example.com/image.png' });
             if (url) restoreSelectionAndExec(() => document.execCommand('insertHTML', false, `<img src="${url}" alt="Image">`));
         } else if (command === 'formatBlock') {
@@ -9707,6 +9812,18 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
             <input type="text" id="command-input" class="w-full bg-transparent focus:outline-none text-text-primary" placeholder="Type a command..." autocomplete="off">
         </div>
     </div>
+</div>
+<div id="link-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-4 rounded-lg shadow-2xl w-[90vw] max-w-lg z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-3 flex-shrink-0">
+        <h3 class="text-lg font-semibold">Link</h3>
+        <button id="link-modal-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    <div class="relative flex-shrink-0 mb-2">
+        <i data-feather="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary"></i>
+        <input type="text" id="link-modal-input" placeholder="Paste link or search notes" class="w-full bg-bg-main border border-border-color rounded-md py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-accent-primary">
+    </div>
+    <div id="link-modal-results" class="flex-grow overflow-y-auto custom-scrollbar -mr-2 pr-2">
+        </div>
 </div>
 <div id="linked-notes-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-lg z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
     <header class="flex justify-between items-center mb-4 flex-shrink-0">
