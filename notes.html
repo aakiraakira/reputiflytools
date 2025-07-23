@@ -156,7 +156,36 @@
     padding: 0.75rem 1rem;
     user-select: none; /* Prevent text selection in view mode */
 }
-
+/* ADD THIS RULE FOR PROPERTY MENU ICONS */
+#properties-menu i {
+    color: var(--text-secondary);
+}
+/* ADD THIS CSS FOR THE NEW PROPERTY MODAL */
+.prop-type-option {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-pane-dark);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.prop-type-option:hover {
+    background-color: var(--bg-main);
+}
+.prop-type-option input[type="radio"] {
+    margin-right: 0.75rem;
+}
+.prop-type-option input[type="radio"]:checked + span {
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+.prop-type-option span {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
 .checklist-header {
     display: flex;
     justify-content: flex-end;
@@ -5587,6 +5616,47 @@ ${noteContent}`;
 };
 
             async function init() {
+                // ADD THIS ENTIRE BLOCK FOR THE NEW "ADD PROPERTY" MODAL LOGIC
+const addPropertyModal = document.getElementById('add-property-modal');
+document.getElementById('create-property-btn').addEventListener('click', () => {
+    const nameInput = document.getElementById('new-prop-name-input');
+    const errorEl = document.getElementById('add-property-error');
+    const propName = nameInput.value.trim();
+    const propType = addPropertyModal.querySelector('input[name="prop-type"]:checked').value;
+
+    if (!propName) {
+        errorEl.textContent = 'Property name cannot be empty.';
+        return;
+    }
+    
+    const note = findItem(state.settings.activeNoteId)?.item;
+    if (note) {
+        if (!note.properties) note.properties = {};
+
+        if (note.properties[propName] || ['Created', 'Modified'].includes(propName)) {
+            errorEl.textContent = 'A property with this name already exists.';
+            return;
+        }
+
+        const initialValue = propType === 'date' ? new Date().toISOString() : '';
+        note.properties[propName] = { type: propType, value: initialValue };
+        
+        if (propType === 'select') {
+            note.properties[propName].options = [];
+        }
+
+        saveState();
+        renderNoteProperties(note);
+        feather.replace();
+        closeModal(addPropertyModal);
+        showToast(`Property "${propName}" added!`, 'success');
+    }
+});
+
+const closeAddPropertyModal = () => closeModal(document.getElementById('add-property-modal'));
+document.getElementById('add-property-cancel-btn').addEventListener('click', closeAddPropertyModal);
+document.getElementById('add-property-modal-close-btn').addEventListener('click', closeAddPropertyModal);
+// END OF BLOCK TO ADD
                 // --- START: Date Property Click-to-Calendar Listener ---
 app.containers.notesListContent.addEventListener('click', (e) => {
     const dateBtn = e.target.closest('.list-view-jump-to-date-btn');
@@ -5677,31 +5747,36 @@ const propertiesContainer = document.getElementById('note-properties-container')
 const propertiesMenu = document.getElementById('properties-menu');
 
 // --- Unified Click Listener for the Properties Container ---
+// REPLACE THE ENTIRE 'propertiesContainer.addEventListener('click', ...)' BLOCK WITH THIS
 propertiesContainer.addEventListener('click', async (e) => {
-    
-    
     const note = findItem(state.settings.activeNoteId)?.item;
     if (!note) return;
+
+    // Action: Handle collapsing the properties section
     if (e.target.closest('#properties-header')) {
         note.propertiesCollapsed = !note.propertiesCollapsed;
         saveState();
         renderNoteProperties(note);
         feather.replace();
-        return; // Exit after handling the toggle
-    }
-
-    // Action: Handle "Add a property" button
-    if (e.target.closest('#add-property-btn')) {
-        const btnRect = e.target.closest('#add-property-btn').getBoundingClientRect();
-        propertiesMenu.style.top = `${btnRect.bottom + 5}px`;
-        propertiesMenu.style.left = `${btnRect.left}px`;
-        propertiesMenu.classList.remove('hidden');
-        setTimeout(() => propertiesMenu.classList.remove('scale-95', 'opacity-0'), 10);
-        feather.replace();
         return;
     }
 
-    // Action: Handle "Delete" button for a property
+    // Action: Open the new "Add Property" modal
+    if (e.target.closest('#add-property-btn')) {
+        const modal = document.getElementById('add-property-modal');
+        document.getElementById('new-prop-name-input').value = '';
+        document.getElementById('add-property-error').textContent = '';
+        // Reset radio button to 'text'
+        const defaultRadio = modal.querySelector('input[type="radio"][value="text"]');
+        if(defaultRadio) defaultRadio.checked = true;
+        
+        openModal(modal);
+        feather.replace();
+        document.getElementById('new-prop-name-input').focus();
+        return;
+    }
+
+    // Action: Handle deleting a property
     const deleteBtn = e.target.closest('.delete-prop-btn');
     if (deleteBtn) {
         const propName = deleteBtn.dataset.propName;
@@ -5712,14 +5787,20 @@ propertiesContainer.addEventListener('click', async (e) => {
         return;
     }
 
-    // Action: Handle clicking a property value to edit it
+    // Action: Handle clicking a property value to edit it (logic is preserved)
     const valueContainer = e.target.closest('.prop-value-container');
     if (valueContainer && !valueContainer.dataset.editing) {
+        // ... (This preserves all the complex logic for editing existing properties)
         const propValueEl = valueContainer.querySelector('[data-prop-name]');
         if (!propValueEl) return;
 
         const propName = propValueEl.dataset.propName;
-        const prop = note.properties[propName];
+        const allProps = {
+            'Created': { type: 'date', value: note.createdAt, readonly: true },
+            'Modified': { type: 'date', value: note.modifiedAt, readonly: true },
+            ...(note.properties || {})
+        };
+        const prop = allProps[propName];
         if (!prop || prop.readonly) return;
 
         valueContainer.dataset.editing = "true";
@@ -5750,7 +5831,7 @@ propertiesContainer.addEventListener('click', async (e) => {
             filterInput.focus();
             filterInput.oninput = debounce(() => renderOptions(filterInput.value), 150);
 
-        } else { // Handles 'date', 'text', 'number'
+        } else {
             const originalValue = prop.value || '';
             let inputHTML = '';
             if (prop.type === 'date') {
@@ -9994,6 +10075,35 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
     </div>
     <div id="select-property-options" class="flex-grow overflow-y-auto custom-scrollbar space-y-1 py-1">
         </div>
+</div>
+<div id="add-property-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-md z-50 transition-all duration-300 transform scale-95 opacity-0">
+    <header class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-semibold">Add New Property</h3>
+        <button id="add-property-modal-close-btn" class="p-2 -mr-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+
+    <div class="space-y-4">
+        <div>
+            <label for="new-prop-name-input" class="text-sm font-medium text-text-secondary">Property Name</label>
+            <input type="text" id="new-prop-name-input" placeholder="e.g., Status, Priority..." class="w-full mt-1 bg-bg-pane-dark border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none">
+        </div>
+        <div>
+            <label class="text-sm font-medium text-text-secondary">Property Type</label>
+            <div id="new-prop-type-selector" class="grid grid-cols-2 gap-2 mt-2">
+                <label class="prop-type-option"><input type="radio" name="prop-type" value="text" checked><span><i data-feather="type"></i>Text</span></label>
+                <label class="prop-type-option"><input type="radio" name="prop-type" value="number"><span><i data-feather="hash"></i>Number</span></label>
+                <label class="prop-type-option"><input type="radio" name="prop-type" value="date"><span><i data-feather="calendar"></i>Date</span></label>
+                <label class="prop-type-option"><input type="radio" name="prop-type" value="select"><span><i data-feather="chevron-down"></i>Select</span></label>
+                <label class="prop-type-option"><input type="radio" name="prop-type" value="image"><span><i data-feather="image"></i>Image URL</span></label>
+            </div>
+        </div>
+        <p id="add-property-error" class="text-red-500 text-sm h-5"></p>
+    </div>
+
+    <footer class="flex justify-end gap-3 mt-6">
+        <button id="add-property-cancel-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Cancel</button>
+        <button id="create-property-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Create Property</button>
+    </footer>
 </div>
 </body>
 </html>
