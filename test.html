@@ -1672,7 +1672,7 @@ window.functions = getFunctions(app,);
    </div>
    <div id="mobile-contextual-toolbar" class="hidden md:hidden w-full">
     <div class="overflow-x-auto no-scrollbar">
-        <div id="mobile-typing-panel" class="flex items-center gap-1 whitespace-nowrap">
+        <div id="mobile-typing-panel" class="flex items-center gap-1 whitespace-nowrap px-2">
             <button data-command="formatBlock" data-value="h1" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H1</button>
             <button data-command="formatBlock" data-value="h2" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H2</button>
             <button data-command="formatBlock" data-value="h3" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H3</button>
@@ -1681,9 +1681,9 @@ window.functions = getFunctions(app,);
             <button data-command="formatBlock" data-value="blockquote" class="p-3 hover:bg-bg-main rounded" title="Quote"><strong>&ldquo;</strong></button>
             <button data-command="insertTable" class="p-3 hover:bg-bg-main rounded" title="Insert Table"><i data-feather="grid" class="w-5 h-5"></i></button>
             <button data-command="formatBlock" data-value="code" class="p-3 hover:bg-bg-main rounded" title="Code Block"><i data-feather="code" class="w-5 h-5"></i></button>
-            <button data-command="insertImage" class="p-3 hover:bg-bg-main rounded"><i data-feather="image" class="w-5 h-5"></i></button>
+            <button data-action="open-media-modal" class="p-3 hover:bg-bg-main rounded"><i data-feather="image" class="w-5 h-5"></i></button>
         </div>
-        <div id="mobile-selection-panel" class="hidden flex items-center gap-1 whitespace-nowrap">
+        <div id="mobile-selection-panel" class="hidden flex items-center gap-1 whitespace-nowrap px-2">
             <button data-command="bold" class="p-3 hover:bg-bg-main rounded"><i data-feather="bold" class="w-5 h-5"></i></button>
             <button data-command="italic" class="p-3 hover:bg-bg-main rounded"><i data-feather="italic" class="w-5 h-5"></i></button>
             <button data-command="createLink" class="p-3 hover:bg-bg-main rounded"><i data-feather="link" class="w-5 h-5"></i></button>
@@ -5413,10 +5413,29 @@ ${noteContent}`;
 };
 
             async function init() {
-                // --- START: New Smart Mobile Contextual Toolbar Logic ---
+                // --- START: UPGRADED Smart Mobile Contextual Toolbar Logic ---
 const mobileContextualToolbar = document.getElementById('mobile-contextual-toolbar');
 const defaultHeaderContent = document.getElementById('header-main-content');
 const noteEditorBody = app.elements.noteEditorBody;
+
+// --- Media Modal Logic ---
+const mediaModal = document.getElementById('insert-media-modal');
+mediaModal.addEventListener('click', (e) => {
+    const button = e.target.closest('button');
+    if (!button) return;
+
+    const action = button.dataset.mediaAction;
+    if (action === 'library') document.getElementById('media-input-library').click();
+    if (action === 'camera') document.getElementById('media-input-camera').click();
+    if (action === 'files') document.getElementById('media-input-files').click();
+
+    if (button.id === 'close-media-modal-btn') {
+        mediaModal.style.transform = 'translateY(-100%)';
+    }
+});
+document.getElementById('media-input-library').addEventListener('change', (e) => handleFileUpload(e.target.files[0]));
+document.getElementById('media-input-camera').addEventListener('change', (e) => handleFileUpload(e.target.files[0]));
+document.getElementById('media-input-files').addEventListener('change', (e) => handleFileUpload(e.target.files[0]));
 
 // Show the contextual toolbar when the user starts typing in the editor
 noteEditorBody.addEventListener('focus', () => {
@@ -5430,7 +5449,6 @@ noteEditorBody.addEventListener('focus', () => {
 // Restore the default header when the user stops editing
 noteEditorBody.addEventListener('blur', () => {
     if (window.innerWidth < 768) {
-        // A small delay prevents the toolbar from disappearing before a button click is registered
         setTimeout(() => {
             defaultHeaderContent.classList.remove('hidden');
             mobileContextualToolbar.classList.add('hidden');
@@ -5443,25 +5461,56 @@ mobileContextualToolbar.addEventListener('mousedown', (e) => {
     const button = e.target.closest('button');
     if (!button) return;
 
-    e.preventDefault(); // This is crucial: it prevents the editor from losing focus
+    e.preventDefault();
+
+    if (button.dataset.action === 'open-media-modal') {
+        mediaModal.style.transform = 'translateY(0%)';
+        feather.replace();
+        return;
+    }
 
     const command = button.dataset.command;
     const value = button.dataset.value;
 
-    // Re-use the existing logic from the desktop toolbar to apply formatting
-    const desktopButton = app.toolbar.inline.querySelector(`[data-command="${command}"][data-value="${value || ''}"]`)
-                       || app.toolbar.inline.querySelector(`[data-command="${command}"]`);
-
+    const desktopButton = app.toolbar.inline.querySelector(`[data-command="${command}"][data-value="${value || ''}"]`) || app.toolbar.inline.querySelector(`[data-command="${command}"]`);
     if (desktopButton) {
         desktopButton.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    } else {
-         restoreSelectionAndExec(() => document.execCommand(command, false, value));
     }
 });
 
+// This function updates button states (e.g., makes 'B' active when text is bold)
+const updateMobileToolbarState = () => {
+    const commands = ['bold', 'italic', 'h1', 'h2', 'h3', 'blockquote', 'insertChecklist'];
+    const selectionPanelButtons = mobileContextualToolbar.querySelectorAll('#mobile-selection-panel button');
+
+    selectionPanelButtons.forEach(btn => {
+        const command = btn.dataset.command;
+        const value = btn.dataset.value;
+        let isActive = false;
+
+        if (command === 'formatBlock') {
+            const block = document.queryCommandValue('formatBlock');
+            isActive = block.toLowerCase() === value.toLowerCase();
+        } else {
+            isActive = document.queryCommandState(command);
+        }
+        btn.classList.toggle('bg-accent-primary', isActive);
+        btn.classList.toggle('text-white', isActive);
+    });
+};
+
 // Make the toolbar context-aware by listening for text selections
 document.addEventListener('selectionchange', () => {
-    if (window.innerWidth >= 768) return; // Only run on mobile
+    // --- THIS IS THE FIX: HIDE THE OLD FLOATING TOOLBAR ON MOBILE ---
+    const inlineToolbar = document.getElementById('inline-toolbar');
+    if (window.innerWidth < 768) {
+        if (inlineToolbar) {
+            inlineToolbar.style.opacity = '0';
+            inlineToolbar.style.pointerEvents = 'none';
+        }
+    }
+
+    if (window.innerWidth >= 768) return;
 
     const selection = window.getSelection();
     const typingPanel = document.getElementById('mobile-typing-panel');
@@ -5469,19 +5518,18 @@ document.addEventListener('selectionchange', () => {
 
     if (!typingPanel || !selectionPanel) return;
 
-    // Check if the selection is inside our note editor and the toolbar is visible
     const isEditing = noteEditorBody.contains(selection.anchorNode) && !mobileContextualToolbar.classList.contains('hidden');
 
     if (isEditing && !selection.isCollapsed) {
-        // If text is selected, show the formatting panel
         typingPanel.classList.add('hidden');
         selectionPanel.classList.remove('hidden');
+        updateMobileToolbarState();
     } else {
-        // If there's no selection (just a cursor), show the default typing panel
         typingPanel.classList.remove('hidden');
         selectionPanel.classList.add('hidden');
     }
 });
+// --- END: UPGRADED Smart Mobile Contextual Toolbar Logic ---
 // --- END: New Smart Mobile Contextual Toolbar Logic ---
                 // --- START: Date Property Click-to-Calendar Listener ---
 app.containers.notesListContent.addEventListener('click', (e) => {
@@ -9834,6 +9882,29 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
     </div>
     <div id="select-property-options" class="flex-grow overflow-y-auto custom-scrollbar space-y-1 py-1">
         </div>
+</div>
+<div id="insert-media-modal" class="modal hidden fixed inset-0 bg-bg-main z-[999] flex flex-col transition-transform duration-300 ease-in-out" style="transform: translateY(-100%);">
+    <header class="p-4 flex justify-between items-center border-b border-border-color">
+        <h3 class="text-lg font-semibold">Insert Media</h3>
+        <button id="close-media-modal-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    <div class="p-4 space-y-3">
+        <button data-media-action="library" class="w-full flex items-center gap-4 p-4 rounded-lg bg-bg-pane-light hover:bg-bg-pane-dark">
+            <i data-feather="image" class="w-6 h-6 text-text-secondary"></i>
+            <span class="font-semibold text-text-primary">Photo library</span>
+        </button>
+        <button data-media-action="camera" class="w-full flex items-center gap-4 p-4 rounded-lg bg-bg-pane-light hover:bg-bg-pane-dark">
+            <i data-feather="camera" class="w-6 h-6 text-text-secondary"></i>
+            <span class="font-semibold text-text-primary">Take photo</span>
+        </button>
+        <button data-media-action="files" class="w-full flex items-center gap-4 p-4 rounded-lg bg-bg-pane-light hover:bg-bg-pane-dark">
+            <i data-feather="folder" class="w-6 h-6 text-text-secondary"></i>
+            <span class="font-semibold text-text-primary">Choose files</span>
+        </button>
+    </div>
+    <input type="file" id="media-input-library" class="hidden" accept="image/*">
+    <input type="file" id="media-input-camera" class="hidden" accept="image/*" capture="environment">
+    <input type="file" id="media-input-files" class="hidden" multiple>
 </div>
 </body>
 </html>
