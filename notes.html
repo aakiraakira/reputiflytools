@@ -4800,29 +4800,56 @@ if (themeMeta) {
             }
 
             function renderCollectionsList(collections = state.collections, level = 0) {
-    const createItemHTML = (item, currentLevel) => {
-        const isActive = item.id === state.settings.activeCollectionId;
-        const isNoteActive = item.id === state.settings.activeNoteId;
-        const isFolder = item.type === 'folder';
+    // REPLACE the existing createItemHTML function with this one
+// REPLACE the existing createItemHTML function with this one
+const createItemHTML = (item, currentLevel) => {
+    const isActive = item.id === state.settings.activeCollectionId;
+    const isNoteActive = item.id === state.settings.activeNoteId;
+    const isFolder = item.type === 'folder';
 
-        if (isFolder && item.children) {
-            item.children.sort((a, b) => {
-                if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-                return a.name.localeCompare(b.name);
-            });
+    // --- Start of new logic ---
+    // This finds the correct parent folder ID for the new note
+    let newNoteParentId = null;
+    if (isFolder) {
+        // If clicking a folder's plus button, the folder itself is the parent
+        newNoteParentId = item.id;
+    } else {
+        // If clicking a note's plus button, find the note's parent folder
+        const findResult = findItem(item.id);
+        const parent = findResult ? findResult.parent : null;
+        if (parent && !Array.isArray(parent)) { // Check if the parent is a folder, not the root
+            newNoteParentId = parent.id;
         }
+    }
+    // --- End of new logic ---
 
-        return `
-            <li data-id="${item.id}" draggable="true" class="collection-item-wrapper rounded-md">
-                <a href="#" class="collection-item flex items-center gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
+    if (isFolder && item.children) {
+        item.children.sort((a, b) => {
+            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+    }
+
+    // This HTML is updated to include the button, which appears on hover
+    return `
+        <li data-id="${item.id}" draggable="true" class="collection-item-wrapper group rounded-md">
+            <div class="collection-item flex items-center justify-between gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
+                
+                <a href="#" class="collection-item-link flex items-center gap-2 flex-grow min-w-0">
                     ${isFolder ? `<i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i>` : ''}
                     <i data-feather="${isFolder ? 'folder' : (item.pinned ? 'paperclip' : 'file-text')}" class="w-4 h-4 flex-shrink-0 text-text-secondary ${item.pinned ? 'text-accent-primary': ''}"></i>
-                    <span class="truncate flex-grow">${item.name}</span>
+                    <span class="truncate">${item.name}</span>
                 </a>
-                ${isFolder && item.expanded && item.children ? `<ul class="collection-children">${renderCollectionsList(item.children, currentLevel + 1)}</ul>` : ''}
-            </li>
-        `;
-    };
+
+                <button class="add-note-btn opacity-0 group-hover:opacity-100 transition-opacity" data-parent-id="${newNoteParentId}" title="Add New Note">
+                    <i data-feather="plus" class="w-4 h-4 pointer-events-none"></i>
+                </button>
+
+            </div>
+            ${isFolder && item.expanded && item.children ? `<ul class="collection-children">${renderCollectionsList(item.children, currentLevel + 1)}</ul>` : ''}
+        </li>
+    `;
+};
 
     collections.sort((a, b) => {
         if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
@@ -8415,38 +8442,54 @@ if (button) {
 }
 });
 // --- END: New Mobile Menu Logic ---
-                app.containers.collectionsList.addEventListener('click', (e) => {
-                    const itemLink = e.target.closest('.collection-item');
-                    if (!itemLink) return;
-                    e.preventDefault();
+                // REPLACE the existing event listener with this one
+// REPLACE the existing event listener with this one
+app.containers.collectionsList.addEventListener('click', (e) => {
+    // First, check if the new plus button was clicked
+    const addBtn = e.target.closest('.add-note-btn');
+    if (addBtn) {
+        e.preventDefault();
+        e.stopPropagation(); // This stops the click from also navigating to the note/folder
+        
+        // Get the parent folder's ID that we stored on the button
+        const parentId = addBtn.dataset.parentId === 'null' ? null : addBtn.dataset.parentId;
 
-                    const wrapper = itemLink.closest('.collection-item-wrapper');
-                    const id = wrapper.dataset.id;
-                    const { item } = findItem(id);
-                    
-                    state.settings.activeTag = null; // Deactivate tag filter
-
-                   if (item.type === 'folder') {
-    // Default to list view on mobile devices
-    if (window.innerWidth < 768) {
-        state.settings.activeView = 'list';
+        // Call your existing createNewNote function with the correct parent ID
+        createNewNote(true, '', parentId); 
+        return; // Action is done, so we stop here
     }
+
+    // If the plus button wasn't clicked, run the original navigation logic
+    const itemLink = e.target.closest('.collection-item-link');
+    if (!itemLink) return;
     
-    state.settings.activeCollectionId = id;
-    state.settings.activeNoteId = null;
-    item.expanded = !item.expanded;
-} else if (item.type === 'note') {
-                         state.settings.activeNoteId = id;
-                         const result = findItem(id);
-                         const parent = result.parent;
-                         state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
-                         if (window.innerWidth < 768) {
-                             toggleMobileSidebar(false);
-                         }
-                    }
-                    saveState();
-                    render();
-                });
+    e.preventDefault();
+
+    const wrapper = itemLink.closest('.collection-item-wrapper');
+    const id = wrapper.dataset.id;
+    const { item } = findItem(id);
+    
+    state.settings.activeTag = null; // Deactivate tag filter
+
+    if (item.type === 'folder') {
+        if (window.innerWidth < 768) {
+            state.settings.activeView = 'list';
+        }
+        state.settings.activeCollectionId = id;
+        state.settings.activeNoteId = null;
+        item.expanded = !item.expanded;
+    } else if (item.type === 'note') {
+        state.settings.activeNoteId = id;
+        const result = findItem(id);
+        const parent = result.parent;
+        state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+        if (window.innerWidth < 768) {
+            toggleMobileSidebar(false);
+        }
+    }
+    saveState();
+    render();
+});
                 
                 app.containers.tagList.addEventListener('click', e => {
                     e.preventDefault();
