@@ -1546,11 +1546,10 @@ window.functions = getFunctions(app,);
                     </div>
                     <div class="flex items-center gap-2 flex-shrink-0">
                         <div id="view-switcher-container" class="view-switcher bg-bg-pane-dark p-1 rounded-lg flex">
-                            <button class="view-btn px-2.5 py-1 rounded" title="Gallery View" data-view="gallery"><i data-feather="grid" class="w-4 h-4"></i></button>
 
                             <button class="view-btn px-2.5 py-1 rounded" title="Calendar View" data-view="calendar"><i data-feather="calendar" class="w-4 h-4"></i></button>
 
-                          <button class="view-btn px-2.5 py-1 rounded" title="Board View" data-view="board"><i data-feather="trello" class="w-4 h-4"></i></button>
+                          <button class="view-btn px-2.5 py-1 rounded hidden md:flex" title="Board View" data-view="board"><i data-feather="trello" class="w-4 h-4"></i></button>
                           <button class="view-btn px-2.5 py-1 rounded" title="List View" data-view="list"><i data-feather="list" class="w-4 h-4"></i></button>
                         </div>
                         <button id="new-collection-btn" class="text-text-secondary hover:text-accent-primary transition-colors flex-shrink-0"><i data-feather="plus"></i></button>
@@ -1693,11 +1692,11 @@ window.functions = getFunctions(app,);
 
                     <div id="kanban-board" class="flex gap-4 min-h-full"></div>
                 </div>
-                <div id="calendar-view" class="notes-view hidden flex-grow p-4 md:p-5 flex flex-col"></div>
+                <div id="calendar-view" class="notes-view hidden flex-grow p-4 pb-24 md:p-5 flex flex-col"></div>
                 <div id="gallery-view" class="notes-view hidden flex-grow p-4 md:p-5"></div>
 
-                <div id="list-view" class="notes-view hidden flex-grow p-4 md:p-5">
-                    <div id="notes-list-content" class="space-y-3"></div>
+                <div id="list-view" class="notes-view hidden flex-grow p-4 pb-24 md:p-5">
+                    <div id="notes-list-content" class="space-y-4"></div>
                 </div>
                 <div id="note-editor-view" class="notes-view hidden flex-grow flex flex-col pb-24 md:pb-1">
                     <div id="highlight-controls" class="hidden sticky top-0 z-20 p-2 bg-bg-main">
@@ -4448,6 +4447,10 @@ function renderCalendarView() {
         return;
     }
 
+    // --- Highlighting Logic ---
+    const highlightDate = state.settings.calendarHighlightDate;
+    state.settings.calendarHighlightDate = null; // Clear it after use so it doesn't stay highlighted
+
     const today = new Date();
     if (!state.calendar) state.calendar = {};
     if (!state.calendar[collectionId]) {
@@ -4458,7 +4461,7 @@ function renderCalendarView() {
     const firstDayOfMonth = new Date(year, month, 1);
     const lastDayOfMonth = new Date(year, month + 1, 0);
     const daysInMonth = lastDayOfMonth.getDate();
-    const startingDay = firstDayOfMonth.getDay(); // 0 = Sunday, 1 = Monday, ...
+    const startingDay = firstDayOfMonth.getDay();
 
     const notesWithDates = (collection.children || [])
         .filter(note => note.type === 'note')
@@ -4487,13 +4490,16 @@ function renderCalendarView() {
         const currentDate = new Date(year, month, day);
         const notesForDay = notesWithDates.filter(note => {
             const eventDate = note.eventDate;
-            return eventDate.getDate() === currentDate.getDate() &&
-                   eventDate.getMonth() === currentDate.getMonth() &&
-                   eventDate.getFullYear() === currentDate.getFullYear();
+            return eventDate.getUTCDate() === currentDate.getDate() && eventDate.getUTCMonth() === currentDate.getMonth() && eventDate.getUTCFullYear() === currentDate.getFullYear();
         });
 
+        // --- Highlighting Logic ---
+        const currentDateString = new Date(Date.UTC(year, month, day)).toISOString().split('T')[0];
+        const isHighlighted = highlightDate === currentDateString;
+        const highlightClass = isHighlighted ? 'bg-accent-primary/10' : '';
+
         html += `
-            <div class="relative p-2 bg-bg-main min-h-[100px] overflow-y-auto custom-scrollbar">
+            <div class="relative p-2 bg-bg-main min-h-[100px] overflow-y-auto custom-scrollbar ${highlightClass}">
                 <div class="font-semibold text-text-secondary">${day}</div>
                 <div class="mt-1 space-y-1">
                 ${notesForDay.map(note => `
@@ -4641,68 +4647,123 @@ function renderGalleryView() {
                 app.containers.kanbanBoard.innerHTML = columnsHTML + addColumnBtnHTML;
             }
 
-            function renderListView() {
-                 app.views.list.classList.remove('hidden');
-                 let notes = [];
-                 const activeTag = state.settings.activeTag;
-                 
-                 if (activeTag) {
-                     notes = getAllNotes(state.collections).filter(note => (note.tags || []).includes(activeTag));
-                 } else {
-                     const collectionId = state.settings.activeCollectionId;
-                     const collection = findItem(collectionId)?.item;
-                     notes = collection 
-                        ? (collection.children || []).filter(c => c.type === 'note') 
-                        : getAllNotes(state.collections);
-                 }
+function renderListView() {
+    app.views.list.classList.remove('hidden');
+    let notes = [];
+    const activeTag = state.settings.activeTag;
 
+    if (activeTag) {
+        notes = getAllNotes(state.collections).filter(note => (note.tags || []).includes(activeTag));
+    } else {
+        const collectionId = state.settings.activeCollectionId;
+        const collection = findItem(collectionId)?.item;
+        notes = collection ?
+            (collection.children || []).filter(c => c.type === 'note') :
+            getAllNotes(state.collections);
+    }
 
-                 if (notes.length === 0) {
-                     app.containers.notesListContent.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="inbox" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">No Notes Here</h3><p>Create a new note to get started.</p></div>`;
-                     feather.replace();
-                     return;
-                 }
-                 
-                 const sortOrder = state.settings.listSortOrder;
-                 const [key, direction] = sortOrder.split('-');
+    if (notes.length === 0) {
+        app.containers.notesListContent.innerHTML = `<div class="text-center p-10 text-text-secondary col-span-full"><i data-feather="inbox" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">No Notes Here</h3><p>Create a new note to see it here.</p></div>`;
+        feather.replace();
+        return;
+    }
 
-                 notes.sort((a,b) => {
-                     let valA = a[key];
-                     let valB = b[key];
-                     if(key === 'name') {
-                         return direction === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-                     } else {
-                         return direction === 'desc' ? new Date(valB) - new Date(valA) : new Date(valA) - new Date(valB);
-                     }
-                 });
+    const sortOrder = state.settings.listSortOrder;
+    const [key, direction] = sortOrder.split('-');
 
-                 app.containers.notesListContent.innerHTML = notes.map(note => {
-                    const date = formatDateTime(note.modifiedAt);
-                    const pinnedClass = note.pinned ? 'pinned' : '';
-                    return `
-    <div class="list-note-item bg-bg-pane-light p-4 rounded-lg shadow-sm border border-border-color cursor-pointer hover:shadow-md transition-all relative ${pinnedClass}" data-note-id="${note.id}">
-        <div class="flex justify-between items-start">
-            <div class="flex-grow min-w-0">
-                <h3 class="font-semibold text-lg truncate">${note.name}</h3>
+    notes.sort((a, b) => {
+        let valA = a[key];
+        let valB = b[key];
+        if (key === 'name') {
+            return direction === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else {
+            return direction === 'desc' ? new Date(valB) - new Date(valA) : new Date(valA) - new Date(valB);
+        }
+    });
 
-                <p class="text-sm text-text-secondary mt-1 truncate-multiline card-content">${note.content.replace(/<[^>]*>?/gm, '')}</p>
+    app.containers.notesListContent.innerHTML = notes.map(note => {
+        const pinnedClass = note.pinned ? 'pinned' : '';
 
-                <p class="text-xs text-text-tertiary mt-3">Last Modified: ${date}</p>
-            </div>
-
-            <div class="flex items-center flex-shrink-0 ml-4">
-                <button class="summarize-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note with AI" data-note-id="${note.id}">
-                    <i data-feather="zap" class="w-4 h-4"></i>
-                </button>
-                <button class="quiz-btn p-2 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Generate Quiz with AI" data-note-id="${note.id}">
-                    <i data-feather="help-circle" class="w-4 h-4"></i>
-                </button>
-            </div>
-        </div>
-    </div>`
-                 }).join('');
+        let coverImageHTML = '';
+        const coverProp = Object.values(note.properties || {}).find(p => p.type === 'image' && p.value);
+        if (coverProp) {
+            coverImageHTML = `<div class="h-32 bg-contain bg-no-repeat bg-center mb-4" style="background-image: url('${coverProp.value}')"></div>`;
+        } else {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = note.content;
+            const firstImage = tempDiv.querySelector('img');
+            if (firstImage) {
+                coverImageHTML = `<div class="h-32 bg-contain bg-no-repeat bg-center mb-4" style="background-image: url('${firstImage.src}')"></div>`;
             }
-            
+        }
+
+        let allPropertiesHTML = '';
+        const props = note.properties || {};
+        const sortedPropNames = Object.keys(props)
+            .filter(propName => props[propName].type !== 'image' && props[propName].value)
+            .sort();
+
+        if (sortedPropNames.length > 0) {
+            const propsList = sortedPropNames.map(propName => {
+                const prop = props[propName];
+                const propNameDisplay = `<span class="text-text-tertiary">${propName}:</span>`;
+                let valueDisplay = '';
+
+                // --- THIS IS THE FIX: Removed "p-1" class from buttons/divs below ---
+                if (prop.type === 'date') {
+                    const formattedDate = new Date(prop.value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+                    return `<button class="list-view-jump-to-date-btn flex items-center gap-1.5 text-xs hover:bg-bg-pane-dark rounded-md" data-note-id="${note.id}" data-date-value="${prop.value}">
+                                ${propNameDisplay}
+                                <span class="text-text-primary font-medium">${formattedDate}</span>
+                            </button>`;
+                } else if (prop.type === 'select') {
+                    valueDisplay = `<span class="rounded px-1.5 py-0.5 text-xs font-medium ${getSelectColor(prop.value)}">${prop.value}</span>`;
+                } else {
+                    valueDisplay = `<span class="text-text-primary font-medium truncate max-w-[150px] inline-block align-bottom">${prop.value}</span>`;
+                }
+
+                return `<div class="flex items-center gap-1.5 text-xs">${propNameDisplay} ${valueDisplay}</div>`;
+            }).join('');
+
+            if (propsList) {
+                allPropertiesHTML = `<div class="flex items-center gap-x-3 whitespace-nowrap">${propsList}</div>`;
+            }
+        }
+        
+        const plainContent = note.content.replace(/<[^>]*>?/gm, '').trim();
+        const excerpt = plainContent.substring(0, 120) + (plainContent.length > 120 ? '...' : '');
+        const modifiedDate = formatDateTime(note.modifiedAt);
+
+        return `
+            <div class="list-note-item flex flex-col bg-bg-pane-light border border-border-color rounded-lg overflow-hidden transition-all hover:shadow-md ${pinnedClass}" data-note-id="${note.id}">
+                <a href="#" class="note-link-area block p-4 flex-grow">
+                    ${coverImageHTML}
+                    <h4 class="font-semibold text-lg text-text-primary truncate">${note.name}</h4>
+                    <p class="text-sm text-text-secondary mt-2" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+                        ${excerpt || 'No content preview...'}
+                    </p>
+                </a>
+
+                ${allPropertiesHTML ? `
+                <div class="px-4 py-2 border-t border-border-color">
+                    <div class="overflow-x-auto no-scrollbar">
+                        ${allPropertiesHTML}
+                    </div>
+                </div>
+                ` : ''}
+
+                <div class="px-4 pb-3 pt-2 ${allPropertiesHTML ? 'border-t border-border-color' : ''} flex justify-between items-center">
+                    <p class="text-xs text-text-tertiary whitespace-nowrap">${modifiedDate}</p>
+                    <div class="flex items-center">
+                        <button class="summarize-btn p-1.5 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Summarize Note" data-note-id="${note.id}"><i data-feather="zap" class="w-4 h-4"></i></button>
+                        <button class="quiz-btn p-1.5 rounded-full hover:bg-bg-pane-dark text-text-secondary" title="Generate Quiz" data-note-id="${note.id}"><i data-feather="help-circle" class="w-4 h-4"></i></button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    feather.replace();
+}            
             function updateEditorStats() {
                 const text = app.elements.noteEditorBody.innerText || '';
                 const charCount = text.length;
@@ -5328,6 +5389,48 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: Date Property Click-to-Calendar Listener ---
+app.containers.notesListContent.addEventListener('click', (e) => {
+    const dateBtn = e.target.closest('.list-view-jump-to-date-btn');
+    if (dateBtn) {
+        e.preventDefault();
+        e.stopPropagation(); // Prevents the main card link from firing
+
+        const noteId = dateBtn.dataset.noteId;
+        const dateValue = dateBtn.dataset.dateValue;
+        const noteResult = findItem(noteId);
+
+        if (noteResult && dateValue) {
+            const targetDate = new Date(dateValue);
+            const parentCollection = Array.isArray(noteResult.parent) ? null : noteResult.parent;
+            
+            if (parentCollection) {
+                // Set the calendar state for that collection to the correct month/year
+                if (!state.calendar) state.calendar = {};
+                state.calendar[parentCollection.id] = {
+                    month: targetDate.getMonth(),
+                    year: targetDate.getFullYear()
+                };
+                
+                // Store the specific date we want to highlight
+                state.settings.calendarHighlightDate = targetDate.toISOString().split('T')[0];
+                
+                // Switch the view to the calendar
+                state.settings.activeView = 'calendar';
+                state.settings.activeCollectionId = parentCollection.id;
+                state.settings.activeNoteId = null; // We are viewing the folder, not a single note
+
+                saveState();
+                render();
+            } else {
+                showToast("Note must be in a project folder to view in calendar.", "info");
+            }
+        }
+    }
+});
+// --- END: Date Property Click-to-Calendar Listener ---
+                
+                
                 // ADD THIS NEW EVENT LISTENER INSIDE init()
 document.getElementById('calendar-view').addEventListener('click', e => {
     const prevBtn = e.target.closest('#calendar-prev-month');
