@@ -30,6 +30,8 @@
     <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.1/dist/browser-image-compression.js"></script>
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/diff_match_patch/20121119/diff_match_patch.js"></script>
     
 
@@ -1462,17 +1464,34 @@ window.functions = getFunctions(app,);
           }
 
           if(signOutLink) { // Check if link exists
-            signOutLink.addEventListener('click', async (e) => {
-                e.preventDefault();
-                try {
-                    // We need to import signOut here to use it
-                    const { signOut } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
-                    await signOut(window.auth);
-                } catch (error) {
-                    console.error('Sign out error:', error);
-                }
-            });
+  signOutLink.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+          // Import the necessary functions from Firebase SDKs
+          const { signOut } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
+          const { terminate } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+
+          // 1. Terminate the Firestore instance to clear the local IndexedDB cache
+          if (window.db) {
+              await terminate(window.db);
+              console.log("Firestore instance terminated and cache cleared.");
           }
+
+          // 2. Sign the user out
+          await signOut(window.auth);
+
+          // 3. Reload the page to ensure a completely clean state for the next user
+          window.location.reload();
+
+      } catch (error) {
+          console.error('Sign out process failed:', error);
+          // As a fallback, still try to sign out and reload to be safe
+          const { signOut } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
+          await signOut(window.auth).catch(e => console.error("Fallback signout failed", e));
+          window.location.reload();
+      }
+  });
+}
           // --- END: PROFILE LOGIC ---
           
           // Make sure init() is defined before calling it
@@ -1692,10 +1711,10 @@ window.functions = getFunctions(app,);
 
                     <div id="kanban-board" class="flex gap-4 min-h-full"></div>
                 </div>
-                <div id="calendar-view" class="notes-view hidden flex-grow p-4 md:p-5 flex flex-col"></div>
+                <div id="calendar-view" class="notes-view hidden flex-grow p-4 pb-24 md:p-5 flex flex-col"></div>
                 <div id="gallery-view" class="notes-view hidden flex-grow p-4 md:p-5"></div>
 
-                <div id="list-view" class="notes-view hidden flex-grow p-4 md:p-5">
+                <div id="list-view" class="notes-view hidden flex-grow p-4 pb-24 md:p-5">
                     <div id="notes-list-content" class="space-y-4"></div>
                 </div>
                 <div id="note-editor-view" class="notes-view hidden flex-grow flex flex-col pb-24 md:pb-1">
@@ -2073,7 +2092,8 @@ const displayVersionDiff = (selectedVersionContent) => {
 
     // Finally, set the viewer's content to our processed HTML.
     viewer.innerHTML = ''; // Clear previous content
-    viewer.appendChild(tempDiv);
+    // Sanitize the historical content before adding it to the viewer
+viewer.innerHTML = DOMPurify.sanitize(selectedVersionContent);
     
     // Re-render Feather icons inside the new preview content.
     feather.replace();
@@ -3015,7 +3035,8 @@ const handlePublicNoteView = async (noteId) => {
                 }
             });
             html = tempDiv.innerHTML.replace(/ contenteditable="true"/g, '');
-            noteContentDiv.innerHTML = html;
+            // CRITICAL: Sanitize all public-facing content to prevent XSS
+noteContentDiv.innerHTML = DOMPurify.sanitize(html);
 
             // Delegated Click Listener for Sorting and Code Copying
             noteContentDiv.addEventListener('click', (e) => {
@@ -4824,7 +4845,8 @@ function renderListView() {
     } else {
         editorBody.classList.remove('hidden');
         app.elements.markdownPreview.classList.add('hidden');
-        editorBody.innerHTML = contentToRender;
+        // Sanitize the content before rendering to prevent XSS attacks
+editorBody.innerHTML = DOMPurify.sanitize(contentToRender);
         app.toolbar.editorModeToggle.classList.remove('active');
     }
 
@@ -5856,7 +5878,143 @@ const commands = [
                 showToast(`✅ Checkpoint saved: "${args}"`, 'success');
             }
         }
-    },
+    },{
+    name: 'list',
+    description: 'Switch to list view. Usage: /list [folder name]',
+    suggest: 'folders',
+    execute: (args) => {
+        const targetView = 'list';
+        if (args) {
+            const targetFolder = findBestMatch(args, getAllFolders());
+            if (targetFolder) {
+                state.settings.activeCollectionId = targetFolder.id;
+                state.settings.activeNoteId = null;
+                state.settings.activeView = targetView;
+                saveState();
+                render();
+                showToast(`Showing List View for "${targetFolder.name}"`);
+            } else {
+                showToast(`❌ Folder not found: "${args}"`, 'error');
+            }
+        } else {
+            let currentFolderId = state.settings.activeCollectionId;
+            if (state.settings.activeNoteId) {
+                const noteResult = findItem(state.settings.activeNoteId);
+                const parent = noteResult ? noteResult.parent : null;
+                if (parent && !Array.isArray(parent)) {
+                    currentFolderId = parent.id;
+                }
+            }
+            if (currentFolderId) {
+                state.settings.activeCollectionId = currentFolderId;
+                state.settings.activeNoteId = null;
+                state.settings.activeView = targetView;
+                saveState();
+                render();
+            } else {
+                showToast('Please select a folder first.', 'info');
+            }
+        }
+    }
+},
+{
+    name: 'calendar',
+    description: 'Switch to calendar view. Usage: /calendar [folder name]',
+    suggest: 'folders',
+    execute: (args) => {
+        const targetView = 'calendar';
+        if (args) {
+            const targetFolder = findBestMatch(args, getAllFolders());
+            if (targetFolder) {
+                state.settings.activeCollectionId = targetFolder.id;
+                state.settings.activeNoteId = null;
+                state.settings.activeView = targetView;
+                saveState();
+                render();
+                showToast(`Showing Calendar View for "${targetFolder.name}"`);
+            } else {
+                showToast(`❌ Folder not found: "${args}"`, 'error');
+            }
+        } else {
+            let currentFolderId = state.settings.activeCollectionId;
+            if (state.settings.activeNoteId) {
+                const noteResult = findItem(state.settings.activeNoteId);
+                const parent = noteResult ? noteResult.parent : null;
+                if (parent && !Array.isArray(parent)) {
+                    currentFolderId = parent.id;
+                }
+            }
+            if (currentFolderId) {
+                state.settings.activeCollectionId = currentFolderId;
+                state.settings.activeNoteId = null;
+                state.settings.activeView = targetView;
+                saveState();
+                render();
+            } else {
+                showToast('Please select a folder first.', 'info');
+            }
+        }
+    }
+},
+{
+    name: 'date',
+    description: 'Set a date property on the current note. Usage: /date [Property Name] DD/MM/YY',
+    execute: (args) => {
+        if (!state.settings.activeNoteId) {
+            return showToast('❌ This command can only be used inside a note.', 'error');
+        }
+
+        const dateRegex = /^(.*)\s+(\d{1,2}\/\d{1,2}\/\d{2,4})$/;
+        const match = args.match(dateRegex);
+
+        if (!match) {
+            return showToast('❌ Invalid format. Use: /date [Property Name] DD/MM/YY', 'error');
+        }
+
+        const propName = match[1].trim();
+        const dateString = match[2];
+        const dateParts = dateString.split('/');
+
+        if (dateParts.length !== 3) {
+             return showToast('❌ Invalid date format. Use DD/MM/YY.', 'error');
+        }
+
+        const day = parseInt(dateParts[0], 10);
+        const month = parseInt(dateParts[1], 10);
+        let year = parseInt(dateParts[2], 10);
+
+        if (year < 100) {
+            year += 2000;
+        }
+
+        if (isNaN(day) || isNaN(month) || isNaN(year)) {
+             return showToast('❌ Invalid date value.', 'error');
+        }
+
+        const dateObj = new Date(Date.UTC(year, month - 1, day));
+        
+        if (isNaN(dateObj.getTime())) {
+            return showToast('❌ Invalid date. Please check the day, month, and year.', 'error');
+        }
+
+        const note = findItem(state.settings.activeNoteId)?.item;
+        if (note) {
+            if (!note.properties) {
+                note.properties = {};
+            }
+            note.properties[propName] = {
+                type: 'date',
+                value: dateObj.toISOString()
+            };
+            note.modifiedAt = new Date().toISOString();
+            
+            performImmediateSave();
+            renderNoteProperties(note);
+            feather.replace();
+            showToast(`✅ Set date for "${propName}"`, 'success');
+        }
+    }
+},
     {
         name: 'history',
         description: 'Open version history for a note. Usage: /history [note name]',
