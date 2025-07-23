@@ -1254,20 +1254,49 @@ table.filter-collapsed .toggle-filter-btn > i {
             font-weight: 600;
         }
         /* --- START: Mobile Inline Toolbar Scroll --- */
+/* --- START: Mobile Inline Toolbar --- */
 @media (max-width: 767px) {
     #inline-toolbar {
-        max-width: 200px; /* Limit the width on mobile */
+        /* Positioning & Sizing */
+        position: fixed;
+        bottom: 10px; /* Sits at the bottom of the viewport */
+        left: 50%;
+        transform: translateX(-50%) translateY(120%); /* Start hidden below screen */
+        width: 95%;
+        max-width: 400px; /* Ensure it doesn't get too wide on tablets */
+        z-index: 100;
+        
+        /* Appearance */
+        background-color: var(--bg-pane-dark);
+        border: 1px solid var(--border-color);
+        box-shadow: 0 4px 12px var(--shadow-color);
+        padding: 0.25rem; /* 4px */
+        
+        /* Animation */
+        transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+        
+        /* Remove desktop-specific styles */
+        top: auto !important; 
+        opacity: 1 !important; /* Let transform handle visibility */
+        pointer-events: auto !important;
     }
+
+    #inline-toolbar.visible {
+        transform: translateX(-50%) translateY(0); /* Slide into view */
+    }
+
     #inline-toolbar-buttons {
         scroll-behavior: smooth;
     }
+
     .toolbar-scroll-btn {
-        display: flex; /* Show the scroll buttons on mobile */
+        display: flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
     }
 }
+/* --- END: Mobile Inline Toolbar --- */
 /* --- END: Mobile Inline Toolbar Scroll --- */
 
         /* Mobile-specific overrides */
@@ -1748,33 +1777,6 @@ window.functions = getFunctions(app,);
                     <div id="search-results-list"></div>
                 </div>
            </div>
-           <div id="mobile-editor-toolbar" class="hidden md:hidden bg-bg-pane-light border-t border-border-color sticky bottom-0 z-20">
-    <div id="mobile-toolbar-default-panel" class="p-2">
-        <div class="overflow-x-auto no-scrollbar">
-            <div class="flex items-center gap-1 whitespace-nowrap">
-                <button data-command="toggle-inserter" class="p-3 hover:bg-bg-main rounded"><i data-feather="plus" class="w-5 h-5"></i></button>
-                <div class="w-px h-6 bg-border-color mx-1"></div>
-                <button data-command="formatBlock" data-value="h1" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H1</button>
-                <button data-command="formatBlock" data-value="h2" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H2</button>
-                <button data-command="formatBlock" data-value="h3" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H3</button>
-                <div class="w-px h-6 bg-border-color mx-1"></div>
-                <button data-command="insertChecklist" class="p-3 hover:bg-bg-main rounded" title="Checklist"><i data-feather="check-square" class="w-5 h-5"></i></button>
-                <button data-command="formatBlock" data-value="blockquote" class="p-3 hover:bg-bg-main rounded" title="Quote"><strong>&ldquo;</strong></button>
-            </div>
-        </div>
-    </div>
-
-    <div id="mobile-toolbar-selection-panel" class="hidden p-2">
-        <div class="overflow-x-auto no-scrollbar">
-            <div class="flex items-center gap-1 whitespace-nowrap">
-                <button data-command="bold" class="p-3 hover:bg-bg-main rounded"><i data-feather="bold" class="w-5 h-5"></i></button>
-                <button data-command="italic" class="p-3 hover:bg-bg-main rounded"><i data-feather="italic" class="w-5 h-5"></i></button>
-                <button data-command="createLink" class="p-3 hover:bg-bg-main rounded"><i data-feather="link" class="w-5 h-5"></i></button>
-                <button data-command="formatBlock" data-value="code" class="p-3 hover:bg-bg-main rounded" title="Code Block"><i data-feather="code" class="w-5 h-5"></i></button>
-            </div>
-        </div>
-    </div>
-</div>
         </main>
         <div id="table-creator-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-sm z-50 transition-all duration-300 transform scale-95 opacity-0">
     <h3 class="text-lg font-semibold mb-4">Create Table</h3>
@@ -3261,7 +3263,6 @@ if (checklistItem) {
                     viewSwitcher: document.getElementById('view-switcher-container'),
                     importFileInput: document.getElementById('import-file-input'),
                     mobileMoreButton: document.getElementById('mobile-more-button'),
-                    mobileEditorToolbar: document.getElementById('mobile-editor-toolbar'),
                     headerMainContent: document.getElementById('header-main-content'),
                     toggleTagsBtn: document.getElementById('toggle-tags-btn'), // Add this line
                 },
@@ -4301,53 +4302,50 @@ if (themeMeta) {
             }
 
             function renderMainView() {
-    document.querySelectorAll('.notes-view').forEach(v => v.classList.add('hidden'));
+                document.querySelectorAll('.notes-view').forEach(v => v.classList.add('hidden'));
 
-    if (isSearchActive) {
-        renderSearchResults(app.search.input.value);
-        return;
-    }
+                if (isSearchActive) {
+                    renderSearchResults(app.search.input.value);
+                    return;
+                }
+                
+                const isNoteActive = !!state.settings.activeNoteId;
+                const isTagActive = !!state.settings.activeTag;
+                const activeCollection = findItem(state.settings.activeCollectionId)?.item;
 
-    const isNoteActive = !!state.settings.activeNoteId;
-    const isTagActive = !!state.settings.activeTag;
-    const activeCollection = findItem(state.settings.activeCollectionId)?.item;
+                if (isTagActive) {
+                    app.elements.currentViewTitle.textContent = `Tag: #${state.settings.activeTag}`;
+                } else {
+                    app.elements.currentViewTitle.textContent = activeCollection?.name || "All Notes";
+                }
+                
+                const showListControls = !isNoteActive && (state.settings.activeView === 'list' || !activeCollection || isTagActive);
 
-    // This is the new logic to show/hide the toolbar
-    const mobileToolbar = document.getElementById('mobile-editor-toolbar');
-    if (mobileToolbar) {
-        mobileToolbar.classList.toggle('hidden', !isNoteActive || window.innerWidth >= 768);
-    }
+                app.elements.viewSwitcher.style.display = isNoteActive || !activeCollection || isTagActive ? 'none' : 'flex';
+                app.elements.listViewControls.style.display = showListControls ? 'flex' : 'none';
+                
 
-    if (isTagActive) {
-        app.elements.currentViewTitle.textContent = `Tag: #${state.settings.activeTag}`;
-    } else {
-        app.elements.currentViewTitle.textContent = activeCollection?.name || "All Notes";
-    }
-
-    const showListControls = !isNoteActive && (state.settings.activeView === 'list' || !activeCollection || isTagActive);
-
-    app.elements.viewSwitcher.style.display = isNoteActive || !activeCollection || isTagActive ? 'none' : 'flex';
-    app.elements.listViewControls.style.display = showListControls ? 'flex' : 'none';
-
-    if (isNoteActive) {
-        renderNoteEditor();
-    } else if (isTagActive) {
-        renderListView();
-    } else if (activeCollection) {
-         document.querySelectorAll('#view-switcher-container .view-btn').forEach(b => b.classList.remove('active'));
-         document.querySelector(`#view-switcher-container .view-btn[data-view="${state.settings.activeView}"]`)?.classList.add('active');
-
-        if (state.settings.activeView === 'board') {
-            renderKanbanView();
-        }else if (state.settings.activeView === 'calendar') {
-            renderCalendarView();
-        } else {
-            renderListView();
-        }
-    } else {
-         renderListView();
-    }
-}
+                if (isNoteActive) {
+                    renderNoteEditor();
+                } else if (isTagActive) {
+                    renderListView();
+                } else if (activeCollection) {
+                     document.querySelectorAll('#view-switcher-container .view-btn').forEach(b => b.classList.remove('active'));
+                     document.querySelector(`#view-switcher-container .view-btn[data-view="${state.settings.activeView}"]`)?.classList.add('active');
+                    
+                    if (state.settings.activeView === 'board') {
+                        renderKanbanView();
+                    }else if (state.settings.activeView === 'calendar') { // ADD THIS BLOCK
+    renderCalendarView();
+} else if (state.settings.activeView === 'gallery') { // ADD THIS BLOCK
+    renderGalleryView();
+}else {
+                        renderListView();
+                    }
+                } else {
+                     renderListView();
+                }
+            }
             
             function renderMobileControls() {
     const activeCollection = findItem(state.settings.activeCollectionId)?.item;
@@ -5420,56 +5418,6 @@ ${noteContent}`;
 };
 
             async function init() {
-                // --- START: Mobile Toolbar Selection-Aware Logic ---
-document.addEventListener('selectionchange', () => {
-    // Only run this logic on mobile screens
-    if (window.innerWidth >= 768) return;
-
-    const selection = window.getSelection();
-    const defaultPanel = document.getElementById('mobile-toolbar-default-panel');
-    const selectionPanel = document.getElementById('mobile-toolbar-selection-panel');
-
-    if (!defaultPanel || !selectionPanel) return;
-
-    // Check if the selection is actually inside our note editor
-    const isEditing = app.elements.noteEditorBody.contains(selection.anchorNode);
-
-    if (selection.isCollapsed || !isEditing) {
-        // If there's no selection (just a cursor) or not editing, show the default panel
-        defaultPanel.classList.remove('hidden');
-        selectionPanel.classList.add('hidden');
-    } else {
-        // If text is selected, show the formatting panel
-        defaultPanel.classList.add('hidden');
-        selectionPanel.classList.remove('hidden');
-    }
-});
-// --- END: Mobile Toolbar Selection-Aware Logic ---
-                // --- START: Unified Mobile Toolbar Listener ---
-const mobileToolbar = document.getElementById('mobile-editor-toolbar');
-if (mobileToolbar) {
-    mobileToolbar.addEventListener('mousedown', async (e) => {
-        const button = e.target.closest('button');
-        if (!button) return;
-
-        e.preventDefault(); // Prevents the editor from losing focus
-
-        const command = button.dataset.command;
-        const value = button.dataset.value;
-
-        // Re-use the same robust logic from the desktop toolbar by simulating a click
-        const desktopButton = app.toolbar.inline.querySelector(`[data-command="${command}"][data-value="${value || ''}"]`)
-                           || app.toolbar.inline.querySelector(`[data-command="${command}"]`);
-
-        if (desktopButton) {
-            desktopButton.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-        } else {
-             restoreSelectionAndExec(() => document.execCommand(command, false, value));
-        }
-    });
-}
-// --- END: Unified Mobile Toolbar Listener ---
-// --- END: Mobile Editor Toolbar Listener ---
                 // --- START: Date Property Click-to-Calendar Listener ---
 app.containers.notesListContent.addEventListener('click', (e) => {
     const dateBtn = e.target.closest('.list-view-jump-to-date-btn');
@@ -8411,33 +8359,73 @@ app.modals.quizContent.addEventListener('click', e => {
                     renderNoteEditor();
                 });
 
-                document.addEventListener('selectionchange', () => {
-                    if (document.activeElement !== app.elements.noteEditorBody) {
-                        app.toolbar.inline.style.opacity = '0';
-                        app.toolbar.inline.style.pointerEvents = 'none';
-                        return;
-                    }
-                    const selection = window.getSelection();
+                // --- START: Responsive Inline Toolbar Logic ---
+const handleToolbarVisibility = () => {
+    const editorView = document.getElementById('note-editor-view');
+    const inlineToolbar = app.toolbar.inline;
 
-                    if (selection.isCollapsed) {
-                        app.toolbar.inline.style.opacity = '0';
-                        app.toolbar.inline.style.pointerEvents = 'none';
-                        return;
-                    }
+    if (window.innerWidth > 767) {
+        // --- Desktop Logic (selection-based) ---
+        const selection = window.getSelection();
 
-                    if (selection.rangeCount > 0) {
-                        editorSelectionRange = selection.getRangeAt(0).cloneRange();
-                    }
+        // Hide if not focused in the editor body
+        if (document.activeElement !== app.elements.noteEditorBody) {
+            inlineToolbar.style.opacity = '0';
+            inlineToolbar.style.pointerEvents = 'none';
+            return;
+        }
 
-                    const range = selection.getRangeAt(0);
-                    const rect = range.getBoundingClientRect();
-                    const toolbarRect = app.toolbar.inline.getBoundingClientRect();
-                    app.toolbar.inline.style.top = `${window.scrollY + rect.top - toolbarRect.height - 8}px`;
-                    app.toolbar.inline.style.left = `${window.scrollX + rect.left + (rect.width / 2) - (toolbarRect.width / 2)}px`;
-                    app.toolbar.inline.style.opacity = '1';
-                    app.toolbar.inline.style.transform = 'scale(1)';
-                    app.toolbar.inline.style.pointerEvents = 'auto';
-                });
+        // Hide if selection is collapsed (just a cursor)
+        if (selection.isCollapsed) {
+            inlineToolbar.style.opacity = '0';
+            inlineToolbar.style.pointerEvents = 'none';
+            return;
+        }
+
+        if (selection.rangeCount > 0) {
+            editorSelectionRange = selection.getRangeAt(0).cloneRange();
+            const range = selection.getRangeAt(0);
+            const rect = range.getBoundingClientRect();
+            const toolbarRect = inlineToolbar.getBoundingClientRect();
+
+            // Position above the selection
+            inlineToolbar.style.top = `${window.scrollY + rect.top - toolbarRect.height - 8}px`;
+            inlineToolbar.style.left = `${window.scrollX + rect.left + (rect.width / 2) - (toolbarRect.width / 2)}px`;
+
+            // Show the toolbar
+            inlineToolbar.style.opacity = '1';
+            inlineToolbar.style.transform = 'scale(1)';
+            inlineToolbar.style.pointerEvents = 'auto';
+        }
+    } else {
+        // --- Mobile Logic (focus-based) ---
+        // This part is intentionally left blank. 
+        // The selection event should do nothing on mobile. The focus listeners below handle everything.
+    }
+};
+
+// Main listener that triggers the logic above
+document.addEventListener('selectionchange', handleToolbarVisibility);
+
+// Listeners specifically for mobile focus/blur
+const editorView = document.getElementById('note-editor-view');
+editorView.addEventListener('focusin', (e) => {
+    if (window.innerWidth < 768 && e.target.closest('#note-editor-body')) {
+        app.toolbar.inline.classList.add('visible');
+    }
+});
+
+editorView.addEventListener('focusout', (e) => {
+    if (window.innerWidth < 768) {
+        // A small delay helps prevent the toolbar from disappearing when focus briefly moves
+        setTimeout(() => {
+            if (!editorView.contains(document.activeElement)) {
+                app.toolbar.inline.classList.remove('visible');
+            }
+        }, 100);
+    }
+});
+// --- END: Responsive Inline Toolbar Logic ---
                 
                 app.toolbar.inline.addEventListener('mousedown', async (e) => {
     const button = e.target.closest('button');
@@ -9822,6 +9810,5 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
     <div id="select-property-options" class="flex-grow overflow-y-auto custom-scrollbar space-y-1 py-1">
         </div>
 </div>
-
 </body>
 </html>
