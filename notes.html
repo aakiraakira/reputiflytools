@@ -143,20 +143,21 @@
 /* --- START: Notion-Style Mobile Menu CSS --- */
 /* --- START: New 'Add Note' Button Styles --- */
 /* --- START: New 'Add Note' Button Styles --- */
+/* --- START: New 'Add Note' Button Styles --- */
 .add-note-btn {
-    opacity: 1; /* Make the button visible by default */
-    margin-left: auto; /* Pushes the button to the right */
+    /* This is now simpler because the flex layout handles positioning */
     padding: 0.25rem; /* 4px */
     border-radius: 0.25rem; /* 4px */
     color: var(--text-tertiary);
-    transition: color 150ms ease-in-out; /* Only transition color now */
-    flex-shrink: 0;
+    transition: color 150ms ease-in-out, background-color 150ms ease-in-out;
+    flex-shrink: 0; /* Prevents the button from being squished */
 }
 
 .add-note-btn:hover {
     color: var(--text-primary);
     background-color: var(--bg-pane-dark);
 }
+/* --- END: New 'Add Note' Button Styles --- */
 /* --- END: New 'Add Note' Button Styles --- */
 /* --- END: New 'Add Note' Button Styles --- */
 /* Add these new rules for folder-specific view buttons */
@@ -5903,25 +5904,31 @@ const upgradePastedTables = (html) => {
 /**
  * MODIFIED: Upgraded to accept a specific parentId for the new note.
  */
+// =================================================================
+// START: REPLACEMENT createNewNote FUNCTION
+// =================================================================
 const createNewNote = (andSwitchToIt = true, initialContent = '', parentId = undefined) => {
     let parentCollection;
     let targetArray;
     let finalParentId = parentId;
 
+    // If no parent is specified, fall back to the currently active folder
     if (finalParentId === undefined) {
         finalParentId = state.settings.activeCollectionId;
     }
 
     const parentResult = findItem(finalParentId);
 
+    // Determine where to add the new note (in a folder or at the root)
     if (parentResult && parentResult.item.type === 'folder') {
         parentCollection = parentResult.item;
         targetArray = parentCollection.children;
     } else {
-        finalParentId = null; // Default to root if parent isn't a folder
+        finalParentId = null; // Default to the root level if the parent isn't a valid folder
         targetArray = state.collections;
     }
     
+    // Automatically expand the parent folder to show the new note
     if (parentCollection) {
         parentCollection.expanded = true;
     }
@@ -5934,7 +5941,7 @@ const createNewNote = (andSwitchToIt = true, initialContent = '', parentId = und
         pinned: false, links: [], tags: [], properties: {}, propertiesCollapsed: false,
     };
 
-    targetArray.unshift(newNote);
+    targetArray.unshift(newNote); // Add the new note to the top of the list
     
     if(andSwitchToIt) {
         state.settings.activeNoteId = newNote.id;
@@ -5943,13 +5950,21 @@ const createNewNote = (andSwitchToIt = true, initialContent = '', parentId = und
         state.settings.editorMode = 'editor';
     }
     
+    // Save, update search index, and re-render the app
     saveState();
-    buildLunrize();
+    buildLunrIndex();
     render();
-    app.elements.noteEditorTitle.focus();
-    app.elements.noteEditorTitle.select();
-    return newNote;
+
+    if (andSwitchToIt) {
+        app.elements.noteEditorTitle.focus();
+        app.elements.noteEditorTitle.select();
+    }
+    
+    return newNote; // Return the newly created note object
 };
+// =================================================================
+// END: REPLACEMENT createNewNote FUNCTION
+// =================================================================
 
 /**
  * MODIFIED: Now generates a '+' button for each item.
@@ -6016,32 +6031,36 @@ const renderNotionStyleMenu = () => {
 /**
  * MODIFIED: Added a new case for 'add-note-here'.
  */
+// =================================================================
+// START: REPLACEMENT CLICK LISTENER
+// =================================================================
 notionMenu.addEventListener('click', (e) => {
     const target = e.target.closest('[data-action]');
     if (!target) return;
     
-    e.preventDefault();
     const action = target.dataset.action;
-    const listItem = target.closest('.collection-item-wrapper, .recent-note-card');
     
-    // --- NEW: Handle the 'add-note-here' action ---
+    // --- CORRECTED: Logic for the '+' button ---
     if (action === 'add-note-here') {
+        e.preventDefault();
+        // Get the parent folder's ID from the button's data attribute
         const parentId = target.dataset.parentId === 'null' ? null : target.dataset.parentId;
-        const newNote = createNewNote(false, '', parentId); // Create note but don't switch view yet
         
-        if (parentId) {
-            const parentFolder = findItem(parentId)?.item;
-            if (parentFolder) parentFolder.expanded = true;
-        }
-
-        renderNotionStyleMenu(); // Re-render the menu to show the new note
+        // Call our newly upgraded function with the specific parent ID
+        const newNote = createNewNote(false, '', parentId); 
+        
+        // Re-render the menu to show the new note
+        renderNotionStyleMenu(); 
         showToast(`Note "${newNote.name}" created!`, 'success');
-        saveState();
-        return; // Stop here, don't close the menu
+        
+        return; // Stop here, we don't want to close the menu
     }
 
+    // --- Logic for all other navigation clicks ---
+    const listItem = target.closest('.collection-item-wrapper, .recent-note-card');
     if (!listItem) return;
 
+    e.preventDefault();
     const id = listItem.dataset.id;
     const { item } = findItem(id);
     if (!item) return;
@@ -6073,6 +6092,9 @@ notionMenu.addEventListener('click', (e) => {
         render();
     }
 });
+// =================================================================
+// END: REPLACEMENT CLICK LISTENER
+// =================================================================
 // =================================================================
 // END: REPLACEMENT JAVASCRIPT BLOCK
 // =================================================================
@@ -7934,8 +7956,10 @@ const notionMenuCloseBtn = document.getElementById('mobile-menu-close-btn');
 /**
  * Dynamically builds the content for our new Notion-style menu.
  */
+// =================================================================
+// START: REPLACEMENT FUNCTION
+// =================================================================
 const renderNotionStyleMenu = () => {
-    // This part that populates the header and "Jump back in" section is correct and remains.
     const user = window.auth.currentUser;
     if (user && user.email) {
         document.getElementById('menu-user-initial').textContent = user.email.charAt(0).toUpperCase();
@@ -7960,35 +7984,39 @@ const renderNotionStyleMenu = () => {
             </div>`;
     }
 
-    // --- THIS IS THE CORRECTED LOGIC FOR BUILDING THE FOLDER & NOTE LIST ---
-    const buildPrivateList = (collections = state.collections, level = 0) => {
+    const buildPrivateList = (collections = state.collections, level = 0, parentId = null) => {
         return collections.map(item => {
             const isFolder = item.type === 'folder';
+            
+            // --- THIS IS THE NEW, MORE RELIABLE HTML STRUCTURE ---
             let itemHTML = `
                 <li data-id="${item.id}" class="collection-item-wrapper rounded-md">
-                    <div class="collection-item flex items-center gap-2 p-2 rounded-md" style="padding-left: ${8 + level * 16}px;">
+                    <div class="collection-item flex items-center justify-between gap-2 p-2 rounded-md hover:bg-bg-pane-dark" style="padding-left: ${8 + level * 16}px;">
                         
-                        ${isFolder ? `<a href="#" class="expander-btn -ml-1 p-1" data-action="toggle-expand"><i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i></a>` : '<div class="w-6 h-6 flex-shrink-0"></div>' /* Spacer for alignment */}
-                        
-                        <a href="#" class="flex items-center gap-2 flex-grow min-w-0" data-action="${isFolder ? 'navigate-folder' : 'navigate-note'}">
-                            <i data-feather="${isFolder ? 'folder' : 'file-text'}" class="w-4 h-4 flex-shrink-0 text-text-secondary"></i>
-                            <span class="truncate">${item.name}</span>
-                        </a>
+                        <div class="flex items-center gap-2 flex-grow min-w-0">
+                            ${isFolder ? `<a href="#" class="expander-btn -ml-1 p-1" data-action="toggle-expand"><i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i></a>` : '<div class="w-6 h-6 flex-shrink-0"></div>'}
+                            <a href="#" class="flex items-center gap-2 flex-grow min-w-0" data-action="${isFolder ? 'navigate-folder' : 'navigate-note'}">
+                                <i data-feather="${isFolder ? 'folder' : 'file-text'}" class="w-4 h-4 flex-shrink-0 text-text-secondary"></i>
+                                <span class="truncate">${item.name}</span>
+                            </a>
+                        </div>
+
+                        <button class="add-note-btn" data-action="add-note-here" data-parent-id="${isFolder ? item.id : parentId}" title="Add New Note Here">
+                            <i data-feather="plus" class="w-4 h-4"></i>
+                        </button>
+
                     </div>`;
-            
-            // If the folder is expanded, recursively render its children (the notes inside)
+
             if (isFolder && item.expanded && item.children && item.children.length > 0) {
-                itemHTML += `<ul class="collection-children">${buildPrivateList(item.children, level + 1)}</ul>`;
+                itemHTML += `<ul class="collection-children">${buildPrivateList(item.children, level + 1, item.id)}</ul>`;
             } else if (isFolder && item.expanded) {
                 itemHTML += `<p class="pl-12 py-1 text-sm text-text-tertiary">No notes inside</p>`;
             }
-            
             itemHTML += `</li>`;
             return itemHTML;
         }).join('');
     };
 
-    // This part that injects the HTML is also correct and remains.
     document.getElementById('jump-back-in-section').innerHTML = jumpBackHTML;
     document.getElementById('private-section').innerHTML = `
         <h3 class="notion-menu-section-header">All Notes</h3>
@@ -7996,6 +8024,9 @@ const renderNotionStyleMenu = () => {
     `;
     feather.replace();
 };
+// =================================================================
+// END: REPLACEMENT FUNCTION
+// =================================================================
 
 // --- THIS IS THE CORRECTED CLICK HANDLER FOR THE MENU ---
 notionMenu.addEventListener('click', (e) => {
