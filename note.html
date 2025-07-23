@@ -5856,7 +5856,143 @@ const commands = [
                 showToast(`✅ Checkpoint saved: "${args}"`, 'success');
             }
         }
-    },
+    },{
+    name: 'list',
+    description: 'Switch to list view. Usage: /list [folder name]',
+    suggest: 'folders',
+    execute: (args) => {
+        const targetView = 'list';
+        if (args) {
+            const targetFolder = findBestMatch(args, getAllFolders());
+            if (targetFolder) {
+                state.settings.activeCollectionId = targetFolder.id;
+                state.settings.activeNoteId = null;
+                state.settings.activeView = targetView;
+                saveState();
+                render();
+                showToast(`Showing List View for "${targetFolder.name}"`);
+            } else {
+                showToast(`❌ Folder not found: "${args}"`, 'error');
+            }
+        } else {
+            let currentFolderId = state.settings.activeCollectionId;
+            if (state.settings.activeNoteId) {
+                const noteResult = findItem(state.settings.activeNoteId);
+                const parent = noteResult ? noteResult.parent : null;
+                if (parent && !Array.isArray(parent)) {
+                    currentFolderId = parent.id;
+                }
+            }
+            if (currentFolderId) {
+                state.settings.activeCollectionId = currentFolderId;
+                state.settings.activeNoteId = null;
+                state.settings.activeView = targetView;
+                saveState();
+                render();
+            } else {
+                showToast('Please select a folder first.', 'info');
+            }
+        }
+    }
+},
+{
+    name: 'calendar',
+    description: 'Switch to calendar view. Usage: /calendar [folder name]',
+    suggest: 'folders',
+    execute: (args) => {
+        const targetView = 'calendar';
+        if (args) {
+            const targetFolder = findBestMatch(args, getAllFolders());
+            if (targetFolder) {
+                state.settings.activeCollectionId = targetFolder.id;
+                state.settings.activeNoteId = null;
+                state.settings.activeView = targetView;
+                saveState();
+                render();
+                showToast(`Showing Calendar View for "${targetFolder.name}"`);
+            } else {
+                showToast(`❌ Folder not found: "${args}"`, 'error');
+            }
+        } else {
+            let currentFolderId = state.settings.activeCollectionId;
+            if (state.settings.activeNoteId) {
+                const noteResult = findItem(state.settings.activeNoteId);
+                const parent = noteResult ? noteResult.parent : null;
+                if (parent && !Array.isArray(parent)) {
+                    currentFolderId = parent.id;
+                }
+            }
+            if (currentFolderId) {
+                state.settings.activeCollectionId = currentFolderId;
+                state.settings.activeNoteId = null;
+                state.settings.activeView = targetView;
+                saveState();
+                render();
+            } else {
+                showToast('Please select a folder first.', 'info');
+            }
+        }
+    }
+},
+{
+    name: 'date',
+    description: 'Set a date property on the current note. Usage: /date [Property Name] DD/MM/YY',
+    execute: (args) => {
+        if (!state.settings.activeNoteId) {
+            return showToast('❌ This command can only be used inside a note.', 'error');
+        }
+
+        const dateRegex = /^(.*)\s+(\d{1,2}\/\d{1,2}\/\d{2,4})$/;
+        const match = args.match(dateRegex);
+
+        if (!match) {
+            return showToast('❌ Invalid format. Use: /date [Property Name] DD/MM/YY', 'error');
+        }
+
+        const propName = match[1].trim();
+        const dateString = match[2];
+        const dateParts = dateString.split('/');
+
+        if (dateParts.length !== 3) {
+             return showToast('❌ Invalid date format. Use DD/MM/YY.', 'error');
+        }
+
+        const day = parseInt(dateParts[0], 10);
+        const month = parseInt(dateParts[1], 10);
+        let year = parseInt(dateParts[2], 10);
+
+        if (year < 100) {
+            year += 2000;
+        }
+
+        if (isNaN(day) || isNaN(month) || isNaN(year)) {
+             return showToast('❌ Invalid date value.', 'error');
+        }
+
+        const dateObj = new Date(Date.UTC(year, month - 1, day));
+        
+        if (isNaN(dateObj.getTime())) {
+            return showToast('❌ Invalid date. Please check the day, month, and year.', 'error');
+        }
+
+        const note = findItem(state.settings.activeNoteId)?.item;
+        if (note) {
+            if (!note.properties) {
+                note.properties = {};
+            }
+            note.properties[propName] = {
+                type: 'date',
+                value: dateObj.toISOString()
+            };
+            note.modifiedAt = new Date().toISOString();
+            
+            performImmediateSave();
+            renderNoteProperties(note);
+            feather.replace();
+            showToast(`✅ Set date for "${propName}"`, 'success');
+        }
+    }
+},
     {
         name: 'history',
         description: 'Open version history for a note. Usage: /history [note name]',
