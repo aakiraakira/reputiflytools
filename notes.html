@@ -1440,6 +1440,78 @@ table.filter-collapsed .toggle-filter-btn > i {
             color: white;
             font-weight: 600;
         }
+        /* --- START: Full Page Mobile Menu CSS --- */
+#mobile-menu-fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: var(--bg-main);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    padding: 1rem;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+    pointer-events: none;
+}
+
+#mobile-menu-fullscreen.open {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+#mobile-menu-fullscreen-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem;
+    flex-shrink: 0;
+}
+
+#mobile-menu-fullscreen-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+#mobile-menu-fullscreen-content {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding-top: 1rem;
+}
+
+/* Style for the individual menu items */
+#mobile-menu-fullscreen-content button {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    width: 100%;
+    padding: 1rem;
+    text-align: left;
+    font-size: 1rem;
+    border-radius: 0.5rem;
+    color: var(--text-secondary);
+    transition: background-color 0.2s, color 0.2s;
+}
+
+#mobile-menu-fullscreen-content button:hover {
+    background-color: var(--bg-pane-dark);
+    color: var(--text-primary);
+}
+
+#mobile-menu-fullscreen-content hr {
+    border-color: var(--border-color);
+    margin: 0.5rem 0;
+}
+
+#mobile-menu-fullscreen-content .text-red-500 {
+    color: #ef4444; /* red-500 */
+}
+/* --- END: Full Page Mobile Menu CSS --- */
         /* --- START: Mobile Inline Toolbar Scroll --- */
 @media (max-width: 767px) {
     #inline-toolbar {
@@ -1876,7 +1948,18 @@ window.functions = getFunctions(app,);
          <button id="mobile-global-ai-btn" class="p-2 rounded-full hover:bg-bg-pane-dark" title="Ask Your Notes"><i data-feather="message-circle" class="w-5 h-5"></i></button>
          <button id="mobile-more-button" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="more-vertical" class="w-5 h-5"></i></button>
          <div id="mobile-controls-dropdown" class="dropdown-menu hidden absolute top-full right-0 mt-2 w-48 bg-bg-pane-light shadow-2xl rounded-md p-2 border-border-color origin-top-right scale-95 opacity-0 z-30">
-         </div>
+</div>
+
+<div id="mobile-menu-fullscreen" class="">
+    <div id="mobile-menu-fullscreen-header">
+        <h2 id="mobile-menu-fullscreen-title">Actions</h2>
+        <button id="mobile-menu-fullscreen-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark">
+            <i data-feather="x" class="w-6 h-6"></i>
+        </button>
+    </div>
+    <div id="mobile-menu-fullscreen-content" class="custom-scrollbar">
+        </div>
+</div>
        </div>
    </div>
 
@@ -7551,23 +7634,64 @@ document.getElementById('header-flashcard-btn').addEventListener('click', () => 
                 });
                 
                 app.elements.mobileSidebarOverlay.addEventListener('click', () => toggleMobileSidebar(false));
-                app.elements.mobileMoreButton.addEventListener('click', (e) => {
-    e.stopPropagation(); // This is crucial to prevent the menu from closing itself
-    const dropdown = app.containers.mobileControlsDropdown;
-    const isHidden = dropdown.classList.contains('hidden');
-    if (isHidden) {
-        // Show the dropdown with animation
-        dropdown.classList.remove('hidden');
-        setTimeout(() => {
-             dropdown.classList.remove('scale-95', 'opacity-0');
-        }, 10);
-    } else {
-        // Hide the dropdown with animation
-        dropdown.classList.add('scale-95', 'opacity-0');
-        setTimeout(() => dropdown.classList.add('hidden'), 100);
+                // --- START: New Mobile Menu Logic ---
+const mobileMenu = document.getElementById('mobile-menu-fullscreen');
+const mobileMenuContent = document.getElementById('mobile-menu-fullscreen-content');
+const mobileMenuCloseBtn = document.getElementById('mobile-menu-fullscreen-close-btn');
+
+const openMobileMenu = () => {
+    // 1. Get the content from the original (now hidden) dropdown
+    const originalContent = app.containers.mobileControlsDropdown.innerHTML;
+    
+    // 2. Populate the new fullscreen menu with that content
+    mobileMenuContent.innerHTML = originalContent;
+    
+    // 3. Open the fullscreen menu with animation
+    mobileMenu.classList.add('open');
+    
+    // 4. Hide the mobile toolbar
+    document.getElementById('mobile-sticky-toolbar')?.classList.add('hidden');
+
+    feather.replace(); // Ensure icons are rendered
+};
+
+const closeMobileMenu = () => {
+    mobileMenu.classList.remove('open');
+    
+    // Show the mobile toolbar again ONLY if a note is active
+    if (state.settings.activeNoteId) {
+        document.getElementById('mobile-sticky-toolbar')?.classList.remove('hidden');
     }
+};
+
+// Open menu when the "more" button is clicked
+app.elements.mobileMoreButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openMobileMenu();
 });
 
+// Close menu with the 'X' button
+mobileMenuCloseBtn.addEventListener('click', closeMobileMenu);
+
+// Close menu when an action button inside is clicked
+mobileMenuContent.addEventListener('click', (e) => {
+    const button = e.target.closest('button');
+if (button) {
+    // Find the corresponding button in the original dropdown and click it
+    const originalButton = app.containers.mobileControlsDropdown.querySelector(`[data-action="${button.dataset.action}"]`);
+    if (originalButton) {
+        originalButton.click();
+    }
+    // Also handle view switchers
+    const viewButton = app.containers.mobileControlsDropdown.querySelector(`[data-view="${button.dataset.view}"]`);
+    if (viewButton) {
+        viewButton.click();
+    }
+    
+    closeMobileMenu();
+}
+});
+// --- END: New Mobile Menu Logic ---
                 app.containers.collectionsList.addEventListener('click', (e) => {
                     const itemLink = e.target.closest('.collection-item');
                     if (!itemLink) return;
