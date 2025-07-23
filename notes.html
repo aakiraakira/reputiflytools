@@ -160,6 +160,9 @@
 #properties-menu i {
     color: var(--text-secondary);
 }
+/* ADD THIS ENTIRE BLOCK FOR THE NEW CALENDAR FEATURES */
+
+/* END OF NEW CALENDAR CSS */
 /* ADD THIS CSS FOR THE NEW PROPERTY MODAL */
 .prop-type-option {
     display: flex;
@@ -415,6 +418,96 @@
     outline: none;
     border-color: var(--accent-primary);
 }
+/* --- START: NEW CALENDAR & DAY VIEW STYLES --- */
+.calendar-container {
+    display: flex;
+    gap: 1rem;
+    flex-grow: 1;
+    min-height: 0;
+}
+.calendar-grid-wrapper {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+}
+.calendar-day-cell {
+    position: relative;
+    padding: 0.5rem;
+    background-color: var(--bg-main);
+    min-height: 120px;
+    overflow-y: auto;
+}
+.calendar-day-cell.drag-over {
+    background-color: rgba(230, 57, 127, 0.1);
+    outline: 2px dashed var(--accent-primary);
+    outline-offset: -2px;
+}
+.calendar-day-number {
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    transition: background-color 0.2s;
+}
+.calendar-day-number:hover {
+    background-color: var(--bg-pane-dark);
+}
+.calendar-event-item {
+    font-size: 0.875rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    background-color: var(--bg-pane-dark);
+    cursor: grab;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.event-color-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    flex-shrink: 0;
+}
+#calendar-unscheduled-notes {
+    width: 280px;
+    flex-shrink: 0;
+    background-color: var(--bg-pane-dark);
+    border-radius: 0.5rem;
+    display: flex;
+    flex-direction: column;
+}
+.day-view-container {
+    padding: 1rem;
+    flex-grow: 1;
+    overflow-y: auto;
+}
+.day-view-timeline {
+    position: relative;
+    padding-left: 50px; /* Space for the time */
+}
+.day-view-event {
+    position: relative;
+    padding: 0.75rem;
+    background-color: var(--bg-pane-dark);
+    border-radius: 0.375rem;
+    border-left-width: 4px;
+}
+.day-view-time {
+    position: absolute;
+    left: 0;
+    top: 0.75rem;
+    transform: translateX(-100%);
+    padding-right: 10px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-tertiary);
+}
+/* --- END: NEW CALENDAR & DAY VIEW STYLES --- */
 /* ADD THIS ENTIRE BLOCK TO DIFFERENTIATE LINKS */
 /* Style for internal note links */
 #note-editor-body a.internal-link::before {
@@ -4055,6 +4148,21 @@ const handleFileUpload = async (file) => {
                  }).replace(/, /g, ', ');
             };
             // ADD THIS NEW HELPER FUNCTION
+            // ADD THIS NEW HELPER FUNCTION
+function parseDurationToMinutes(str) {
+    if (!str) return 0;
+    str = str.toLowerCase().trim();
+    let totalMinutes = 0;
+    const hourMatch = str.match(/(\d*\.?\d+)\s*h/);
+    const minMatch = str.match(/(\d+)\s*m/);
+    if (hourMatch) totalMinutes += parseFloat(hourMatch[1]) * 60;
+    if (minMatch) totalMinutes += parseInt(minMatch[1], 10);
+    // If just a number is entered, assume it's minutes
+    if (!hourMatch && !minMatch && !isNaN(parseFloat(str))) {
+        totalMinutes = parseFloat(str);
+    }
+    return Math.round(totalMinutes);
+}
 function getSelectColor(optionName) {
     const colors = ['bg-blue-500/20 text-blue-400', 'bg-green-500/20 text-green-400', 'bg-yellow-500/20 text-yellow-400', 'bg-red-500/20 text-red-400', 'bg-purple-500/20 text-purple-400', 'bg-pink-500/20 text-pink-400'];
     let hash = 0;
@@ -4649,6 +4757,7 @@ if (themeMeta) {
     feather.replace();
 }
 // ADD THIS ENTIRE NEW FUNCTION
+// REPLACE THE ENTIRE renderCalendarView FUNCTION WITH THIS
 function renderCalendarView() {
     const calendarView = document.getElementById('calendar-view');
     calendarView.classList.remove('hidden');
@@ -4657,14 +4766,10 @@ function renderCalendarView() {
     const collection = findItem(collectionId)?.item;
 
     if (!collection || collection.type !== 'folder') {
-        calendarView.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="calendar" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">Calendar View</h3><p>Create Date properties in your notes to see them here.</p></div>`;
+        calendarView.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="calendar" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">Calendar View</h3><p>This view is only available for folders.</p></div>`;
         feather.replace();
         return;
     }
-
-    // --- Highlighting Logic ---
-    const highlightDate = state.settings.calendarHighlightDate;
-    state.settings.calendarHighlightDate = null; // Clear it after use so it doesn't stay highlighted
 
     const today = new Date();
     if (!state.calendar) state.calendar = {};
@@ -4678,59 +4783,72 @@ function renderCalendarView() {
     const daysInMonth = lastDayOfMonth.getDate();
     const startingDay = firstDayOfMonth.getDay();
 
-    const notesWithDates = (collection.children || [])
-        .filter(note => note.type === 'note')
-        .map(note => {
-            const dateProp = Object.values(note.properties || {}).find(p => p.type === 'date' && p.value);
-            return dateProp ? { ...note, eventDate: new Date(dateProp.value) } : null;
-        }).filter(Boolean);
+    const notesInCollection = (collection.children || []).filter(note => note.type === 'note');
+    const notesWithDates = notesInCollection.map(note => {
+        const dateProp = Object.values(note.properties || {}).find(p => p.type === 'date' && p.value);
+        return dateProp ? { ...note, eventDate: new Date(dateProp.value) } : null;
+    }).filter(Boolean);
+    const unscheduledNotes = notesInCollection.filter(note => !notesWithDates.some(scheduledNote => scheduledNote.id === note.id));
 
     const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     let html = `
-        <header class="flex justify-between items-center mb-4 flex-shrink-0">
-            <h3 class="text-xl font-semibold text-text-primary">${firstDayOfMonth.toLocaleString('default', { month: 'long' })} ${year}</h3>
-            <div class="flex items-center gap-2">
-                <button id="calendar-prev-month" class="p-2 rounded-md hover:bg-bg-pane-dark"><i data-feather="chevron-left" class="w-5 h-5"></i></button>
-                <button id="calendar-next-month" class="p-2 rounded-md hover:bg-bg-pane-dark"><i data-feather="chevron-right" class="w-5 h-5"></i></button>
-            </div>
-        </header>
-        <div class="grid grid-cols-7 gap-px bg-border-color border border-border-color rounded-lg flex-grow min-h-0">
-            ${daysOfWeek.map(day => `<div class="text-center font-semibold text-sm py-2 bg-bg-pane-dark text-text-secondary">${day}</div>`).join('')}
+    <div class="calendar-container">
+        <div class="calendar-grid-wrapper">
+            <header class="flex justify-between items-center mb-4 flex-shrink-0">
+                <h3 class="text-xl font-semibold text-text-primary">${firstDayOfMonth.toLocaleString('default', { month: 'long' })} ${year}</h3>
+                <div class="flex items-center gap-2">
+                    <button id="calendar-day-view-btn" class="view-btn px-2.5 py-1 rounded" title="Day View"><i data-feather="sidebar" class="w-4 h-4"></i></button>
+                    <button id="calendar-month-view-btn" class="view-btn px-2.5 py-1 rounded active" title="Month View"><i data-feather="calendar" class="w-4 h-4"></i></button>
+                    <button id="calendar-prev-month" class="p-2 rounded-md hover:bg-bg-pane-dark"><i data-feather="chevron-left" class="w-5 h-5"></i></button>
+                    <button id="calendar-next-month" class="p-2 rounded-md hover:bg-bg-pane-dark"><i data-feather="chevron-right" class="w-5 h-5"></i></button>
+                </div>
+            </header>
+            <div class="grid grid-cols-7 gap-px bg-border-color border border-border-color rounded-lg flex-grow min-h-0">
+                ${daysOfWeek.map(day => `<div class="text-center font-semibold text-sm py-2 bg-bg-pane-dark text-text-secondary">${day}</div>`).join('')}
     `;
 
     for (let i = 0; i < startingDay; i++) { html += `<div class="bg-bg-pane-light"></div>`; }
 
     for (let day = 1; day <= daysInMonth; day++) {
         const currentDate = new Date(year, month, day);
+        const currentDateStr = currentDate.toISOString().split('T')[0];
         const notesForDay = notesWithDates.filter(note => {
             const eventDate = note.eventDate;
-            return eventDate.getUTCDate() === currentDate.getDate() && eventDate.getUTCMonth() === currentDate.getMonth() && eventDate.getUTCFullYear() === currentDate.getFullYear();
+            return eventDate.getUTCDate() === day && eventDate.getUTCMonth() === month && eventDate.getUTCFullYear() === year;
         });
 
-        // --- Highlighting Logic ---
-        const currentDateString = new Date(Date.UTC(year, month, day)).toISOString().split('T')[0];
-        const isHighlighted = highlightDate === currentDateString;
-        const highlightClass = isHighlighted ? 'bg-accent-primary/10' : '';
-
-        html += `
-            <div class="relative p-2 bg-bg-main min-h-[100px] overflow-y-auto custom-scrollbar ${highlightClass}">
-                <div class="font-semibold text-text-secondary">${day}</div>
-                <div class="mt-1 space-y-1">
-                ${notesForDay.map(note => `
-                    <a href="#" class="calendar-event-item block text-sm p-1.5 rounded-md bg-bg-pane-dark hover:bg-bg-pane-light border-l-4 border-accent-primary" data-note-id="${note.id}">
-                        ${note.name}
-                    </a>
-                `).join('')}
-                </div>
+        html += `<div class="calendar-day-cell custom-scrollbar" data-date="${currentDateStr}">
+            <div class="calendar-day-number" title="View Day">${day}</div>
+            <div class="mt-1 space-y-1">
+            ${notesForDay.map(note => {
+                const selectProp = Object.values(note.properties || {}).find(p => p.type === 'select' && p.value);
+                const colorClass = selectProp ? getSelectColor(selectProp.value).split(' ')[0] : 'bg-transparent';
+                return `<div class="calendar-event-item" draggable="true" data-note-id="${note.id}" style="border-color: ${selectProp ? getComputedStyle(document.documentElement).getPropertyValue('--' + colorClass.replace('bg-','').replace('-500/20','-400')) : 'var(--accent-primary)'};">
+                    <div class="event-color-dot ${colorClass}"></div>
+                    <span class="truncate pointer-events-none">${note.name}</span>
+                </div>`;
+            }).join('')}
             </div>
-        `;
+        </div>`;
     }
 
     const remainingCells = (7 - ((startingDay + daysInMonth) % 7)) % 7;
     for (let i = 0; i < remainingCells; i++) { html += `<div class="bg-bg-pane-light"></div>`; }
 
-    html += '</div>';
+    html += `</div></div>
+        <aside id="calendar-unscheduled-notes" class="custom-scrollbar">
+            <h4 class="p-3 font-semibold text-text-secondary sticky top-0 bg-bg-pane-dark z-10">Unscheduled</h4>
+            <div class="p-3 space-y-2">
+            ${unscheduledNotes.map(note => `
+                <div class="calendar-event-item" draggable="true" data-note-id="${note.id}">
+                    <span class="truncate pointer-events-none">${note.name}</span>
+                </div>
+            `).join('')}
+            ${unscheduledNotes.length === 0 ? '<p class="text-xs text-center text-text-tertiary p-4">All notes in this project are scheduled.</p>' : ''}
+            </div>
+        </aside>
+    </div>`;
     calendarView.innerHTML = html;
     feather.replace();
 }
@@ -4806,6 +4924,71 @@ function renderGalleryView() {
             ${cardsHTML}
         </div>
     `;
+}
+// ADD THIS ENTIRE NEW FUNCTION
+// REPLACE THE ENTIRE renderDayView FUNCTION
+function renderDayView(date) {
+    const calendarView = document.getElementById('calendar-view');
+    const collectionId = state.settings.activeCollectionId;
+    const collection = findItem(collectionId)?.item;
+    if (!collection) return;
+
+    const notesInCollection = (collection.children || []).filter(note => note.type === 'note');
+    const notesForDay = notesInCollection.map(note => {
+        const dateProp = Object.values(note.properties || {}).find(p => p.type === 'date' && p.value);
+        if (dateProp) {
+            const eventDate = new Date(dateProp.value);
+            if (eventDate.toDateString() === date.toDateString()) {
+                const endDate = dateProp.endValue ? new Date(dateProp.endValue) : null;
+                return { ...note, eventDate, endDate };
+            }
+        }
+        return null;
+    }).filter(Boolean);
+
+    let html = `
+    <div class="day-view-container custom-scrollbar">
+        <header class="flex justify-between items-center mb-6">
+            <h3 class="text-xl font-semibold text-text-primary">${date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</h3>
+            <div class="flex items-center gap-2">
+                <button id="calendar-month-view-btn" class="view-btn px-2.5 py-1 rounded" title="Month View"><i data-feather="calendar" class="w-4 h-4"></i> Back to Month</button>
+            </div>
+        </header>
+        <div class="relative">
+            <div class="absolute left-0 top-0 bottom-0 w-16 border-r border-border-color text-xs text-text-tertiary">
+                ${Array.from({ length: 24 }).map((_, hour) => `<div class="h-12 text-right pr-2 border-b border-border-color">${hour % 12 === 0 ? 12 : hour % 12} ${hour < 12 ? 'AM' : 'PM'}</div>`).join('')}
+            </div>
+            <div class="relative ml-16 h-[1152px]"> `;
+
+    if (notesForDay.length > 0) {
+        notesForDay.forEach(note => {
+            const startMinutes = note.eventDate.getHours() * 60 + note.eventDate.getMinutes();
+            const endMinutes = note.endDate ? (note.endDate.getHours() * 60 + note.endDate.getMinutes()) : (startMinutes + 60);
+            const duration = Math.max(30, endMinutes - startMinutes); // Minimum 30min height
+            
+            const top = (startMinutes / 60) * 48; // 48px per hour
+            const height = (duration / 60) * 48;
+
+            const selectProp = Object.values(note.properties || {}).find(p => p.type === 'select' && p.value);
+            const colorClass = selectProp ? getSelectColor(selectProp.value).split(' ')[0] : 'bg-transparent';
+            const styleColor = selectProp ? getComputedStyle(document.documentElement).getPropertyValue('--' + colorClass.replace('bg-','').replace('-500/20','-400')) : 'var(--accent-primary)';
+
+            html += `
+                <a href="#" class="day-view-event-link absolute left-2 right-0" data-note-id="${note.id}" style="top: ${top}px; height: ${height}px;">
+                    <div class="day-view-event h-full p-2" style="border-color: ${styleColor};">
+                        <div class="font-semibold text-text-primary text-sm flex items-center gap-2">
+                             <div class="event-color-dot ${colorClass}"></div>
+                             <span class="truncate">${note.name}</span>
+                        </div>
+                    </div>
+                </a>
+            `;
+        });
+    }
+
+    html += `</div></div></div>`;
+    calendarView.innerHTML = html;
+    feather.replace();
 }
 // END OF NEW FUNCTION
             function renderKanbanView() {
@@ -5160,22 +5343,22 @@ if (backlinks.length > 0) {
     feather.replace();
 }
 // REPLACE the entire renderNoteProperties function
+// REPLACE THE ENTIRE renderNoteProperties FUNCTION
+// REPLACE THE ENTIRE renderNoteProperties FUNCTION
 function renderNoteProperties(note) {
     const container = document.getElementById('note-properties-container');
     if (!container || !note) {
-        if(container) container.innerHTML = '';
+        if (container) container.innerHTML = '';
         return;
     }
 
     const isCollapsed = note.propertiesCollapsed;
 
-    // --- Header with Collapse Button ---
     let headerHTML = `
         <div id="properties-header" class="flex items-center text-text-tertiary hover:text-text-primary cursor-pointer -mx-2 px-2 py-1 rounded-md hover:bg-bg-pane-dark">
             <i data-feather="chevron-right" class="w-4 h-4 transition-transform duration-200 ${!isCollapsed ? 'rotate-90' : ''}"></i>
             <span class="ml-1 text-xs font-semibold uppercase">Properties</span>
-        </div>
-    `;
+        </div>`;
 
     let propertiesHTML = '';
     if (!isCollapsed) {
@@ -5186,19 +5369,42 @@ function renderNoteProperties(note) {
         const allProps = { ...defaultProps, ...(note.properties || {}) };
 
         propertiesHTML = Object.entries(allProps).map(([name, prop]) => {
-            // ... (the entire mapping logic from our last step remains the same)
             let valueHTML = '';
             const isReadOnly = prop.readonly;
-            const icons = { 'text': 'type', 'number': 'hash', 'date': 'calendar', 'select': 'chevron-down', 'image': 'image' };
+            const icons = { 'text': 'type', 'number': 'hash', 'date': 'clock', 'select': 'chevron-down', 'image': 'image' };
 
             switch (prop.type) {
-                 case 'date': valueHTML = `<span class="prop-value" data-prop-name="${name}">${formatDateTime(prop.value) || 'Empty'}</span>`; break;
-                 case 'text': case 'number': case 'image': valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`; break;
-                 case 'select':
+                case 'date':
+                    if (!prop.value) {
+                        valueHTML = `<span class="prop-value" data-prop-name="${name}">Empty</span>`;
+                        break;
+                    }
+                    const startDate = new Date(prop.value);
+                    const endDate = prop.endValue ? new Date(prop.endValue) : null;
+                    
+                    const hasTime = startDate.getUTCHours() !== 0 || startDate.getUTCMinutes() !== 0 || (endDate && (endDate.getUTCHours() !== 0 || endDate.getUTCMinutes() !== 0));
+                    
+                    const dateOptions = { year: 'numeric', month: 'short', day: 'numeric' };
+                    const timeOptions = { hour: 'numeric', minute: '2-digit', hour12: true };
+
+                    let formattedString = startDate.toLocaleString(undefined, {...dateOptions, ...(hasTime && timeOptions)});
+
+                    if (endDate) {
+                        const sameDay = startDate.toDateString() === endDate.toDateString();
+                        if (sameDay) {
+                            formattedString += ` → ${endDate.toLocaleTimeString(undefined, timeOptions)}`;
+                        } else {
+                            formattedString += ` → ${endDate.toLocaleString(undefined, {...dateOptions, ...(hasTime && timeOptions)})}`;
+                        }
+                    }
+                    valueHTML = `<span class="prop-value" data-prop-name="${name}">${formattedString}</span>`;
+                    break;
+                case 'text': case 'number': case 'image': valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`; break;
+                case 'select':
                     if (prop.value) { valueHTML = `<span class="prop-value rounded px-2 py-0.5 ${getSelectColor(prop.value)}" data-prop-name="${name}">${prop.value}</span>`; } 
                     else { valueHTML = `<span class="prop-value text-text-tertiary" data-prop-name="${name}">Empty</span>`; }
                     break;
-                 default: valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`;
+                default: valueHTML = `<span class="prop-value" data-prop-name="${name}">${prop.value || 'Empty'}</span>`;
             }
 
             return `<div class="property-row group flex items-center py-2 hover:bg-bg-pane-dark -mx-2 px-2 rounded-md">
@@ -5750,15 +5956,32 @@ app.containers.notesListContent.addEventListener('click', (e) => {
                 
                 
                 // ADD THIS NEW EVENT LISTENER INSIDE init()
+// REPLACE THE ENTIRE 'calendar-view' CLICK LISTENER WITH THIS
 document.getElementById('calendar-view').addEventListener('click', e => {
+    const dayViewBtn = e.target.closest('#calendar-day-view-btn');
+    const monthViewBtn = e.target.closest('#calendar-month-view-btn');
+    const dayNumber = e.target.closest('.calendar-day-number');
+    const eventLink = e.target.closest('.day-view-event-link');
     const prevBtn = e.target.closest('#calendar-prev-month');
     const nextBtn = e.target.closest('#calendar-next-month');
     const eventItem = e.target.closest('.calendar-event-item');
-
+    
     const collectionId = state.settings.activeCollectionId;
     if (!collectionId) return;
 
-    if (prevBtn) {
+    if (dayViewBtn) {
+        renderDayView(new Date()); // Switch to today's date in Day View
+    } else if (monthViewBtn) {
+        renderCalendarView(); // Switch back to Month View
+    } else if (dayNumber) {
+        const dateStr = dayNumber.closest('.calendar-day-cell').dataset.date;
+        renderDayView(new Date(dateStr + 'T12:00:00Z')); // Use noon UTC to avoid timezone issues
+    } else if (eventLink) {
+        e.preventDefault();
+        state.settings.activeNoteId = eventLink.dataset.noteId;
+        saveState();
+        render();
+    } else if (prevBtn) {
         state.calendar[collectionId].month--;
         if (state.calendar[collectionId].month < 0) {
             state.calendar[collectionId].month = 11;
@@ -5774,8 +5997,7 @@ document.getElementById('calendar-view').addEventListener('click', e => {
         renderCalendarView();
     } else if (eventItem) {
         e.preventDefault();
-        const noteId = eventItem.dataset.noteId;
-        state.settings.activeNoteId = noteId;
+        state.settings.activeNoteId = eventItem.dataset.noteId;
         saveState();
         render();
     }
@@ -5798,11 +6020,21 @@ const propertiesMenu = document.getElementById('properties-menu');
 
 // --- Unified Click Listener for the Properties Container ---
 // REPLACE THE ENTIRE 'propertiesContainer.addEventListener('click', ...)' BLOCK WITH THIS
+// REPLACE THE 'click' EVENT LISTENER FOR THE propertiesContainer
+// REPLACE THE 'click' EVENT LISTENER FOR THE propertiesContainer
 propertiesContainer.addEventListener('click', async (e) => {
     const note = findItem(state.settings.activeNoteId)?.item;
     if (!note) return;
+    
+    // This new block handles the "+ Add end date" button correctly, which is now legacy but we keep it for old data.
+    const addEndDateBtn = e.target.closest('#add-end-date-btn');
+    if (addEndDateBtn) {
+        addEndDateBtn.classList.add('hidden');
+        const wrapper = addEndDateBtn.closest('.flex-col')?.querySelector('#end-date-wrapper');
+        if (wrapper) wrapper.classList.remove('hidden');
+        return;
+    }
 
-    // Action: Handle collapsing the properties section
     if (e.target.closest('#properties-header')) {
         note.propertiesCollapsed = !note.propertiesCollapsed;
         saveState();
@@ -5811,22 +6043,19 @@ propertiesContainer.addEventListener('click', async (e) => {
         return;
     }
 
-    // Action: Open the new "Add Property" modal
     if (e.target.closest('#add-property-btn')) {
         const modal = document.getElementById('add-property-modal');
         document.getElementById('new-prop-name-input').value = '';
         document.getElementById('add-property-error').textContent = '';
-        // Reset radio button to 'text'
         const defaultRadio = modal.querySelector('input[type="radio"][value="text"]');
         if(defaultRadio) defaultRadio.checked = true;
-        
+        renderValueInput('text');
         openModal(modal);
         feather.replace();
         document.getElementById('new-prop-name-input').focus();
         return;
     }
 
-    // Action: Handle deleting a property
     const deleteBtn = e.target.closest('.delete-prop-btn');
     if (deleteBtn) {
         const propName = deleteBtn.dataset.propName;
@@ -5837,10 +6066,8 @@ propertiesContainer.addEventListener('click', async (e) => {
         return;
     }
 
-    // Action: Handle clicking a property value to edit it (logic is preserved)
     const valueContainer = e.target.closest('.prop-value-container');
     if (valueContainer && !valueContainer.dataset.editing) {
-        // ... (This preserves all the complex logic for editing existing properties)
         const propValueEl = valueContainer.querySelector('[data-prop-name]');
         if (!propValueEl) return;
 
@@ -5855,42 +6082,32 @@ propertiesContainer.addEventListener('click', async (e) => {
 
         valueContainer.dataset.editing = "true";
 
-        if (prop.type === 'select') {
-            const menu = document.getElementById('select-property-menu');
-            const filterInput = document.getElementById('select-property-filter');
-            const optionsContainer = document.getElementById('select-property-options');
-
-            const renderOptions = (filter = '') => {
-                const lowerFilter = filter.toLowerCase();
-                const filteredOptions = (prop.options || []).filter(opt => opt.name.toLowerCase().includes(lowerFilter));
-                let optionsHTML = filteredOptions.map(opt => `<button class="select-option-item w-full text-left rounded px-2 py-1 hover:bg-bg-pane-dark" data-value="${opt.name}"><span class="rounded px-2 py-0.5 ${getSelectColor(opt.name)}">${opt.name}</span></button>`).join('');
-                if (filter && !filteredOptions.some(opt => opt.name.toLowerCase() === lowerFilter)) {
-                    optionsHTML += `<button class="select-option-item w-full text-left rounded px-2 py-1 hover:bg-bg-pane-dark" data-action="create" data-value="${filter}"><span class="text-text-secondary">Create:</span> <span class="rounded px-2 py-0.5 ${getSelectColor(filter)}">${filter}</span></button>`;
-                }
-                optionsContainer.innerHTML = optionsHTML;
+        if (prop.type === 'date') {
+            const toLocalISOString = (date) => {
+                const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+                return (new Date(date - tzoffset)).toISOString().slice(0, 16);
             };
-
-            renderOptions();
-            filterInput.value = '';
-            const valueRect = propValueEl.getBoundingClientRect();
-            menu.style.top = `${valueRect.bottom + 5}px`;
-            menu.style.left = `${valueRect.left}px`;
-            menu.dataset.propName = propName;
-            menu.classList.remove('hidden');
-            setTimeout(() => menu.classList.remove('scale-95', 'opacity-0'), 10);
-            filterInput.focus();
-            filterInput.oninput = debounce(() => renderOptions(filterInput.value), 150);
-
-        } else {
-            const originalValue = prop.value || '';
-            let inputHTML = '';
-            if (prop.type === 'date') {
-                const dateForInput = originalValue ? new Date(originalValue).toISOString().split('T')[0] : '';
-                inputHTML = `<input type="date" value="${dateForInput}" class="prop-edit-input bg-transparent focus:outline-none w-full" data-prop-name="${propName}" data-prop-type="${prop.type}">`;
-            } else {
-                const inputType = prop.type === 'number' ? 'number' : 'text';
-                inputHTML = `<input type="${inputType}" value="${originalValue}" class="prop-edit-input bg-transparent focus:outline-none w-full" data-prop-name="${propName}" data-prop-type="${prop.type}">`;
+            
+            const startValue = prop.value ? toLocalISOString(new Date(prop.value)) : '';
+            let durationMinutes = 0;
+            if (prop.value && prop.endValue) {
+                durationMinutes = (new Date(prop.endValue) - new Date(prop.value)) / 60000;
             }
+            const durationString = durationMinutes > 0 ? `${durationMinutes}m` : '';
+
+            let inputHTML = `
+                <div class="flex items-center gap-2">
+                    <input type="datetime-local" value="${startValue}" class="prop-edit-input bg-transparent focus:outline-none w-full" data-prop-name="${propName}" data-prop-type="date" data-date-type="start">
+                    <input type="text" value="${durationString}" placeholder="e.g., 45m, 1.5h" class="prop-edit-input bg-transparent focus:outline-none w-full" data-prop-name="${propName}" data-prop-type="date" data-date-type="duration">
+                </div>
+            `;
+            valueContainer.innerHTML = inputHTML;
+            valueContainer.querySelector('input[data-date-type="start"]')?.focus();
+        } else {
+            // Logic for 'text', 'number', 'select', etc. remains the same
+            const originalValue = prop.value || '';
+            const inputType = prop.type === 'number' ? 'number' : 'text';
+            let inputHTML = `<input type="${inputType}" value="${originalValue}" class="prop-edit-input bg-transparent focus:outline-none w-full" data-prop-name="${propName}" data-prop-type="${prop.type}">`;
             valueContainer.innerHTML = inputHTML;
             const input = valueContainer.querySelector('input');
             input.focus();
@@ -5901,28 +6118,52 @@ propertiesContainer.addEventListener('click', async (e) => {
 
 // --- Save changes when an input loses focus (blur) ---
 // --- Save changes when an input loses focus (blur) ---
+// REPLACE THE 'blur' EVENT LISTENER FOR THE propertiesContainer
+// REPLACE THE 'blur' EVENT LISTENER FOR THE propertiesContainer
+// REPLACE THE 'blur' EVENT LISTENER FOR THE propertiesContainer
 propertiesContainer.addEventListener('blur', (e) => {
     if (e.target.classList.contains('prop-edit-input')) {
         const note = findItem(state.settings.activeNoteId)?.item;
         const input = e.target;
         const propName = input.dataset.propName;
-        const propType = input.dataset.propType;
-
+        
         if (note && propName) {
-            input.closest('.prop-value-container')?.removeAttribute('data-editing');
-            let newValue = input.value;
-            
-            // This is the fix: convert the date string to a full ISO string
-            if (propType === 'date' && newValue) {
-                const parts = newValue.split('-'); // e.g., "2025-07-23" -> ["2025", "07", "23"]
-                // Create date in UTC to avoid timezone off-by-one errors
-                newValue = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).toISOString();
-            }
+            const valueContainer = input.closest('.prop-value-container');
+            if (!valueContainer) return;
 
-            note.properties[propName].value = newValue;
-            saveState();
-            renderNoteProperties(note);
-            feather.replace();
+            setTimeout(() => {
+                if (document.activeElement.closest('.prop-value-container') === valueContainer) return;
+                
+                valueContainer.removeAttribute('data-editing');
+                const prop = note.properties[propName];
+                
+                if (prop.type === 'date') {
+                    const startDateInput = valueContainer.querySelector('input[data-date-type="start"]');
+                    const durationInput = valueContainer.querySelector('input[data-date-type="duration"]');
+                    
+                    if (startDateInput && startDateInput.value) {
+                        const startDate = new Date(startDateInput.value);
+                        prop.value = startDate.toISOString();
+                        
+                        const durationMinutes = parseDurationToMinutes(durationInput.value);
+                        if (durationMinutes > 0) {
+                            const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
+                            prop.endValue = endDate.toISOString();
+                        } else {
+                            delete prop.endValue;
+                        }
+                    } else {
+                        delete prop.value;
+                        delete prop.endValue;
+                    }
+                } else {
+                    prop.value = input.value;
+                }
+
+                saveState();
+                renderNoteProperties(note);
+                feather.replace();
+            }, 150);
         }
     }
 }, true);
