@@ -1254,49 +1254,20 @@ table.filter-collapsed .toggle-filter-btn > i {
             font-weight: 600;
         }
         /* --- START: Mobile Inline Toolbar Scroll --- */
-/* --- START: Mobile Inline Toolbar --- */
 @media (max-width: 767px) {
     #inline-toolbar {
-        /* Positioning & Sizing */
-        position: fixed;
-        bottom: 10px; /* Sits at the bottom of the viewport */
-        left: 50%;
-        transform: translateX(-50%) translateY(120%); /* Start hidden below screen */
-        width: 95%;
-        max-width: 400px; /* Ensure it doesn't get too wide on tablets */
-        z-index: 100;
-        
-        /* Appearance */
-        background-color: var(--bg-pane-dark);
-        border: 1px solid var(--border-color);
-        box-shadow: 0 4px 12px var(--shadow-color);
-        padding: 0.25rem; /* 4px */
-        
-        /* Animation */
-        transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
-        
-        /* Remove desktop-specific styles */
-        top: auto !important; 
-        opacity: 1 !important; /* Let transform handle visibility */
-        pointer-events: auto !important;
+        max-width: 200px; /* Limit the width on mobile */
     }
-
-    #inline-toolbar.visible {
-        transform: translateX(-50%) translateY(0); /* Slide into view */
-    }
-
     #inline-toolbar-buttons {
         scroll-behavior: smooth;
     }
-
     .toolbar-scroll-btn {
-        display: flex;
+        display: flex; /* Show the scroll buttons on mobile */
         align-items: center;
         justify-content: center;
         cursor: pointer;
     }
 }
-/* --- END: Mobile Inline Toolbar --- */
 /* --- END: Mobile Inline Toolbar Scroll --- */
 
         /* Mobile-specific overrides */
@@ -1699,6 +1670,30 @@ window.functions = getFunctions(app,);
          </div>
        </div>
    </div>
+   <div id="mobile-contextual-toolbar" class="hidden md:hidden w-full">
+    <div class="overflow-x-auto no-scrollbar">
+        <div id="mobile-typing-panel" class="flex items-center gap-1 whitespace-nowrap">
+            <button data-command="formatBlock" data-value="h1" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H1</button>
+            <button data-command="formatBlock" data-value="h2" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H2</button>
+            <button data-command="formatBlock" data-value="h3" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H3</button>
+            <div class="w-px h-6 bg-border-color mx-1"></div>
+            <button data-command="insertChecklist" class="p-3 hover:bg-bg-main rounded" title="Checklist"><i data-feather="check-square" class="w-5 h-5"></i></button>
+            <button data-command="formatBlock" data-value="blockquote" class="p-3 hover:bg-bg-main rounded" title="Quote"><strong>&ldquo;</strong></button>
+            <button data-command="insertTable" class="p-3 hover:bg-bg-main rounded" title="Insert Table"><i data-feather="grid" class="w-5 h-5"></i></button>
+            <button data-command="formatBlock" data-value="code" class="p-3 hover:bg-bg-main rounded" title="Code Block"><i data-feather="code" class="w-5 h-5"></i></button>
+            <button data-command="insertImage" class="p-3 hover:bg-bg-main rounded"><i data-feather="image" class="w-5 h-5"></i></button>
+        </div>
+        <div id="mobile-selection-panel" class="hidden flex items-center gap-1 whitespace-nowrap">
+            <button data-command="bold" class="p-3 hover:bg-bg-main rounded"><i data-feather="bold" class="w-5 h-5"></i></button>
+            <button data-command="italic" class="p-3 hover:bg-bg-main rounded"><i data-feather="italic" class="w-5 h-5"></i></button>
+            <button data-command="createLink" class="p-3 hover:bg-bg-main rounded"><i data-feather="link" class="w-5 h-5"></i></button>
+            <div class="w-px h-6 bg-border-color mx-1"></div>
+            <button data-command="formatBlock" data-value="h1" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H1</button>
+            <button data-command="formatBlock" data-value="h2" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H2</button>
+            <button data-command="formatBlock" data-value="h3" class="p-3 hover:bg-bg-main rounded font-bold text-sm">H3</button>
+        </div>
+    </div>
+</div>
 
     <div id="search-bar-container" class="hidden md:absolute md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 z-10 w-full md:w-[95%] md:max-w-[500px]">
          <div class="bg-bg-pane-dark rounded-full shadow-lg flex items-center px-4 w-full">
@@ -5418,6 +5413,76 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: New Smart Mobile Contextual Toolbar Logic ---
+const mobileContextualToolbar = document.getElementById('mobile-contextual-toolbar');
+const defaultHeaderContent = document.getElementById('header-main-content');
+const noteEditorBody = app.elements.noteEditorBody;
+
+// Show the contextual toolbar when the user starts typing in the editor
+noteEditorBody.addEventListener('focus', () => {
+    if (window.innerWidth < 768) {
+        defaultHeaderContent.classList.add('hidden');
+        mobileContextualToolbar.classList.remove('hidden');
+        feather.replace();
+    }
+});
+
+// Restore the default header when the user stops editing
+noteEditorBody.addEventListener('blur', () => {
+    if (window.innerWidth < 768) {
+        // A small delay prevents the toolbar from disappearing before a button click is registered
+        setTimeout(() => {
+            defaultHeaderContent.classList.remove('hidden');
+            mobileContextualToolbar.classList.add('hidden');
+        }, 150);
+    }
+});
+
+// Make the toolbar buttons work
+mobileContextualToolbar.addEventListener('mousedown', (e) => {
+    const button = e.target.closest('button');
+    if (!button) return;
+
+    e.preventDefault(); // This is crucial: it prevents the editor from losing focus
+
+    const command = button.dataset.command;
+    const value = button.dataset.value;
+
+    // Re-use the existing logic from the desktop toolbar to apply formatting
+    const desktopButton = app.toolbar.inline.querySelector(`[data-command="${command}"][data-value="${value || ''}"]`)
+                       || app.toolbar.inline.querySelector(`[data-command="${command}"]`);
+
+    if (desktopButton) {
+        desktopButton.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    } else {
+         restoreSelectionAndExec(() => document.execCommand(command, false, value));
+    }
+});
+
+// Make the toolbar context-aware by listening for text selections
+document.addEventListener('selectionchange', () => {
+    if (window.innerWidth >= 768) return; // Only run on mobile
+
+    const selection = window.getSelection();
+    const typingPanel = document.getElementById('mobile-typing-panel');
+    const selectionPanel = document.getElementById('mobile-selection-panel');
+
+    if (!typingPanel || !selectionPanel) return;
+
+    // Check if the selection is inside our note editor and the toolbar is visible
+    const isEditing = noteEditorBody.contains(selection.anchorNode) && !mobileContextualToolbar.classList.contains('hidden');
+
+    if (isEditing && !selection.isCollapsed) {
+        // If text is selected, show the formatting panel
+        typingPanel.classList.add('hidden');
+        selectionPanel.classList.remove('hidden');
+    } else {
+        // If there's no selection (just a cursor), show the default typing panel
+        typingPanel.classList.remove('hidden');
+        selectionPanel.classList.add('hidden');
+    }
+});
+// --- END: New Smart Mobile Contextual Toolbar Logic ---
                 // --- START: Date Property Click-to-Calendar Listener ---
 app.containers.notesListContent.addEventListener('click', (e) => {
     const dateBtn = e.target.closest('.list-view-jump-to-date-btn');
@@ -8359,73 +8424,33 @@ app.modals.quizContent.addEventListener('click', e => {
                     renderNoteEditor();
                 });
 
-                // --- START: Responsive Inline Toolbar Logic ---
-const handleToolbarVisibility = () => {
-    const editorView = document.getElementById('note-editor-view');
-    const inlineToolbar = app.toolbar.inline;
+                document.addEventListener('selectionchange', () => {
+                    if (document.activeElement !== app.elements.noteEditorBody) {
+                        app.toolbar.inline.style.opacity = '0';
+                        app.toolbar.inline.style.pointerEvents = 'none';
+                        return;
+                    }
+                    const selection = window.getSelection();
 
-    if (window.innerWidth > 767) {
-        // --- Desktop Logic (selection-based) ---
-        const selection = window.getSelection();
+                    if (selection.isCollapsed) {
+                        app.toolbar.inline.style.opacity = '0';
+                        app.toolbar.inline.style.pointerEvents = 'none';
+                        return;
+                    }
 
-        // Hide if not focused in the editor body
-        if (document.activeElement !== app.elements.noteEditorBody) {
-            inlineToolbar.style.opacity = '0';
-            inlineToolbar.style.pointerEvents = 'none';
-            return;
-        }
+                    if (selection.rangeCount > 0) {
+                        editorSelectionRange = selection.getRangeAt(0).cloneRange();
+                    }
 
-        // Hide if selection is collapsed (just a cursor)
-        if (selection.isCollapsed) {
-            inlineToolbar.style.opacity = '0';
-            inlineToolbar.style.pointerEvents = 'none';
-            return;
-        }
-
-        if (selection.rangeCount > 0) {
-            editorSelectionRange = selection.getRangeAt(0).cloneRange();
-            const range = selection.getRangeAt(0);
-            const rect = range.getBoundingClientRect();
-            const toolbarRect = inlineToolbar.getBoundingClientRect();
-
-            // Position above the selection
-            inlineToolbar.style.top = `${window.scrollY + rect.top - toolbarRect.height - 8}px`;
-            inlineToolbar.style.left = `${window.scrollX + rect.left + (rect.width / 2) - (toolbarRect.width / 2)}px`;
-
-            // Show the toolbar
-            inlineToolbar.style.opacity = '1';
-            inlineToolbar.style.transform = 'scale(1)';
-            inlineToolbar.style.pointerEvents = 'auto';
-        }
-    } else {
-        // --- Mobile Logic (focus-based) ---
-        // This part is intentionally left blank. 
-        // The selection event should do nothing on mobile. The focus listeners below handle everything.
-    }
-};
-
-// Main listener that triggers the logic above
-document.addEventListener('selectionchange', handleToolbarVisibility);
-
-// Listeners specifically for mobile focus/blur
-const editorView = document.getElementById('note-editor-view');
-editorView.addEventListener('focusin', (e) => {
-    if (window.innerWidth < 768 && e.target.closest('#note-editor-body')) {
-        app.toolbar.inline.classList.add('visible');
-    }
-});
-
-editorView.addEventListener('focusout', (e) => {
-    if (window.innerWidth < 768) {
-        // A small delay helps prevent the toolbar from disappearing when focus briefly moves
-        setTimeout(() => {
-            if (!editorView.contains(document.activeElement)) {
-                app.toolbar.inline.classList.remove('visible');
-            }
-        }, 100);
-    }
-});
-// --- END: Responsive Inline Toolbar Logic ---
+                    const range = selection.getRangeAt(0);
+                    const rect = range.getBoundingClientRect();
+                    const toolbarRect = app.toolbar.inline.getBoundingClientRect();
+                    app.toolbar.inline.style.top = `${window.scrollY + rect.top - toolbarRect.height - 8}px`;
+                    app.toolbar.inline.style.left = `${window.scrollX + rect.left + (rect.width / 2) - (toolbarRect.width / 2)}px`;
+                    app.toolbar.inline.style.opacity = '1';
+                    app.toolbar.inline.style.transform = 'scale(1)';
+                    app.toolbar.inline.style.pointerEvents = 'auto';
+                });
                 
                 app.toolbar.inline.addEventListener('mousedown', async (e) => {
     const button = e.target.closest('button');
