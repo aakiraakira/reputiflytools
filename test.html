@@ -1482,7 +1482,6 @@ table.filter-collapsed .toggle-filter-btn > i {
     flex-grow: 1;
     overflow-y: auto;
     padding-top: 1rem;
-    padding-bottom: 3rem;
 }
 
 /* Style for the individual menu items */
@@ -1514,27 +1513,6 @@ table.filter-collapsed .toggle-filter-btn > i {
 }
 /* --- END: Full Page Mobile Menu CSS --- */
         /* --- START: Mobile Inline Toolbar Scroll --- */
-/* --- START: Mobile Toolbar Smooth Hide/Show --- */
-#mobile-sticky-toolbar {
-    /* These properties make the show/hide animated */
-    transition: height 0.3s ease, opacity 0.3s ease, padding 0.3s ease, transform 0.2s ease;
-    transform-origin: top;
-}
-
-#mobile-toolbar-buttons {
-    scroll-behavior: smooth;
-}
-#mobile-sticky-toolbar.toolbar-hidden {
-    /* Instead of display:none, we animate its properties to zero */
-    height: 0px !important; /* The !important ensures it overrides other styles */
-    padding-top: 0;
-    padding-bottom: 0;
-    opacity: 0;
-    border-width: 0; /* Hides the border when collapsed */
-    transform: scaleY(0.9); /* Adds a subtle vertical squish effect */
-    visibility: hidden; /* Prevents interaction but keeps it in the layout */
-}
-/* --- END: Mobile Toolbar Smooth Hide/Show --- */
 @media (max-width: 767px) {
     #inline-toolbar {
         display: none !important; /* This completely hides the old toolbar on mobile */
@@ -1998,9 +1976,8 @@ window.functions = getFunctions(app,);
 <input type="file" id="file-upload-input" class="hidden" accept=".csv, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, image/*, .pdf, .txt, .md" />
 
            
-           <div id="mobile-sticky-toolbar" class="toolbar-hidden md:hidden sticky top-[65px] z-20 bg-bg-pane-dark border-b border-border-color flex items-center h-[48px]">
-    <button id="toolbar-page-left" class="h-full px-2 text-text-tertiary hover:bg-bg-main"><i data-feather="chevron-left" class="w-5 h-5"></i></button>
-    <div id="mobile-toolbar-buttons" class="flex-grow h-full flex items-center gap-1 overflow-hidden">
+           <div id="mobile-sticky-toolbar" class="hidden md:hidden sticky top-[65px] z-20 bg-bg-pane-dark p-2 border-b border-border-color">
+    <div class="flex items-center gap-1 overflow-x-auto no-scrollbar">
         <button data-command="bold" class="p-2 hover:bg-bg-main rounded flex-shrink-0"><i data-feather="bold" class="w-4 h-4"></i></button>
         <button data-command="italic" class="p-2 hover:bg-bg-main rounded flex-shrink-0"><i data-feather="italic" class="w-4 h-4"></i></button>
         <button data-command="createLink" class="p-2 hover:bg-bg-main rounded flex-shrink-0"><i data-feather="link" class="w-4 h-4"></i></button>
@@ -2016,7 +1993,6 @@ window.functions = getFunctions(app,);
         <button data-command="formatBlock" data-value="h2" class="p-2 hover:bg-bg-main rounded font-bold text-sm flex-shrink-0">H2</button>
         <button data-command="formatBlock" data-value="h3" class="p-2 hover:bg-bg-main rounded font-bold text-sm flex-shrink-0">H3</button>
     </div>
-    <button id="toolbar-page-right" class="h-full px-2 text-text-tertiary hover:bg-bg-main"><i data-feather="chevron-right" class="w-5 h-5"></i></button>
 </div>
 <div id="main-content-area" class="flex-grow overflow-y-auto relative flex flex-col custom-scrollbar">
 
@@ -5991,16 +5967,15 @@ ${noteContent}`;
 };
 
             async function init() {
-                
                 // --- START: Mobile Toolbar Keyboard Awareness Logic ---
-// --- START: Mobile Toolbar Keyboard Awareness Logic ---
 const mobileToolbar = document.getElementById('mobile-sticky-toolbar');
 const noteEditorBody = app.elements.noteEditorBody;
 
 const handleToolbarVisibility = () => {
     // This function will decide if the toolbar should be shown or hidden.
     if (window.innerWidth >= 768) {
-        mobileToolbar.classList.add('toolbar-hidden');
+        // Don't do anything on desktop
+        mobileToolbar.classList.add('hidden');
         return;
     }
 
@@ -6012,26 +5987,11 @@ const handleToolbarVisibility = () => {
     const isKeyboardOpen = window.visualViewport.height < window.innerHeight * 0.8;
 
     if (isNoteActive && isEditorFocused && isKeyboardOpen) {
-        mobileToolbar.classList.remove('toolbar-hidden');
+        mobileToolbar.classList.remove('hidden');
     } else {
-        mobileToolbar.classList.add('toolbar-hidden');
+        mobileToolbar.classList.add('hidden');
     }
 };
-
-// Listen for when the viewport resizes (keyboard opens/closes)
-if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', handleToolbarVisibility);
-}
-
-// Also, check visibility when the user taps into or out of the editor
-noteEditorBody.addEventListener('focus', handleToolbarVisibility);
-noteEditorBody.addEventListener('blur', () => {
-    // When the user taps away, always hide the toolbar after a short delay
-    setTimeout(() => {
-        mobileToolbar.classList.add('toolbar-hidden');
-    }, 100);
-});
-// --- END: Mobile Toolbar Keyboard Awareness Logic ---
 
 // Listen for when the viewport resizes (keyboard opens/closes)
 if (window.visualViewport) {
@@ -6168,67 +6128,6 @@ app.containers.notesListContent.addEventListener('click', (e) => {
                 state.settings.activeView = 'calendar';
                 state.settings.activeCollectionId = parentCollection.id;
                 state.settings.activeNoteId = null; // We are viewing the folder, not a single note
-                // --- START: Mobile Toolbar Paging Logic ---
-const toolbarButtonsContainer = document.getElementById('mobile-toolbar-buttons');
-const pageLeftBtn = document.getElementById('toolbar-page-left');
-const pageRightBtn = document.getElementById('toolbar-page-right');
-const ITEMS_PER_PAGE = 3;
-
-let currentToolbarPage = 0;
-let totalToolbarPages = 1;
-
-const updateToolbarPages = () => {
-    if (!toolbarButtonsContainer) return;
-    
-    const allButtons = toolbarButtonsContainer.querySelectorAll('button, div.w-px');
-    if (allButtons.length === 0) return;
-
-    const containerWidth = toolbarButtonsContainer.offsetWidth;
-    const itemWidth = allButtons.length > 0 ? (allButtons[0].offsetWidth + 4) : 0; // 4 is for the gap
-    
-    totalToolbarPages = Math.ceil(allButtons.length / ITEMS_PER_PAGE);
-    const totalContentWidth = allButtons.length * itemWidth;
-    
-    const showButtons = totalContentWidth > containerWidth;
-    pageLeftBtn.style.display = showButtons ? 'block' : 'none';
-    pageRightBtn.style.display = showButtons ? 'block' : 'none';
-
-    pageLeftBtn.disabled = (currentToolbarPage === 0);
-    pageRightBtn.disabled = (currentToolbarPage >= totalToolbarPages - 1);
-};
-
-pageLeftBtn.addEventListener('click', () => {
-    if (currentToolbarPage > 0) {
-        currentToolbarPage--;
-        const scrollAmount = toolbarButtonsContainer.offsetWidth;
-        toolbarButtonsContainer.scrollLeft -= scrollAmount;
-        updateToolbarPages();
-    }
-});
-
-pageRightBtn.addEventListener('click', () => {
-    if (currentToolbarPage < totalToolbarPages - 1) {
-        currentToolbarPage++;
-        const scrollAmount = toolbarButtonsContainer.offsetWidth;
-        toolbarButtonsContainer.scrollLeft += scrollAmount;
-        updateToolbarPages();
-    }
-});
-
-const toolbarObserver = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-        if (mutation.attributeName === 'class' && !mobileToolbar.classList.contains('toolbar-hidden')) {
-             currentToolbarPage = 0;
-             toolbarButtonsContainer.scrollLeft = 0;
-             setTimeout(updateToolbarPages, 50);
-        }
-    }
-});
-
-if (mobileToolbar) {
-    toolbarObserver.observe(mobileToolbar, { attributes: true });
-}
-// --- END: Mobile Toolbar Paging Logic ---
 
                 saveState();
                 render();
