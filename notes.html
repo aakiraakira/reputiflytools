@@ -419,12 +419,6 @@
     border-color: var(--accent-primary);
 }
 /* --- START: NEW CALENDAR & DAY VIEW STYLES --- */
-.calendar-container {
-    display: flex;
-    gap: 1rem;
-    flex-grow: 1;
-    min-height: 0;
-}
 .calendar-grid-wrapper {
     flex-grow: 1;
     display: flex;
@@ -473,40 +467,82 @@
     border-radius: 9999px;
     flex-shrink: 0;
 }
-#calendar-unscheduled-notes {
-    width: 280px;
-    flex-shrink: 0;
-    background-color: var(--bg-pane-dark);
-    border-radius: 0.5rem;
+.day-view-container {
+    flex-grow: 1;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
 }
-.day-view-container {
-    padding: 1rem;
-    flex-grow: 1;
-    overflow-y: auto;
+.day-view-all-day-section {
+    padding: 0.5rem 0 0.5rem 5rem; /* Aligns with timeline */
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
-.day-view-timeline {
+.day-view-all-day-item {
+    padding: 0.25rem 0.5rem;
+    background-color: var(--bg-pane-dark);
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+}
+.day-view-timeline-wrapper {
     position: relative;
-    padding-left: 50px; /* Space for the time */
+    flex-grow: 1;
+}
+.day-view-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-rows: repeat(24, 48px);
+}
+.day-view-hour-slot {
+    border-bottom: 1px solid var(--border-color);
+    padding-left: 5rem; /* Space for time labels */
+    position: relative;
+}
+.day-view-hour-slot::before {
+    content: attr(data-time);
+    position: absolute;
+    left: 0;
+    top: -0.5em;
+    padding-right: 0.5rem;
+    width: 5rem;
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+}
+.day-view-event-container {
+    position: absolute;
+    left: 5rem;
+    right: 0.5rem;
+    z-index: 10;
 }
 .day-view-event {
-    position: relative;
     padding: 0.75rem;
     background-color: var(--bg-pane-dark);
     border-radius: 0.375rem;
     border-left-width: 4px;
 }
-.day-view-time {
+#now-indicator {
     position: absolute;
-    left: 0;
-    top: 0.75rem;
-    transform: translateX(-100%);
-    padding-right: 10px;
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--text-tertiary);
+    height: 2px;
+    background-color: #ef4444; /* red-500 */
+    width: 100%;
+    z-index: 20;
 }
+#now-indicator::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: -4px;
+    width: 12px;
+    height: 12px;
+    background-color: #ef4444;
+    border-radius: 9999px;
+}
+/* --- END: NEW CALENDAR & DAY VIEW STYLES --- */
 /* --- END: NEW CALENDAR & DAY VIEW STYLES --- */
 /* ADD THIS ENTIRE BLOCK TO DIFFERENTIATE LINKS */
 /* Style for internal note links */
@@ -1835,7 +1871,7 @@ window.functions = getFunctions(app,);
          <button id="mobile-search-icon" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="search" class="w-5 h-5"></i></button>
          <button id="mobile-global-ai-btn" class="p-2 rounded-full hover:bg-bg-pane-dark" title="Ask Your Notes"><i data-feather="message-circle" class="w-5 h-5"></i></button>
          <button id="mobile-more-button" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="more-vertical" class="w-5 h-5"></i></button>
-         <div id="mobile-controls-dropdown" class="dropdown-menu hidden absolute top-full right-0 mt-2 w-48 bg-bg-pane-light shadow-2xl rounded-md p-2 border-border-color origin-top-right scale-95 opacity-0 z-10">
+         <div id="mobile-controls-dropdown" class="dropdown-menu hidden absolute top-full right-0 mt-2 w-48 bg-bg-pane-light shadow-2xl rounded-md p-2 border-border-color origin-top-right scale-95 opacity-0 z-30">
          </div>
        </div>
    </div>
@@ -4163,6 +4199,15 @@ function parseDurationToMinutes(str) {
     }
     return Math.round(totalMinutes);
 }
+// ADD THIS NEW HELPER FUNCTION
+function updateNowIndicator() {
+    let indicator = document.getElementById('now-indicator');
+    if (!indicator) return;
+    const now = new Date();
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    const top = (minutes / 60) * 48; // 48px per hour
+    indicator.style.top = `${top}px`;
+}
 function getSelectColor(optionName) {
     const colors = ['bg-blue-500/20 text-blue-400', 'bg-green-500/20 text-green-400', 'bg-yellow-500/20 text-yellow-400', 'bg-red-500/20 text-red-400', 'bg-purple-500/20 text-purple-400', 'bg-pink-500/20 text-pink-400'];
     let hash = 0;
@@ -4758,10 +4803,10 @@ if (themeMeta) {
 }
 // ADD THIS ENTIRE NEW FUNCTION
 // REPLACE THE ENTIRE renderCalendarView FUNCTION WITH THIS
+// REPLACE THE ENTIRE renderCalendarView FUNCTION
 function renderCalendarView() {
     const calendarView = document.getElementById('calendar-view');
     calendarView.classList.remove('hidden');
-
     const collectionId = state.settings.activeCollectionId;
     const collection = findItem(collectionId)?.item;
 
@@ -4788,24 +4833,22 @@ function renderCalendarView() {
         const dateProp = Object.values(note.properties || {}).find(p => p.type === 'date' && p.value);
         return dateProp ? { ...note, eventDate: new Date(dateProp.value) } : null;
     }).filter(Boolean);
-    const unscheduledNotes = notesInCollection.filter(note => !notesWithDates.some(scheduledNote => scheduledNote.id === note.id));
-
+    
     const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     let html = `
-    <div class="calendar-container">
-        <div class="calendar-grid-wrapper">
-            <header class="flex justify-between items-center mb-4 flex-shrink-0">
-                <h3 class="text-xl font-semibold text-text-primary">${firstDayOfMonth.toLocaleString('default', { month: 'long' })} ${year}</h3>
-                <div class="flex items-center gap-2">
-                    <button id="calendar-day-view-btn" class="view-btn px-2.5 py-1 rounded" title="Day View"><i data-feather="sidebar" class="w-4 h-4"></i></button>
-                    <button id="calendar-month-view-btn" class="view-btn px-2.5 py-1 rounded active" title="Month View"><i data-feather="calendar" class="w-4 h-4"></i></button>
-                    <button id="calendar-prev-month" class="p-2 rounded-md hover:bg-bg-pane-dark"><i data-feather="chevron-left" class="w-5 h-5"></i></button>
-                    <button id="calendar-next-month" class="p-2 rounded-md hover:bg-bg-pane-dark"><i data-feather="chevron-right" class="w-5 h-5"></i></button>
-                </div>
-            </header>
-            <div class="grid grid-cols-7 gap-px bg-border-color border border-border-color rounded-lg flex-grow min-h-0">
-                ${daysOfWeek.map(day => `<div class="text-center font-semibold text-sm py-2 bg-bg-pane-dark text-text-secondary">${day}</div>`).join('')}
+    <div class="calendar-grid-wrapper h-full">
+        <header class="flex justify-between items-center mb-4 flex-shrink-0">
+            <h3 class="text-xl font-semibold text-text-primary">${firstDayOfMonth.toLocaleString('default', { month: 'long' })} ${year}</h3>
+            <div class="flex items-center gap-2">
+                <button id="calendar-day-view-btn" class="view-btn px-2.5 py-1 rounded" title="Day View"><i data-feather="sidebar" class="w-4 h-4"></i></button>
+                <button id="calendar-month-view-btn" class="view-btn px-2.5 py-1 rounded active" title="Month View"><i data-feather="calendar" class="w-4 h-4"></i></button>
+                <button id="calendar-prev-month" class="p-2 rounded-md hover:bg-bg-pane-dark"><i data-feather="chevron-left" class="w-5 h-5"></i></button>
+                <button id="calendar-next-month" class="p-2 rounded-md hover:bg-bg-pane-dark"><i data-feather="chevron-right" class="w-5 h-5"></i></button>
+            </div>
+        </header>
+        <div class="grid grid-cols-7 gap-px bg-border-color border border-border-color rounded-lg flex-grow min-h-0">
+            ${daysOfWeek.map(day => `<div class="text-center font-semibold text-sm py-2 bg-bg-pane-dark text-text-secondary">${day}</div>`).join('')}
     `;
 
     for (let i = 0; i < startingDay; i++) { html += `<div class="bg-bg-pane-light"></div>`; }
@@ -4813,10 +4856,7 @@ function renderCalendarView() {
     for (let day = 1; day <= daysInMonth; day++) {
         const currentDate = new Date(year, month, day);
         const currentDateStr = currentDate.toISOString().split('T')[0];
-        const notesForDay = notesWithDates.filter(note => {
-            const eventDate = note.eventDate;
-            return eventDate.getUTCDate() === day && eventDate.getUTCMonth() === month && eventDate.getUTCFullYear() === year;
-        });
+        const notesForDay = notesWithDates.filter(note => new Date(note.eventDate).toDateString() === currentDate.toDateString());
 
         html += `<div class="calendar-day-cell custom-scrollbar" data-date="${currentDateStr}">
             <div class="calendar-day-number" title="View Day">${day}</div>
@@ -4824,7 +4864,7 @@ function renderCalendarView() {
             ${notesForDay.map(note => {
                 const selectProp = Object.values(note.properties || {}).find(p => p.type === 'select' && p.value);
                 const colorClass = selectProp ? getSelectColor(selectProp.value).split(' ')[0] : 'bg-transparent';
-                return `<div class="calendar-event-item" draggable="true" data-note-id="${note.id}" style="border-color: ${selectProp ? getComputedStyle(document.documentElement).getPropertyValue('--' + colorClass.replace('bg-','').replace('-500/20','-400')) : 'var(--accent-primary)'};">
+                return `<div class="calendar-event-item" draggable="true" data-note-id="${note.id}">
                     <div class="event-color-dot ${colorClass}"></div>
                     <span class="truncate pointer-events-none">${note.name}</span>
                 </div>`;
@@ -4836,19 +4876,7 @@ function renderCalendarView() {
     const remainingCells = (7 - ((startingDay + daysInMonth) % 7)) % 7;
     for (let i = 0; i < remainingCells; i++) { html += `<div class="bg-bg-pane-light"></div>`; }
 
-    html += `</div></div>
-        <aside id="calendar-unscheduled-notes" class="custom-scrollbar">
-            <h4 class="p-3 font-semibold text-text-secondary sticky top-0 bg-bg-pane-dark z-10">Unscheduled</h4>
-            <div class="p-3 space-y-2">
-            ${unscheduledNotes.map(note => `
-                <div class="calendar-event-item" draggable="true" data-note-id="${note.id}">
-                    <span class="truncate pointer-events-none">${note.name}</span>
-                </div>
-            `).join('')}
-            ${unscheduledNotes.length === 0 ? '<p class="text-xs text-center text-text-tertiary p-4">All notes in this project are scheduled.</p>' : ''}
-            </div>
-        </aside>
-    </div>`;
+    html += `</div></div>`;
     calendarView.innerHTML = html;
     feather.replace();
 }
@@ -4927,6 +4955,8 @@ function renderGalleryView() {
 }
 // ADD THIS ENTIRE NEW FUNCTION
 // REPLACE THE ENTIRE renderDayView FUNCTION
+// REPLACE THE ENTIRE renderDayView FUNCTION
+// REPLACE THE ENTIRE renderDayView FUNCTION
 function renderDayView(date) {
     const calendarView = document.getElementById('calendar-view');
     const collectionId = state.settings.activeCollectionId;
@@ -4946,49 +4976,77 @@ function renderDayView(date) {
         return null;
     }).filter(Boolean);
 
+    const allDayEvents = notesForDay.filter(note => {
+        const hasTime = note.eventDate.getHours() !== 0 || note.eventDate.getMinutes() !== 0;
+        return !hasTime && !note.endDate;
+    });
+    const timedEvents = notesForDay.filter(note => !allDayEvents.includes(note));
+    timedEvents.sort((a, b) => a.eventDate - b.eventDate);
+
     let html = `
-    <div class="day-view-container custom-scrollbar">
-        <header class="flex justify-between items-center mb-6">
+    <div class="day-view-container">
+        <header class="flex justify-between items-center mb-4 flex-shrink-0">
             <h3 class="text-xl font-semibold text-text-primary">${date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</h3>
             <div class="flex items-center gap-2">
-                <button id="calendar-month-view-btn" class="view-btn px-2.5 py-1 rounded" title="Month View"><i data-feather="calendar" class="w-4 h-4"></i> Back to Month</button>
+                <button id="calendar-month-view-btn" class="view-btn px-2.5 py-1 rounded"><i data-feather="calendar" class="w-4 h-4 mr-2"></i>Back to Month</button>
             </div>
         </header>
-        <div class="relative">
-            <div class="absolute left-0 top-0 bottom-0 w-16 border-r border-border-color text-xs text-text-tertiary">
-                ${Array.from({ length: 24 }).map((_, hour) => `<div class="h-12 text-right pr-2 border-b border-border-color">${hour % 12 === 0 ? 12 : hour % 12} ${hour < 12 ? 'AM' : 'PM'}</div>`).join('')}
+
+        ${allDayEvents.length > 0 ? `
+        <div class="day-view-all-day-section">
+            <span class="text-xs font-semibold text-text-tertiary mr-4">All-day</span>
+            <div class="inline-flex gap-2">
+            ${allDayEvents.map(note => {
+                const selectProp = Object.values(note.properties || {}).find(p => p.type === 'select' && p.value);
+                const colorClass = selectProp ? getSelectColor(selectProp.value).split(' ')[0] : 'bg-accent-primary';
+                return `<a href="#" class="day-view-event-link day-view-all-day-item flex items-center gap-2" data-note-id="${note.id}"><div class="event-color-dot ${colorClass}"></div>${note.name}</a>`;
+            }).join('')}
             </div>
-            <div class="relative ml-16 h-[1152px]"> `;
+        </div>
+        ` : ''}
 
-    if (notesForDay.length > 0) {
-        notesForDay.forEach(note => {
-            const startMinutes = note.eventDate.getHours() * 60 + note.eventDate.getMinutes();
-            const endMinutes = note.endDate ? (note.endDate.getHours() * 60 + note.endDate.getMinutes()) : (startMinutes + 60);
-            const duration = Math.max(30, endMinutes - startMinutes); // Minimum 30min height
-            
-            const top = (startMinutes / 60) * 48; // 48px per hour
-            const height = (duration / 60) * 48;
-
-            const selectProp = Object.values(note.properties || {}).find(p => p.type === 'select' && p.value);
-            const colorClass = selectProp ? getSelectColor(selectProp.value).split(' ')[0] : 'bg-transparent';
-            const styleColor = selectProp ? getComputedStyle(document.documentElement).getPropertyValue('--' + colorClass.replace('bg-','').replace('-500/20','-400')) : 'var(--accent-primary)';
-
-            html += `
-                <a href="#" class="day-view-event-link absolute left-2 right-0" data-note-id="${note.id}" style="top: ${top}px; height: ${height}px;">
-                    <div class="day-view-event h-full p-2" style="border-color: ${styleColor};">
-                        <div class="font-semibold text-text-primary text-sm flex items-center gap-2">
-                             <div class="event-color-dot ${colorClass}"></div>
-                             <span class="truncate">${note.name}</span>
-                        </div>
-                    </div>
-                </a>
-            `;
-        });
-    }
-
-    html += `</div></div></div>`;
+        <div class="day-view-timeline-wrapper custom-scrollbar">
+            <div class="relative h-[1152px]">
+                <div class="day-view-grid">
+                    ${Array.from({ length: 24 }).map((_, hour) => {
+                        const time = new Date(); time.setHours(hour, 0);
+                        return `<div class="day-view-hour-slot" data-time="${time.toLocaleTimeString(undefined, { hour: 'numeric', hour12: true })}"></div>`;
+                    }).join('')}
+                </div>
+                <div class="absolute top-0 bottom-0 left-20 right-0">
+                    ${timedEvents.map(note => {
+                        const startMinutes = note.eventDate.getHours() * 60 + note.eventDate.getMinutes();
+                        const endMinutes = note.endDate ? (note.endDate.getHours() * 60 + note.endDate.getMinutes()) : (startMinutes + 60);
+                        const duration = Math.max(30, endMinutes - startMinutes);
+                        const top = (startMinutes / 60) * 48;
+                        const height = (duration / 60) * 48;
+                        const selectProp = Object.values(note.properties || {}).find(p => p.type === 'select' && p.value);
+                        const styleColor = selectProp ? getComputedStyle(document.documentElement).getPropertyValue('--' + getSelectColor(selectProp.value).split(' ')[0].replace('bg-','').replace('-500/20','-400')) : 'var(--accent-primary)';
+                        
+                        return `
+                            <a href="#" class="day-view-event-link absolute left-1 right-2" data-note-id="${note.id}" style="top: ${top}px; height: ${height}px;">
+                                <div class="day-view-event h-full" style="border-left-color: ${styleColor}; background-color: ${styleColor.replace(')',', 0.1)')}">
+                                    <div class="font-semibold text-text-primary text-sm truncate">${note.name}</div>
+                                    <div class="text-xs text-text-secondary">${note.eventDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</div>
+                                </div>
+                            </a>`;
+                    }).join('')}
+                    ${new Date().toDateString() === date.toDateString() ? '<div id="now-indicator"><div/>' : ''}
+                </div>
+            </div>
+        </div>
+    </div>`;
     calendarView.innerHTML = html;
     feather.replace();
+    
+    if (document.getElementById('now-indicator')) {
+        updateNowIndicator();
+        setInterval(updateNowIndicator, 60000);
+        const now = new Date();
+        const minutes = now.getHours() * 60 + now.getMinutes();
+        const scrollPos = (minutes / 60) * 48 - 100;
+        document.querySelector('.day-view-timeline-wrapper').scrollTop = Math.max(0, scrollPos);
+    }
 }
 // END OF NEW FUNCTION
             function renderKanbanView() {
