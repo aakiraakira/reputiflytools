@@ -240,6 +240,39 @@
     background-color: var(--bg-main) !important;
 }
 /* --- END: Notion-Style Mobile Menu CSS --- */
+/* --- START: Mobile Settings Popup CSS --- */
+#mobile-settings-popup.open {
+    transform: translateX(0);
+}
+
+.toggle-switch {
+    width: 44px;
+    height: 24px;
+    background-color: var(--bg-pane-dark);
+    border-radius: 9999px;
+    padding: 2px;
+    transition: background-color 0.2s ease-in-out;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.toggle-switch.active {
+    background-color: var(--accent-primary);
+}
+
+.toggle-knob {
+    width: 20px;
+    height: 20px;
+    background-color: white;
+    border-radius: 9999px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    transition: transform 0.2s ease-in-out;
+}
+
+.toggle-switch.active .toggle-knob {
+    transform: translateX(20px);
+}
+/* --- END: Mobile Settings Popup CSS --- */
 /* Add these styles for checklist items */
 /* Add these styles for checklist items */
 /* UPDATED: Styles for checklist items in editor AND public view */
@@ -7893,7 +7926,97 @@ const openNotionStyleMenu = () => {
 const closeNotionStyleMenu = () => {
     notionMenu.classList.remove('open');
 };
+// =================================================================
+// START: NEW MOBILE SETTINGS POPUP JAVASCRIPT
+// =================================================================
+const settingsPopup = document.getElementById('mobile-settings-popup');
 
+/**
+ * Opens and populates the mobile settings view.
+ */
+const openMobileSettingsPopup = () => {
+    // 1. Update Theme Button state
+    const currentTheme = state.settings.theme;
+    const themeIcon = document.getElementById('mobile-theme-icon');
+    const themeText = document.getElementById('mobile-theme-text');
+    if (currentTheme === 'dark') {
+        themeIcon.setAttribute('data-feather', 'moon');
+        themeText.textContent = 'Dark Theme';
+    } else if (currentTheme === 'reputify') {
+        themeIcon.setAttribute('data-feather', 'star');
+        themeText.textContent = 'Reputify Theme';
+    } else {
+        themeIcon.setAttribute('data-feather', 'sun');
+        themeText.textContent = 'Light Theme';
+    }
+
+    // 2. Update Toggle Switch states
+    const chatbotToggle = document.querySelector('.toggle-switch[data-setting="chatbotVisible"]');
+    chatbotToggle.classList.toggle('active', state.settings.chatbotVisible);
+
+    const propertiesToggle = document.querySelector('.toggle-switch[data-setting="propertiesVisible"]');
+    // The logic is inverted for "Hide Properties", so we check for NOT visible
+    propertiesToggle.classList.toggle('active', !state.settings.propertiesVisible);
+
+    // 3. Render icons and show the popup
+    feather.replace();
+    settingsPopup.classList.add('open');
+};
+
+/**
+ * Closes the mobile settings view.
+ */
+const closeMobileSettingsPopup = () => {
+    settingsPopup.classList.remove('open');
+};
+
+// --- Event Listeners for the new Settings Popup ---
+
+// Listener to open the popup from the main menu footer
+document.getElementById('mobile-menu-settings-btn').addEventListener('click', openMobileSettingsPopup);
+
+// Listener for the back button inside the popup
+document.getElementById('mobile-settings-back-btn').addEventListener('click', closeMobileSettingsPopup);
+
+// Listener for all buttons inside the settings content area
+document.getElementById('mobile-settings-content').addEventListener('click', (e) => {
+    const button = e.target.closest('button');
+    if (button) {
+        // --- Re-use existing logic from the desktop sidebar ---
+        if (button.id === 'mobile-theme-toggle') {
+            document.getElementById('theme-toggle').click();
+            // Re-render the popup to reflect the new theme name
+            openMobileSettingsPopup(); 
+        } else if (button.id === 'mobile-bookmarklet-btn') {
+            document.getElementById('bookmarklet-info-btn').click();
+        } else {
+            const action = button.dataset.action;
+            if (action) {
+                // For Import/Export, find the original button by its data-action and click it
+                document.querySelector(`#settings-panel button[data-action="${action}"]`)?.click();
+            }
+        }
+    }
+
+    // --- Handle clicks on the toggle switches ---
+    const toggle = e.target.closest('.toggle-switch');
+    if (toggle) {
+        const settingKey = toggle.dataset.setting;
+        if (settingKey === 'chatbotVisible') {
+            state.settings.chatbotVisible = !state.settings.chatbotVisible;
+            toggle.classList.toggle('active', state.settings.chatbotVisible);
+        } else if (settingKey === 'propertiesVisible') {
+            // "Hide Properties" is an inverted toggle
+            state.settings.propertiesVisible = !state.settings.propertiesVisible;
+            toggle.classList.toggle('active', !state.settings.propertiesVisible);
+        }
+        saveState();
+        render(); // Re-render main app to show/hide elements
+    }
+});
+// =================================================================
+// END: NEW MOBILE SETTINGS POPUP JAVASCRIPT
+// =================================================================
 // --- EVENT LISTENERS ---
 // ADD ALL THIS NEW JAVASCRIPT CODE
 
@@ -7923,15 +8046,7 @@ document.getElementById('mobile-menu-add-folder-btn').addEventListener('click', 
     closeNotionStyleMenu(); // Close menu after action
 });
 
-document.getElementById('mobile-menu-settings-btn').addEventListener('click', () => {
-    alert("Settings button clicked! This can be hooked up to a new settings modal.");
-    // Here you would trigger a new modal for settings
-});
 
-document.getElementById('mobile-menu-tags-btn').addEventListener('click', () => {
-    alert("Tags button clicked! This can be hooked up to a new tags modal.");
-    // Here you would trigger a new modal for tags
-});
 
 
 // --- Click handler for the whole menu needs to be updated for view-switcher ---
@@ -11033,5 +11148,54 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
 </footer>
 
 </div>
+<div id="mobile-settings-popup" class="fixed inset-0 bg-bg-pane-light z-[1001] flex flex-col transition-transform duration-300 ease-in-out translate-x-full">
+    
+    <header class="flex items-center p-4 border-b border-border-color flex-shrink-0">
+        <button id="mobile-settings-back-btn" class="p-2 -ml-2 rounded-full hover:bg-bg-pane-dark">
+            <i data-feather="arrow-left" class="w-6 h-6"></i>
+        </button>
+        <h3 class="text-lg font-semibold ml-2">Settings</h3>
+    </header>
+
+    <div id="mobile-settings-content" class="flex-grow overflow-y-auto custom-scrollbar p-2">
+        <div class="space-y-1 p-2">
+            <button id="mobile-theme-toggle" class="w-full text-left px-3 py-3 text-base hover:bg-bg-pane-dark rounded-lg flex items-center gap-4 text-text-primary">
+               <i data-feather="star" id="mobile-theme-icon" class="w-5 h-5"></i>
+               <span id="mobile-theme-text">Reputify Theme</span>
+            </button>
+            <button data-action="import" class="w-full text-left px-3 py-3 text-base hover:bg-bg-pane-dark rounded-lg flex items-center gap-4 text-text-primary">
+                <i data-feather="upload" class="w-5 h-5"></i>
+                <span>Import Data</span>
+            </button>
+            <button data-action="export" class="w-full text-left px-3 py-3 text-base hover:bg-bg-pane-dark rounded-lg flex items-center gap-4 text-text-primary">
+                <i data-feather="download" class="w-5 h-5"></i>
+                <span>Export Data</span>
+            </button>
+            <div id="mobile-chatbot-toggle" class="w-full text-left px-3 py-3 text-base rounded-lg flex items-center justify-between gap-4 text-text-primary cursor-pointer hover:bg-bg-pane-dark">
+                <div class="flex items-center gap-4">
+                    <i data-feather="message-square" class="w-5 h-5"></i>
+                    <span>Show Chatbot Button</span>
+                </div>
+                <div class="toggle-switch" data-setting="chatbotVisible">
+                    <div class="toggle-knob"></div>
+                </div>
+            </div>
+            <button id="mobile-bookmarklet-btn" class="w-full text-left px-3 py-3 text-base hover:bg-bg-pane-dark rounded-lg flex items-center gap-4 text-text-primary">
+                <i data-feather="book" class="w-5 h-5"></i>
+                <span>Web Clipper</span>
+            </button>
+            <div id="mobile-properties-toggle" class="w-full text-left px-3 py-3 text-base rounded-lg flex items-center justify-between gap-4 text-text-primary cursor-pointer hover:bg-bg-pane-dark">
+                <div class="flex items-center gap-4">
+                    <i data-feather="eye" class="w-5 h-5"></i>
+                    <span>Hide Properties</span>
+                </div>
+                <div class="toggle-switch" data-setting="propertiesVisible">
+                    <div class="toggle-knob"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 </body>
 </html>
