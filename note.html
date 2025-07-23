@@ -141,6 +141,25 @@
     border-color: var(--border-color);
 }
 /* --- START: Notion-Style Mobile Menu CSS --- */
+/* --- START: New 'Add Note' Button Styles --- */
+/* --- START: New 'Add Note' Button Styles --- */
+/* --- START: New 'Add Note' Button Styles --- */
+.add-note-btn {
+    /* This is now simpler because the flex layout handles positioning */
+    padding: 0.25rem; /* 4px */
+    border-radius: 0.25rem; /* 4px */
+    color: var(--text-tertiary);
+    transition: color 150ms ease-in-out, background-color 150ms ease-in-out;
+    flex-shrink: 0; /* Prevents the button from being squished */
+}
+
+.add-note-btn:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-pane-dark);
+}
+/* --- END: New 'Add Note' Button Styles --- */
+/* --- END: New 'Add Note' Button Styles --- */
+/* --- END: New 'Add Note' Button Styles --- */
 /* Add these new rules for folder-specific view buttons */
 /* Add this new rule for the slide-in secondary view */
 
@@ -4707,7 +4726,7 @@ const openLinkModal = () => {
     }
     const propertiesBtn = document.getElementById('toggle-properties-btn');
 if (propertiesBtn) {
-    const icon = propertiesBtn.querySelector('i');
+    const icon = propertiesBtn.querySelector('i, svg');
     const text = propertiesBtn.querySelector('span');
     if (state.settings.propertiesVisible) {
         text.textContent = 'Hide Properties';
@@ -4781,29 +4800,56 @@ if (themeMeta) {
             }
 
             function renderCollectionsList(collections = state.collections, level = 0) {
-    const createItemHTML = (item, currentLevel) => {
-        const isActive = item.id === state.settings.activeCollectionId;
-        const isNoteActive = item.id === state.settings.activeNoteId;
-        const isFolder = item.type === 'folder';
+    // REPLACE the existing createItemHTML function with this one
+// REPLACE the existing createItemHTML function with this one
+const createItemHTML = (item, currentLevel) => {
+    const isActive = item.id === state.settings.activeCollectionId;
+    const isNoteActive = item.id === state.settings.activeNoteId;
+    const isFolder = item.type === 'folder';
 
-        if (isFolder && item.children) {
-            item.children.sort((a, b) => {
-                if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-                return a.name.localeCompare(b.name);
-            });
+    // --- Start of new logic ---
+    // This finds the correct parent folder ID for the new note
+    let newNoteParentId = null;
+    if (isFolder) {
+        // If clicking a folder's plus button, the folder itself is the parent
+        newNoteParentId = item.id;
+    } else {
+        // If clicking a note's plus button, find the note's parent folder
+        const findResult = findItem(item.id);
+        const parent = findResult ? findResult.parent : null;
+        if (parent && !Array.isArray(parent)) { // Check if the parent is a folder, not the root
+            newNoteParentId = parent.id;
         }
+    }
+    // --- End of new logic ---
 
-        return `
-            <li data-id="${item.id}" draggable="true" class="collection-item-wrapper rounded-md">
-                <a href="#" class="collection-item flex items-center gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
+    if (isFolder && item.children) {
+        item.children.sort((a, b) => {
+            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+    }
+
+    // This HTML is updated to include the button, which appears on hover
+    return `
+        <li data-id="${item.id}" draggable="true" class="collection-item-wrapper group rounded-md">
+            <div class="collection-item flex items-center justify-between gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
+                
+                <a href="#" class="collection-item-link flex items-center gap-2 flex-grow min-w-0">
                     ${isFolder ? `<i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i>` : ''}
                     <i data-feather="${isFolder ? 'folder' : (item.pinned ? 'paperclip' : 'file-text')}" class="w-4 h-4 flex-shrink-0 text-text-secondary ${item.pinned ? 'text-accent-primary': ''}"></i>
-                    <span class="truncate flex-grow">${item.name}</span>
+                    <span class="truncate">${item.name}</span>
                 </a>
-                ${isFolder && item.expanded && item.children ? `<ul class="collection-children">${renderCollectionsList(item.children, currentLevel + 1)}</ul>` : ''}
-            </li>
-        `;
-    };
+
+                <button class="add-note-btn opacity-0 group-hover:opacity-100 transition-opacity" data-parent-id="${newNoteParentId}" title="Add New Note">
+                    <i data-feather="plus" class="w-4 h-4 pointer-events-none"></i>
+                </button>
+
+            </div>
+            ${isFolder && item.expanded && item.children ? `<ul class="collection-children">${renderCollectionsList(item.children, currentLevel + 1)}</ul>` : ''}
+        </li>
+    `;
+};
 
     collections.sort((a, b) => {
         if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
@@ -5878,75 +5924,153 @@ const upgradePastedTables = (html) => {
     });
     return tempDiv.innerHTML;
 };            
-            const createNewNote = (andSwitchToIt = true, initialContent = '') => {
-                let parentCollection;
-                let targetArray;
-                let parentId = state.settings.activeCollectionId;
+            // =================================================================
+// START: REPLACEMENT JAVASCRIPT BLOCK
+// =================================================================
 
-                const parentResult = findItem(parentId);
+/**
+ * MODIFIED: Upgraded to accept a specific parentId for the new note.
+ */
+// =================================================================
+// START: REPLACEMENT createNewNote FUNCTION
+// =================================================================
+const createNewNote = (andSwitchToIt = true, initialContent = '', parentId = undefined) => {
+    let parentCollection;
+    let targetArray;
+    let finalParentId = parentId;
 
-                if (parentResult && parentResult.item.type === 'folder') {
-                    parentCollection = parentResult.item;
-                    targetArray = parentCollection.children;
-                } else if(parentResult) {
-                    const parentOfNoteResult = findItem(parentResult.parent.id);
-                    parentId = parentOfNoteResult ? parentOfNoteResult.item.id : null;
-                    parentCollection = parentOfNoteResult ? parentOfNoteResult.item : null;
-                    targetArray = parentCollection ? parentCollection.children : state.collections;
-                } else {
-                    parentId = null;
-                    targetArray = state.collections;
-                }
-                
-                if (parentCollection) {
-                    parentCollection.expanded = true;
-                }
+    // If no parent is specified, fall back to the currently active folder
+    if (finalParentId === undefined) {
+        finalParentId = state.settings.activeCollectionId;
+    }
 
-                const now = new Date().toISOString();
-                const newNote = {
-    id: generateId('n'), name: 'Untitled Note', type: 'note', content: initialContent,
-    status: parentId ? state.kanbanColumns[parentId]?.[0]?.id || null : null,
-    createdAt: now,
-    modifiedAt: now,
-    pinned: false,
-    links: [],
-    tags: [],
-    properties: {}, // ADD THIS LINE
-        propertiesCollapsed: false, // ADD THIS LINE
+    const parentResult = findItem(finalParentId);
 
+    // Determine where to add the new note (in a folder or at the root)
+    if (parentResult && parentResult.item.type === 'folder') {
+        parentCollection = parentResult.item;
+        targetArray = parentCollection.children;
+    } else {
+        finalParentId = null; // Default to the root level if the parent isn't a valid folder
+        targetArray = state.collections;
+    }
+    
+    // Automatically expand the parent folder to show the new note
+    if (parentCollection) {
+        parentCollection.expanded = true;
+    }
+
+    const now = new Date().toISOString();
+    const newNote = {
+        id: generateId('n'), name: 'Untitled Note', type: 'note', content: initialContent,
+        status: finalParentId ? state.kanbanColumns[finalParentId]?.[0]?.id || null : null,
+        createdAt: now, modifiedAt: now,
+        pinned: false, links: [], tags: [], properties: {}, propertiesCollapsed: false,
+    };
+
+    targetArray.unshift(newNote); // Add the new note to the top of the list
+    
+    if(andSwitchToIt) {
+        state.settings.activeNoteId = newNote.id;
+        state.settings.activeCollectionId = finalParentId;
+        state.settings.activeTag = null;
+        state.settings.editorMode = 'editor';
+    }
+    
+    // Save, update search index, and re-render the app
+    saveState();
+    buildLunrIndex();
+    render();
+
+    if (andSwitchToIt) {
+        app.elements.noteEditorTitle.focus();
+        app.elements.noteEditorTitle.select();
+    }
+    
+    return newNote; // Return the newly created note object
+};
+// =================================================================
+// END: REPLACEMENT createNewNote FUNCTION
+// =================================================================
+
+/**
+ * MODIFIED: Now generates a '+' button for each item.
+ */
+const renderNotionStyleMenu = () => {
+    const user = window.auth.currentUser;
+    if (user && user.email) {
+        document.getElementById('menu-user-initial').textContent = user.email.charAt(0).toUpperCase();
+        document.getElementById('menu-user-email').textContent = user.email;
+        document.getElementById('dropdown-user-email-display').textContent = user.email;
+    }
+    const allNotes = getAllNotes(state.collections);
+    const recentNotes = [...allNotes]
+        .sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt))
+        .slice(0, 5);
+    let jumpBackHTML = '';
+    if (recentNotes.length > 0) {
+        jumpBackHTML = `
+            <h3 class="notion-menu-section-header">Jump back in</h3>
+            <div class="jump-back-in-grid">
+                ${recentNotes.map(note => `
+                    <a href="#" class="recent-note-card" data-id="${note.id}" data-action="navigate-note">
+                        <i data-feather="file-text" class="w-5 h-5"></i>
+                        <span class="note-name">${note.name}</span>
+                    </a>
+                `).join('')}
+            </div>`;
+    }
+
+    const buildPrivateList = (collections = state.collections, level = 0, parentId = null) => {
+        return collections.map(item => {
+            const isFolder = item.type === 'folder';
+            // --- MODIFIED: Added 'group' class and the new '+' button ---
+            let itemHTML = `
+                <li data-id="${item.id}" class="collection-item-wrapper group rounded-md">
+                    <div class="collection-item flex items-center gap-2 p-2 rounded-md" style="padding-left: ${8 + level * 16}px;">
+                        ${isFolder ? `<a href="#" class="expander-btn -ml-1 p-1" data-action="toggle-expand"><i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i></a>` : '<div class="w-6 h-6 flex-shrink-0"></div>'}
+                        <a href="#" class="flex items-center gap-2 flex-grow min-w-0" data-action="${isFolder ? 'navigate-folder' : 'navigate-note'}">
+                            <i data-feather="${isFolder ? 'folder' : 'file-text'}" class="w-4 h-4 flex-shrink-0 text-text-secondary"></i>
+                            <span class="truncate">${item.name}</span>
+                        </a>
+                        <button class="add-note-btn" data-action="add-note-here" data-parent-id="${isFolder ? item.id : parentId}" title="Add New Note Here">
+                            <i data-feather="plus" class="w-4 h-4"></i>
+                        </button>
+                    </div>`;
+            if (isFolder && item.expanded && item.children && item.children.length > 0) {
+                itemHTML += `<ul class="collection-children">${buildPrivateList(item.children, level + 1, item.id)}</ul>`;
+            } else if (isFolder && item.expanded) {
+                itemHTML += `<p class="pl-12 py-1 text-sm text-text-tertiary">No notes inside</p>`;
+            }
+            itemHTML += `</li>`;
+            return itemHTML;
+        }).join('');
+    };
+
+    document.getElementById('jump-back-in-section').innerHTML = jumpBackHTML;
+    document.getElementById('private-section').innerHTML = `
+        <h3 class="notion-menu-section-header">All Notes</h3>
+        <ul class="space-y-1">${buildPrivateList()}</ul>
+    `;
+    feather.replace();
 };
 
-                if (initialContent) {
-                   updateNoteLinks(newNote);
-                   updateNoteTags(newNote);
-                   const titleMatch = initialContent.match(/<h1>(.*?)<\/h1>/);
-                   if (titleMatch && titleMatch[1]) {
-                       newNote.name = titleMatch[1];
-                   } else {
-                       // Try to find title from markdown
-                       const mdTitleMatch = initialContent.match(/^# (.*)/m);
-                       if(mdTitleMatch && mdTitleMatch[1]) {
-                           newNote.name = mdTitleMatch[1];
-                       }
-                   }
-                }
-                
-                targetArray.unshift(newNote);
-                
-                if(andSwitchToIt) {
-                    state.settings.activeNoteId = newNote.id;
-                    state.settings.activeTag = null;
-                    // Switch to editor mode when creating a new note
-                    state.settings.editorMode = 'editor';
-                }
-                
-                saveState();
-                buildLunrIndex();
-                render();
-                app.elements.noteEditorTitle.focus();
-    app.elements.noteEditorTitle.select();
-                return newNote;
-            };
+/**
+ * MODIFIED: Added a new case for 'add-note-here'.
+ */
+// =================================================================
+// START: REPLACEMENT CLICK LISTENER
+// =================================================================
+// REPLACE your current notionMenu 'click' listener with this one
+// REPLACE your current notionMenu 'click' listener with this one
+// REPLACE your current notionMenu 'click' listener with this one
+
+// =================================================================
+// END: REPLACEMENT CLICK LISTENER
+// =================================================================
+// =================================================================
+// END: REPLACEMENT JAVASCRIPT BLOCK
+// =================================================================
 
             function initSpeechRecognition() {
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -6805,7 +6929,7 @@ const commands = [
 },
 {
     name: 'date',
-    description: 'Set a date property on the current note. Usage: /date [Property Name] DD/MM/YY',
+    description: 'Set a date. Usage: /date [Property Name] DD/MM/YY',
     execute: (args) => {
         if (!state.settings.activeNoteId) {
             return showToast('❌ This command can only be used inside a note.', 'error');
@@ -7805,8 +7929,10 @@ const notionMenuCloseBtn = document.getElementById('mobile-menu-close-btn');
 /**
  * Dynamically builds the content for our new Notion-style menu.
  */
+// =================================================================
+// START: REPLACEMENT FUNCTION
+// =================================================================
 const renderNotionStyleMenu = () => {
-    // This part that populates the header and "Jump back in" section is correct and remains.
     const user = window.auth.currentUser;
     if (user && user.email) {
         document.getElementById('menu-user-initial').textContent = user.email.charAt(0).toUpperCase();
@@ -7831,35 +7957,39 @@ const renderNotionStyleMenu = () => {
             </div>`;
     }
 
-    // --- THIS IS THE CORRECTED LOGIC FOR BUILDING THE FOLDER & NOTE LIST ---
-    const buildPrivateList = (collections = state.collections, level = 0) => {
+    const buildPrivateList = (collections = state.collections, level = 0, parentId = null) => {
         return collections.map(item => {
             const isFolder = item.type === 'folder';
+            
+            // --- THIS IS THE NEW, MORE RELIABLE HTML STRUCTURE ---
             let itemHTML = `
                 <li data-id="${item.id}" class="collection-item-wrapper rounded-md">
-                    <div class="collection-item flex items-center gap-2 p-2 rounded-md" style="padding-left: ${8 + level * 16}px;">
+                    <div class="collection-item flex items-center justify-between gap-2 p-2 rounded-md hover:bg-bg-pane-dark" style="padding-left: ${8 + level * 16}px;">
                         
-                        ${isFolder ? `<a href="#" class="expander-btn -ml-1 p-1" data-action="toggle-expand"><i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i></a>` : '<div class="w-6 h-6 flex-shrink-0"></div>' /* Spacer for alignment */}
-                        
-                        <a href="#" class="flex items-center gap-2 flex-grow min-w-0" data-action="${isFolder ? 'navigate-folder' : 'navigate-note'}">
-                            <i data-feather="${isFolder ? 'folder' : 'file-text'}" class="w-4 h-4 flex-shrink-0 text-text-secondary"></i>
-                            <span class="truncate">${item.name}</span>
-                        </a>
+                        <div class="flex items-center gap-2 flex-grow min-w-0">
+                            ${isFolder ? `<a href="#" class="expander-btn -ml-1 p-1" data-action="toggle-expand"><i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i></a>` : '<div class="w-6 h-6 flex-shrink-0"></div>'}
+                            <a href="#" class="flex items-center gap-2 flex-grow min-w-0" data-action="${isFolder ? 'navigate-folder' : 'navigate-note'}">
+                                <i data-feather="${isFolder ? 'folder' : 'file-text'}" class="w-4 h-4 flex-shrink-0 text-text-secondary"></i>
+                                <span class="truncate">${item.name}</span>
+                            </a>
+                        </div>
+
+                        <button class="add-note-btn" data-action="add-note-here" data-parent-id="${isFolder ? item.id : parentId}" title="Add New Note Here">
+                            <i data-feather="plus" class="w-4 h-4"></i>
+                        </button>
+
                     </div>`;
-            
-            // If the folder is expanded, recursively render its children (the notes inside)
+
             if (isFolder && item.expanded && item.children && item.children.length > 0) {
-                itemHTML += `<ul class="collection-children">${buildPrivateList(item.children, level + 1)}</ul>`;
+                itemHTML += `<ul class="collection-children">${buildPrivateList(item.children, level + 1, item.id)}</ul>`;
             } else if (isFolder && item.expanded) {
                 itemHTML += `<p class="pl-12 py-1 text-sm text-text-tertiary">No notes inside</p>`;
             }
-            
             itemHTML += `</li>`;
             return itemHTML;
         }).join('');
     };
 
-    // This part that injects the HTML is also correct and remains.
     document.getElementById('jump-back-in-section').innerHTML = jumpBackHTML;
     document.getElementById('private-section').innerHTML = `
         <h3 class="notion-menu-section-header">All Notes</h3>
@@ -7867,50 +7997,13 @@ const renderNotionStyleMenu = () => {
     `;
     feather.replace();
 };
+// =================================================================
+// END: REPLACEMENT FUNCTION
+// =================================================================
 
 // --- THIS IS THE CORRECTED CLICK HANDLER FOR THE MENU ---
-notionMenu.addEventListener('click', (e) => {
-    // Find the closest element with a data-action attribute
-    const target = e.target.closest('[data-action]');
-    if (!target) return;
-    
-    e.preventDefault();
-    const action = target.dataset.action;
-    const listItem = target.closest('.collection-item-wrapper, .recent-note-card');
-    if (!listItem) return;
+// REPLACE your current notionMenu 'click' listener with this one
 
-    const id = listItem.dataset.id;
-    const { item } = findItem(id);
-    if (!item) return;
-
-    // Use a switch to handle the different actions cleanly
-    switch (action) {
-        case 'toggle-expand':
-            if (item.type === 'folder') {
-                item.expanded = !item.expanded;
-                renderNotionStyleMenu(); // Just re-render the menu to show/hide notes
-            }
-            break;
-        case 'navigate-folder':
-            state.settings.activeCollectionId = item.id;
-            state.settings.activeNoteId = null; // De-select any active note
-            state.settings.activeTag = null;
-            closeNotionStyleMenu(); // Close the menu...
-            render(); // ...and render the main app view
-            break;
-        case 'navigate-note':
-            state.settings.activeNoteId = item.id;
-            const result = findItem(item.id);
-            state.settings.activeCollectionId = (Array.isArray(result.parent)) ? null : result.parent.id;
-            state.settings.activeTag = null;
-            closeNotionStyleMenu(); // Close the menu...
-            render(); // ...and render the main app view
-            break;
-    }
-    
-    // Save state after any action that might change it
-    saveState();
-});
 
 // =================================================================
 // END: CORRECTED JAVASCRIPT
@@ -8104,42 +8197,58 @@ document.getElementById('mobile-menu-add-folder-btn').addEventListener('click', 
 
 
 // --- Click handler for the whole menu needs to be updated for view-switcher ---
+// REPLACE your current notionMenu 'click' listener with this one
+// REPLACE your current notionMenu 'click' listener with this one
 notionMenu.addEventListener('click', (e) => {
-    // 1. Handle view switcher clicks
-    const viewBtn = e.target.closest('.folder-view-btn');
-    if (viewBtn) {
-        e.preventDefault();
-        state.settings.activeView = viewBtn.dataset.view;
-        state.settings.activeCollectionId = viewBtn.dataset.folderId;
-        state.settings.activeNoteId = null; // We are now viewing the folder
-        closeNotionStyleMenu();
-        saveState();
-        render();
-        return; // Stop processing
+    // Find the closest element that has a data-action attribute
+    const target = e.target.closest('[data-action]');
+    if (!target) return;
+
+    e.preventDefault();
+    const action = target.dataset.action;
+    
+    // --- Priority 1: Handle the 'Add Note' action ---
+    if (action === 'add-note-here') {
+        const parentId = target.dataset.parentId === 'null' ? null : target.dataset.parentId;
+        const newNote = createNewNote(false, '', parentId); // Create the note but don't switch view
+        renderNotionStyleMenu(); // Re-render the menu to show the new note
+        showToast(`Note "${newNote.name}" created!`, 'success');
+        return; // Stop processing further actions
     }
 
-    // 2. Handle regular note/folder clicks (existing logic)
-    const targetItem = e.target.closest('[data-id]');
-    if (!targetItem) return;
-    
-    e.preventDefault();
-    const id = targetItem.dataset.id;
+    // --- Priority 2: Handle all other actions like navigation or expanding a folder ---
+    const listItem = target.closest('.collection-item-wrapper, .recent-note-card');
+    if (!listItem) return;
+
+    const id = listItem.dataset.id;
     const { item } = findItem(id);
+    if (!item) return;
 
-    state.settings.activeTag = null;
-
-    if (item.type === 'folder') {
-        item.expanded = !item.expanded;
-        renderNotionStyleMenu(); 
-    } else if (item.type === 'note') {
-        state.settings.activeNoteId = id;
-        const result = findItem(id);
-        state.settings.activeCollectionId = (Array.isArray(result.parent)) ? null : result.parent.id;
-        closeNotionStyleMenu();
+    switch (action) {
+        case 'toggle-expand':
+            if (item.type === 'folder') {
+                item.expanded = !item.expanded;
+                renderNotionStyleMenu(); // Only re-render the menu
+            }
+            break;
+        case 'navigate-folder':
+            state.settings.activeCollectionId = item.id;
+            state.settings.activeNoteId = null;
+            state.settings.activeTag = null;
+            closeNotionStyleMenu(); // Close menu and render main app
+            render();
+            break;
+        case 'navigate-note':
+            state.settings.activeNoteId = item.id;
+            const result = findItem(item.id);
+            state.settings.activeCollectionId = (Array.isArray(result.parent)) ? null : result.parent.id;
+            state.settings.activeTag = null;
+            closeNotionStyleMenu(); // Close menu and render main app
+            render();
+            break;
     }
     
     saveState();
-    render();
 });
 
 // Add a global click listener to close the profile dropdown when clicking away
@@ -8158,32 +8267,7 @@ app.elements.mobileMenuBtn.addEventListener('click', (e) => {
 notionMenuCloseBtn.addEventListener('click', closeNotionStyleMenu);
 
 // 3. Listener to handle clicks inside the new menu (for navigation).
-notionMenu.addEventListener('click', (e) => {
-    const targetItem = e.target.closest('[data-id]');
-    if (!targetItem) return;
-    
-    e.preventDefault();
-    const id = targetItem.dataset.id;
-    const { item } = findItem(id);
-
-    state.settings.activeTag = null; // Always clear tag filter on navigation
-
-    if (item.type === 'folder') {
-        item.expanded = !item.expanded; // Toggle folder expansion
-        // Re-render the menu content to show the change
-        renderNotionStyleMenu(); 
-    } else if (item.type === 'note') {
-        // If a note is clicked, navigate to it and close the menu
-        state.settings.activeNoteId = id;
-        const result = findItem(id);
-        const parent = result.parent;
-        state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
-        closeNotionStyleMenu(); // Close menu after selection
-    }
-    
-    saveState();
-    render(); // Re-render the main app view
-});
+// REPLACE your current notionMenu 'click' listener with this one
 
 // (The original toggleMobileSidebar and its overlay listener are no longer needed and have been removed)
 
@@ -8255,38 +8339,54 @@ if (button) {
 }
 });
 // --- END: New Mobile Menu Logic ---
-                app.containers.collectionsList.addEventListener('click', (e) => {
-                    const itemLink = e.target.closest('.collection-item');
-                    if (!itemLink) return;
-                    e.preventDefault();
+                // REPLACE the existing event listener with this one
+// REPLACE the existing event listener with this one
+app.containers.collectionsList.addEventListener('click', (e) => {
+    // First, check if the new plus button was clicked
+    const addBtn = e.target.closest('.add-note-btn');
+    if (addBtn) {
+        e.preventDefault();
+        e.stopPropagation(); // This stops the click from also navigating to the note/folder
+        
+        // Get the parent folder's ID that we stored on the button
+        const parentId = addBtn.dataset.parentId === 'null' ? null : addBtn.dataset.parentId;
 
-                    const wrapper = itemLink.closest('.collection-item-wrapper');
-                    const id = wrapper.dataset.id;
-                    const { item } = findItem(id);
-                    
-                    state.settings.activeTag = null; // Deactivate tag filter
-
-                   if (item.type === 'folder') {
-    // Default to list view on mobile devices
-    if (window.innerWidth < 768) {
-        state.settings.activeView = 'list';
+        // Call your existing createNewNote function with the correct parent ID
+        createNewNote(true, '', parentId); 
+        return; // Action is done, so we stop here
     }
+
+    // If the plus button wasn't clicked, run the original navigation logic
+    const itemLink = e.target.closest('.collection-item-link');
+    if (!itemLink) return;
     
-    state.settings.activeCollectionId = id;
-    state.settings.activeNoteId = null;
-    item.expanded = !item.expanded;
-} else if (item.type === 'note') {
-                         state.settings.activeNoteId = id;
-                         const result = findItem(id);
-                         const parent = result.parent;
-                         state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
-                         if (window.innerWidth < 768) {
-                             toggleMobileSidebar(false);
-                         }
-                    }
-                    saveState();
-                    render();
-                });
+    e.preventDefault();
+
+    const wrapper = itemLink.closest('.collection-item-wrapper');
+    const id = wrapper.dataset.id;
+    const { item } = findItem(id);
+    
+    state.settings.activeTag = null; // Deactivate tag filter
+
+    if (item.type === 'folder') {
+        if (window.innerWidth < 768) {
+            state.settings.activeView = 'list';
+        }
+        state.settings.activeCollectionId = id;
+        state.settings.activeNoteId = null;
+        item.expanded = !item.expanded;
+    } else if (item.type === 'note') {
+        state.settings.activeNoteId = id;
+        const result = findItem(id);
+        const parent = result.parent;
+        state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+        if (window.innerWidth < 768) {
+            toggleMobileSidebar(false);
+        }
+    }
+    saveState();
+    render();
+});
                 
                 app.containers.tagList.addEventListener('click', e => {
                     e.preventDefault();
