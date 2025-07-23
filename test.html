@@ -142,6 +142,8 @@
 }
 /* --- START: Notion-Style Mobile Menu CSS --- */
 /* Add these new rules for folder-specific view buttons */
+/* Add this new rule for the slide-in secondary view */
+
 .folder-view-switcher {
     display: flex;
     gap: 0.5rem;
@@ -7748,27 +7750,32 @@ const notionMenuCloseBtn = document.getElementById('mobile-menu-close-btn');
  * Dynamically builds the content for our new Notion-style menu.
  */
 // REPLACE the entire renderNotionStyleMenu function
+// =================================================================
+// START: CORRECTED JAVASCRIPT FOR FOLDER NAVIGATION
+// =================================================================
+
+/**
+ * Dynamically builds the content for our new Notion-style menu.
+ */
 const renderNotionStyleMenu = () => {
+    // This part that populates the header and "Jump back in" section is correct and remains.
     const user = window.auth.currentUser;
     if (user && user.email) {
         document.getElementById('menu-user-initial').textContent = user.email.charAt(0).toUpperCase();
         document.getElementById('menu-user-email').textContent = user.email;
-        // Also update the dropdown email
         document.getElementById('dropdown-user-email-display').textContent = user.email;
     }
-
     const allNotes = getAllNotes(state.collections);
     const recentNotes = [...allNotes]
         .sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt))
         .slice(0, 3);
-
     let jumpBackHTML = '';
     if (recentNotes.length > 0) {
         jumpBackHTML = `
             <h3 class="notion-menu-section-header">Jump back in</h3>
             <div class="jump-back-in-grid">
                 ${recentNotes.map(note => `
-                    <a href="#" class="recent-note-card" data-id="${note.id}">
+                    <a href="#" class="recent-note-card" data-id="${note.id}" data-action="navigate-note">
                         <i data-feather="file-text" class="w-5 h-5"></i>
                         <span class="note-name">${note.name}</span>
                     </a>
@@ -7776,36 +7783,27 @@ const renderNotionStyleMenu = () => {
             </div>`;
     }
 
-    // THIS IS THE NEW PART: A recursive function to build the list with the view switcher
+    // --- THIS IS THE CORRECTED LOGIC FOR BUILDING THE FOLDER & NOTE LIST ---
     const buildPrivateList = (collections = state.collections, level = 0) => {
         return collections.map(item => {
-            const isActive = item.id === state.settings.activeCollectionId;
-            const isNoteActive = item.id === state.settings.activeNoteId;
+            const isFolder = item.type === 'folder';
             let itemHTML = `
-                <li data-id="${item.id}" draggable="true" class="collection-item-wrapper rounded-md">
-                    <a href="#" class="collection-item flex items-center gap-2 p-2 rounded-md ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + level * 16}px;">
-                        ${item.type === 'folder' ? `<i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i>` : ''}
-                        <i data-feather="${item.type === 'folder' ? 'folder' : 'file-text'}" class="w-4 h-4 flex-shrink-0 text-text-secondary"></i>
-                        <span class="truncate flex-grow">${item.name}</span>
-                    </a>`;
-            
-            // If the item is an expanded folder, add the view switcher buttons
-            if (item.type === 'folder' && item.expanded) {
-                const currentView = (item.id === state.settings.activeCollectionId) ? state.settings.activeView : 'list';
-                itemHTML += `
-                    <div class="folder-view-switcher">
-                        <button class="folder-view-btn ${currentView === 'list' ? 'active' : ''}" data-view="list" data-folder-id="${item.id}">
-                            <i data-feather="list" class="w-4 h-4"></i>List
-                        </button>
-                        <button class="folder-view-btn ${currentView === 'calendar' ? 'active' : ''}" data-view="calendar" data-folder-id="${item.id}">
-                            <i data-feather="calendar" class="w-4 h-4"></i>Calendar
-                        </button>
+                <li data-id="${item.id}" class="collection-item-wrapper rounded-md">
+                    <div class="collection-item flex items-center gap-2 p-2 rounded-md" style="padding-left: ${8 + level * 16}px;">
+                        
+                        ${isFolder ? `<a href="#" class="expander-btn -ml-1 p-1" data-action="toggle-expand"><i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i></a>` : '<div class="w-6 h-6 flex-shrink-0"></div>' /* Spacer for alignment */}
+                        
+                        <a href="#" class="flex items-center gap-2 flex-grow min-w-0" data-action="${isFolder ? 'navigate-folder' : 'navigate-note'}">
+                            <i data-feather="${isFolder ? 'folder' : 'file-text'}" class="w-4 h-4 flex-shrink-0 text-text-secondary"></i>
+                            <span class="truncate">${item.name}</span>
+                        </a>
                     </div>`;
-                if (item.children && item.children.length > 0) {
-                    itemHTML += `<ul class="collection-children">${buildPrivateList(item.children, level + 1)}</ul>`;
-                } else {
-                     itemHTML += `<p class="pl-12 py-1 text-sm text-text-tertiary">No notes inside</p>`;
-                }
+            
+            // If the folder is expanded, recursively render its children (the notes inside)
+            if (isFolder && item.expanded && item.children && item.children.length > 0) {
+                itemHTML += `<ul class="collection-children">${buildPrivateList(item.children, level + 1)}</ul>`;
+            } else if (isFolder && item.expanded) {
+                itemHTML += `<p class="pl-12 py-1 text-sm text-text-tertiary">No notes inside</p>`;
             }
             
             itemHTML += `</li>`;
@@ -7813,14 +7811,62 @@ const renderNotionStyleMenu = () => {
         }).join('');
     };
 
+    // This part that injects the HTML is also correct and remains.
     document.getElementById('jump-back-in-section').innerHTML = jumpBackHTML;
     document.getElementById('private-section').innerHTML = `
         <h3 class="notion-menu-section-header">Private</h3>
         <ul class="space-y-1">${buildPrivateList()}</ul>
     `;
-    
     feather.replace();
 };
+
+// --- THIS IS THE CORRECTED CLICK HANDLER FOR THE MENU ---
+notionMenu.addEventListener('click', (e) => {
+    // Find the closest element with a data-action attribute
+    const target = e.target.closest('[data-action]');
+    if (!target) return;
+    
+    e.preventDefault();
+    const action = target.dataset.action;
+    const listItem = target.closest('.collection-item-wrapper, .recent-note-card');
+    if (!listItem) return;
+
+    const id = listItem.dataset.id;
+    const { item } = findItem(id);
+    if (!item) return;
+
+    // Use a switch to handle the different actions cleanly
+    switch (action) {
+        case 'toggle-expand':
+            if (item.type === 'folder') {
+                item.expanded = !item.expanded;
+                renderNotionStyleMenu(); // Just re-render the menu to show/hide notes
+            }
+            break;
+        case 'navigate-folder':
+            state.settings.activeCollectionId = item.id;
+            state.settings.activeNoteId = null; // De-select any active note
+            state.settings.activeTag = null;
+            closeNotionStyleMenu(); // Close the menu...
+            render(); // ...and render the main app view
+            break;
+        case 'navigate-note':
+            state.settings.activeNoteId = item.id;
+            const result = findItem(item.id);
+            state.settings.activeCollectionId = (Array.isArray(result.parent)) ? null : result.parent.id;
+            state.settings.activeTag = null;
+            closeNotionStyleMenu(); // Close the menu...
+            render(); // ...and render the main app view
+            break;
+    }
+    
+    // Save state after any action that might change it
+    saveState();
+});
+
+// =================================================================
+// END: CORRECTED JAVASCRIPT
+// =================================================================
 /**
  * Opens the new mobile menu.
  */
