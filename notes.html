@@ -141,6 +141,24 @@
     border-color: var(--border-color);
 }
 /* --- START: Notion-Style Mobile Menu CSS --- */
+/* --- START: New 'Add Note' Button Styles --- */
+/* --- START: New 'Add Note' Button Styles --- */
+.add-note-btn {
+    opacity: 1; /* Make the button visible by default */
+    margin-left: auto; /* Pushes the button to the right */
+    padding: 0.25rem; /* 4px */
+    border-radius: 0.25rem; /* 4px */
+    color: var(--text-tertiary);
+    transition: color 150ms ease-in-out; /* Only transition color now */
+    flex-shrink: 0;
+}
+
+.add-note-btn:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-pane-dark);
+}
+/* --- END: New 'Add Note' Button Styles --- */
+/* --- END: New 'Add Note' Button Styles --- */
 /* Add these new rules for folder-specific view buttons */
 /* Add this new rule for the slide-in secondary view */
 
@@ -184,9 +202,21 @@
 
 /* Grid layout for the "Jump back in" cards */
 .jump-back-in-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    display: flex;
+    flex-wrap: nowrap; /* Prevent wrapping */
     gap: 0.5rem;
+    overflow-x: auto; /* Enable horizontal scrolling */
+    padding-bottom: 0.5rem; /* Add space for the scrollbar */
+    /* Hide scrollbar for a cleaner look */
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+}
+.jump-back-in-grid::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+}
+.recent-note-card {
+    width: 140px; /* Give cards a fixed width */
+    flex-shrink: 0; /* Prevent cards from shrinking */
 }
 
 /* Individual card for a recent note */
@@ -228,6 +258,42 @@
     background-color: var(--bg-main) !important;
 }
 /* --- END: Notion-Style Mobile Menu CSS --- */
+/* --- START: Mobile Settings Popup CSS --- */
+#mobile-settings-popup.open {
+    transform: translateX(0);
+}
+
+.toggle-switch {
+    width: 44px;
+    height: 24px;
+    background-color: var(--bg-pane-dark);
+    border-radius: 9999px;
+    padding: 2px;
+    transition: background-color 0.2s ease-in-out;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.toggle-switch.active {
+    background-color: var(--accent-primary);
+}
+
+.toggle-knob {
+    width: 20px;
+    height: 20px;
+    background-color: white;
+    border-radius: 9999px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    transition: transform 0.2s ease-in-out;
+}
+
+.toggle-switch.active .toggle-knob {
+    transform: translateX(20px);
+}
+/* --- END: Mobile Settings Popup CSS --- */
+#mobile-tags-popup.open {
+    transform: translateX(0);
+}
 /* Add these styles for checklist items */
 /* Add these styles for checklist items */
 /* UPDATED: Styles for checklist items in editor AND public view */
@@ -4942,7 +5008,7 @@ if (themeMeta) {
 </button>
         <hr class="my-1 border-border-color">
         <div class="text-xs text-text-tertiary px-3 pt-2 pb-1 font-semibold uppercase">View</div>
-        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="board"><i data-feather="trello" class="w-4 h-4"></i>Board</button>
+        <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="calendar"><i data-feather="calendar" class="w-4 h-4"></i>Calendar</button>
         <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2 view-btn-mobile" data-view="list"><i data-feather="list" class="w-4 h-4"></i>List</button>
     `; 
 //...
@@ -5830,75 +5896,186 @@ const upgradePastedTables = (html) => {
     });
     return tempDiv.innerHTML;
 };            
-            const createNewNote = (andSwitchToIt = true, initialContent = '') => {
-                let parentCollection;
-                let targetArray;
-                let parentId = state.settings.activeCollectionId;
+            // =================================================================
+// START: REPLACEMENT JAVASCRIPT BLOCK
+// =================================================================
 
-                const parentResult = findItem(parentId);
+/**
+ * MODIFIED: Upgraded to accept a specific parentId for the new note.
+ */
+const createNewNote = (andSwitchToIt = true, initialContent = '', parentId = undefined) => {
+    let parentCollection;
+    let targetArray;
+    let finalParentId = parentId;
 
-                if (parentResult && parentResult.item.type === 'folder') {
-                    parentCollection = parentResult.item;
-                    targetArray = parentCollection.children;
-                } else if(parentResult) {
-                    const parentOfNoteResult = findItem(parentResult.parent.id);
-                    parentId = parentOfNoteResult ? parentOfNoteResult.item.id : null;
-                    parentCollection = parentOfNoteResult ? parentOfNoteResult.item : null;
-                    targetArray = parentCollection ? parentCollection.children : state.collections;
-                } else {
-                    parentId = null;
-                    targetArray = state.collections;
-                }
-                
-                if (parentCollection) {
-                    parentCollection.expanded = true;
-                }
+    if (finalParentId === undefined) {
+        finalParentId = state.settings.activeCollectionId;
+    }
 
-                const now = new Date().toISOString();
-                const newNote = {
-    id: generateId('n'), name: 'Untitled Note', type: 'note', content: initialContent,
-    status: parentId ? state.kanbanColumns[parentId]?.[0]?.id || null : null,
-    createdAt: now,
-    modifiedAt: now,
-    pinned: false,
-    links: [],
-    tags: [],
-    properties: {}, // ADD THIS LINE
-        propertiesCollapsed: false, // ADD THIS LINE
+    const parentResult = findItem(finalParentId);
 
+    if (parentResult && parentResult.item.type === 'folder') {
+        parentCollection = parentResult.item;
+        targetArray = parentCollection.children;
+    } else {
+        finalParentId = null; // Default to root if parent isn't a folder
+        targetArray = state.collections;
+    }
+    
+    if (parentCollection) {
+        parentCollection.expanded = true;
+    }
+
+    const now = new Date().toISOString();
+    const newNote = {
+        id: generateId('n'), name: 'Untitled Note', type: 'note', content: initialContent,
+        status: finalParentId ? state.kanbanColumns[finalParentId]?.[0]?.id || null : null,
+        createdAt: now, modifiedAt: now,
+        pinned: false, links: [], tags: [], properties: {}, propertiesCollapsed: false,
+    };
+
+    targetArray.unshift(newNote);
+    
+    if(andSwitchToIt) {
+        state.settings.activeNoteId = newNote.id;
+        state.settings.activeCollectionId = finalParentId;
+        state.settings.activeTag = null;
+        state.settings.editorMode = 'editor';
+    }
+    
+    saveState();
+    buildLunrize();
+    render();
+    app.elements.noteEditorTitle.focus();
+    app.elements.noteEditorTitle.select();
+    return newNote;
 };
 
-                if (initialContent) {
-                   updateNoteLinks(newNote);
-                   updateNoteTags(newNote);
-                   const titleMatch = initialContent.match(/<h1>(.*?)<\/h1>/);
-                   if (titleMatch && titleMatch[1]) {
-                       newNote.name = titleMatch[1];
-                   } else {
-                       // Try to find title from markdown
-                       const mdTitleMatch = initialContent.match(/^# (.*)/m);
-                       if(mdTitleMatch && mdTitleMatch[1]) {
-                           newNote.name = mdTitleMatch[1];
-                       }
-                   }
-                }
-                
-                targetArray.unshift(newNote);
-                
-                if(andSwitchToIt) {
-                    state.settings.activeNoteId = newNote.id;
-                    state.settings.activeTag = null;
-                    // Switch to editor mode when creating a new note
-                    state.settings.editorMode = 'editor';
-                }
-                
-                saveState();
-                buildLunrIndex();
-                render();
-                app.elements.noteEditorTitle.focus();
-    app.elements.noteEditorTitle.select();
-                return newNote;
-            };
+/**
+ * MODIFIED: Now generates a '+' button for each item.
+ */
+const renderNotionStyleMenu = () => {
+    const user = window.auth.currentUser;
+    if (user && user.email) {
+        document.getElementById('menu-user-initial').textContent = user.email.charAt(0).toUpperCase();
+        document.getElementById('menu-user-email').textContent = user.email;
+        document.getElementById('dropdown-user-email-display').textContent = user.email;
+    }
+    const allNotes = getAllNotes(state.collections);
+    const recentNotes = [...allNotes]
+        .sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt))
+        .slice(0, 5);
+    let jumpBackHTML = '';
+    if (recentNotes.length > 0) {
+        jumpBackHTML = `
+            <h3 class="notion-menu-section-header">Jump back in</h3>
+            <div class="jump-back-in-grid">
+                ${recentNotes.map(note => `
+                    <a href="#" class="recent-note-card" data-id="${note.id}" data-action="navigate-note">
+                        <i data-feather="file-text" class="w-5 h-5"></i>
+                        <span class="note-name">${note.name}</span>
+                    </a>
+                `).join('')}
+            </div>`;
+    }
+
+    const buildPrivateList = (collections = state.collections, level = 0, parentId = null) => {
+        return collections.map(item => {
+            const isFolder = item.type === 'folder';
+            // --- MODIFIED: Added 'group' class and the new '+' button ---
+            let itemHTML = `
+                <li data-id="${item.id}" class="collection-item-wrapper group rounded-md">
+                    <div class="collection-item flex items-center gap-2 p-2 rounded-md" style="padding-left: ${8 + level * 16}px;">
+                        ${isFolder ? `<a href="#" class="expander-btn -ml-1 p-1" data-action="toggle-expand"><i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i></a>` : '<div class="w-6 h-6 flex-shrink-0"></div>'}
+                        <a href="#" class="flex items-center gap-2 flex-grow min-w-0" data-action="${isFolder ? 'navigate-folder' : 'navigate-note'}">
+                            <i data-feather="${isFolder ? 'folder' : 'file-text'}" class="w-4 h-4 flex-shrink-0 text-text-secondary"></i>
+                            <span class="truncate">${item.name}</span>
+                        </a>
+                        <button class="add-note-btn" data-action="add-note-here" data-parent-id="${isFolder ? item.id : parentId}" title="Add New Note Here">
+                            <i data-feather="plus" class="w-4 h-4"></i>
+                        </button>
+                    </div>`;
+            if (isFolder && item.expanded && item.children && item.children.length > 0) {
+                itemHTML += `<ul class="collection-children">${buildPrivateList(item.children, level + 1, item.id)}</ul>`;
+            } else if (isFolder && item.expanded) {
+                itemHTML += `<p class="pl-12 py-1 text-sm text-text-tertiary">No notes inside</p>`;
+            }
+            itemHTML += `</li>`;
+            return itemHTML;
+        }).join('');
+    };
+
+    document.getElementById('jump-back-in-section').innerHTML = jumpBackHTML;
+    document.getElementById('private-section').innerHTML = `
+        <h3 class="notion-menu-section-header">All Notes</h3>
+        <ul class="space-y-1">${buildPrivateList()}</ul>
+    `;
+    feather.replace();
+};
+
+/**
+ * MODIFIED: Added a new case for 'add-note-here'.
+ */
+notionMenu.addEventListener('click', (e) => {
+    const target = e.target.closest('[data-action]');
+    if (!target) return;
+    
+    e.preventDefault();
+    const action = target.dataset.action;
+    const listItem = target.closest('.collection-item-wrapper, .recent-note-card');
+    
+    // --- NEW: Handle the 'add-note-here' action ---
+    if (action === 'add-note-here') {
+        const parentId = target.dataset.parentId === 'null' ? null : target.dataset.parentId;
+        const newNote = createNewNote(false, '', parentId); // Create note but don't switch view yet
+        
+        if (parentId) {
+            const parentFolder = findItem(parentId)?.item;
+            if (parentFolder) parentFolder.expanded = true;
+        }
+
+        renderNotionStyleMenu(); // Re-render the menu to show the new note
+        showToast(`Note "${newNote.name}" created!`, 'success');
+        saveState();
+        return; // Stop here, don't close the menu
+    }
+
+    if (!listItem) return;
+
+    const id = listItem.dataset.id;
+    const { item } = findItem(id);
+    if (!item) return;
+
+    switch (action) {
+        case 'toggle-expand':
+            if (item.type === 'folder') {
+                item.expanded = !item.expanded;
+                renderNotionStyleMenu();
+            }
+            break;
+        case 'navigate-folder':
+            state.settings.activeCollectionId = item.id;
+            state.settings.activeNoteId = null;
+            state.settings.activeTag = null;
+            closeNotionStyleMenu();
+            break;
+        case 'navigate-note':
+            state.settings.activeNoteId = item.id;
+            const result = findItem(item.id);
+            state.settings.activeCollectionId = (Array.isArray(result.parent)) ? null : result.parent.id;
+            state.settings.activeTag = null;
+            closeNotionStyleMenu();
+            break;
+    }
+    
+    saveState();
+    if (action.startsWith('navigate')) {
+        render();
+    }
+});
+// =================================================================
+// END: REPLACEMENT JAVASCRIPT BLOCK
+// =================================================================
 
             function initSpeechRecognition() {
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -7768,7 +7945,7 @@ const renderNotionStyleMenu = () => {
     const allNotes = getAllNotes(state.collections);
     const recentNotes = [...allNotes]
         .sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt))
-        .slice(0, 3);
+        .slice(0, 5);
     let jumpBackHTML = '';
     if (recentNotes.length > 0) {
         jumpBackHTML = `
@@ -7814,7 +7991,7 @@ const renderNotionStyleMenu = () => {
     // This part that injects the HTML is also correct and remains.
     document.getElementById('jump-back-in-section').innerHTML = jumpBackHTML;
     document.getElementById('private-section').innerHTML = `
-        <h3 class="notion-menu-section-header">Private</h3>
+        <h3 class="notion-menu-section-header">All Notes</h3>
         <ul class="space-y-1">${buildPrivateList()}</ul>
     `;
     feather.replace();
@@ -7881,7 +8058,148 @@ const openNotionStyleMenu = () => {
 const closeNotionStyleMenu = () => {
     notionMenu.classList.remove('open');
 };
+// =================================================================
+// START: NEW MOBILE SETTINGS POPUP JAVASCRIPT
+// =================================================================
+const settingsPopup = document.getElementById('mobile-settings-popup');
 
+/**
+ * Opens and populates the mobile settings view.
+ */
+const openMobileSettingsPopup = () => {
+    // 1. Update Theme Button state
+    const currentTheme = state.settings.theme;
+    const themeIcon = document.getElementById('mobile-theme-icon');
+    const themeText = document.getElementById('mobile-theme-text');
+    if (currentTheme === 'dark') {
+        themeIcon.setAttribute('data-feather', 'moon');
+        themeText.textContent = 'Dark Theme';
+    } else if (currentTheme === 'reputify') {
+        themeIcon.setAttribute('data-feather', 'star');
+        themeText.textContent = 'Reputify Theme';
+    } else {
+        themeIcon.setAttribute('data-feather', 'sun');
+        themeText.textContent = 'Light Theme';
+    }
+
+    // 2. Update Toggle Switch states
+    const chatbotToggle = document.querySelector('.toggle-switch[data-setting="chatbotVisible"]');
+    chatbotToggle.classList.toggle('active', state.settings.chatbotVisible);
+
+    const propertiesToggle = document.querySelector('.toggle-switch[data-setting="propertiesVisible"]');
+    // The logic is inverted for "Hide Properties", so we check for NOT visible
+    propertiesToggle.classList.toggle('active', !state.settings.propertiesVisible);
+
+    // 3. Render icons and show the popup
+    feather.replace();
+    settingsPopup.classList.add('open');
+};
+
+/**
+ * Closes the mobile settings view.
+ */
+const closeMobileSettingsPopup = () => {
+    settingsPopup.classList.remove('open');
+};
+// =================================================================
+// START: NEW MOBILE TAGS POPUP JAVASCRIPT
+// =================================================================
+const tagsPopup = document.getElementById('mobile-tags-popup');
+
+/**
+ * Opens and populates the mobile tags view.
+ */
+const openMobileTagsPopup = () => {
+    const tagsContent = document.getElementById('mobile-tags-content');
+    // Re-use the HTML from the original desktop tags list for consistency
+    const originalTagsHTML = app.containers.tagList.innerHTML;
+    tagsContent.innerHTML = `<div class="p-2 space-y-1">${originalTagsHTML}</div>`;
+    
+    feather.replace();
+    tagsPopup.classList.add('open');
+};
+
+/**
+ * Closes the mobile tags view.
+ */
+const closeMobileTagsPopup = () => {
+    tagsPopup.classList.remove('open');
+};
+
+// --- Event Listeners for the new Tags Popup ---
+
+// Listener to open the popup from the main menu footer
+document.getElementById('mobile-menu-tags-btn').addEventListener('click', openMobileTagsPopup);
+
+// Listener for the back button inside the popup
+document.getElementById('mobile-tags-back-btn').addEventListener('click', closeMobileTagsPopup);
+
+// Listener to handle clicking a tag inside the new popup
+document.getElementById('mobile-tags-content').addEventListener('click', (e) => {
+    const tagItem = e.target.closest('.tag-filter-item');
+    if (tagItem) {
+        e.preventDefault();
+        const tagName = tagItem.dataset.tag;
+        // Simulate a click on the original tag to reuse existing logic
+        const originalTag = app.containers.tagList.querySelector(`[data-tag="${tagName}"]`);
+        if (originalTag) {
+            originalTag.click();
+        }
+        // Close both the tags popup and the main menu to show the results
+        closeMobileTagsPopup();
+        closeNotionStyleMenu();
+    }
+});
+// =================================================================
+// END: NEW MOBILE TAGS POPUP JAVASCRIPT
+// =================================================================
+// --- Event Listeners for the new Settings Popup ---
+
+// Listener to open the popup from the main menu footer
+document.getElementById('mobile-menu-settings-btn').addEventListener('click', openMobileSettingsPopup);
+
+// Listener for the back button inside the popup
+document.getElementById('mobile-settings-back-btn').addEventListener('click', closeMobileSettingsPopup);
+
+// Listener for all buttons inside the settings content area
+document.getElementById('mobile-settings-content').addEventListener('click', (e) => {
+    const button = e.target.closest('button');
+    if (button) {
+        // --- Re-use existing logic from the desktop sidebar ---
+        if (button.id === 'mobile-theme-toggle') {
+            document.getElementById('theme-toggle').click();
+            // Re-render the popup to reflect the new theme name
+            openMobileSettingsPopup(); 
+        } else if (button.id === 'mobile-bookmarklet-btn') {
+            document.getElementById('bookmarklet-info-btn').click();
+        } else {
+            const action = button.dataset.action;
+            if (action) {
+                // For Import/Export, find the original button by its data-action and click it
+                document.querySelector(`#settings-panel button[data-action="${action}"]`)?.click();
+            }
+        }
+    }
+
+    // --- Handle clicks on the toggle switches ---
+    const toggle = e.target.closest('.toggle-switch');
+    if (toggle) {
+        const settingKey = toggle.dataset.setting;
+        if (settingKey === 'chatbotVisible') {
+            state.settings.chatbotVisible = !state.settings.chatbotVisible;
+            toggle.classList.toggle('active', state.settings.chatbotVisible);
+        } else if (settingKey === 'propertiesVisible') {
+            // "Hide Properties" is an inverted toggle
+            state.settings.propertiesVisible = !state.settings.propertiesVisible;
+            toggle.classList.toggle('active', !state.settings.propertiesVisible);
+        }
+        saveState();
+        render(); // Re-render main app to show/hide elements
+    }
+});
+// =================================================================
+// END: NEW MOBILE SETTINGS POPUP JAVASCRIPT
+// =================================================================
 // --- EVENT LISTENERS ---
 // ADD ALL THIS NEW JAVASCRIPT CODE
 
@@ -7911,15 +8229,7 @@ document.getElementById('mobile-menu-add-folder-btn').addEventListener('click', 
     closeNotionStyleMenu(); // Close menu after action
 });
 
-document.getElementById('mobile-menu-settings-btn').addEventListener('click', () => {
-    alert("Settings button clicked! This can be hooked up to a new settings modal.");
-    // Here you would trigger a new modal for settings
-});
 
-document.getElementById('mobile-menu-tags-btn').addEventListener('click', () => {
-    alert("Tags button clicked! This can be hooked up to a new tags modal.");
-    // Here you would trigger a new modal for tags
-});
 
 
 // --- Click handler for the whole menu needs to be updated for view-switcher ---
@@ -10978,7 +11288,7 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
             <div id="menu-user-initial">R</div>
         </button>
         <div>
-            <div id="menu-workspace-title" class="font-semibold text-text-primary">Reputifly Workspace</div>
+            <div id="menu-workspace-title" class="font-semibold text-text-primary">Workspace</div>
             <div id="menu-user-email" class="text-xs text-text-secondary"></div>
         </div>
     </div>
@@ -11020,6 +11330,66 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
     </button>
 </footer>
 
+</div>
+<div id="mobile-settings-popup" class="fixed inset-0 bg-bg-pane-light z-[1001] flex flex-col transition-transform duration-300 ease-in-out translate-x-full">
+    
+    <header class="flex items-center p-4 border-b border-border-color flex-shrink-0">
+        <button id="mobile-settings-back-btn" class="p-2 -ml-2 rounded-full hover:bg-bg-pane-dark">
+            <i data-feather="arrow-left" class="w-6 h-6"></i>
+        </button>
+        <h3 class="text-lg font-semibold ml-2">Settings</h3>
+    </header>
+
+    <div id="mobile-settings-content" class="flex-grow overflow-y-auto custom-scrollbar p-2">
+        <div class="space-y-1 p-2">
+            <button id="mobile-theme-toggle" class="w-full text-left px-3 py-3 text-base hover:bg-bg-pane-dark rounded-lg flex items-center gap-4 text-text-primary">
+               <i data-feather="star" id="mobile-theme-icon" class="w-5 h-5"></i>
+               <span id="mobile-theme-text">Reputify Theme</span>
+            </button>
+            <button data-action="import" class="w-full text-left px-3 py-3 text-base hover:bg-bg-pane-dark rounded-lg flex items-center gap-4 text-text-primary">
+                <i data-feather="upload" class="w-5 h-5"></i>
+                <span>Import Data</span>
+            </button>
+            <button data-action="export" class="w-full text-left px-3 py-3 text-base hover:bg-bg-pane-dark rounded-lg flex items-center gap-4 text-text-primary">
+                <i data-feather="download" class="w-5 h-5"></i>
+                <span>Export Data</span>
+            </button>
+            <div id="mobile-chatbot-toggle" class="w-full text-left px-3 py-3 text-base rounded-lg flex items-center justify-between gap-4 text-text-primary cursor-pointer hover:bg-bg-pane-dark">
+                <div class="flex items-center gap-4">
+                    <i data-feather="message-square" class="w-5 h-5"></i>
+                    <span>Show Chatbot Button</span>
+                </div>
+                <div class="toggle-switch" data-setting="chatbotVisible">
+                    <div class="toggle-knob"></div>
+                </div>
+            </div>
+            <button id="mobile-bookmarklet-btn" class="w-full text-left px-3 py-3 text-base hover:bg-bg-pane-dark rounded-lg flex items-center gap-4 text-text-primary">
+                <i data-feather="book" class="w-5 h-5"></i>
+                <span>Web Clipper</span>
+            </button>
+            <div id="mobile-properties-toggle" class="w-full text-left px-3 py-3 text-base rounded-lg flex items-center justify-between gap-4 text-text-primary cursor-pointer hover:bg-bg-pane-dark">
+                <div class="flex items-center gap-4">
+                    <i data-feather="eye" class="w-5 h-5"></i>
+                    <span>Hide Properties</span>
+                </div>
+                <div class="toggle-switch" data-setting="propertiesVisible">
+                    <div class="toggle-knob"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="mobile-tags-popup" class="fixed inset-0 bg-bg-pane-light z-[1001] flex flex-col transition-transform duration-300 ease-in-out translate-x-full">
+    
+    <header class="flex items-center p-4 border-b border-border-color flex-shrink-0">
+        <button id="mobile-tags-back-btn" class="p-2 -ml-2 rounded-full hover:bg-bg-pane-dark">
+            <i data-feather="arrow-left" class="w-6 h-6"></i>
+        </button>
+        <h3 class="text-lg font-semibold ml-2">Tags</h3>
+    </header>
+
+    <div id="mobile-tags-content" class="flex-grow overflow-y-auto custom-scrollbar p-2">
+        </div>
 </div>
 </body>
 </html>
