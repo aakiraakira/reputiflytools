@@ -5257,6 +5257,14 @@ function renderDayView(date) {
     const collection = findItem(collectionId)?.item;
     if (!collection) return;
 
+    // --- THIS IS THE FIX ---
+    // Manually create a timezone-independent YYYY-MM-DD string for the data attribute.
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const dateStringForData = `${yyyy}-${mm}-${dd}`;
+    // --- END OF FIX ---
+
     const notesInCollection = (collection.children || []).filter(note => note.type === 'note');
     const notesForDay = notesInCollection.map(note => {
         const dateProp = Object.values(note.properties || {}).find(p => p.type === 'date' && p.value);
@@ -5274,27 +5282,14 @@ function renderDayView(date) {
     const timedEvents = notesForDay.filter(note => !allDayEvents.includes(note));
     timedEvents.sort((a, b) => a.eventDate - b.eventDate);
 
-    let html = `
-    <div class="day-view-container" data-date="${date.toISOString()}">
+    // Use the new timezone-safe date string in the container's data attribute
+    let html = `<div class="day-view-container" data-date="${dateStringForData}"> 
         <header class="flex justify-between items-center mb-4 flex-shrink-0">
             <h3 class="text-xl font-semibold text-text-primary">${date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</h3>
             <div class="flex items-center gap-2">
                 <button id="calendar-month-view-btn" class="view-btn px-2.5 py-1 rounded"><i data-feather="calendar" class="w-4 h-4 mr-2"></i>Back to Month</button>
             </div>
         </header>
-
-        ${allDayEvents.length > 0 ? `
-        <div class="day-view-all-day-section">
-            <span class="text-xs font-semibold text-text-tertiary mr-4">All-day</span>
-            <div class="inline-flex gap-2">
-            ${allDayEvents.map(note => {
-                const selectProp = Object.values(note.properties || {}).find(p => p.type === 'select' && p.value);
-                const colorClass = selectProp ? getSelectColor(selectProp.value).split(' ')[0] : 'bg-accent-primary';
-                return `<a href="#" class="day-view-event-link day-view-all-day-item flex items-center gap-2" data-note-id="${note.id}"><div class="event-color-dot ${colorClass}"></div>${note.name}</a>`;
-            }).join('')}
-            </div>
-        </div>
-        ` : ''}
 
         <div class="day-view-timeline-wrapper custom-scrollbar">
             <div class="relative h-[1152px]">
@@ -6262,22 +6257,31 @@ ${noteContent}`;
                 // --- START: Calendar Right-Click to Add Event Logic ---
 // --- START: Calendar Right-Click to Add Event Logic ---
 // --- START: Calendar Click/Right-Click to Add Event Logic ---
+// --- START: Calendar Click/Right-Click to Add Event Logic ---
+// --- START: Calendar Click/Right-Click to Add Event Logic ---
 const assignNoteModal = document.getElementById('assign-note-modal');
 const calendarViewEl = document.getElementById('calendar-view');
 let assignNoteTargetTimestamp = null;
 let notesForAssignment = [];
+let isAssigningWithTime = false;
 
 const openAssignNoteModal = (timestamp, notes) => {
     assignNoteTargetTimestamp = timestamp;
     notesForAssignment = notes;
     const modalTitle = document.getElementById('assign-note-modal-title');
     const searchInput = document.getElementById('assign-note-search-input');
+    const durationWrapper = document.getElementById('assign-note-duration-wrapper');
+    const durationInput = document.getElementById('assign-note-duration-input');
 
-    // Display date and time if the timestamp has a specific time
-    const hasTime = timestamp.getHours() !== 0 || timestamp.getMinutes() !== 0;
-    const titleTime = hasTime ? timestamp.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
+    // A specific time is being assigned if it's not noon (our placeholder for 'all-day')
+    isAssigningWithTime = !(timestamp.getHours() === 12 && timestamp.getMinutes() === 0);
+
+    durationWrapper.style.display = isAssigningWithTime ? 'block' : 'none';
+    durationInput.value = '';
+
+    const titleTime = isAssigningWithTime ? timestamp.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
     const titleDate = timestamp.toLocaleDateString(undefined, { month: 'long', day: 'numeric' });
-    modalTitle.textContent = `Assign Note to ${titleDate}${hasTime ? ` at ${titleTime}`: ''}`;
+    modalTitle.textContent = `Assign Note to ${titleDate}${isAssigningWithTime ? ` at ${titleTime}`: ''}`;
 
     searchInput.value = '';
     renderAssignableNotes(notes);
@@ -6311,32 +6315,40 @@ const handleCalendarDayAction = (dayCell) => {
     openAssignNoteModal(date, notesInCollection);
 };
 
+const handleDayViewTimeSlotAction = (slotEl) => {
+    const dayViewContainer = slotEl.closest('.day-view-container');
+    if(!dayViewContainer) return;
+
+    const dateString = dayViewContainer.dataset.date; // This is now YYYY-MM-DD
+    const allSlots = Array.from(slotEl.parentElement.children);
+    const hour = allSlots.indexOf(slotEl);
+
+    const [year, month, day] = dateString.split('-').map(Number);
+    const targetTimestamp = new Date(year, month - 1, day, hour);
+
+    const collectionId = state.settings.activeCollectionId;
+    const collection = findItem(collectionId)?.item;
+    const notesInCollection = (collection?.children || []).filter(item => item.type === 'note');
+    openAssignNoteModal(targetTimestamp, notesInCollection);
+};
+
 calendarViewEl.addEventListener('contextmenu', (e) => {
-    if (window.innerWidth < 768) return;
     const dayCell = e.target.closest('.calendar-day-cell');
-    if (dayCell) { e.preventDefault(); handleCalendarDayAction(dayCell); }
+    const hourSlot = e.target.closest('.day-view-hour-slot');
+    if (dayCell || hourSlot) e.preventDefault();
+
+    if (dayCell) handleCalendarDayAction(dayCell);
+    if (hourSlot) handleDayViewTimeSlotAction(hourSlot);
 });
 
 calendarViewEl.addEventListener('click', (e) => {
-    const collectionId = state.settings.activeCollectionId;
-    const dayViewContainer = e.target.closest('.day-view-container');
+    if (window.innerWidth >= 768) return; // Mobile only
+    const dayCell = e.target.closest('.calendar-day-cell');
+    const hourSlot = e.target.closest('.day-view-hour-slot');
+    if (dayCell || hourSlot) e.preventDefault();
 
-    if (dayViewContainer) { // Logic for Day View clicks
-        const hourSlot = e.target.closest('.day-view-hour-slot');
-        if (hourSlot) {
-            const dayDate = new Date(dayViewContainer.dataset.date);
-            const allSlots = Array.from(hourSlot.parentElement.children);
-            const hour = allSlots.indexOf(hourSlot);
-            dayDate.setHours(hour, 0, 0, 0);
-
-            const collection = findItem(collectionId)?.item;
-            const notesInCollection = (collection?.children || []).filter(item => item.type === 'note');
-            openAssignNoteModal(dayDate, notesInCollection);
-        }
-    } else if (window.innerWidth < 768) { // Logic for Month View clicks on mobile
-        const dayCell = e.target.closest('.calendar-day-cell');
-        if (dayCell) { e.preventDefault(); handleCalendarDayAction(dayCell); }
-    }
+    if (dayCell) handleCalendarDayAction(dayCell);
+    if (hourSlot) handleDayViewTimeSlotAction(hourSlot);
 });
 
 document.getElementById('assign-note-search-input').addEventListener('input', (e) => {
@@ -6356,28 +6368,25 @@ document.getElementById('assign-note-list').addEventListener('click', (e) => {
 
             let datePropName = Object.keys(note.properties).find(k => note.properties[k].type === 'date') || 'Date';
 
-            note.properties[datePropName] = {
-                type: 'date',
-                value: assignNoteTargetTimestamp.toISOString()
-            };
+            note.properties[datePropName] = { type: 'date', value: assignNoteTargetTimestamp.toISOString() };
 
-            // If a specific time was clicked, create a 1-hour event by default
-            if (assignNoteTargetTimestamp.getHours() !== 0 || assignNoteTargetTimestamp.getMinutes() !== 0) {
-                const endDate = new Date(assignNoteTargetTimestamp.getTime() + 60 * 60 * 1000); // Add 1 hour
+            if (isAssigningWithTime) {
+                const durationInput = document.getElementById('assign-note-duration-input').value;
+                let durationInMinutes = parseDurationToMinutes(durationInput);
+                if (durationInMinutes <= 0) { durationInMinutes = 60; }
+
+                const endDate = new Date(assignNoteTargetTimestamp.getTime() + durationInMinutes * 60 * 1000);
                 note.properties[datePropName].endValue = endDate.toISOString();
             } else {
-                delete note.properties[datePropName].endValue; // It's an all-day event
+                delete note.properties[datePropName].endValue;
             }
 
             note.modifiedAt = new Date().toISOString();
             saveState();
 
-            // Refresh the correct view (Day or Month)
             if (document.querySelector('.day-view-container')) {
                 renderDayView(assignNoteTargetTimestamp);
-            } else {
-                renderCalendarView();
-            }
+            } else { renderCalendarView(); }
 
             closeModal(assignNoteModal);
             showToast(`✅ "${note.name}" assigned to date.`);
@@ -6388,6 +6397,8 @@ document.getElementById('assign-note-list').addEventListener('click', (e) => {
 document.getElementById('assign-note-modal-close-btn').addEventListener('click', () => {
     closeModal(assignNoteModal);
 });
+// --- END: Calendar Click/Right-Click to Add Event Logic ---
+// --- END: Calendar Click/Right-Click to Add Event Logic ---
 // --- END: Calendar Click/Right-Click to Add Event Logic ---
 // --- END: Calendar Right-Click to Add Event Logic ---
 // --- END: Calendar Right-Click to Add Event Logic ---
@@ -11890,7 +11901,10 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
         <i data-feather="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary"></i>
         <input type="text" id="assign-note-search-input" placeholder="Search notes in this project..." class="w-full bg-bg-main border border-border-color rounded-md py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-accent-primary">
     </div>
-    
+    <div id="assign-note-duration-wrapper" class="relative flex-shrink-0 mb-2">
+    <label for="assign-note-duration-input" class="text-sm font-medium text-text-secondary">Duration</label>
+    <input type="text" id="assign-note-duration-input" placeholder="e.g., 30m, 1.5h, 90 (defaults to 1 hour)" class="w-full mt-1 bg-bg-main border border-border-color rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-accent-primary">
+</div>
     <div id="assign-note-list" class="flex-grow overflow-y-auto custom-scrollbar -mr-2 pr-2">
         </div>
 </div>
