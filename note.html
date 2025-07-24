@@ -5119,7 +5119,7 @@ function renderCalendarView() {
         const dateProp = Object.values(note.properties || {}).find(p => p.type === 'date' && p.value);
         return dateProp ? { ...note, eventDate: new Date(dateProp.value) } : null;
     }).filter(Boolean);
-    
+
     const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     let html = `
@@ -5141,7 +5141,15 @@ function renderCalendarView() {
 
     for (let day = 1; day <= daysInMonth; day++) {
         const currentDate = new Date(year, month, day);
-        const currentDateStr = currentDate.toISOString().split('T')[0];
+
+        // --- THIS IS THE FIX ---
+        // Manually create the YYYY-MM-DD string to avoid timezone conversion errors.
+        const yyyy = currentDate.getFullYear();
+        const mm = String(currentDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(currentDate.getDate()).padStart(2, '0');
+        const currentDateStr = `${yyyy}-${mm}-${dd}`;
+        // --- END OF FIX ---
+
         const notesForDay = notesWithDates.filter(note => new Date(note.eventDate).toDateString() === currentDate.toDateString());
 
         html += `<div class="calendar-day-cell custom-scrollbar" data-date="${currentDateStr}">
@@ -5196,7 +5204,7 @@ function renderGalleryView() {
         // 1. Look for a specific "Cover Image" or "Image" property
         const coverProp = Object.values(note.properties || {}).find(p => p.type === 'image' && p.value);
         if (coverProp) {
-            coverImageHTML = `<div class="h-32 bg-cover bg-center" style="background-image: url('${coverProp.value}')"></div>`;
+            coverImageHTML = `<div class="h-32 bg-cover bg-center" style="background-image: url('${firstImage.src}')"></div>`;
             coverImageFound = true;
         } else {
             // 2. If not found, look for the first image in the note's content
@@ -6250,6 +6258,119 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: Calendar Right-Click to Add Event Logic ---
+// --- START: Calendar Right-Click to Add Event Logic ---
+const assignNoteModal = document.getElementById('assign-note-modal');
+const calendarViewEl = document.getElementById('calendar-view');
+let assignNoteTargetDate = null;
+let notesForAssignment = [];
+
+const openAssignNoteModal = (date, notes) => {
+    assignNoteTargetDate = date;
+    notesForAssignment = notes;
+    const modalTitle = document.getElementById('assign-note-modal-title');
+    const searchInput = document.getElementById('assign-note-search-input');
+
+    const [year, month, day] = date.split('-').map(Number);
+    const localDate = new Date(year, month - 1, day);
+
+    modalTitle.textContent = `Assign Note to ${localDate.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`;
+
+    searchInput.value = '';
+    renderAssignableNotes(notes);
+    openModal(assignNoteModal);
+    searchInput.focus();
+};
+
+const renderAssignableNotes = (notes) => {
+    const listEl = document.getElementById('assign-note-list');
+    if (notes.length === 0) {
+        listEl.innerHTML = `<p class="p-4 text-center text-sm text-text-tertiary">No notes in this project.</p>`;
+        return;
+    }
+    listEl.innerHTML = notes.map(note => `
+        <div class="link-modal-item p-2 rounded-md hover:bg-bg-pane-dark cursor-pointer" data-note-id="${note.id}">
+            <div class="flex items-center gap-3">
+                <i data-feather="file-text" class="w-5 h-5 text-text-secondary flex-shrink-0"></i>
+                <div class="min-w-0">
+                    <div class="font-semibold text-text-primary truncate">${note.name}</div>
+                    <div class="text-sm text-text-secondary truncate">${formatDateTime(note.modifiedAt)}</div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+    feather.replace();
+};
+
+const handleCalendarDayAction = (dayCell) => {
+    const date = dayCell.dataset.date;
+    const collectionId = state.settings.activeCollectionId;
+    const collection = findItem(collectionId)?.item;
+    const notesInCollection = (collection?.children || []).filter(item => item.type === 'note');
+    openAssignNoteModal(date, notesInCollection);
+};
+
+calendarViewEl.addEventListener('contextmenu', (e) => {
+    if (window.innerWidth < 768) return;
+    const dayCell = e.target.closest('.calendar-day-cell');
+    if (dayCell) {
+        e.preventDefault();
+        handleCalendarDayAction(dayCell);
+    }
+});
+
+calendarViewEl.addEventListener('click', (e) => {
+    if (window.innerWidth >= 768) return;
+    const dayCell = e.target.closest('.calendar-day-cell');
+    if (dayCell) {
+        e.preventDefault();
+        handleCalendarDayAction(dayCell);
+    }
+});
+
+document.getElementById('assign-note-search-input').addEventListener('input', (e) => {
+    const query = e.target.value;
+    if (!query) {
+        renderAssignableNotes(notesForAssignment);
+        return;
+    }
+    const fuse = new Fuse(notesForAssignment, { keys: ['name'], threshold: 0.4 });
+    const results = fuse.search(query).map(result => result.item);
+    renderAssignableNotes(results);
+});
+
+document.getElementById('assign-note-list').addEventListener('click', (e) => {
+    const noteItem = e.target.closest('.link-modal-item');
+    if (noteItem) {
+        const noteId = noteItem.dataset.noteId;
+        const note = findItem(noteId)?.item;
+        if (note && assignNoteTargetDate) {
+            if (!note.properties) note.properties = {};
+
+            let datePropName = Object.keys(note.properties).find(k => note.properties[k].type === 'date');
+            if (!datePropName) {
+                datePropName = 'Date';
+            }
+
+            note.properties[datePropName] = {
+                type: 'date',
+                value: new Date(assignNoteTargetDate + 'T12:00:00').toISOString()
+            };
+
+            note.modifiedAt = new Date().toISOString();
+            saveState();
+            renderCalendarView();
+            closeModal(assignNoteModal);
+            showToast(`✅ "${note.name}" assigned to date.`);
+        }
+    }
+});
+
+document.getElementById('assign-note-modal-close-btn').addEventListener('click', () => {
+    closeModal(assignNoteModal);
+});
+// --- END: Calendar Right-Click to Add Event Logic ---
+// --- END: Calendar Right-Click to Add Event Logic ---
                 // --- START: Mobile Toolbar Keyboard Awareness Logic ---
 
 // --- END: Mobile Toolbar Keyboard Awareness Logic ---
@@ -11738,6 +11859,18 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
     </header>
 
     <div id="mobile-tags-content" class="flex-grow overflow-y-auto custom-scrollbar p-2">
+        </div>
+</div>
+<div id="assign-note-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-4 rounded-lg shadow-2xl w-[90vw] max-w-lg z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-3 flex-shrink-0">
+        <h3 id="assign-note-modal-title" class="text-lg font-semibold">Assign Note to Date</h3>
+        <button id="assign-note-modal-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    <div class="relative flex-shrink-0 mb-2">
+        <i data-feather="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary"></i>
+        <input type="text" id="assign-note-search-input" placeholder="Search notes in this project..." class="w-full bg-bg-main border border-border-color rounded-md py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-accent-primary">
+    </div>
+    <div id="assign-note-list" class="flex-grow overflow-y-auto custom-scrollbar -mr-2 pr-2">
         </div>
 </div>
 </body>
