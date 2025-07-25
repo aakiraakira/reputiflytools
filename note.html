@@ -168,6 +168,36 @@
     gap: 0.5rem;
     padding: 0.25rem 0.5rem 0.5rem 2.75rem; /* Aligns with note items */
 }
+/* --- START: Fullscreen Modal Styles --- */
+        #chatbot-modal, #chatbot-context-modal {
+            /* On mobile, they will be fullscreen */
+            width: 100vw;
+            height: 100vh;
+            max-width: 100vw;
+            max-height: 100vh;
+            top: 0;
+            left: 0;
+            transform: none;
+            border-radius: 0;
+        }
+
+        /* On desktop, they will be large but not edge-to-edge */
+        @media (min-width: 768px) {
+            #chatbot-modal, #chatbot-context-modal {
+                width: 90vw;
+                height: 85vh;
+                max-width: 1200px; /* Increased max width for chatbot */
+                border-radius: 0.75rem; /* 12px */
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                border: 1px solid var(--border-color);
+            }
+            #chatbot-context-modal {
+                 max-width: 800px; /* Specific larger size for context modal */
+            }
+        }
+        /* --- END: Fullscreen Modal Styles --- */
 .folder-view-btn {
     display: flex;
     align-items: center;
@@ -2369,7 +2399,9 @@ window.functions = getFunctions(app,);
         </div>
         <footer class="p-4 border-t border-border-color flex-shrink-0">
             <div id="chatbot-error" class="text-red-500 text-sm mb-2 h-5"></div>
+            <div id="chatbot-context-pills" class="flex flex-wrap gap-1 mb-2"></div>
             <div class="flex items-center gap-2">
+                <button id="chatbot-add-context-btn" title="Add Note Context" class="text-text-secondary hover:text-accent-primary p-2 rounded-full hover:bg-bg-main flex-shrink-0"><i data-feather="plus-circle" class="w-5 h-5"></i></button>
                 <input id="chatbot-input" type="text" class="w-full bg-bg-pane-dark border border-border-color rounded-full py-2 px-4 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="Ask anything...">
                 <button id="chatbot-send-btn" class="bg-gradient-to-r from-[var(--brand-grad-from)] to-[var(--brand-grad-to)] text-white rounded-full w-10 h-10 flex-shrink-0 flex items-center justify-center hover:opacity-90">
                     <i data-feather="arrow-up" class="w-5 h-5"></i>
@@ -6255,6 +6287,79 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: ADD THIS ENTIRE BLOCK FOR CHATBOT CONTEXT ---
+            window.chatbotContextNoteIds = []; // Use window scope to make it accessible
+
+            const chatbotContextModal = document.getElementById('chatbot-context-modal');
+            const contextNoteList = document.getElementById('chatbot-context-note-list');
+            const contextPillsContainer = document.getElementById('chatbot-context-pills');
+
+            const renderContextPills = () => {
+                if (window.chatbotContextNoteIds.length === 0) {
+                    contextPillsContainer.innerHTML = '';
+                    return;
+                }
+                const allNotes = getAllNotes(state.collections);
+                const contextNotes = allNotes.filter(n => window.chatbotContextNoteIds.includes(n.id));
+                contextPillsContainer.innerHTML = contextNotes.map(note => `
+                    <div class="bg-bg-pane-dark text-text-secondary text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
+                        <i data-feather="file-text" class="w-3 h-3"></i>
+                        <span>${note.name}</span>
+                        <button class="remove-context-pill-btn" data-note-id="${note.id}"><i data-feather="x" class="w-3 h-3"></i></button>
+                    </div>
+                `).join('');
+                feather.replace();
+            };
+            
+            const renderNoteListForContext = (notesToRender) => {
+                contextNoteList.innerHTML = notesToRender.map(note => `
+                    <label class="p-2 rounded-md hover:bg-bg-pane-dark flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" class="context-note-checkbox shrink-0" value="${note.id}" ${window.chatbotContextNoteIds.includes(note.id) ? 'checked' : ''}>
+                        <i data-feather="file-text" class="w-5 h-5 text-text-secondary flex-shrink-0"></i>
+                        <div class="min-w-0">
+                            <div class="font-semibold text-text-primary truncate">${note.name}</div>
+                        </div>
+                    </label>
+                `).join('');
+                 feather.replace();
+            };
+            
+            document.getElementById('chatbot-add-context-btn').addEventListener('click', () => {
+                renderNoteListForContext(getAllNotes(state.collections));
+                openModal(chatbotContextModal);
+            });
+
+            document.getElementById('chatbot-context-search-input').addEventListener('input', (e) => {
+                const query = e.target.value;
+                const allNotes = getAllNotes(state.collections);
+                if (!query) {
+                    renderNoteListForContext(allNotes);
+                    return;
+                }
+                const fuse = new Fuse(allNotes, { keys: ['name'], threshold: 0.4 });
+                renderNoteListForContext(fuse.search(query).map(result => result.item));
+            });
+
+            document.getElementById('chatbot-context-confirm-btn').addEventListener('click', () => {
+                const selectedIds = Array.from(contextNoteList.querySelectorAll('.context-note-checkbox:checked')).map(cb => cb.value);
+                window.chatbotContextNoteIds = selectedIds;
+                renderContextPills();
+                closeModal(chatbotContextModal);
+            });
+            
+            contextPillsContainer.addEventListener('click', (e) => {
+                const removeBtn = e.target.closest('.remove-context-pill-btn');
+                if(removeBtn) {
+                    const noteId = removeBtn.dataset.noteId;
+                    window.chatbotContextNoteIds = window.chatbotContextNoteIds.filter(id => id !== noteId);
+                    renderContextPills();
+                }
+            });
+            
+            const closeContextModal = () => closeModal(chatbotContextModal);
+            document.getElementById('chatbot-context-modal-close-btn').addEventListener('click', closeContextModal);
+            document.getElementById('chatbot-context-cancel-btn').addEventListener('click', closeContextModal);
+            // --- END: ADD THIS ENTIRE BLOCK ---
                 // --- START: Calendar Right-Click to Add Event Logic ---
 // --- START: Calendar Right-Click to Add Event Logic ---
 // --- START: Calendar Click/Right-Click to Add Event Logic ---
@@ -10121,14 +10226,16 @@ app.modals.quizContent.addEventListener('click', e => {
                 app.modals.chatbotClearBtn.addEventListener('click', async () => {
                     const confirmed = await showConfirm({
                         title: 'Clear Chat History',
-                        message: 'Are you sure you want to delete the entire conversation?',
+                        message: 'Are you sure you want to delete the entire conversation and remove all context notes?',
                         confirmText: 'Clear',
                         confirmClass: 'bg-red-500'
                     });
                     if (confirmed) {
                         state.chatHistory = [];
+                        window.chatbotContextNoteIds = []; // Also clear the context
                         saveState();
                         renderChatHistory();
+                        document.getElementById('chatbot-context-pills').innerHTML = ''; // Clear the UI pills
                         showToast('Chat history cleared', 'success');
                     }
                 });
@@ -10150,14 +10257,38 @@ app.modals.quizContent.addEventListener('click', e => {
                     app.modals.chatbotHistory.appendChild(thinkingBubble);
                     app.modals.chatbotHistory.scrollTop = app.modals.chatbotHistory.scrollHeight;
 
-                    const payload = {
-                        contents: state.chatHistory.map(msg => ({
-                            role: msg.role === 'user' ? 'user' : 'model',
-                            parts: [{ text: msg.text }]
-                        }))
-                    };
+                    // --- START: THIS IS THE CRITICAL LOGIC ---
+                    let contextText = '';
+                    // 1. Check if any context note IDs have been stored
+                    if (window.chatbotContextNoteIds && window.chatbotContextNoteIds.length > 0) {
+                        const allNotes = getAllNotes(state.collections);
+                        // 2. Find the full note objects using their IDs
+                        const contextNotes = allNotes.filter(n => window.chatbotContextNoteIds.includes(n.id));
+                        if (contextNotes.length > 0) {
+                            // 3. Assemble the note content into a special context block for the AI
+                             contextText = "Use the following notes as mandatory context for your answer:\n\n" +
+                                contextNotes.map(n => `--- NOTE: ${n.name} ---\n${n.content.replace(/<[^>]*>?/gm, '')}\n--- END NOTE ---`).join('\n\n') +
+                                "\n\nBased on that context, and our conversation history, answer my new question.\n\n---\n\n";
+                        }
+                    }
+
+                    // 4. Assemble the conversational history
+                    const historyForPrompt = state.chatHistory.map(msg => {
+                        if (msg === state.chatHistory[state.chatHistory.length - 1]) {
+                            return `User: ${msg.text}`;
+                        }
+                        return `${msg.role === 'user' ? 'User' : 'AI'}: ${msg.text}`;
+                    }).join('\n\n');
+                    
+                    // 5. Create the final prompt with context + history
+                    const finalPrompt = `${contextText}This is a conversation. Please provide a relevant and helpful response based on the history.\n\n${historyForPrompt}`;
+                    window.chatbotContextNoteIds = [];
+                    renderContextPills();
+
+                    const payload = { contents: [{ parts: [{ text: finalPrompt }] }] };
 
                     const modelResponse = await callGeminiAPI(payload, app.modals.chatbotError);
+                    // --- END: CRITICAL LOGIC ---
                     
                     thinkingBubble.remove();
 
@@ -11908,6 +12039,22 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
 </div>
     <div id="assign-note-list" class="flex-grow overflow-y-auto custom-scrollbar -mr-2 pr-2">
         </div>
+</div>
+<div id="chatbot-context-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-4 rounded-lg shadow-2xl w-[90vw] max-w-lg z-[1000] transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-3 flex-shrink-0">
+        <h3 class="text-lg font-semibold flex items-center gap-2"><i data-feather="file-plus" class="w-5 h-5 text-accent-primary"></i>Add Context from Notes</h3>
+        <button id="chatbot-context-modal-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    <div class="relative flex-shrink-0 mb-2">
+        <i data-feather="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary"></i>
+        <input type="text" id="chatbot-context-search-input" placeholder="Search notes..." class="w-full bg-bg-main border border-border-color rounded-md py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-accent-primary">
+    </div>
+    <div id="chatbot-context-note-list" class="flex-grow overflow-y-auto custom-scrollbar -mr-2 pr-2 space-y-1">
+        </div>
+    <footer class="flex justify-end gap-3 mt-4 flex-shrink-0">
+        <button id="chatbot-context-cancel-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Cancel</button>
+        <button id="chatbot-context-confirm-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Add Context</button>
+    </footer>
 </div>
 </body>
 </html>
