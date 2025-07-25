@@ -136,24 +136,6 @@
 .reputify-theme .prose code {
     color: var(--accent-primary-dark);
 }
-/* --- START: Full-Screen Mobile Modal CSS --- */
-@media (max-width: 767px) {
-    .modal.fullscreen-mobile {
-        top: auto;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        width: 100%;
-        max-width: 100%;
-        max-height: 85vh; /* Allow some of the page to show behind */
-        border-radius: 1rem 1rem 0 0; /* Only round the top corners */
-        transform: translateY(100%); /* Start off-screen */
-    }
-    .modal.fullscreen-mobile.scale-95 {
-         transform: translateY(100%); /* Override desktop animation */
-    }
-}
-/* --- END: Full-Screen Mobile Modal CSS --- */
 .reputify-theme .prose blockquote {
     color: var(--text-tertiary);
     border-color: var(--border-color);
@@ -3294,9 +3276,18 @@ const handleGlobalAIQuery = async () => {
 }).join('\n\n');
     const historyContext = askYourNotesHistory.map(item => `Previous Question: ${item.question}\nPrevious Answer: ${item.answer}`).join('\n\n');
     
-    const prompt = `You are a helpful assistant.
-${historyContext ? `For context, here is the previous turn of our conversation:\n${historyContext}\n\n` : ''}
-Based ONLY on the context from the provided notes below, answer the user's new question. If the answer cannot be found in the notes, say "I could not find an answer in your notes." Do not use any external knowledge.
+    const prompt = `You are an expert analyst and strategic advisor. Your primary goal is to answer the user's question by deeply synthesizing information from all provided 'Context from Notes'.
+- Identify Core Objectives: First, look for high-level goals, principles, or constraints (like budget, target audience, or strategic direction) mentioned in the notes.
+
+Analyze Options: Evaluate any options or data points in the context of these core objectives.
+
+Reason and Infer: Connect information across different notes to identify dependencies, conflicts, or opportunities. Go beyond direct statements to infer the implications.
+
+Provide a Recommendation: If the user asks for a recommendation (e.g., "which should I choose?", "what should I do?"), weigh the pros and cons of each option based on your analysis and provide a clear, well-reasoned recommendation. Justify why you chose it and why other options are less suitable.
+
+Be Proactive: If you spot a direct contradiction or a significant risk, highlight it clearly in your answer.
+
+If the information is truly insufficient, state that you cannot provide a confident answer.
 
 User's Question: "${query}"
 
@@ -5275,10 +5266,13 @@ function renderDayView(date) {
     const collection = findItem(collectionId)?.item;
     if (!collection) return;
 
+    // --- THIS IS THE FIX ---
+    // Manually create a timezone-independent YYYY-MM-DD string for the data attribute.
     const yyyy = date.getFullYear();
     const mm = String(date.getMonth() + 1).padStart(2, '0');
     const dd = String(date.getDate()).padStart(2, '0');
     const dateStringForData = `${yyyy}-${mm}-${dd}`;
+    // --- END OF FIX ---
 
     const notesInCollection = (collection.children || []).filter(note => note.type === 'note');
     const notesForDay = notesInCollection.map(note => {
@@ -5293,8 +5287,11 @@ function renderDayView(date) {
         return null;
     }).filter(Boolean);
 
-    const timedEvents = notesForDay.sort((a, b) => a.eventDate - b.eventDate);
+    const allDayEvents = notesForDay.filter(note => !note.eventDate.toTimeString().startsWith('00:00:00') && (!note.endDate || (note.endDate.getTime() - note.eventDate.getTime()) >= 86400000));
+    const timedEvents = notesForDay.filter(note => !allDayEvents.includes(note));
+    timedEvents.sort((a, b) => a.eventDate - b.eventDate);
 
+    // Use the new timezone-safe date string in the container's data attribute
     let html = `<div class="day-view-container" data-date="${dateStringForData}"> 
         <header class="flex justify-between items-center mb-4 flex-shrink-0">
             <h3 class="text-xl font-semibold text-text-primary">${date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</h3>
@@ -5303,19 +5300,19 @@ function renderDayView(date) {
             </div>
         </header>
 
-        <div class="day-view-timeline-wrapper custom-scrollbar relative">
-            <div class="h-[1152px] relative">
-                <div class="day-view-grid absolute inset-0 z-0">
+        <div class="day-view-timeline-wrapper custom-scrollbar">
+            <div class="relative h-[1152px]">
+                <div class="day-view-grid">
                     ${Array.from({ length: 24 }).map((_, hour) => {
                         const time = new Date(); time.setHours(hour, 0);
-                        return `<div class="day-view-hour-slot" data-hour="${hour}" data-time="${time.toLocaleTimeString(undefined, { hour: 'numeric', hour12: true })}"></div>`;
+                        return `<div class="day-view-hour-slot" data-time="${time.toLocaleTimeString(undefined, { hour: 'numeric', hour12: true })}"></div>`;
                     }).join('')}
                 </div>
-                <div class="absolute top-0 bottom-0 left-20 right-0 z-10">
+                <div class="absolute top-0 bottom-0 left-20 right-0">
                     ${timedEvents.map(note => {
                         const startMinutes = note.eventDate.getHours() * 60 + note.eventDate.getMinutes();
                         const endMinutes = note.endDate ? (note.endDate.getHours() * 60 + note.endDate.getMinutes()) : (startMinutes + 60);
-                        const duration = Math.max(30, endMinutes - startMinutes); 
+                        const duration = Math.max(30, endMinutes - startMinutes);
                         const top = (startMinutes / 60) * 48;
                         const height = (duration / 60) * 48;
                         const selectProp = Object.values(note.properties || {}).find(p => p.type === 'select' && p.value);
@@ -5327,14 +5324,14 @@ function renderDayView(date) {
 
                         return `
                             <a href="#" class="day-view-event-link absolute left-1 right-2" data-note-id="${note.id}" style="top: ${top}px; height: ${height}px;">
-                                <div class="day-view-event h-full p-2 rounded flex flex-col pointer-events-none" style="border-left-width: 3px; border-left-color: ${styleColor}; background-color: ${styleColor.replace(')',', 0.1)')};">
+                                <div class="day-view-event h-full p-2 rounded flex flex-col" style="border-left-width: 3px; border-left-color: ${styleColor}; background-color: ${styleColor.replace(')',', 0.1)')};">
                                     <div class="font-semibold text-text-primary text-sm truncate leading-tight">${note.name}</div>
                                     <div class="text-xs text-text-secondary mt-1">${timeString}</div>
                                 </div>
                             </a>`;
                     }).join('')}
+                    ${new Date().toDateString() === date.toDateString() ? '<div id="now-indicator"></div>' : ''}
                 </div>
-                ${new Date().toDateString() === date.toDateString() ? '<div id="now-indicator" class="z-20"></div>' : ''}
             </div>
         </div>
     </div>`;
@@ -6267,6 +6264,10 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: Calendar Right-Click to Add Event Logic ---
+// --- START: Calendar Right-Click to Add Event Logic ---
+// --- START: Calendar Click/Right-Click to Add Event Logic ---
+// --- START: Calendar Click/Right-Click to Add Event Logic ---
 // --- START: Calendar Click/Right-Click to Add Event Logic ---
 const assignNoteModal = document.getElementById('assign-note-modal');
 const calendarViewEl = document.getElementById('calendar-view');
@@ -6282,6 +6283,7 @@ const openAssignNoteModal = (timestamp, notes) => {
     const durationWrapper = document.getElementById('assign-note-duration-wrapper');
     const durationInput = document.getElementById('assign-note-duration-input');
 
+    // A specific time is being assigned if it's not noon (our placeholder for 'all-day')
     isAssigningWithTime = !(timestamp.getHours() === 12 && timestamp.getMinutes() === 0);
 
     durationWrapper.style.display = isAssigningWithTime ? 'block' : 'none';
@@ -6327,8 +6329,9 @@ const handleDayViewTimeSlotAction = (slotEl) => {
     const dayViewContainer = slotEl.closest('.day-view-container');
     if(!dayViewContainer) return;
 
-    const dateString = dayViewContainer.dataset.date;
-    const hour = parseInt(slotEl.dataset.hour);
+    const dateString = dayViewContainer.dataset.date; // This is now YYYY-MM-DD
+    const allSlots = Array.from(slotEl.parentElement.children);
+    const hour = allSlots.indexOf(slotEl);
 
     const [year, month, day] = dateString.split('-').map(Number);
     const targetTimestamp = new Date(year, month - 1, day, hour);
@@ -6349,19 +6352,13 @@ calendarViewEl.addEventListener('contextmenu', (e) => {
 });
 
 calendarViewEl.addEventListener('click', (e) => {
-    const hourSlot = e.target.closest('.day-view-hour-slot');
-    if(hourSlot) {
-        handleDayViewTimeSlotAction(hourSlot);
-        return;
-    }
-
-    if (window.innerWidth >= 768) return; // Remaining logic is mobile-only
-
+    if (window.innerWidth >= 768) return; // Mobile only
     const dayCell = e.target.closest('.calendar-day-cell');
-    if (dayCell) {
-        e.preventDefault();
-        handleCalendarDayAction(dayCell);
-    }
+    const hourSlot = e.target.closest('.day-view-hour-slot');
+    if (dayCell || hourSlot) e.preventDefault();
+
+    if (dayCell) handleCalendarDayAction(dayCell);
+    if (hourSlot) handleDayViewTimeSlotAction(hourSlot);
 });
 
 document.getElementById('assign-note-search-input').addEventListener('input', (e) => {
@@ -6411,7 +6408,9 @@ document.getElementById('assign-note-modal-close-btn').addEventListener('click',
     closeModal(assignNoteModal);
 });
 // --- END: Calendar Click/Right-Click to Add Event Logic ---
-
+// --- END: Calendar Click/Right-Click to Add Event Logic ---
+// --- END: Calendar Click/Right-Click to Add Event Logic ---
+// --- END: Calendar Right-Click to Add Event Logic ---
 // --- END: Calendar Right-Click to Add Event Logic ---
                 // --- START: Mobile Toolbar Keyboard Awareness Logic ---
 
@@ -7128,7 +7127,7 @@ const commands = [
 },{
     name: 'remove',
     suggest: 'checklist_items',
-    description: 'Remove an item from a checklist. Usage: /remove [item name]',
+    description: 'Remove item from checklist. Usage: /remove [item name]',
     execute: (args) => {
         const noteId = state.settings.activeNoteId;
         if (!noteId) return showToast('❌ Must be in a note.', 'error');
@@ -7213,7 +7212,7 @@ const commands = [
     }
 },{
     name: 'save',
-    description: 'Save a manual checkpoint of the current note.',
+    description: 'Save a manual checkpoint of the current note',
     execute: () => {
         const noteId = state.settings.activeNoteId;
         if (!noteId) {
@@ -11903,7 +11902,7 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
     <div id="mobile-tags-content" class="flex-grow overflow-y-auto custom-scrollbar p-2">
         </div>
 </div>
-<div id="assign-note-modal" class="modal fullscreen-mobile hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-4 rounded-lg shadow-2xl w-[90vw] max-w-lg z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+<div id="assign-note-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-4 rounded-lg shadow-2xl w-[90vw] max-w-lg z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
     <header class="flex justify-between items-center mb-3 flex-shrink-0">
         <h3 id="assign-note-modal-title" class="text-lg font-semibold">Assign Note to Date</h3>
         <button id="assign-note-modal-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
