@@ -803,10 +803,10 @@
     border-radius: 3px;
     border: 1px solid var(--border-color);
 }
-.bg-highlight-yellow { background-color: rgba(250, 204, 21, 0.2); }
-.bg-highlight-green { background-color: rgba(74, 222, 128, 0.2); }
-.bg-highlight-blue { background-color: rgba(96, 165, 250, 0.2); }
-.bg-highlight-red { background-color: rgba(248, 113, 113, 0.2); }
+.text-color-red { color: #F87171; }
+.text-color-orange { color: #FB923C; }
+.text-color-green { color: #4ADE80; }
+.text-color-blue { color: #007aff; }
 #note-editor-body tfoot td {
     font-weight: bold;
     color: var(--text-secondary);
@@ -2425,11 +2425,18 @@ window.functions = getFunctions(app,);
         <button data-command="insertTable" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Insert Table"><i data-feather="grid" class="w-4 h-4"></i></button>
         <button data-command="monospace" class="p-2 hover:bg-bg-main rounded font-mono font-bold flex-shrink-0" title="Monospace">M</button>
         <button data-command="insertChecklist" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Checklist"><i data-feather="check-square" class="w-4 h-4"></i></button>
-        <button data-command="toggleCheckboxes" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Hide/Show Checkboxes"><i data-feather="eye-off" class="w-4 h-4"></i></button>
+        <div class="w-px h-5 bg-border-color mx-1 flex-shrink-0"></div>
+        
+        <button data-command="textColor" data-value="red" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Text Color Red"><i data-feather="droplet" class="w-4 h-4" style="color: #F87171;"></i></button>
+<button data-command="textColor" data-value="orange" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Text Color Orange"><i data-feather="droplet" class="w-4 h-4" style="color: #FB923C;"></i></button>
+<button data-command="textColor" data-value="green" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Text Color Green"><i data-feather="droplet" class="w-4 h-4" style="color: #4ADE80;"></i></button>
+<button data-command="textColor" data-value="blue" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Text Color Blue"><i data-feather="droplet" class="w-4 h-4" style="color: #60A5FA;"></i></button>
+<button data-command="textColor" data-value="none" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Clear Text Color"><i data-feather="droplet-off" class="w-4 h-4 text-text-tertiary"></i></button>
         <div class="w-px h-5 bg-border-color mx-1 flex-shrink-0"></div>
         <button data-command="formatBlock" data-value="h1" class="p-2 hover:bg-bg-main rounded font-bold text-sm flex-shrink-0">H1</button>
         <button data-command="formatBlock" data-value="h2" class="p-2 hover:bg-bg-main rounded font-bold text-sm flex-shrink-0">H2</button>
         <button data-command="formatBlock" data-value="h3" class="p-2 hover:bg-bg-main rounded font-bold text-sm flex-shrink-0">H3</button>
+        
     </div>
 
     <button id="toolbar-scroll-right" class="toolbar-scroll-btn hidden p-2"><i data-feather="chevron-right" class="w-4 h-4"></i></button>
@@ -4580,6 +4587,7 @@ const handleFileUpload = async (file) => {
                     timeout = setTimeout(() => func.apply(this, args), delay);
                 };
             };
+            const scheduleRebuildIndex = debounce(buildLunrIndex, 2000);
             
             
             
@@ -7887,7 +7895,7 @@ tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="tabl
 // --- START: NEW RESEARCH AGENT COMMAND ---
 {
     name: 'research',
-    description: 'Creates a research brief from multiple notes. Usage: /research [topic]',
+    description: 'Research brief from multiple notes. Usage: /research [topic]',
     execute: (args) => {
         if (!args) {
             return showToast('❌ Please provide a research topic.', 'error');
@@ -7899,7 +7907,7 @@ tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="tabl
 // --- START: NEW MEETING ASSISTANT COMMAND ---
 {
     name: 'process',
-    description: 'Processes meeting notes to extract a summary and action items.',
+    description: 'Scans meeting notes to extract a summary and action items.',
     execute: (args) => {
         const noteId = state.settings.activeNoteId;
         if (!noteId) {
@@ -9812,7 +9820,7 @@ performImmediateSave = () => {
             // --- END: UPGRADED LOGIC ---
 
             saveState();
-            buildLunrIndex();
+            scheduleRebuildIndex();
             renderCollectionsList();
             renderTagList();
         }
@@ -10395,65 +10403,66 @@ app.modals.quizContent.addEventListener('click', e => {
                 });
 
                 const handleChatSubmit = async () => {
-                    const userInput = app.modals.chatbotInput.value.trim();
-                    if (!userInput) return;
-                    
-                    app.modals.chatbotError.textContent = '';
-                    app.modals.chatbotInput.value = '';
-                    app.modals.chatbotSendBtn.disabled = true;
+    const userInput = app.modals.chatbotInput.value.trim();
+    if (!userInput) return;
 
-                    state.chatHistory.push({ role: 'user', text: userInput });
-                    renderChatHistory();
-                    
-                    const thinkingBubble = document.createElement('div');
-                    thinkingBubble.className = 'chat-bubble thinking w-fit rounded-lg px-3 py-2 self-start model';
-                    thinkingBubble.innerHTML = '● ● ●';
-                    app.modals.chatbotHistory.appendChild(thinkingBubble);
-                    app.modals.chatbotHistory.scrollTop = app.modals.chatbotHistory.scrollHeight;
+    app.modals.chatbotError.textContent = '';
+    app.modals.chatbotInput.value = '';
+    app.modals.chatbotSendBtn.disabled = true;
 
-                    // --- START: THIS IS THE CRITICAL LOGIC ---
-                    let contextText = '';
-                    // 1. Check if any context note IDs have been stored
-                    if (window.chatbotContextNoteIds && window.chatbotContextNoteIds.length > 0) {
-                        const allNotes = getAllNotes(state.collections);
-                        // 2. Find the full note objects using their IDs
-                        const contextNotes = allNotes.filter(n => window.chatbotContextNoteIds.includes(n.id));
-                        if (contextNotes.length > 0) {
-                            // 3. Assemble the note content into a special context block for the AI
-                             contextText = "Use the following notes as mandatory context for your answer:\n\n" +
-                                contextNotes.map(n => `--- NOTE: ${n.name} ---\n${n.content.replace(/<[^>]*>?/gm, '')}\n--- END NOTE ---`).join('\n\n') +
-                                "\n\nBased on that context, and our conversation history, answer my new question.\n\n---\n\n";
-                        }
-                    }
+    // --- STEP 1: Capture the current context ---
+    // Find the full note objects for the context provided in this turn.
+    const allNotes = getAllNotes(state.collections);
+    const contextNotesForThisTurn = allNotes.filter(n => window.chatbotContextNoteIds.includes(n.id));
 
-                    // 4. Assemble the conversational history
-                    const historyForPrompt = state.chatHistory.map(msg => {
-                        if (msg === state.chatHistory[state.chatHistory.length - 1]) {
-                            return `User: ${msg.text}`;
-                        }
-                        return `${msg.role === 'user' ? 'User' : 'AI'}: ${msg.text}`;
-                    }).join('\n\n');
-                    
-                    // 5. Create the final prompt with context + history
-                    const finalPrompt = `${contextText}This is a conversation. Please provide a relevant and helpful response based on the history.\n\n${historyForPrompt}`;
-                    window.chatbotContextNoteIds = [];
-                    renderContextPills();
+    // --- STEP 2: Add the user's message AND its context to the history ---
+    state.chatHistory.push({
+        role: 'user',
+        text: userInput,
+        // *** THE FIX ***: Store the context with the message.
+        context: contextNotesForThisTurn.map(n => ({ name: n.name, content: n.content.replace(/<[^>]*>?/gm, '') }))
+    });
 
-                    const payload = { contents: [{ parts: [{ text: finalPrompt }] }] };
+    // Now that the context is saved in the history, we can clear the temporary holder.
+    window.chatbotContextNoteIds = [];
+    renderContextPills(); // This will clear the pills from the UI.
+    renderChatHistory();
 
-                    const modelResponse = await callGeminiAPI(payload, app.modals.chatbotError);
-                    // --- END: CRITICAL LOGIC ---
-                    
-                    thinkingBubble.remove();
+    // --- Show the "thinking" bubble ---
+    const thinkingBubble = document.createElement('div');
+    thinkingBubble.className = 'chat-bubble thinking w-fit rounded-lg px-3 py-2 self-start model';
+    thinkingBubble.innerHTML = '● ● ●';
+    app.modals.chatbotHistory.appendChild(thinkingBubble);
+    app.modals.chatbotHistory.scrollTop = app.modals.chatbotHistory.scrollHeight;
 
-                    if (modelResponse) {
-                        state.chatHistory.push({ role: 'model', text: modelResponse });
-                        renderChatHistory();
-                    }
-                    saveState();
-                    app.modals.chatbotSendBtn.disabled = false;
-                    app.modals.chatbotInput.focus();
-                };
+    // --- STEP 3: Build the complete prompt with FULL history and context ---
+    let fullPrompt = "You are a helpful AI assistant. Answer the user's question based on the conversation history and any provided note context.\n\n---\n\n";
+
+    // Rebuild the entire history for every turn.
+    state.chatHistory.forEach(msg => {
+        let contextBlock = '';
+        // If a historical message has context, add it before the user's text.
+        if (msg.context && msg.context.length > 0) {
+            contextBlock = "CONTEXT PROVIDED:\n" + msg.context.map(n => `--- NOTE: ${n.name} ---\n${n.content}\n--- END NOTE ---`).join('\n\n') + "\n\n";
+        }
+        fullPrompt += `${contextBlock}${msg.role === 'user' ? 'User' : 'AI'}: ${msg.text}\n\n`;
+    });
+
+    const payload = { contents: [{ parts: [{ text: fullPrompt }] }] };
+    const modelResponse = await callGeminiAPI(payload, app.modals.chatbotError);
+    
+    thinkingBubble.remove();
+
+    if (modelResponse) {
+        // Add only the AI's response to the history. The context is already stored with the user's message.
+        state.chatHistory.push({ role: 'model', text: modelResponse });
+        renderChatHistory();
+    }
+
+    saveState();
+    app.modals.chatbotSendBtn.disabled = false;
+    app.modals.chatbotInput.focus();
+};
 
                 app.modals.chatbotSendBtn.addEventListener('click', handleChatSubmit);
                 app.modals.chatbotInput.addEventListener('keydown', (e) => {
@@ -10496,6 +10505,7 @@ app.modals.quizContent.addEventListener('click', e => {
                 app.elements.desktopNewNoteBtn.addEventListener('click', () => createNewNote());
 
                 const openSearch = () => {
+                    buildLunrIndex(); // Ensure index is fresh before searching
                     const highlightControls = document.getElementById('highlight-controls');
                     if (!highlightControls.classList.contains('hidden')) {
                         const clearSearchBtn = document.getElementById('clear-search-btn');
@@ -10620,36 +10630,105 @@ const originalButton = originalToolbar.querySelector(selector);
         const value = button.dataset.value;
 
         if (command === 'monospace') {
-            restoreSelectionAndExec(() => {
-                const selection = window.getSelection();
-                if (!selection.rangeCount) return;
-                let parent = selection.getRangeAt(0).commonAncestorContainer;
-                parent = parent.nodeType === 3 ? parent.parentNode : parent;
-                const codeTag = parent.closest('code:not(pre code)');
-                if (codeTag) {
-                    const content = document.createDocumentFragment();
-                    while(codeTag.firstChild) { content.appendChild(codeTag.firstChild); }
-                    codeTag.parentNode.replaceChild(content, codeTag);
-                } else {
-                    const selectedText = selection.toString();
-                    if (selectedText) document.execCommand('insertHTML', false, `<code>${selectedText}</code>`);
-                }
-            });
-            return;
-        }
-        if (command === 'toggleCheckboxes') {
-            restoreSelectionAndExec(() => {
-                const selection = window.getSelection();
-                if (!selection.rangeCount) return;
-                const allChecklistItems = app.elements.noteEditorBody.querySelectorAll('.task-list-item');
-                allChecklistItems.forEach(item => {
-                    if (selection.containsNode(item, true)) {
-                        item.classList.toggle('checkbox-hidden');
+                        restoreSelectionAndExec(() => {
+                            const selection = window.getSelection();
+                            if (!selection.rangeCount) return;
+                            let parent = selection.getRangeAt(0).commonAncestorContainer;
+                            parent = parent.nodeType === 3 ? parent.parentNode : parent;
+                            const codeTag = parent.closest('code:not(pre code)');
+                            if (codeTag) {
+                                const content = document.createDocumentFragment();
+                                while(codeTag.firstChild) { content.appendChild(codeTag.firstChild); }
+                                codeTag.parentNode.replaceChild(content, codeTag);
+                            } else {
+                                const selectedText = selection.toString();
+                                if (selectedText) document.execCommand('insertHTML', false, `<code>${selectedText}</code>`);
+                            }
+                        });
+                        return;
                     }
-                });
-            });
-            return;
-        }
+                    else if (command === 'textColor') { // NEW CODE STARTS HERE - TEXT COLOR
+                        restoreSelectionAndExec(() => {
+                            const selection = window.getSelection();
+                            if (!selection.rangeCount) return;
+
+                            const range = selection.getRangeAt(0);
+                            const selectedText = range.toString();
+
+                            if (!selectedText) return;
+
+                            const span = document.createElement('span');
+                            span.setAttribute('data-text-color', value); // Store color for toggling
+
+                            // Check if the selection is already part of a colored span
+                            let parentColoredSpan = range.commonAncestorContainer.parentElement.closest('[data-text-color]');
+
+                            if (value === 'none') {
+                                // If "Clear Color" is selected
+                                if (parentColoredSpan) {
+                                    const content = document.createDocumentFragment();
+                                    while (parentColoredSpan.firstChild) {
+                                        content.appendChild(parentColoredSpan.firstChild);
+                                    }
+                                    parentColoredSpan.parentNode.replaceChild(content, parentColoredSpan);
+                                } else {
+                                    // If no direct parent span, try to clear color from selected text
+                                    const tempDiv = document.createElement('div');
+                                    tempDiv.appendChild(range.extractContents());
+                                    tempDiv.querySelectorAll('span[data-text-color]').forEach(s => {
+                                        const innerContent = document.createDocumentFragment();
+                                        while(s.firstChild) innerContent.appendChild(s.firstChild);
+                                        s.parentNode.replaceChild(innerContent, s);
+                                    });
+                                    range.insertNode(tempDiv);
+                                }
+                            } else {
+                                // Applying a specific color
+                                span.classList.add(`text-color-${value}`);
+
+                                if (parentColoredSpan) {
+                                    // If already colored, check if it's the same color or change it
+                                    if (parentColoredSpan.getAttribute('data-text-color') === value) {
+                                        // Same color, so un-color it
+                                        const content = document.createDocumentFragment();
+                                        while (parentColoredSpan.firstChild) {
+                                            content.appendChild(parentColoredSpan.firstChild);
+                                        }
+                                        parentColoredSpan.parentNode.replaceChild(content, parentColoredSpan);
+                                    } else {
+                                        // Different color, so change the class
+                                        parentColoredSpan.className = ''; // Clear existing classes
+                                        parentColoredSpan.classList.add(`text-color-${value}`);
+                                        parentColoredSpan.setAttribute('data-text-color', value);
+                                    }
+                                } else {
+                                    // No existing color, apply new span
+                                    try {
+                                        range.surroundContents(span);
+                                    } catch (e) {
+                                        // Fallback for partial selections that cannot be surrounded
+                                        const fragment = range.extractContents();
+                                        span.appendChild(fragment);
+                                        range.insertNode(span);
+                                    }
+                                }
+                            }
+                        });
+                        return;
+                    } // NEW CODE ENDS HERE // NEW CODE ENDS HERE
+                    if (command === 'toggleCheckboxes') {
+                        restoreSelectionAndExec(() => {
+                            const selection = window.getSelection();
+                            if (!selection.rangeCount) return;
+                            const allChecklistItems = app.elements.noteEditorBody.querySelectorAll('.task-list-item');
+                            allChecklistItems.forEach(item => {
+                                if (selection.containsNode(item, true)) {
+                                    item.classList.toggle('checkbox-hidden');
+                                }
+                            });
+                        });
+                        return;
+                    }
         if (command === 'formatBlock' && value === 'code') {
              restoreSelectionAndExec(() => {
                 const selection = window.getSelection();
