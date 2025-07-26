@@ -2069,6 +2069,12 @@ window.functions = getFunctions(app,);
                                 <span>Web Clipper</span>
                             </button>
                             <button id="toggle-properties-btn" class="settings-footer-item">
+                                </button>
+<button id="build-ai-index-btn" class="settings-footer-item">
+    <i data-feather="cpu" class="w-5 h-5"></i>
+    <span>Build AI Index</span>
+</button>
+
                             <i data-feather="eye" class="w-5 h-5"></i>
                             <span>Hide Properties</span>
                         </button>
@@ -3271,6 +3277,7 @@ function convertTablesToMarkdown(htmlString) {
 
     return tempDiv.innerHTML;
 }
+// REPLACE THIS ENTIRE FUNCTION
 const handleGlobalAIQuery = async () => {
     const askBtn = document.getElementById('global-ai-ask-btn');
     const answerContainer = document.getElementById('global-ai-answer-container');
@@ -3282,35 +3289,36 @@ const handleGlobalAIQuery = async () => {
 
     if (!query) return;
 
-    // --- START: MODIFIED SECTION ---
-    // Clear previous results and set loading state right when a new question is asked
     askBtn.disabled = true;
     askBtn.querySelector('span').textContent = 'Thinking...';
     answerContainer.classList.add('hidden');
     sourcesContainer.classList.add('hidden');
     copyBtnFooter.classList.add('hidden');
     answerEl.innerHTML = '';
-    // --- END: MODIFIED SECTION ---
 
-    const searchResults = lunrIndex.search(query);
-    const topNotes = searchResults.slice(0, 5).map(res => findItem(res.ref)?.item).filter(Boolean);
+    // =================================================================
+    // START: *** THIS IS THE CORE UPGRADE ***
+    // =================================================================
+    // OLD WAY (Keyword Search):
+    // const searchResults = lunrIndex.search(query);
+    // const topNotes = searchResults.slice(0, 5).map(res => findItem(res.ref)?.item).filter(Boolean);
 
-    if (topNotes.length === 0) {
-        showToast('No relevant notes found.', 'info');
+    // NEW WAY (Vector Search):
+    const topChunks = await searchAiIndex(query);
+
+    if (topChunks.length === 0) {
+        showToast('No relevant information found in your notes.', 'info');
         askBtn.disabled = false;
         askBtn.querySelector('span').textContent = 'Ask';
         return;
     }
 
-    const context = topNotes.map(note => {
-    const contentWithMarkdownTables = convertTablesToMarkdown(note.content);
-    return `--- Note: "${note.name}" ---\n${contentWithMarkdownTables.replace(/<[^>]*>?/gm, '')}`;
-}).join('\n\n');
-    const historyContext = askYourNotesHistory.map(item => `Previous Question: ${item.question}\nPrevious Answer: ${item.answer}`).join('\n\n');
+    const context = topChunks.map(chunk => `--- From Note: "${chunk.noteName}" ---\n${chunk.content}`).join('\n\n');
+    // =================================================================
+    // END: *** THIS IS THE CORE UPGRADE ***
+    // =================================================================
     
-    const prompt = `You are a helpful assistant.
-${historyContext ? `For context, here is the previous turn of our conversation:\n${historyContext}\n\n` : ''}
-Based ONLY on the context from the provided notes below, answer the user's new question. If the answer cannot be found in the notes, say "I could not find an answer in your notes." Do not use any external knowledge.
+    const prompt = `You are a helpful assistant. Based ONLY on the context from the provided notes below, answer the user's question. If the answer cannot be found, say "I could not find an answer in your notes." Do not use any external knowledge.
 
 User's Question: "${query}"
 
@@ -3325,9 +3333,17 @@ ${context}`;
         answerContainer.classList.remove('hidden');
         copyBtnFooter.classList.remove('hidden');
         
-        findAndDisplaySourceSnippets(aiResponse, topNotes);
+        // Display sources based on the chunks we found
+        const sourcesEl = document.getElementById('global-ai-sources');
+        const uniqueSources = [...new Map(topChunks.map(item => [item['noteId'], item])).values()];
+        sourcesEl.innerHTML = uniqueSources.map(chunk => `
+            <a href="#" class="source-snippet-link block p-2 border border-border-color bg-bg-pane-dark rounded-md text-xs hover:bg-bg-pane-light" data-note-id="${chunk.noteId}">
+                <div class="font-semibold text-text-primary mb-1">🧾 From: “${chunk.noteName}”</div>
+                <div class="text-text-secondary italic pointer-events-none">..."${chunk.content.substring(0, 120)}"...</div>
+            </a>
+        `).join('');
+        sourcesContainer.classList.remove('hidden');
         
-        askYourNotesHistory.push({ question: query, answer: aiResponse });
     } else {
         showToast('The AI could not provide an answer.', 'error');
     }
@@ -4622,6 +4638,143 @@ function getSelectColor(optionName) {
     }
     return colors[Math.abs(hash % colors.length)];
 }
+// =================================================================
+// START: NEW AI INDEXING & VECTOR SEARCH FUNCTIONS
+// =================================================================
+
+/**
+ * Takes a note's HTML content and splits it into smaller, meaningful text chunks.
+ * This is crucial for creating effective embeddings.
+ * @param {object} note - The note object.
+ * @returns {Array<object>} An array of chunk objects.
+ */
+function chunkNote(note) {
+    const plainText = note.content.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
+    if (plainText.length < 50) return []; // Ignore very short notes
+
+    const chunks = [];
+    // Split by paragraphs, but also handle long text without paragraphs
+    const potentialChunks = plainText.split(/\n\n|\. /);
+    let currentChunk = '';
+
+    for (const p of potentialChunks) {
+        if (currentChunk.length + p.length < 500) { // Aim for chunks around 500 chars
+            currentChunk += p + '. ';
+        } else {
+            chunks.push({
+                noteId: note.id,
+                noteName: note.name,
+                content: currentChunk.trim()
+            });
+            currentChunk = p + '. ';
+        }
+    }
+    if (currentChunk) {
+        chunks.push({
+            noteId: note.id,
+            noteName: note.name,
+            content: currentChunk.trim()
+        });
+    }
+    return chunks;
+}
+
+/**
+ * Calculates the cosine similarity between two vectors (arrays of numbers).
+ * @param {Array<number>} vecA - The first vector.
+ * @param {Array<number>} vecB - The second vector.
+ * @returns {number} The similarity score between -1 and 1.
+ */
+function cosineSimilarity(vecA, vecB) {
+    let dotProduct = 0.0;
+    let normA = 0.0;
+    let normB = 0.0;
+    for (let i = 0; i < vecA.length; i++) {
+        dotProduct += vecA[i] * vecB[i];
+        normA += vecA[i] * vecA[i];
+        normB += vecB[i] * vecB[i];
+    }
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+/**
+ * The main function to create and store the AI index (vector embeddings).
+ */
+async function buildAiIndex() {
+    const toastId = showToast('🔬 Starting AI Indexing...', 'loading');
+    try {
+        const allNotes = getAllNotes(state.collections);
+        let allChunks = [];
+        allNotes.forEach(note => {
+            allChunks.push(...chunkNote(note));
+        });
+
+        if (allChunks.length === 0) {
+            dismissToast(toastId);
+            return showToast('No content to index.', 'info');
+        }
+
+        // Call the 'embedContent' cloud function
+        const callEmbedFunction = httpsCallable(window.functions, 'embedContent');
+        const response = await callEmbedFunction({ chunks: allChunks.map(c => c.content) });
+        
+        const embeddings = response.data.embeddings;
+
+        if (!embeddings || embeddings.length !== allChunks.length) {
+            throw new Error('Mismatch between chunks and generated embeddings.');
+        }
+
+        const aiIndex = allChunks.map((chunk, i) => ({
+            ...chunk,
+            vector: embeddings[i]
+        }));
+
+        localStorage.setItem('codex-notes-ai-index', JSON.stringify(aiIndex));
+        dismissToast(toastId);
+        showToast(`✅ AI Index built with ${aiIndex.length} data points.`, 'success');
+
+    } catch (error) {
+        console.error("Error building AI index:", error);
+        dismissToast(toastId);
+        showToast(`Error building index: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Searches the AI index using vector similarity to find the most relevant text chunks.
+ * @param {string} query - The user's search query.
+ * @returns {Promise<Array<object>>} A promise that resolves to the top matching chunks.
+ */
+async function searchAiIndex(query) {
+    const rawIndex = localStorage.getItem('codex-notes-ai-index');
+    if (!rawIndex) {
+        showToast('AI Index not found. Please build it from Settings.', 'error');
+        return [];
+    }
+    const aiIndex = JSON.parse(rawIndex);
+
+    // Get embedding for the user's query
+    const callEmbedFunction = httpsCallable(window.functions, 'embedContent');
+    const response = await callEmbedFunction({ chunks: [query] });
+    const queryVector = response.data.embeddings[0];
+
+    if (!queryVector) {
+        throw new Error('Could not generate embedding for the query.');
+    }
+
+    // Calculate similarity for all chunks
+    const scoredChunks = aiIndex.map(chunk => ({
+        ...chunk,
+        score: cosineSimilarity(queryVector, chunk.vector)
+    }));
+
+    // Sort by score and return the top 5
+    scoredChunks.sort((a, b) => b.score - a.score);
+    return scoredChunks.slice(0, 5);
+}
+// =================================================================
+// END: NEW AI INDEXING & VECTOR SEARCH FUNCTIONS
+// =================================================================
             
             async function callGeminiAPI(payload, elementForError) {
                 // Clear any previous errors
@@ -8409,6 +8562,8 @@ document.getElementById('toggle-properties-btn').addEventListener('click', () =>
     saveState();
     render();
 });
+document.getElementById('build-ai-index-btn').addEventListener('click', buildAiIndex);
+
                 // --- START: Inline Toolbar Scroll Logic ---
 const toolbarButtons = document.getElementById('inline-toolbar-buttons');
 const scrollLeftBtn = document.getElementById('toolbar-scroll-left');
@@ -9831,10 +9986,48 @@ saveNoteContent = debounce(performImmediateSave, 500);
         app.elements.noteEditorBody.focus();
     }
 });
-                app.elements.noteEditorBody.addEventListener('input', () => {
+                // REPLACE THE OLD 'input' LISTENER WITH THIS
+app.elements.noteEditorBody.addEventListener('input', () => {
+    const selection = window.getSelection();
+    if (!selection.rangeCount || !selection.isCollapsed) {
+        saveNoteContent();
+        updateStatsDebounced();
+        return;
+    }
+
+    const range = selection.getRangeAt(0);
+    let container = range.startContainer;
+    const node = container.nodeType === 3 ? container.parentNode : container;
+    const block = node.closest('p, div');
+
+    if (block) {
+        const text = block.textContent;
+        // Check for "1. " to start a numbered list
+        if (text.trim() === '1.') {
+            // A small timeout allows the browser to process the spacebar press
+            setTimeout(() => {
+                if (block.textContent.trim() === '1.') {
+                     block.innerHTML = '';
+                     document.execCommand('insertOrderedList', false, null);
+                     saveNoteContent();
+                }
+            }, 10);
+        }
+        // Check for "- " to start a bulleted list
+        else if (text.trim() === '-') {
+            setTimeout(() => {
+                if (block.textContent.trim() === '-') {
+                    block.innerHTML = '';
+                    document.execCommand('insertUnorderedList', false, null);
                     saveNoteContent();
-                    updateStatsDebounced();
-                });
+                }
+            }, 10);
+        }
+    }
+
+    saveNoteContent();
+    updateStatsDebounced();
+});
 
                 // REPLACE your entire existing 'noteEditorBody' keydown listener with this one
 app.elements.noteEditorBody.addEventListener('keydown', (e) => {
