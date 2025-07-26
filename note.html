@@ -10395,65 +10395,66 @@ app.modals.quizContent.addEventListener('click', e => {
                 });
 
                 const handleChatSubmit = async () => {
-                    const userInput = app.modals.chatbotInput.value.trim();
-                    if (!userInput) return;
-                    
-                    app.modals.chatbotError.textContent = '';
-                    app.modals.chatbotInput.value = '';
-                    app.modals.chatbotSendBtn.disabled = true;
+    const userInput = app.modals.chatbotInput.value.trim();
+    if (!userInput) return;
 
-                    state.chatHistory.push({ role: 'user', text: userInput });
-                    renderChatHistory();
-                    
-                    const thinkingBubble = document.createElement('div');
-                    thinkingBubble.className = 'chat-bubble thinking w-fit rounded-lg px-3 py-2 self-start model';
-                    thinkingBubble.innerHTML = '● ● ●';
-                    app.modals.chatbotHistory.appendChild(thinkingBubble);
-                    app.modals.chatbotHistory.scrollTop = app.modals.chatbotHistory.scrollHeight;
+    app.modals.chatbotError.textContent = '';
+    app.modals.chatbotInput.value = '';
+    app.modals.chatbotSendBtn.disabled = true;
 
-                    // --- START: THIS IS THE CRITICAL LOGIC ---
-                    let contextText = '';
-                    // 1. Check if any context note IDs have been stored
-                    if (window.chatbotContextNoteIds && window.chatbotContextNoteIds.length > 0) {
-                        const allNotes = getAllNotes(state.collections);
-                        // 2. Find the full note objects using their IDs
-                        const contextNotes = allNotes.filter(n => window.chatbotContextNoteIds.includes(n.id));
-                        if (contextNotes.length > 0) {
-                            // 3. Assemble the note content into a special context block for the AI
-                             contextText = "Use the following notes as mandatory context for your answer:\n\n" +
-                                contextNotes.map(n => `--- NOTE: ${n.name} ---\n${n.content.replace(/<[^>]*>?/gm, '')}\n--- END NOTE ---`).join('\n\n') +
-                                "\n\nBased on that context, and our conversation history, answer my new question.\n\n---\n\n";
-                        }
-                    }
+    // --- STEP 1: Capture the current context ---
+    // Find the full note objects for the context provided in this turn.
+    const allNotes = getAllNotes(state.collections);
+    const contextNotesForThisTurn = allNotes.filter(n => window.chatbotContextNoteIds.includes(n.id));
 
-                    // 4. Assemble the conversational history
-                    const historyForPrompt = state.chatHistory.map(msg => {
-                        if (msg === state.chatHistory[state.chatHistory.length - 1]) {
-                            return `User: ${msg.text}`;
-                        }
-                        return `${msg.role === 'user' ? 'User' : 'AI'}: ${msg.text}`;
-                    }).join('\n\n');
-                    
-                    // 5. Create the final prompt with context + history
-                    const finalPrompt = `${contextText}This is a conversation. Please provide a relevant and helpful response based on the history.\n\n${historyForPrompt}`;
-                    window.chatbotContextNoteIds = [];
-                    renderContextPills();
+    // --- STEP 2: Add the user's message AND its context to the history ---
+    state.chatHistory.push({
+        role: 'user',
+        text: userInput,
+        // *** THE FIX ***: Store the context with the message.
+        context: contextNotesForThisTurn.map(n => ({ name: n.name, content: n.content.replace(/<[^>]*>?/gm, '') }))
+    });
 
-                    const payload = { contents: [{ parts: [{ text: finalPrompt }] }] };
+    // Now that the context is saved in the history, we can clear the temporary holder.
+    window.chatbotContextNoteIds = [];
+    renderContextPills(); // This will clear the pills from the UI.
+    renderChatHistory();
 
-                    const modelResponse = await callGeminiAPI(payload, app.modals.chatbotError);
-                    // --- END: CRITICAL LOGIC ---
-                    
-                    thinkingBubble.remove();
+    // --- Show the "thinking" bubble ---
+    const thinkingBubble = document.createElement('div');
+    thinkingBubble.className = 'chat-bubble thinking w-fit rounded-lg px-3 py-2 self-start model';
+    thinkingBubble.innerHTML = '● ● ●';
+    app.modals.chatbotHistory.appendChild(thinkingBubble);
+    app.modals.chatbotHistory.scrollTop = app.modals.chatbotHistory.scrollHeight;
 
-                    if (modelResponse) {
-                        state.chatHistory.push({ role: 'model', text: modelResponse });
-                        renderChatHistory();
-                    }
-                    saveState();
-                    app.modals.chatbotSendBtn.disabled = false;
-                    app.modals.chatbotInput.focus();
-                };
+    // --- STEP 3: Build the complete prompt with FULL history and context ---
+    let fullPrompt = "You are a helpful AI assistant. Answer the user's question based on the conversation history and any provided note context.\n\n---\n\n";
+
+    // Rebuild the entire history for every turn.
+    state.chatHistory.forEach(msg => {
+        let contextBlock = '';
+        // If a historical message has context, add it before the user's text.
+        if (msg.context && msg.context.length > 0) {
+            contextBlock = "CONTEXT PROVIDED:\n" + msg.context.map(n => `--- NOTE: ${n.name} ---\n${n.content}\n--- END NOTE ---`).join('\n\n') + "\n\n";
+        }
+        fullPrompt += `${contextBlock}${msg.role === 'user' ? 'User' : 'AI'}: ${msg.text}\n\n`;
+    });
+
+    const payload = { contents: [{ parts: [{ text: fullPrompt }] }] };
+    const modelResponse = await callGeminiAPI(payload, app.modals.chatbotError);
+    
+    thinkingBubble.remove();
+
+    if (modelResponse) {
+        // Add only the AI's response to the history. The context is already stored with the user's message.
+        state.chatHistory.push({ role: 'model', text: modelResponse });
+        renderChatHistory();
+    }
+
+    saveState();
+    app.modals.chatbotSendBtn.disabled = false;
+    app.modals.chatbotInput.focus();
+};
 
                 app.modals.chatbotSendBtn.addEventListener('click', handleChatSubmit);
                 app.modals.chatbotInput.addEventListener('keydown', (e) => {
