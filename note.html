@@ -3595,7 +3595,134 @@ if (checklistItem) {
         feather.replace();
     }
 };
+// --- START: NEW RESEARCH AGENT LOGIC ---
+const researchAgent = async (topic) => {
+    const toastId = showToast(`🔬 Researching "${topic}"...`, 'loading');
 
+    // STEP 1: FIND RELEVANT NOTES (Use existing search tool)
+    const searchResults = lunrIndex.search(topic);
+    const sourceNotes = searchResults.slice(0, 5).map(res => findItem(res.ref)?.item).filter(Boolean);
+
+    if (sourceNotes.length === 0) {
+        dismissToast(toastId);
+        showToast(`No relevant notes found for "${topic}".`, 'info');
+        return;
+    }
+
+    // STEP 2: READ & PREPARE CONTEXT (Use existing tools)
+    const context = sourceNotes.map(note => {
+        return `--- Note Source: "${note.name}" ---\n${note.content.replace(/<[^>]*>?/gm, '')}`;
+    }).join('\n\n');
+
+    // STEP 3: SYNTHESIZE WITH AI (Use existing AI tool)
+    const prompt = `You are a research assistant. Based ONLY on the provided notes, write a comprehensive research brief about "${topic}".
+    Structure your response in well-written Markdown.
+    At the end of your response, include a "Sources" section listing the names of the notes you used, like this:
+    ## Sources
+    - [[Note Name 1]]
+    - [[Note Name 2]]`;
+
+    // We add the context after the main prompt
+    const finalPrompt = `${prompt}\n\nContext from Notes:\n${context}`;
+    const payload = { contents: [{ parts: [{ text: finalPrompt }] }] };
+    const aiBrief = await callGeminiAPI(payload);
+    dismissToast(toastId);
+
+    if (!aiBrief) {
+        showToast('The AI could not generate a research brief.', 'error');
+        return;
+    }
+
+    // STEP 4: CREATE & LINK THE NEW NOTE (Use existing tools)
+    const newNoteName = `Research Brief: ${topic}`;
+    // The createNewNote function will automatically switch to and focus the new note.
+    const newNote = createNewNote(true, marked.parse(aiBrief), null);
+    newNote.name = newNoteName;
+    updateNoteLinks(newNote); // This will automatically turn [[Note Name]] into clickable links!
+
+    // Final save and render
+    saveState();
+    render();
+    showToast(`✅ Research brief created!`, 'success');
+};
+// --- START: NEW MEETING ASSISTANT LOGIC ---
+const meetingAssistantAgent = async (noteId) => {
+    const toastId = showToast('🤝 Processing meeting notes...', 'loading');
+    const { item: note } = findItem(noteId);
+
+    if (!note || !note.content) {
+        dismissToast(toastId);
+        return showToast('Note is empty.', 'info');
+    }
+
+    const plainContent = note.content.replace(/<[^>]*>?/gm, ' ').trim();
+
+    // STEP 1: ANALYZE & EXTRACT (with a JSON-focused prompt)
+    const prompt = `Analyze the following meeting minutes.
+    1.  Provide a concise summary of the key decisions made.
+    2.  Extract all action items and identify who is assigned to each task.
+    
+    Return your response as a single, valid JSON object with two keys: "summary" (a string) and "actionItems" (an array of objects, where each object has "task" and "assignee" keys).
+    
+    Example: {"summary": "The team decided...", "actionItems": [{"task": "Draft the report", "assignee": "Alice"}, {"task": "Update the slides", "assignee": "Bob"}]}
+    
+    Meeting Minutes:
+    ---
+    ${plainContent}`;
+
+    const payload = { contents: [{ parts: [{ text: prompt }] }] };
+    let aiResponse;
+    try {
+        const rawResponse = await callGeminiAPI(payload);
+        // Clean up the response to ensure it's valid JSON
+        const jsonString = rawResponse.match(/{[\s\S]*}/)[0];
+        aiResponse = JSON.parse(jsonString);
+    } catch (error) {
+        dismissToast(toastId);
+        console.error("Failed to parse AI response:", error);
+        return showToast('AI response was not valid. Could not process meeting.', 'error');
+    }
+    
+    if (!aiResponse || !aiResponse.summary || !aiResponse.actionItems) {
+        dismissToast(toastId);
+        return showToast('AI failed to extract required information.', 'error');
+    }
+
+    // STEP 2: UPDATE THE ORIGINAL NOTE
+    const summaryHTML = `<h2>Meeting Summary</h2>${marked.parse(aiResponse.summary)}`;
+    note.content = summaryHTML + '<hr>' + note.content;
+
+    // STEP 3: CREATE & LINK ACTION ITEMS
+    const taskLinks = [];
+    const tasksFolder = getAllFolders().find(f => f.name.toLowerCase() === 'tasks');
+    const parentId = tasksFolder ? tasksFolder.id : null;
+
+    for (const item of aiResponse.actionItems) {
+        // createNewNote(switchToIt, initialContent, parentId)
+        const newTask = createNewNote(false, `From meeting: [[${note.name}]]`, parentId);
+        newTask.name = item.task;
+        
+        // Add assignee as a property
+        if (item.assignee) {
+            newTask.properties['Assignee'] = { type: 'select', value: item.assignee, options: [{name: item.assignee}] };
+        }
+        taskLinks.push(`[[${newTask.name}]]`);
+    }
+
+    if (taskLinks.length > 0) {
+        note.content += `<h2>Action Items</h2><ul>${taskLinks.map(link => `<li>${link}</li>`).join('')}</ul>`;
+    }
+
+    note.modifiedAt = new Date().toISOString();
+    updateNoteLinks(note); // This makes all the [[links]] clickable
+
+    dismissToast(toastId);
+    saveState();
+    render(); // Re-render the UI to show all the changes
+    showToast('✅ Meeting processed successfully!', 'success');
+};
+// --- END: NEW MEETING ASSISTANT LOGIC ---
+// --- END: NEW RESEARCH AGENT LOGIC ---
 // ==================================================================
 //  END: CORRECT FUNCTION BLOCK
 // ==================================================================
@@ -7756,7 +7883,34 @@ tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="tabl
 },
 // ... rest of the commands
     { name: 'dn', description: 'Delete a note. Usage: /dn [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',async (n)=>{const r=findItem(n.id);const c=await showConfirm({title:`Delete "${n.name}"?`,message:'This cannot be undone.',confirmText:'Delete'});if(c){const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index,1);showToast(`🗑️ Note deleted.`);if(state.settings.activeNoteId===n.id)state.settings.activeNoteId=null;saveState();buildLunrIndex();render()}})},
-    { name: 'df', description: 'Delete folder. Usage: /df [folder name]', suggest: 'folders', execute: (args)=>executeWithSmartFind(args,'folders',async (f)=>{const r=findItem(f.id);const c=await showConfirm({title:`Delete folder "${f.name}"?`,message:'This will delete the folder and <strong>all notes inside</strong>.',confirmText:'Delete'});if(c){const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index,1);showToast(`🗑️ Folder deleted.`);if(state.settings.activeCollectionId===f.id)state.settings.activeCollectionId=null;saveState();buildLunrIndex();render()}})}
+    { name: 'df', description: 'Delete folder. Usage: /df [folder name]', suggest: 'folders', execute: (args)=>executeWithSmartFind(args,'folders',async (f)=>{const r=findItem(f.id);const c=await showConfirm({title:`Delete folder "${f.name}"?`,message:'This will delete the folder and <strong>all notes inside</strong>.',confirmText:'Delete'});if(c){const pA=Array.isArray(r.parent)?r.parent:r.parent.children;pA.splice(r.index,1);showToast(`🗑️ Folder deleted.`);if(state.settings.activeCollectionId===f.id)state.settings.activeCollectionId=null;saveState();buildLunrIndex();render()}})},
+// --- START: NEW RESEARCH AGENT COMMAND ---
+{
+    name: 'research',
+    description: 'Research brief from multiple notes. Usage: /research [topic]',
+    execute: (args) => {
+        if (!args) {
+            return showToast('❌ Please provide a research topic.', 'error');
+        }
+        // We will call the new agent function here
+        researchAgent(args);
+    }
+},
+// --- START: NEW MEETING ASSISTANT COMMAND ---
+{
+    name: 'process',
+    description: 'Scans meeting notes to extract a summary and action items.',
+    execute: (args) => {
+        const noteId = state.settings.activeNoteId;
+        if (!noteId) {
+            return showToast('❌ You must be in a note to process it.', 'error');
+        }
+        // This will call our new agent function
+        meetingAssistantAgent(noteId);
+    }
+}
+// --- END: NEW MEETING ASSISTANT COMMAND ---
+// --- END: NEW RESEARCH AGENT COMMAND ---
 ];
 
 const openCommandPrompt = () => { if (document.activeElement === app.elements.noteEditorBody && window.getSelection().rangeCount > 0) {
