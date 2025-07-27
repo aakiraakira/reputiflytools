@@ -6609,6 +6609,8 @@ app.containers.notesListContent.addEventListener('click', (e) => {
 
 // This new listener handles ticking/unticking the interactive checkboxes
 // This new listener handles ticking/unticking the interactive checkboxes
+// This new listener handles ticking/unticking the interactive checkboxes
+// This new listener handles ticking/unticking the interactive checkboxes
 app.containers.notesListContent.addEventListener('change', (e) => {
     const checkbox = e.target.closest('.checklist-preview-item input[type="checkbox"]');
     if (checkbox) {
@@ -6621,7 +6623,6 @@ app.containers.notesListContent.addEventListener('change', (e) => {
         const note = noteResult.item;
 
         // 1. Update the note's content in the state using a temporary element.
-        // This is a safe way to modify the HTML string.
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = note.content;
 
@@ -6634,7 +6635,6 @@ app.containers.notesListContent.addEventListener('change', (e) => {
         const checkboxInContent = itemInContent.querySelector('.checklist-item-checkbox');
         const isChecked = checkbox.checked;
 
-        // Update the underlying HTML that gets saved
         itemInContent.classList.toggle('checked', isChecked);
         itemInContent.dataset.checked = isChecked;
         if (isChecked) {
@@ -6645,10 +6645,9 @@ app.containers.notesListContent.addEventListener('change', (e) => {
 
         note.content = tempDiv.innerHTML;
         note.modifiedAt = new Date().toISOString();
-        saveState(); // Save the change to the database
+        saveState();
 
         // 2. Manually update the List View UI to avoid a full re-render
-        // This is what keeps your checklist from closing!
         const listItemPreview = checkbox.closest('.checklist-preview-item');
         if (listItemPreview) {
             listItemPreview.classList.toggle('checked', isChecked);
@@ -6664,18 +6663,24 @@ app.containers.notesListContent.addEventListener('change', (e) => {
             }
         }
 
-        // 3. Manually update the main editor's progress bar if that note is currently open
+        // 3. Manually update the main editor view if the note is currently open
         if (note.id === state.settings.activeNoteId) {
             const editorChecklists = app.elements.noteEditorBody.querySelectorAll('.checklist-container');
             const targetChecklistInEditor = editorChecklists[parseInt(checklistIndex)];
+            
             if (targetChecklistInEditor) {
-                // We also need to update the checked state of the item within the editor itself
+                // THIS IS THE FIX: We must update the live editor's DOM state
+                // *before* calling the progress update function.
                 const itemInEditor = targetChecklistInEditor.querySelectorAll('.checklist-item')[parseInt(itemIndex)];
                 if (itemInEditor) {
                     itemInEditor.classList.toggle('checked', isChecked);
-                    itemInEditor.querySelector('input').checked = isChecked;
+                    const checkboxInEditor = itemInEditor.querySelector('input.checklist-item-checkbox');
+                    if (checkboxInEditor) {
+                        checkboxInEditor.checked = isChecked;
+                    }
                 }
-                // Now, update its progress bar
+                
+                // Now, update its progress bar using the corrected DOM
                 updateChecklistProgress(targetChecklistInEditor);
             }
         }
