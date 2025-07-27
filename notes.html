@@ -6577,6 +6577,147 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: Timer/Stopwatch Logic ---
+const initTimer = () => {
+    const modal = document.getElementById('timer-modal');
+    const header = document.getElementById('timer-header');
+    const closeBtn = document.getElementById('timer-close-btn');
+    const display = document.getElementById('timer-display');
+    const startStopBtn = document.getElementById('timer-start-stop-btn');
+    const resetBtn = document.getElementById('timer-reset-btn');
+    const lapBtn = document.getElementById('timer-lap-btn');
+    const lapsContainer = document.getElementById('timer-laps-container');
+    const setBtn = document.getElementById('timer-set-btn');
+    const input = document.getElementById('timer-input');
+    const inputContainer = document.getElementById('timer-input-container');
+
+    let timerInterval = null;
+    let mode = 'stopwatch'; // 'stopwatch' or 'timer'
+    let startTime = 0;
+    let elapsedTime = 0;
+    let laps = [];
+    let countdownFrom = 0;
+
+    const formatTime = (ms) => {
+        const totalSeconds = Math.floor(ms / 1000);
+        const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+        const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+        const seconds = String(totalSeconds % 60).padStart(2, '0');
+        return `${hours}:${minutes}:${seconds}`;
+    };
+
+    const updateDisplay = () => {
+        const now = Date.now();
+        if (mode === 'stopwatch') {
+            elapsedTime = now - startTime;
+            display.textContent = formatTime(elapsedTime);
+        } else { // Timer mode
+            const remainingTime = countdownFrom - (now - startTime);
+            if (remainingTime <= 0) {
+                stopTimer();
+                display.textContent = "00:00:00";
+                showToast("⏰ Timer Finished!", "success");
+                new Audio('https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3').play();
+                return;
+            }
+            display.textContent = formatTime(remainingTime);
+        }
+    };
+
+    const startTimer = () => {
+        if (timerInterval) return; // Already running
+        startTime = Date.now() - elapsedTime;
+        timerInterval = setInterval(updateDisplay, 1000);
+        startStopBtn.textContent = 'Stop';
+        lapBtn.disabled = (mode === 'timer');
+        inputContainer.classList.add('hidden');
+    };
+
+    const stopTimer = () => {
+        if (!timerInterval) return; // Already stopped
+        clearInterval(timerInterval);
+        timerInterval = null;
+        elapsedTime = Date.now() - startTime; // Save final elapsed time
+        startStopBtn.textContent = 'Start';
+        lapBtn.disabled = true;
+    };
+
+    const resetTimer = () => {
+        stopTimer();
+        elapsedTime = 0;
+        laps = [];
+        mode = 'stopwatch';
+        countdownFrom = 0;
+        display.textContent = "00:00:00";
+        lapsContainer.innerHTML = '';
+        inputContainer.classList.remove('hidden');
+        input.value = '';
+    };
+
+    const addLap = () => {
+        if (!timerInterval || mode !== 'stopwatch') return;
+        const lapTime = elapsedTime;
+        laps.push(lapTime);
+        const lapNumber = laps.length;
+        const prevLapTime = laps.length > 1 ? laps[laps.length - 2] : 0;
+        const lapDuration = lapTime - prevLapTime;
+        
+        const lapEl = document.createElement('div');
+        lapEl.className = 'flex justify-between';
+        lapEl.innerHTML = `<span>Lap ${lapNumber}</span><span>${formatTime(lapDuration)}</span>`;
+        lapsContainer.prepend(lapEl);
+    };
+
+    const setTimer = () => {
+        const durationInMinutes = parseDurationToMinutes(input.value);
+        if (durationInMinutes > 0) {
+            resetTimer();
+            mode = 'timer';
+            countdownFrom = durationInMinutes * 60 * 1000;
+            elapsedTime = 0;
+            display.textContent = formatTime(countdownFrom);
+            startTimer();
+        } else {
+            showToast("Invalid time format. Use '15m', '1.5h', etc.", "error");
+        }
+    };
+
+    startStopBtn.addEventListener('click', () => {
+        timerInterval ? stopTimer() : startTimer();
+    });
+    resetBtn.addEventListener('click', resetTimer);
+    lapBtn.addEventListener('click', addLap);
+    setBtn.addEventListener('click', setTimer);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') setTimer();
+    });
+
+    closeBtn.addEventListener('click', () => closeModal(modal));
+
+    // Draggable logic
+    let isDragging = false, offsetX, offsetY;
+    header.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        offsetX = e.clientX - modal.offsetLeft;
+        offsetY = e.clientY - modal.offsetTop;
+        modal.style.transition = 'none';
+    });
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        let newX = e.clientX - offsetX, newY = e.clientY - offsetY;
+        const buffer = 10;
+        newX = Math.max(buffer, Math.min(newX, window.innerWidth - modal.offsetWidth - buffer));
+        newY = Math.max(buffer, Math.min(newY, window.innerHeight - modal.offsetHeight - buffer));
+        modal.style.left = `${newX}px`;
+        modal.style.top = `${newY}px`;
+    });
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+        modal.style.transition = 'all 0.3s';
+    });
+};
+initTimer();
+// --- END: Timer/Stopwatch Logic ---
                 // Paste this code block AFTER the mainContentArea click listener
 // This listener handles clicking on headers to expand/collapse them
 // This listener handles clicking on headers to expand/collapse them
@@ -7614,7 +7755,12 @@ const commands = [
     { name: 'linked', description: 'Show all connections for a note. Usage: /linked [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args, 'notes', (note)=>renderLinkedNotesModal(note)) },
     { name: 'help', description: 'Shows this list of all available commands.', execute: renderHelpModal },
     { name: 'commands', description: 'Alias for /help.', execute: renderHelpModal },
-    { name: 'calculator', description: 'Opens a draggable calculator.', execute: () => openModal(document.getElementById('calculator-modal')) },
+    { name: 'calculator', description: 'Opens a draggable calculator.', execute: () => openModal(document.getElementById('calculator-modal')) },// Add this command object inside the `commands` array
+{ 
+    name: 'timer', 
+    description: 'Opens a draggable timer and stopwatch.', 
+    execute: () => openModal(document.getElementById('timer-modal')) 
+},
     { name: 'ask', description: 'Ask Your Notes AI. Usage: /ask [question]', execute: (args)=>{if(!args)return showToast('❌ Question needed.','error');openModal(document.getElementById('global-ai-modal'));document.getElementById('global-ai-input').value=args;document.getElementById('global-ai-ask-btn').click();feather.replace()} },
     { name: 'summary', description: 'Summarize a note. Usage: /summary [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleSummarize(c)})},
     { name: 'quiz', description: 'Generate quiz. Usage: /quiz [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleGenerateQuiz(c,n)})},
@@ -12709,6 +12855,30 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
             <button class="calc-btn">.</button>
             <button class="calc-btn equals-btn">=</button>
         </div>
+    </div>
+</div>
+<div id="timer-modal" class="modal hidden fixed top-1/4 left-1/2 -translate-x-1/2 bg-bg-pane-dark p-3 rounded-lg shadow-2xl w-[280px] z-[1001] transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header id="timer-header" class="flex justify-between items-center pb-2 mb-2 border-b border-border-color cursor-move flex-shrink-0">
+        <h3 class="text-sm font-semibold flex items-center gap-2">
+            <i data-feather="clock" class="w-4 h-4 text-accent-primary"></i>
+            <span>Timer / Stopwatch</span>
+        </h3>
+        <button id="timer-close-btn" class="p-1 rounded-full hover:bg-bg-main"><i data-feather="x" class="w-4 h-4"></i></button>
+    </header>
+    <div class="flex-grow flex flex-col gap-3">
+        <div id="timer-display" class="w-full bg-bg-main text-center text-5xl font-light p-3 rounded-md border border-border-color tracking-wider">00:00:00</div>
+        
+        <div id="timer-input-container" class="flex gap-2">
+            <input type="text" id="timer-input" placeholder="e.g., 15m, 1.5h" class="w-full bg-bg-pane-light border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none">
+            <button id="timer-set-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Set</button>
+        </div>
+
+        <div id="timer-controls" class="grid grid-cols-2 gap-2">
+            <button id="timer-start-stop-btn" class="calc-btn brand-button col-span-2">Start</button>
+            <button id="timer-reset-btn" class="calc-btn bg-bg-pane-light">Reset</button>
+            <button id="timer-lap-btn" class="calc-btn bg-bg-pane-light" disabled>Lap</button>
+        </div>
+        <div id="timer-laps-container" class="text-xs text-text-secondary max-h-24 overflow-y-auto custom-scrollbar space-y-1 p-1"></div>
     </div>
 </div>
 </body>
