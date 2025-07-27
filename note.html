@@ -6582,6 +6582,7 @@ ${noteContent}`;
 
             async function init() {
                 // --- START: Timer/Stopwatch Logic ---
+// --- START: Timer/Stopwatch Logic ---
 const initTimer = () => {
     const modal = document.getElementById('timer-modal');
     const header = document.getElementById('timer-header');
@@ -6596,11 +6597,24 @@ const initTimer = () => {
     const inputContainer = document.getElementById('timer-input-container');
 
     let timerInterval = null;
-    let mode = 'stopwatch'; // 'stopwatch' or 'timer'
+    let mode = 'stopwatch';
     let startTime = 0;
     let elapsedTime = 0;
     let laps = [];
     let countdownFrom = 0;
+    let isRunning = false;
+
+    const saveTimerState = () => {
+        const stateToSave = {
+            mode,
+            startTime,
+            elapsedTime,
+            laps,
+            countdownFrom,
+            isRunning
+        };
+        localStorage.setItem('reputiflyTimerState', JSON.stringify(stateToSave));
+    };
 
     const formatTime = (ms) => {
         const totalSeconds = Math.floor(ms / 1000);
@@ -6611,39 +6625,44 @@ const initTimer = () => {
     };
 
     const updateDisplay = () => {
-        const now = Date.now();
+        let currentTotalElapsed = isRunning ? elapsedTime + (Date.now() - startTime) : elapsedTime;
+
         if (mode === 'stopwatch') {
-            elapsedTime = now - startTime;
-            display.textContent = formatTime(elapsedTime);
+            display.textContent = formatTime(currentTotalElapsed);
         } else { // Timer mode
-            const remainingTime = countdownFrom - (now - startTime);
-            if (remainingTime <= 0) {
-                stopTimer();
+            const remainingTime = countdownFrom - currentTotalElapsed;
+            if (remainingTime <= 0 && isRunning) {
+                stopTimer(); // This will update elapsedTime
                 display.textContent = "00:00:00";
                 showToast("⏰ Timer Finished!", "success");
                 new Audio('https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3').play();
+                resetTimer(); // Reset to initial state after finishing
                 return;
             }
-            display.textContent = formatTime(remainingTime);
+            display.textContent = formatTime(Math.max(0, remainingTime));
         }
     };
 
     const startTimer = () => {
-        if (timerInterval) return; // Already running
-        startTime = Date.now() - elapsedTime;
-        timerInterval = setInterval(updateDisplay, 1000);
+        if (isRunning) return;
+        isRunning = true;
+        startTime = Date.now();
+        timerInterval = setInterval(updateDisplay, 50); // Update more frequently for accuracy
         startStopBtn.textContent = 'Stop';
         lapBtn.disabled = (mode === 'timer');
         inputContainer.classList.add('hidden');
+        saveTimerState();
     };
 
     const stopTimer = () => {
-        if (!timerInterval) return; // Already stopped
+        if (!isRunning) return;
         clearInterval(timerInterval);
         timerInterval = null;
-        elapsedTime = Date.now() - startTime; // Save final elapsed time
+        elapsedTime += Date.now() - startTime;
+        isRunning = false;
         startStopBtn.textContent = 'Start';
         lapBtn.disabled = true;
+        saveTimerState();
     };
 
     const resetTimer = () => {
@@ -6652,24 +6671,33 @@ const initTimer = () => {
         laps = [];
         mode = 'stopwatch';
         countdownFrom = 0;
+        isRunning = false; // Ensure isRunning is false
         display.textContent = "00:00:00";
         lapsContainer.innerHTML = '';
         inputContainer.classList.remove('hidden');
         input.value = '';
+        saveTimerState();
     };
 
     const addLap = () => {
-        if (!timerInterval || mode !== 'stopwatch') return;
-        const lapTime = elapsedTime;
+        if (!isRunning || mode !== 'stopwatch') return;
+        const lapTime = elapsedTime + (Date.now() - startTime);
         laps.push(lapTime);
-        const lapNumber = laps.length;
-        const prevLapTime = laps.length > 1 ? laps[laps.length - 2] : 0;
-        const lapDuration = lapTime - prevLapTime;
-        
-        const lapEl = document.createElement('div');
-        lapEl.className = 'flex justify-between';
-        lapEl.innerHTML = `<span>Lap ${lapNumber}</span><span>${formatTime(lapDuration)}</span>`;
-        lapsContainer.prepend(lapEl);
+        renderLaps();
+        saveTimerState();
+    };
+    
+    const renderLaps = () => {
+        lapsContainer.innerHTML = '';
+        [...laps].reverse().forEach((lapTime, index) => {
+            const lapNumber = laps.length - index;
+            const prevLapTime = lapNumber > 1 ? laps[lapNumber - 2] : 0;
+            const lapDuration = lapTime - prevLapTime;
+            const lapEl = document.createElement('div');
+            lapEl.className = 'flex justify-between p-1 border-b border-border-color';
+            lapEl.innerHTML = `<span>Lap ${lapNumber}</span><span>${formatTime(lapDuration)}</span>`;
+            lapsContainer.appendChild(lapEl);
+        });
     };
 
     const setTimer = () => {
@@ -6678,27 +6706,41 @@ const initTimer = () => {
             resetTimer();
             mode = 'timer';
             countdownFrom = durationInMinutes * 60 * 1000;
-            elapsedTime = 0;
             display.textContent = formatTime(countdownFrom);
+            saveTimerState();
             startTimer();
         } else {
             showToast("Invalid time format. Use '15m', '1.5h', etc.", "error");
         }
     };
+    
+    const loadTimerState = () => {
+        const savedStateJSON = localStorage.getItem('reputiflyTimerState');
+        if (!savedStateJSON) return;
 
-    startStopBtn.addEventListener('click', () => {
-        timerInterval ? stopTimer() : startTimer();
-    });
+        const savedState = JSON.parse(savedStateJSON);
+        mode = savedState.mode;
+        elapsedTime = savedState.elapsedTime;
+        laps = savedState.laps || [];
+        countdownFrom = savedState.countdownFrom;
+        
+        if (savedState.isRunning) {
+            // Recalculate elapsed time based on how long it's been since the page was closed
+            elapsedTime += Date.now() - savedState.startTime;
+            startTimer();
+        }
+        
+        updateDisplay();
+        renderLaps();
+    };
+
+    startStopBtn.addEventListener('click', () => { isRunning ? stopTimer() : startTimer(); });
     resetBtn.addEventListener('click', resetTimer);
     lapBtn.addEventListener('click', addLap);
     setBtn.addEventListener('click', setTimer);
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') setTimer();
-    });
-
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') setTimer(); });
     closeBtn.addEventListener('click', () => closeModal(modal));
 
-    // Draggable logic
     let isDragging = false, offsetX, offsetY;
     header.addEventListener('mousedown', (e) => {
         isDragging = true;
@@ -6719,8 +6761,11 @@ const initTimer = () => {
         isDragging = false;
         modal.style.transition = 'all 0.3s';
     });
+
+    loadTimerState();
 };
 initTimer();
+// --- END: Timer/Stopwatch Logic ---
 // --- END: Timer/Stopwatch Logic ---
                 // Paste this code block AFTER the mainContentArea click listener
 // This listener handles clicking on headers to expand/collapse them
