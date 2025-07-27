@@ -5734,8 +5734,7 @@ function renderListView() {
             allPropertiesHTML = `<div class="flex items-center gap-x-3 whitespace-nowrap">${propsList}</div>`;
         }
     }
-
-    // START: NEW MULTI-CHECKLIST LOGIC
+    
     let allChecklistsHTML = '';
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = note.content;
@@ -5746,8 +5745,11 @@ function renderListView() {
             const title = checklistEl.querySelector('.checklist-title')?.textContent.trim() || 'Checklist';
             const items = Array.from(checklistEl.querySelectorAll('.checklist-item'));
             const totalItems = items.length;
+            
+            // --- THIS LINE IS NEW ---
+            const completedItems = checklistEl.querySelectorAll('.checklist-item.checked').length;
 
-            if (totalItems === 0) return ''; // Skip empty checklists
+            if (totalItems === 0) return ''; 
 
             const itemsHTML = items.map((item, itemIndex) => {
                 const isChecked = item.classList.contains('checked');
@@ -5772,7 +5774,9 @@ function renderListView() {
                         <div class="flex items-center gap-2 min-w-0">
                             <i data-feather="check-square" class="w-4 h-4 text-text-tertiary flex-shrink-0"></i>
                             <span class="font-medium truncate">${title}</span>
-                            <span class="text-xs text-text-tertiary bg-bg-main px-1.5 py-0.5 rounded-full flex-shrink-0">${totalItems} Tasks</span>
+                            
+                            <span class="text-xs text-text-tertiary bg-bg-main px-1.5 py-0.5 rounded-full flex-shrink-0">${completedItems}/${totalItems} Done</span>
+
                         </div>
                         <i data-feather="chevron-down" class="w-4 h-4 text-text-tertiary transition-transform flex-shrink-0"></i>
                     </div>
@@ -5787,8 +5791,7 @@ function renderListView() {
             allChecklistsHTML = `<div class="space-y-2">${checklistsPreviews}</div>`;
         }
     }
-    // END: NEW MULTI-CHECKLIST LOGIC
-
+    
     const plainContent = note.content.replace(/<[^>]*>?/gm, '').trim();
     const excerpt = plainContent.substring(0, 120) + (plainContent.length > 120 ? '...' : '');
     const modifiedDate = formatDateTime(note.modifiedAt);
@@ -6576,7 +6579,18 @@ ${noteContent}`;
             async function init() {
                 // Paste this code block AFTER the mainContentArea click listener
 // This listener handles clicking on headers to expand/collapse them
+// This listener handles clicking on headers to expand/collapse them
 app.containers.notesListContent.addEventListener('click', (e) => {
+    // First, check if a checklist item's label was clicked
+    const itemLabel = e.target.closest('.checklist-preview-item label');
+    if (itemLabel) {
+        // This is the key fix: stop the click from bubbling up to the main note link.
+        // We do NOT prevent the default action, as that would stop the checkbox from toggling.
+        e.stopPropagation();
+        return; // Action handled, nothing more to do for this click.
+    }
+
+    // Second, handle the expand/collapse header click
     const header = e.target.closest('.checklist-preview-header');
     if (header) {
         e.preventDefault();
@@ -6594,6 +6608,7 @@ app.containers.notesListContent.addEventListener('click', (e) => {
 });
 
 // This new listener handles ticking/unticking the interactive checkboxes
+// This new listener handles ticking/unticking the interactive checkboxes
 app.containers.notesListContent.addEventListener('change', (e) => {
     const checkbox = e.target.closest('.checklist-preview-item input[type="checkbox"]');
     if (checkbox) {
@@ -6605,7 +6620,8 @@ app.containers.notesListContent.addEventListener('change', (e) => {
         
         const note = noteResult.item;
 
-        // Create a temporary element to safely modify the note's HTML content
+        // 1. Update the note's content in the state using a temporary element.
+        // This is a safe way to modify the HTML string.
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = note.content;
 
@@ -6618,7 +6634,7 @@ app.containers.notesListContent.addEventListener('change', (e) => {
         const checkboxInContent = itemInContent.querySelector('.checklist-item-checkbox');
         const isChecked = checkbox.checked;
 
-        // Update the HTML attributes and classes to reflect the new state
+        // Update the underlying HTML that gets saved
         itemInContent.classList.toggle('checked', isChecked);
         itemInContent.dataset.checked = isChecked;
         if (isChecked) {
@@ -6627,14 +6643,42 @@ app.containers.notesListContent.addEventListener('change', (e) => {
             checkboxInContent.removeAttribute('checked');
         }
 
-        // Save the modified HTML back to the note object
         note.content = tempDiv.innerHTML;
         note.modifiedAt = new Date().toISOString();
+        saveState(); // Save the change to the database
+
+        // 2. Manually update the List View UI to avoid a full re-render
+        // This is what keeps your checklist from closing!
+        const listItemPreview = checkbox.closest('.checklist-preview-item');
+        if (listItemPreview) {
+            listItemPreview.classList.toggle('checked', isChecked);
+        }
         
-        // Save the state to the database and re-render the view
-        saveState();
-        renderListView(); 
-        feather.replace(); // Re-render icons
+        const checklistPreviewContainer = checkbox.closest('.list-view-checklist-preview');
+        if (checklistPreviewContainer) {
+            const totalItems = checklistInContent.querySelectorAll('.checklist-item').length;
+            const completedItems = checklistInContent.querySelectorAll('.checklist-item.checked').length;
+            const progressSpan = checklistPreviewContainer.querySelector('.checklist-preview-header span.text-xs');
+            if (progressSpan) {
+                progressSpan.textContent = `${completedItems}/${totalItems} Done`;
+            }
+        }
+
+        // 3. Manually update the main editor's progress bar if that note is currently open
+        if (note.id === state.settings.activeNoteId) {
+            const editorChecklists = app.elements.noteEditorBody.querySelectorAll('.checklist-container');
+            const targetChecklistInEditor = editorChecklists[parseInt(checklistIndex)];
+            if (targetChecklistInEditor) {
+                // We also need to update the checked state of the item within the editor itself
+                const itemInEditor = targetChecklistInEditor.querySelectorAll('.checklist-item')[parseInt(itemIndex)];
+                if (itemInEditor) {
+                    itemInEditor.classList.toggle('checked', isChecked);
+                    itemInEditor.querySelector('input').checked = isChecked;
+                }
+                // Now, update its progress bar
+                updateChecklistProgress(targetChecklistInEditor);
+            }
+        }
     }
 });
                 // --- START: Calculator Logic ---
