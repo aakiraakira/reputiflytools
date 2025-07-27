@@ -169,6 +169,37 @@
 .toolbar-color-btn.active:hover .color-swatch-indicator {
     box-shadow: 0 0 0 2px var(--accent-primary-dark), 0 0 0 4px var(--bg-main);
 }
+/* --- START: Calculator Modal Styles --- */
+#calculator-modal {
+    min-width: 260px;
+    min-height: 380px;
+}
+.calc-btn {
+    @apply h-14 rounded-md text-xl font-medium transition-colors duration-150;
+    background-color: var(--bg-pane-light);
+    color: var(--text-primary);
+}
+.calc-btn:hover {
+    background-color: var(--bg-main);
+}
+.calc-btn:active {
+    transform: scale(0.95);
+}
+.calc-btn.operator-btn {
+    background-color: var(--bg-pane-dark);
+    color: var(--accent-primary);
+}
+.calc-btn.operator-btn:hover {
+    background-color: var(--border-color);
+}
+.calc-btn.equals-btn {
+    background-image: linear-gradient(to right, var(--brand-grad-from), var(--brand-grad-to));
+    color: white;
+}
+.calc-btn.equals-btn:hover {
+    opacity: 0.9;
+}
+/* --- END: Calculator Modal Styles --- */
 .folder-view-switcher {
     display: flex;
     gap: 0.5rem;
@@ -6434,6 +6465,130 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: Calculator Logic ---
+const initCalculator = () => {
+    const modal = document.getElementById('calculator-modal');
+    const header = document.getElementById('calculator-header');
+    const closeBtn = document.getElementById('calculator-close-btn');
+    const display = document.getElementById('calculator-display');
+    const buttons = document.getElementById('calculator-buttons');
+
+    let currentOperand = '';
+    let previousOperand = '';
+    let operation = undefined;
+
+    const compute = () => {
+        let computation;
+        const prev = parseFloat(previousOperand);
+        const current = parseFloat(currentOperand);
+        if (isNaN(prev) || isNaN(current)) return;
+        switch (operation) {
+            case '+': computation = prev + current; break;
+            case '-': computation = prev - current; break;
+            case '*': computation = prev * current; break;
+            case '/': computation = prev / current; break;
+            case '%': computation = prev % current; break;
+            default: return;
+        }
+        currentOperand = computation.toString();
+        operation = undefined;
+        previousOperand = '';
+    };
+
+    const chooseOperation = (op) => {
+        if (currentOperand === '' && previousOperand === '') return;
+        if (currentOperand === '' && previousOperand !== '') {
+            operation = op;
+            return;
+        }
+        if (previousOperand !== '') {
+            compute();
+        }
+        operation = op;
+        previousOperand = currentOperand;
+        currentOperand = '';
+    };
+
+    const appendNumber = (number) => {
+        if (number === '.' && currentOperand.includes('.')) return;
+        currentOperand = currentOperand.toString() + number.toString();
+    };
+    
+    const clear = () => {
+        currentOperand = '';
+        previousOperand = '';
+        operation = undefined;
+    };
+    
+    const clearEntry = () => {
+        currentOperand = '';
+    };
+
+    const updateDisplay = () => {
+        display.value = currentOperand || previousOperand || '0';
+    };
+
+    buttons.addEventListener('click', (e) => {
+        if (e.target.tagName !== 'BUTTON') return;
+        const buttonText = e.target.innerText;
+
+        if (buttonText >= '0' && buttonText <= '9' || buttonText === '.') {
+            appendNumber(buttonText);
+        } else if (['+', '-', '*', '/', '%'].includes(buttonText)) {
+            chooseOperation(buttonText);
+        } else if (buttonText === '=') {
+            compute();
+        } else if (buttonText === 'C') {
+            clear();
+        } else if (buttonText === 'CE') {
+            clearEntry();
+        }
+        updateDisplay();
+    });
+
+    display.addEventListener('keydown', (e) => {
+        if ((e.key >= '0' && e.key <= '9') || e.key === '.') appendNumber(e.key);
+        else if (['+', '-', '*', '/', '%'].includes(e.key)) chooseOperation(e.key);
+        else if (e.key === 'Enter' || e.key === '=') { e.preventDefault(); compute(); }
+        else if (e.key === 'Backspace') clearEntry();
+        else if (e.key.toLowerCase() === 'c') clear();
+        else if (!['Tab', 'ArrowLeft', 'ArrowRight', 'Delete'].includes(e.key)) e.preventDefault();
+        
+        // A small delay to allow the value to update before displaying
+        setTimeout(updateDisplay, 0);
+    });
+
+    closeBtn.addEventListener('click', () => closeModal(modal));
+
+    // Draggable logic
+    let isDragging = false;
+    let offsetX, offsetY;
+    header.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        offsetX = e.clientX - modal.offsetLeft;
+        offsetY = e.clientY - modal.offsetTop;
+        modal.style.transition = 'none'; // Disable transition for smooth dragging
+    });
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        let newX = e.clientX - offsetX;
+        let newY = e.clientY - offsetY;
+        
+        // Constrain movement within the viewport
+        const buffer = 10;
+        newX = Math.max(buffer, Math.min(newX, window.innerWidth - modal.offsetWidth - buffer));
+        newY = Math.max(buffer, Math.min(newY, window.innerHeight - modal.offsetHeight - buffer));
+        
+        modal.style.left = `${newX}px`;
+        modal.style.top = `${newY}px`;
+    });
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+        modal.style.transition = 'all 0.3s'; // Re-enable transition
+    });
+};
+initCalculator();
+// --- END: Calculator Logic ---
                 // --- START: ADD THIS ENTIRE BLOCK FOR CHATBOT CONTEXT ---
             window.chatbotContextNoteIds = []; // Use window scope to make it accessible
 
@@ -7238,6 +7393,7 @@ const commands = [
     { name: 'linked', description: 'Show all connections for a note. Usage: /linked [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args, 'notes', (note)=>renderLinkedNotesModal(note)) },
     { name: 'help', description: 'Shows this list of all available commands.', execute: renderHelpModal },
     { name: 'commands', description: 'Alias for /help.', execute: renderHelpModal },
+    { name: 'calculator', description: 'Opens a draggable calculator.', execute: () => openModal(document.getElementById('calculator-modal')) },
     { name: 'ask', description: 'Ask Your Notes AI. Usage: /ask [question]', execute: (args)=>{if(!args)return showToast('❌ Question needed.','error');openModal(document.getElementById('global-ai-modal'));document.getElementById('global-ai-input').value=args;document.getElementById('global-ai-ask-btn').click();feather.replace()} },
     { name: 'summary', description: 'Summarize a note. Usage: /summary [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleSummarize(c)})},
     { name: 'quiz', description: 'Generate quiz. Usage: /quiz [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleGenerateQuiz(c,n)})},
@@ -12300,6 +12456,39 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
         <button id="chatbot-context-cancel-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Cancel</button>
         <button id="chatbot-context-confirm-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Add Context</button>
     </footer>
+</div>
+<div id="calculator-modal" class="modal hidden fixed top-1/4 left-1/2 -translate-x-1/2 bg-bg-pane-dark p-3 rounded-lg shadow-2xl w-[280px] z-[1001] transition-all duration-300 transform scale-95 opacity-0 flex flex-col" style="resize: both; overflow: hidden;">
+    <header id="calculator-header" class="flex justify-between items-center pb-2 mb-2 border-b border-border-color cursor-move flex-shrink-0">
+        <h3 class="text-sm font-semibold flex items-center gap-2">
+            <i data-feather="cpu" class="w-4 h-4 text-accent-primary"></i>
+            <span>Calculator</span>
+        </h3>
+        <button id="calculator-close-btn" class="p-1 rounded-full hover:bg-bg-main"><i data-feather="x" class="w-4 h-4"></i></button>
+    </header>
+    <div class="flex-grow flex flex-col gap-3">
+        <input type="text" id="calculator-display" class="w-full bg-bg-main text-right text-3xl font-light p-3 rounded-md border border-border-color focus:outline-none focus:ring-2 focus:ring-accent-primary" readonly>
+        <div id="calculator-buttons" class="grid grid-cols-4 gap-2">
+            <button class="calc-btn bg-bg-pane-light">C</button>
+            <button class="calc-btn bg-bg-pane-light">CE</button>
+            <button class="calc-btn bg-bg-pane-light">%</button>
+            <button class="calc-btn operator-btn">/</button>
+            <button class="calc-btn">7</button>
+            <button class="calc-btn">8</button>
+            <button class="calc-btn">9</button>
+            <button class="calc-btn operator-btn">*</button>
+            <button class="calc-btn">4</button>
+            <button class="calc-btn">5</button>
+            <button class="calc-btn">6</button>
+            <button class="calc-btn operator-btn">-</button>
+            <button class="calc-btn">1</button>
+            <button class="calc-btn">2</button>
+            <button class="calc-btn">3</button>
+            <button class="calc-btn operator-btn">+</button>
+            <button class="calc-btn col-span-2">0</button>
+            <button class="calc-btn">.</button>
+            <button class="calc-btn equals-btn">=</button>
+        </div>
+    </div>
 </div>
 </body>
 </html>
