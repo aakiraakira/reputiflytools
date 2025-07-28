@@ -890,6 +890,10 @@
     border-radius: 3px;
     border: 1px solid var(--border-color);
 }
+.bg-highlight-yellow { background-color: rgba(250, 204, 21, 0.2); }
+.bg-highlight-green { background-color: rgba(74, 222, 128, 0.2); }
+.bg-highlight-blue { background-color: rgba(96, 165, 250, 0.2); }
+.bg-highlight-red { background-color: rgba(248, 113, 113, 0.2); }
 .text-color-red { color: #F87171; }
 .text-color-orange { color: #FB923C; }
 .text-color-green { color: #4ADE80; }
@@ -3843,7 +3847,7 @@ const meetingAssistantAgent = async (noteId) => {
             } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
 
             // ADD THIS NEW LINE:
-            const { doc, setDoc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const { doc, setDoc, getDoc, getDocFromServer } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
             const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
 
             const authContainer = document.getElementById('auth-container');
@@ -6578,6 +6582,7 @@ ${noteContent}`;
 
             async function init() {
                 // --- START: Timer/Stopwatch Logic ---
+// --- START: Timer/Stopwatch Logic ---
 const initTimer = () => {
     const modal = document.getElementById('timer-modal');
     const header = document.getElementById('timer-header');
@@ -6592,11 +6597,24 @@ const initTimer = () => {
     const inputContainer = document.getElementById('timer-input-container');
 
     let timerInterval = null;
-    let mode = 'stopwatch'; // 'stopwatch' or 'timer'
+    let mode = 'stopwatch';
     let startTime = 0;
     let elapsedTime = 0;
     let laps = [];
     let countdownFrom = 0;
+    let isRunning = false;
+
+    const saveTimerState = () => {
+        const stateToSave = {
+            mode,
+            startTime,
+            elapsedTime,
+            laps,
+            countdownFrom,
+            isRunning
+        };
+        localStorage.setItem('reputiflyTimerState', JSON.stringify(stateToSave));
+    };
 
     const formatTime = (ms) => {
         const totalSeconds = Math.floor(ms / 1000);
@@ -6607,39 +6625,44 @@ const initTimer = () => {
     };
 
     const updateDisplay = () => {
-        const now = Date.now();
+        let currentTotalElapsed = isRunning ? elapsedTime + (Date.now() - startTime) : elapsedTime;
+
         if (mode === 'stopwatch') {
-            elapsedTime = now - startTime;
-            display.textContent = formatTime(elapsedTime);
+            display.textContent = formatTime(currentTotalElapsed);
         } else { // Timer mode
-            const remainingTime = countdownFrom - (now - startTime);
-            if (remainingTime <= 0) {
-                stopTimer();
+            const remainingTime = countdownFrom - currentTotalElapsed;
+            if (remainingTime <= 0 && isRunning) {
+                stopTimer(); // This will update elapsedTime
                 display.textContent = "00:00:00";
                 showToast("⏰ Timer Finished!", "success");
                 new Audio('https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3').play();
+                resetTimer(); // Reset to initial state after finishing
                 return;
             }
-            display.textContent = formatTime(remainingTime);
+            display.textContent = formatTime(Math.max(0, remainingTime));
         }
     };
 
     const startTimer = () => {
-        if (timerInterval) return; // Already running
-        startTime = Date.now() - elapsedTime;
-        timerInterval = setInterval(updateDisplay, 1000);
+        if (isRunning) return;
+        isRunning = true;
+        startTime = Date.now();
+        timerInterval = setInterval(updateDisplay, 50); // Update more frequently for accuracy
         startStopBtn.textContent = 'Stop';
         lapBtn.disabled = (mode === 'timer');
         inputContainer.classList.add('hidden');
+        saveTimerState();
     };
 
     const stopTimer = () => {
-        if (!timerInterval) return; // Already stopped
+        if (!isRunning) return;
         clearInterval(timerInterval);
         timerInterval = null;
-        elapsedTime = Date.now() - startTime; // Save final elapsed time
+        elapsedTime += Date.now() - startTime;
+        isRunning = false;
         startStopBtn.textContent = 'Start';
         lapBtn.disabled = true;
+        saveTimerState();
     };
 
     const resetTimer = () => {
@@ -6648,24 +6671,33 @@ const initTimer = () => {
         laps = [];
         mode = 'stopwatch';
         countdownFrom = 0;
+        isRunning = false; // Ensure isRunning is false
         display.textContent = "00:00:00";
         lapsContainer.innerHTML = '';
         inputContainer.classList.remove('hidden');
         input.value = '';
+        saveTimerState();
     };
 
     const addLap = () => {
-        if (!timerInterval || mode !== 'stopwatch') return;
-        const lapTime = elapsedTime;
+        if (!isRunning || mode !== 'stopwatch') return;
+        const lapTime = elapsedTime + (Date.now() - startTime);
         laps.push(lapTime);
-        const lapNumber = laps.length;
-        const prevLapTime = laps.length > 1 ? laps[laps.length - 2] : 0;
-        const lapDuration = lapTime - prevLapTime;
-        
-        const lapEl = document.createElement('div');
-        lapEl.className = 'flex justify-between';
-        lapEl.innerHTML = `<span>Lap ${lapNumber}</span><span>${formatTime(lapDuration)}</span>`;
-        lapsContainer.prepend(lapEl);
+        renderLaps();
+        saveTimerState();
+    };
+    
+    const renderLaps = () => {
+        lapsContainer.innerHTML = '';
+        [...laps].reverse().forEach((lapTime, index) => {
+            const lapNumber = laps.length - index;
+            const prevLapTime = lapNumber > 1 ? laps[lapNumber - 2] : 0;
+            const lapDuration = lapTime - prevLapTime;
+            const lapEl = document.createElement('div');
+            lapEl.className = 'flex justify-between p-1 border-b border-border-color';
+            lapEl.innerHTML = `<span>Lap ${lapNumber}</span><span>${formatTime(lapDuration)}</span>`;
+            lapsContainer.appendChild(lapEl);
+        });
     };
 
     const setTimer = () => {
@@ -6674,27 +6706,41 @@ const initTimer = () => {
             resetTimer();
             mode = 'timer';
             countdownFrom = durationInMinutes * 60 * 1000;
-            elapsedTime = 0;
             display.textContent = formatTime(countdownFrom);
+            saveTimerState();
             startTimer();
         } else {
             showToast("Invalid time format. Use '15m', '1.5h', etc.", "error");
         }
     };
+    
+    const loadTimerState = () => {
+        const savedStateJSON = localStorage.getItem('reputiflyTimerState');
+        if (!savedStateJSON) return;
 
-    startStopBtn.addEventListener('click', () => {
-        timerInterval ? stopTimer() : startTimer();
-    });
+        const savedState = JSON.parse(savedStateJSON);
+        mode = savedState.mode;
+        elapsedTime = savedState.elapsedTime;
+        laps = savedState.laps || [];
+        countdownFrom = savedState.countdownFrom;
+        
+        if (savedState.isRunning) {
+            // Recalculate elapsed time based on how long it's been since the page was closed
+            elapsedTime += Date.now() - savedState.startTime;
+            startTimer();
+        }
+        
+        updateDisplay();
+        renderLaps();
+    };
+
+    startStopBtn.addEventListener('click', () => { isRunning ? stopTimer() : startTimer(); });
     resetBtn.addEventListener('click', resetTimer);
     lapBtn.addEventListener('click', addLap);
     setBtn.addEventListener('click', setTimer);
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') setTimer();
-    });
-
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') setTimer(); });
     closeBtn.addEventListener('click', () => closeModal(modal));
 
-    // Draggable logic
     let isDragging = false, offsetX, offsetY;
     header.addEventListener('mousedown', (e) => {
         isDragging = true;
@@ -6715,8 +6761,11 @@ const initTimer = () => {
         isDragging = false;
         modal.style.transition = 'all 0.3s';
     });
+
+    loadTimerState();
 };
 initTimer();
+// --- END: Timer/Stopwatch Logic ---
 // --- END: Timer/Stopwatch Logic ---
                 // Paste this code block AFTER the mainContentArea click listener
 // This listener handles clicking on headers to expand/collapse them
@@ -10320,46 +10369,86 @@ app.elements.noteEditorBody.addEventListener('change', (e) => {
         }
     }
 });
-performImmediateSave = () => {
+performImmediateSave = async () => {
     if (!state.settings.activeNoteId) return;
-    const {item: note} = findItem(state.settings.activeNoteId);
-    if(note) {
-        const newName = app.elements.noteEditorTitle.value;
-        const newContent = app.elements.noteEditorBody.innerHTML;
 
-        if(note.name !== newName || note.content !== newContent) {
-            note.name = newName;
-            note.content = newContent;
-            note.modifiedAt = new Date().toISOString();
-            updateNoteLinks(note);
-            updateNoteTags(note);
+    const user = window.auth.currentUser;
+    if (!user) return;
 
-            // --- UPGRADED: SMART VERSION HISTORY LOGIC ---
-            const versions = state.versions?.[note.id] || [];
-            const lastVersionTime = versions.length > 0 ? new Date(versions[0].savedAt).getTime() : 0;
-            const now = new Date().getTime();
-            const FIVE_MINUTES = 5 * 60 * 1000;
+    const findResult = findItem(state.settings.activeNoteId);
+    if (!findResult || !findResult.item) return;
 
-            if (now - lastVersionTime > FIVE_MINUTES) {
-                const lastVersionContent = versions[0]?.content || '';
-                const dmp = new diff_match_patch();
-                const diff = dmp.diff_main(lastVersionContent.replace(/<[^>]*>?/gm, ''), newContent.replace(/<[^>]*>?/gm, ''));
-                const delta = diff.reduce((sum, [op, txt]) => sum + (op !== 0 ? txt.length : 0), 0);
-                
-                const CHANGE_THRESHOLD = 10; // Only save if more than 10 characters have changed
-                if (versions.length === 0 || delta > CHANGE_THRESHOLD) {
-                    saveNoteVersion(note.id, newContent);
-                    console.log(`Meaningful change detected (delta: ${delta}). New version saved for: ${note.name}`);
+    const note = findResult.item;
+    const originalNoteContent = note.content; // Keep a copy to compare for versioning
+    const newName = app.elements.noteEditorTitle.value;
+    const newContent = app.elements.noteEditorBody.innerHTML;
+
+    // Only proceed if there's an actual change to save.
+    if (note.name === newName && originalNoteContent === newContent) {
+        return;
+    }
+
+    // --- 1. CONFLICT RESOLUTION LOGIC ---
+    try {
+        const userDocRef = doc(window.db, "users", user.uid, "data", "appState");
+        const serverDocSnap = await getDocFromServer(userDocRef);
+
+        if (serverDocSnap.exists()) {
+            const serverState = serverDocSnap.data();
+            const serverNoteResult = findItem(note.id, serverState.collections);
+            
+            if (serverNoteResult && new Date(serverNoteResult.item.modifiedAt) > new Date(note.modifiedAt)) {
+                // CONFLICT DETECTED!
+                const confirmed = await showConfirm({
+                    title: "Sync Conflict",
+                    message: "This note has been updated on another device. Reload to get the latest changes, or overwrite with your current edits.",
+                    confirmText: "Overwrite"
+                });
+
+                if (!confirmed) {
+                    window.location.reload();
+                    return; // Stop the save process.
                 }
             }
-            // --- END: UPGRADED LOGIC ---
+        }
+    } catch (error) {
+        console.warn("Could not check server for version conflict, likely offline.", error);
+    }
+    // --- END OF CONFLICT RESOLUTION ---
 
-            saveState();
-            scheduleRebuildIndex();
-            renderCollectionsList();
-            renderTagList();
+    // Update the local state with the new content
+    note.name = newName;
+    note.content = newContent;
+    note.modifiedAt = new Date().toISOString();
+    updateNoteLinks(note);
+    updateNoteTags(note);
+
+    // --- 2. MEANINGFUL VERSIONING LOGIC ---
+    const versions = state.versions?.[note.id] || [];
+    const lastVersionTime = versions.length > 0 ? new Date(versions[0].savedAt).getTime() : 0;
+    const now = new Date().getTime();
+    const FIVE_MINUTES = 5 * 60 * 1000;
+
+    // Only check for a new version if 5 minutes have passed
+    if (now - lastVersionTime > FIVE_MINUTES) {
+        const lastVersionContent = versions[0]?.content || '';
+        const dmp = new diff_match_patch();
+        const diff = dmp.diff_main(lastVersionContent.replace(/<[^>]*>?/gm, ''), newContent.replace(/<[^>]*>?/gm, ''));
+        const delta = diff.reduce((sum, [op, txt]) => sum + (op !== 0 ? txt.length : 0), 0);
+        
+        const CHANGE_THRESHOLD = 10; 
+        if (versions.length === 0 || delta > CHANGE_THRESHOLD) {
+            // Save the version of the content *before* this new change
+            saveNoteVersion(note.id, originalNoteContent);
         }
     }
+    // --- END OF VERSIONING LOGIC ---
+
+    // Finally, save the new state to Firestore and update the UI
+    await saveState();
+    scheduleRebuildIndex(); // This is already debounced
+    renderCollectionsList();
+    renderTagList();
 };
 
 // The debounced version is now just a wrapper around the immediate one
@@ -11924,9 +12013,38 @@ tableContextMenu.addEventListener('click', (e) => {
     const action = button.dataset.action;
     const colCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
 
+    // --- FIX START: Helper functions are now defined BEFORE the 'actions' object ---
+    const createRow = () => {
+        const currentHeaderCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
+        const newRow = document.createElement('tr');
+        newRow.innerHTML = Array(currentHeaderCount).fill('<td contenteditable="true"><br></td>').join('');
+        return newRow;
+    };
+
+    const addColumn = (index) => {
+        activeTableForAction.querySelectorAll('thead tr:last-child, tbody tr').forEach(row => {
+            const isHeaderRow = row.parentElement.tagName === 'THEAD';
+            const cellType = isHeaderRow ? 'th' : 'td';
+            const newCell = document.createElement(cellType);
+            newCell.setAttribute('contenteditable', 'true');
+            if (isHeaderRow) {
+                newCell.classList.add('sortable-header');
+                newCell.dataset.sortDir = 'none';
+                newCell.textContent = 'Header';
+            }
+            row.insertBefore(newCell, row.children[index]);
+        });
+        const newColCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
+        const filterHeader = activeTableForAction.querySelector('thead tr:first-child th');
+        if (filterHeader) {
+            filterHeader.setAttribute('colspan', newColCount);
+        }
+    };
+    // --- FIX END ---
+
     const actions = {
-        'add-row-above': () => activeTableRow.before(actions.createRow()),
-        'add-row-below': () => activeTableRow.after(actions.createRow()),
+        'add-row-above': () => activeTableRow.before(createRow()),
+        'add-row-below': () => activeTableRow.after(createRow()),
         'duplicate-row': () => activeTableRow.after(activeTableRow.cloneNode(true)),
         'delete-row': () => activeTableRow.remove(),
         'highlight': () => {
@@ -11934,8 +12052,8 @@ tableContextMenu.addEventListener('click', (e) => {
             activeTableRow.className = ''; // Clear other colors
             if (color !== 'none') activeTableRow.classList.add(`bg-highlight-${color}`);
         },
-        'add-col-left': () => actions.addColumn(activeTableColIndex),
-        'add-col-right': () => actions.addColumn(activeTableColIndex + 1),
+        'add-col-left': () => addColumn(activeTableColIndex),
+        'add-col-right': () => addColumn(activeTableColIndex + 1),
         'duplicate-col': () => {
             activeTableForAction.querySelectorAll('tr').forEach(row => {
                 const cellToClone = row.children[activeTableColIndex];
@@ -11954,30 +12072,25 @@ tableContextMenu.addEventListener('click', (e) => {
                 const newRow = tfoot.insertRow(0);
                 for (let i = 0; i < colCount; i++) {
                     const newCell = newRow.insertCell();
-                    // FIX #1: Make the calculation cell non-editable
                     newCell.contentEditable = false;
                 }
             }
             const footerCell = tfoot.rows[0].cells[activeTableColIndex];
 
             if (type === 'clear') {
-    footerCell.innerHTML = '';
-    footerCell.removeAttribute('data-calc-type');
-
-    // Check if any other calculations exist in the footer
-    const allFooterCells = Array.from(footerCell.parentElement.children);
-    const hasOtherCalcs = allFooterCells.some(cell => cell.hasAttribute('data-calc-type'));
-
-    if (!hasOtherCalcs) {
-        tfoot.remove(); // Remove the entire footer if it's now empty
-    }
-} else {
+                footerCell.innerHTML = '';
+                footerCell.removeAttribute('data-calc-type');
+                const allFooterCells = Array.from(footerCell.parentElement.children);
+                const hasOtherCalcs = allFooterCells.some(cell => cell.hasAttribute('data-calc-type'));
+                if (!hasOtherCalcs) {
+                    tfoot.remove();
+                }
+            } else {
                 footerCell.dataset.calcType = type;
                 performStandardCalculation(activeTableForAction, activeTableColIndex, type);
             }
         },
         'custom-calc': async () => {
-            // FIX #2: Get the existing formula before showing the prompt
             const targetHeader = activeTableForAction.querySelector(`thead tr:last-child th:nth-child(${activeTableColIndex + 1})`);
             const existingFormula = targetHeader?.dataset.formula || '';
 
@@ -11985,10 +12098,9 @@ tableContextMenu.addEventListener('click', (e) => {
                 title: 'Custom Column Formula',
                 message: 'Enter formula using column names (e.g., Cost * Quantity) or letters (A-Z).',
                 placeholder: 'e.g., Cost * 0.07',
-                initialValue: existingFormula // And use it as the initial value
+                initialValue: existingFormula
             });
 
-            // If user cancels, formula will be null. If they clear the input and confirm, it will be an empty string.
             if (formula === null) return;
             
             if (targetHeader) {
@@ -11999,31 +12111,6 @@ tableContextMenu.addEventListener('click', (e) => {
                 } else {
                    showToast(`Formula cleared for column.`, 'info');
                 }
-            }
-        },
-        'createRow': () => {
-            const currentHeaderCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
-            const newRow = document.createElement('tr');
-            newRow.innerHTML = Array(currentHeaderCount).fill('<td contenteditable="true"><br></td>').join('');
-            return newRow;
-        },
-        'addColumn': (index) => {
-            activeTableForAction.querySelectorAll('thead tr:last-child, tbody tr').forEach(row => {
-                const isHeaderRow = row.parentElement.tagName === 'THEAD';
-                const cellType = isHeaderRow ? 'th' : 'td';
-                const newCell = document.createElement(cellType);
-                newCell.setAttribute('contenteditable', 'true');
-                if (isHeaderRow) {
-                    newCell.classList.add('sortable-header');
-                    newCell.dataset.sortDir = 'none';
-                    newCell.textContent = 'Header';
-                }
-                row.insertBefore(newCell, row.children[index]);
-            });
-            const newColCount = activeTableForAction.querySelector('thead tr:last-child').children.length;
-            const filterHeader = activeTableForAction.querySelector('thead tr:first-child th');
-            if (filterHeader) {
-                filterHeader.setAttribute('colspan', newColCount);
             }
         },
     };
