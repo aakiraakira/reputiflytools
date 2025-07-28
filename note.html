@@ -4092,61 +4092,55 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
             let activeNoteListener = null; // Unsubscribe function for the real-time listener
 window.noteCache = {}; // Global cache for all note contents
 const listenToActiveNote = () => {
-    // If there's an old listener active, unsubscribe from it first
-    if (activeNoteListener) {
-        activeNoteListener();
-        activeNoteListener = null;
-    }
-
-    const noteId = state.settings.activeNoteId;
-    if (!noteId) return;
-
-    import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js").then(({ doc, onSnapshot }) => {
-        const noteRef = doc(db, "notes", noteId);
-
-        activeNoteListener = onSnapshot(noteRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const serverNoteData = docSnap.data();
-
-                // Update our local cache with the latest data
-                window.noteCache[noteId] = serverNoteData;
-
-                // Only update the editor if the currently viewed note is the one that changed
-                if (noteId === state.settings.activeNoteId) {
-                    const editorTitle = app.elements.noteEditorTitle;
-                    const editorBody = app.elements.noteEditorBody;
-
-                    // Check if the remote change is different from our current state
-                    const titleChanged = editorTitle.value !== serverNoteData.name;
-                    const contentChanged = editorBody.innerHTML !== serverNoteData.content;
-
-                    if (titleChanged || contentChanged) {
-                        console.log("Remote update received. Applying changes.");
-
-                        // To prevent a feedback loop, we check if the user is currently focused on the element
-                        if (document.activeElement !== editorTitle) {
-                            editorTitle.value = serverNoteData.name;
-                        }
-                        if (document.activeElement !== editorBody) {
-                            editorBody.innerHTML = serverNoteData.content;
-                            updateEditorStats();
-                        }
-                    }
+                // If there's an old listener active, unsubscribe from it first
+                if (window.activeNoteListener) {
+                    window.activeNoteListener();
+                    window.activeNoteListener = null;
                 }
-            } else {
-                // The note was likely deleted by another user
-                console.warn("Active note was deleted remotely.");
-                if (activeNoteListener) activeNoteListener(); // Stop listening
-                state.settings.activeNoteId = null;
-                showToast("This note has been deleted.", "info");
-                render();
-            }
-        }, (error) => {
-            console.error("Error listening to note:", error);
-            showToast("Connection to note lost.", "error");
-        });
-    });
-};
+
+                const noteId = state.settings.activeNoteId;
+                if (!noteId) return;
+
+                import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js").then(({ doc, onSnapshot }) => {
+                    const noteRef = doc(db, "notes", noteId);
+
+                    window.activeNoteListener = onSnapshot(noteRef, (docSnap) => {
+                        if (docSnap.exists()) {
+                            const serverNoteData = docSnap.data();
+
+                            // Update our local cache with the latest data
+                            window.noteCache[noteId] = serverNoteData;
+
+                            // Only update the editor if the currently viewed note is the one that changed
+                            if (noteId === state.settings.activeNoteId) {
+                                const editorTitle = app.elements.noteEditorTitle;
+                                const editorBody = app.elements.noteEditorBody;
+
+                                // Check if the remote change is different from our current state
+                                const titleChanged = editorTitle.value !== serverNoteData.name;
+                                const contentChanged = editorBody.innerHTML !== serverNoteData.content;
+
+                                if (titleChanged && document.activeElement !== editorTitle) {
+                                    editorTitle.value = serverNoteData.name;
+                                }
+                                if (contentChanged && document.activeElement !== editorBody) {
+                                    editorBody.innerHTML = serverNoteData.content;
+                                    updateEditorStats();
+                                }
+                            }
+                        } else {
+                            // The note was likely deleted
+                            if (window.activeNoteListener) window.activeNoteListener();
+                            state.settings.activeNoteId = null;
+                            showToast("This note has been deleted.", "info");
+                            render();
+                        }
+                    }, (error) => {
+                        console.error("Error listening to note:", error);
+                        showToast("Connection to note lost.", "error");
+                    });
+                });
+            };
 
             let askYourNotesHistory = [];
             const showToast = (message, type = 'info') => {
@@ -4612,7 +4606,10 @@ async function loadState() {
         ownedSnap.forEach(doc => { allAccessibleNotes[doc.id] = doc.data(); });
         sharedSnap.forEach(doc => { allAccessibleNotes[doc.id] = doc.data(); });
 
-        window.noteCache = allAccessibleNotes;
+        // FIX: Merge the fetched notes into the cache instead of overwriting it.
+        // This resolves the race condition and ensures the search index is complete.
+        Object.assign(window.noteCache, allAccessibleNotes);
+        
         state = migrateState(settingsAndFolders);
 
     } catch (error) {
@@ -10756,25 +10753,43 @@ performImmediateSave = async () => {
     }
 
     try {
-        const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
-        const noteRef = doc(db, "notes", noteId);
+        if (user.uid === noteContent.ownerId) {
+            // --- OWNER'S SAVE LOGIC (Directly update the document) ---
+            const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const noteRef = doc(db, "notes", noteId);
 
-        await updateDoc(noteRef, {
-            name: newName,
-            content: newContent,
-            modifiedAt: noteContent.modifiedAt,
-            links: noteContent.links,
-            tags: noteContent.tags
-        });
-        console.log(`Saved note ${noteId} to Firestore.`);
+            await updateDoc(noteRef, {
+                name: newName,
+                content: newContent,
+                modifiedAt: noteContent.modifiedAt,
+                links: noteContent.links,
+                tags: noteContent.tags
+            });
+            console.log(`Owner saved note ${noteId} to Firestore.`);
+        } else {
+            // --- COLLABORATOR'S SAVE LOGIC (Use the Cloud Function) ---
+            const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
+            const updateNote = httpsCallable(window.functions, 'updateNoteAsCollaborator');
+            await updateNote({
+                noteId: noteId,
+                newName: newName,
+                newContent: newContent,
+                newLinks: noteContent.links,
+                newTags: noteContent.tags,
+                modifiedAt: noteContent.modifiedAt
+            });
+            console.log(`Collaborator saved note ${noteId} via Cloud Function.`);
+        }
+        
         scheduleRebuildIndex();
 
     } catch (error) {
-        console.error("Failed to save note to Firestore:", error);
-        showToast("Error saving note.", 'error');
+        console.error("Failed to save note:", error);
+        showToast("Error saving note. " + (error.message || ''), 'error');
     }
 };
 
+// This re-introduces the debounced function that was missing
 saveNoteContent = debounce(performImmediateSave, 500);
 // =================================================================
 // END: REPLACEMENT saveNoteContent FUNCTION
