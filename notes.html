@@ -6396,6 +6396,7 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
 // =================================================================
 // END: REPLACEMENT createNewNote FUNCTION
 // =================================================================
+
 // ADD THIS ENTIRE NEW FUNCTION
 const handleNoteRename = async (noteId, oldName, newName) => {
     const { writeBatch, doc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
@@ -8171,7 +8172,7 @@ const executeWithSmartFind = async (args, itemType, action) => {
 };
 
 const commands = [
-    { name: 'nn', description: 'New Note. Usage: /nn [note name]', execute: (args)=>{const n=createNewNote(true,'');n.name=args||'Untitled Note';saveState();render();showToast(`✅ Note "${n.name}" created`)} },
+    { name: 'nn', description: 'New Note. Usage: /nn [note name]', execute: (args) => { createNewNote(true, { name: args || 'Untitled Note' }); showToast(`✅ Note "${args || 'Untitled Note'}" created`); } },
     { name: 'nf', description: 'New Folder. Usage: /nf [folder name]', execute: (args)=>{const n=args||'Untitled Folder';const c={id:generateId('c'),name:n,type:'folder',children:[],expanded:true};state.kanbanColumns[c.id]=[{id:generateId('col'),title:'To Do'}];state.collections.push(c);saveState();buildLunrIndex();render();showToast(`✅ Folder "${n}" created`)}},
     { name: 'rename', description: 'Rename item. Usage: /rename [old] to [new]', suggest: 'items', execute: async(args)=>{const s=/\s+to\s+/i;if(!s.test(args))return showToast('❌ Use: /rename [old] to [new]','error');const p=args.split(s);const o=p[0].trim();const n=p[1].trim();if(!o||!n)return showToast('❌ Both names required.','error');const i=findBestMatch(o,[...getAllNotes(state.collections),...getAllFolders()]);if(!i)return showToast(`❌ Not found: "${o}"`,'error');const c=await showConfirm({title:'Confirm Rename',message:`Rename "${i.name}" to "${n}"?`,confirmText:'Rename'});if(c){i.name=n;saveState();buildLunrIndex();render();showToast(`✅ Renamed to "${n}"`)}} },
     { name: 'link', description: 'Link notes. Usage: /link [source] to [target]', suggest: 'notes', execute: (args)=>{const s=/\s+to\s+/i;if(!s.test(args))return showToast('❌ Use: /link [source] to [target]','error');const p=args.split(s);const sN=p[0].trim();const tN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');if(sO.id===tO.id)return showToast('❌ Cannot link a note to itself.','error');sO.content+=`\n<p>[[${tO.name}]]</p>`;updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Linked "${sO.name}" to "${tO.name}"`)}},
@@ -9539,11 +9540,33 @@ toggleToolbarBtn.addEventListener('click', () => {
     feather.replace(); // This redraws the chevron icon
 });
 // REPLACE the existing titleTextarea listener
+// REPLACE the existing titleTextarea listener
 const titleTextarea = app.elements.noteEditorTitle;
 titleTextarea.addEventListener('input', () => {
-    // This part handles the dynamic height adjustment
+    // This part handles the dynamic height adjustment as you type
     titleTextarea.style.height = 'auto';
     titleTextarea.style.height = (titleTextarea.scrollHeight) + 'px';
+});
+
+// ADD this new listener for when you click away from the title
+titleTextarea.addEventListener('blur', () => {
+    const noteId = state.settings.activeNoteId;
+    if (!noteId) return;
+
+    const noteStub = findItem(noteId)?.item;
+    const noteData = window.noteCache[noteId];
+    if (!noteStub || !noteData) return;
+
+    const newName = titleTextarea.value.trim();
+
+    // Only save and re-render if the name has actually changed
+    if (newName && noteData.name !== newName) {
+        console.log(`Title changed to "${newName}". Saving and re-rendering.`);
+        noteData.name = newName; // Immediately update local data
+        noteStub.name = newName;
+        performImmediateSave(); // Save to database
+        render(); // Force the entire UI to update
+    }
 });
 
 // ADD this new listener for when the user is done editing the title
