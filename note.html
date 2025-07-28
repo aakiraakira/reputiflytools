@@ -4615,7 +4615,7 @@ async function loadState() {
     const userDocRef = doc(window.db, "users", user.uid, "data", "appState");
 
     try {
-        const { getDoc, collection, query, where, getDocs, or, writeBatch, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+        const { getDoc, collection, query, where, getDocs, writeBatch, doc: createDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
 
         const userSettingsSnap = await getDoc(userDocRef);
         let settingsAndFolders;
@@ -4623,10 +4623,53 @@ async function loadState() {
         if (userSettingsSnap.exists()) {
             settingsAndFolders = userSettingsSnap.data();
         } else {
-            console.log("New user detected, loading default state.");
+            // This block runs ONLY for a brand new user.
+            console.log("New user detected, setting up default state and notes.");
             settingsAndFolders = JSON.parse(JSON.stringify(defaultState));
-        }
+            
+            // FIX: Create the actual note documents in Firestore for the new user.
+            const batch = writeBatch(window.db);
 
+            // 1. Get all the default notes from the defaultState object.
+            const defaultNotes = getAllNotes(settingsAndFolders.collections);
+            
+            for (const note of defaultNotes) {
+                const noteRef = createDoc(window.db, "notes", note.id);
+                const fullNoteData = {
+                    ownerId: user.uid,
+                    name: note.name,
+                    content: note.content || '',
+                    properties: note.properties || {},
+                    createdAt: note.createdAt,
+                    modifiedAt: note.modifiedAt,
+                    tags: note.tags || [],
+                    links: note.links || [],
+                    sharedWith: []
+                };
+                
+                // 2. Add the full note document to the batch to be created in the database.
+                batch.set(noteRef, fullNoteData);
+                
+                // 3. Pre-populate the local cache so the app can load instantly.
+                window.noteCache[note.id] = fullNoteData;
+
+                // 4. Remove heavy content from the folder structure before saving it.
+                // This keeps the user's settings file small and fast.
+                delete note.content;
+                delete note.properties;
+                delete note.links;
+                delete note.tags;
+            }
+
+            // 5. Add the user's main settings/folder structure to the batch.
+            batch.set(userDocRef, settingsAndFolders);
+            
+            // 6. Commit all these changes to the database at once.
+            await batch.commit();
+            console.log("Default notes and state created successfully for new user.");
+        }
+        
+        // This migration logic is for older accounts and should remain.
         if (!settingsAndFolders.settings.dataModelRefactored) {
             const migrationToast = showToast('Upgrading data model...', 'loading');
             const batch = writeBatch(db);
@@ -4641,7 +4684,7 @@ async function loadState() {
             findNotesRecursive(settingsAndFolders.collections);
 
             for (const note of notesToMigrate) {
-                const noteRef = doc(db, "notes", note.id);
+                const noteRef = createDoc(db, "notes", note.id);
                 const noteData = {
                     ownerId: user.uid,
                     name: note.name,
@@ -4667,38 +4710,32 @@ async function loadState() {
             showToast('Data model upgraded!', 'success');
         }
 
-        // *** THE FIX FOR PERMISSION ERRORS ***
-        // We run two separate queries and merge the results.
-        // *** THIS IS THE CORRECT CODE FOR PERMISSIONS ***
-// We run two separate queries and merge the results.
-const notesRef = collection(db, "notes");
-const ownedNotesQuery  = query(notesRef, where('ownerId',    '==', user.uid));
-const sharedNotesQuery = query(notesRef, where('sharedWith', 'array-contains', user.uid));
+        // Fetch all notes the user has access to (owned or shared).
+        const notesRef = collection(db, "notes");
+        const ownedNotesQuery = query(notesRef, where('ownerId', '==', user.uid));
+        const sharedNotesQuery = query(notesRef, where('sharedWith', 'array-contains', user.uid));
 
-const [ownedSnap, sharedSnap] = await Promise.all([
-  getDocs(ownedNotesQuery),
-  getDocs(sharedNotesQuery)
-]);
+        const [ownedSnap, sharedSnap] = await Promise.all([
+            getDocs(ownedNotesQuery),
+            getDocs(sharedNotesQuery)
+        ]);
 
-const allAccessibleNotes = {};
-ownedSnap.forEach(doc => { allAccessibleNotes[doc.id] = doc.data(); });
-sharedSnap.forEach(doc => { allAccessibleNotes[doc.id] = doc.data(); });
+        const allAccessibleNotes = {};
+        ownedSnap.forEach(doc => { allAccessibleNotes[doc.id] = doc.data(); });
+        sharedSnap.forEach(doc => { allAccessibleNotes[doc.id] = doc.data(); });
 
-window.noteCache = allAccessibleNotes;
-state = migrateState(settingsAndFolders);
+        // Populate the cache with all note data.
+        window.noteCache = allAccessibleNotes;
+        state = migrateState(settingsAndFolders);
 
     } catch (error) {
         console.error("Failed to load state from Firestore:", error);
-        // *** THE FIX FOR THE CRASH ON FAILURE ***
-        // This ensures the app can still load with default data if Firestore fails.
         if (!state || Object.keys(state).length === 0) {
              state = migrateState(JSON.parse(JSON.stringify(defaultState)));
         }
         showToast("Offline: Could not sync with cloud.", 'error');
-        // *** END OF FIX ***
     } finally {
         dismissToast(toastId);
-        // This line is now safe because the 'catch' block ensures state.settings exists.
         state.settings.theme = localStorage.getItem('codex-notes-theme') || 'reputify';
     }
 }
