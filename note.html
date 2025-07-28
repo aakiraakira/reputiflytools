@@ -4092,55 +4092,57 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
             let activeNoteListener = null; // Unsubscribe function for the real-time listener
 window.noteCache = {}; // Global cache for all note contents
 const listenToActiveNote = () => {
-                // If there's an old listener active, unsubscribe from it first
-                if (window.activeNoteListener) {
-                    window.activeNoteListener();
-                    window.activeNoteListener = null;
+    if (activeNoteListener) {
+        activeNoteListener();
+        activeNoteListener = null;
+    }
+
+    const noteId = state.settings.activeNoteId;
+    if (!noteId) return;
+
+    import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js").then(({ doc, onSnapshot }) => {
+        const noteRef = doc(db, "notes", noteId);
+
+        activeNoteListener = onSnapshot(noteRef, (docSnap) => {
+            // This is the crucial check. It tells us if the update is from a
+            // local change we just made. If so, we ignore it to prevent the cursor from jumping.
+            if (docSnap.metadata.hasPendingWrites) {
+                console.log("Ignoring local echo of write.");
+                return;
+            }
+
+            console.log("Remote update received. Applying changes.");
+
+            if (docSnap.exists()) {
+                const serverNoteData = docSnap.data();
+                window.noteCache[noteId] = serverNoteData; // Keep cache updated
+
+                if (noteId === state.settings.activeNoteId) {
+                    const editorTitle = app.elements.noteEditorTitle;
+                    const editorBody = app.elements.noteEditorBody;
+
+                    // Directly apply changes from other users without checking for active focus.
+                    if (editorTitle.value !== serverNoteData.name) {
+                        editorTitle.value = serverNoteData.name;
+                    }
+                    if (editorBody.innerHTML !== serverNoteData.content) {
+                        editorBody.innerHTML = serverNoteData.content;
+                        updateEditorStats();
+                        feather.replace(); // Important to re-render any icons in the note content
+                    }
                 }
-
-                const noteId = state.settings.activeNoteId;
-                if (!noteId) return;
-
-                import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js").then(({ doc, onSnapshot }) => {
-                    const noteRef = doc(db, "notes", noteId);
-
-                    window.activeNoteListener = onSnapshot(noteRef, (docSnap) => {
-                        if (docSnap.exists()) {
-                            const serverNoteData = docSnap.data();
-
-                            // Update our local cache with the latest data
-                            window.noteCache[noteId] = serverNoteData;
-
-                            // Only update the editor if the currently viewed note is the one that changed
-                            if (noteId === state.settings.activeNoteId) {
-                                const editorTitle = app.elements.noteEditorTitle;
-                                const editorBody = app.elements.noteEditorBody;
-
-                                // Check if the remote change is different from our current state
-                                const titleChanged = editorTitle.value !== serverNoteData.name;
-                                const contentChanged = editorBody.innerHTML !== serverNoteData.content;
-
-                                if (titleChanged && document.activeElement !== editorTitle) {
-                                    editorTitle.value = serverNoteData.name;
-                                }
-                                if (contentChanged && document.activeElement !== editorBody) {
-                                    editorBody.innerHTML = serverNoteData.content;
-                                    updateEditorStats();
-                                }
-                            }
-                        } else {
-                            // The note was likely deleted
-                            if (window.activeNoteListener) window.activeNoteListener();
-                            state.settings.activeNoteId = null;
-                            showToast("This note has been deleted.", "info");
-                            render();
-                        }
-                    }, (error) => {
-                        console.error("Error listening to note:", error);
-                        showToast("Connection to note lost.", "error");
-                    });
-                });
-            };
+            } else {
+                if (activeNoteListener) activeNoteListener();
+                state.settings.activeNoteId = null;
+                showToast("This note has been deleted.", "info");
+                render();
+            }
+        }, (error) => {
+            console.error("Error listening to note:", error);
+            showToast("Connection to note lost.", "error");
+        });
+    });
+};
 
             let askYourNotesHistory = [];
             const showToast = (message, type = 'info') => {
