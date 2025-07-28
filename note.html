@@ -6605,6 +6605,57 @@ const renderNotionStyleMenu = () => {
         });
     });
 }
+function setupSharedNoteListener() {
+                const user = window.auth.currentUser;
+                if (!user) return;
+
+                // Import the functions we need
+                import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js")
+                    .then(({ collection, query, where, onSnapshot }) => {
+                        
+                        // Create a query to find notes shared with the current user
+                        const sharedNotesQuery = query(
+                            collection(db, "notes"),
+                            where('sharedWith', 'array-contains', user.uid)
+                        );
+
+                        // onSnapshot creates a real-time listener
+                        onSnapshot(sharedNotesQuery, (snapshot) => {
+                            let wasNoteAdded = false;
+                            // docChanges() tells us exactly what changed (added, modified, removed)
+                            snapshot.docChanges().forEach((change) => {
+                                // We only care about notes that were NEWLY added
+                                if (change.type === "added") {
+                                    const noteData = change.doc.data();
+                                    const noteId = change.doc.id;
+
+                                    // Check if we already know about this note
+                                    if (!window.noteCache[noteId]) {
+                                        console.log('New shared note detected:', noteData.name);
+                                        
+                                        // Add the new note to our local cache
+                                        window.noteCache[noteId] = noteData;
+
+                                        // Find the owner to show in the notification
+                                        // In a real app, you'd fetch the owner's name, but email is fine for now
+                                        const ownerEmail = noteData.ownerId; // In a real app, fetch this user's name
+
+                                        showToast(`📬 Note shared with you: "${noteData.name}"`, 'success');
+                                        wasNoteAdded = true;
+                                    }
+                                }
+                            });
+
+                            // If a note was added, rebuild the UI and search index
+                            if (wasNoteAdded) {
+                                buildLunrIndex();
+                                render();
+                            }
+                        }, (error) => {
+                            console.error("Error listening for shared notes:", error);
+                        });
+                    });
+            }
             /**
  * Renders the generated quiz data into the quiz modal.
  * @param {Array<Object>} quizArray - An array of quiz question objects.
@@ -9497,6 +9548,7 @@ fileUploadInput.addEventListener('change', (e) => {
                 document.getElementById('header-share-btn').addEventListener('click', () => handleShareNote());
                 await loadState();
                 buildLunrIndex();
+                setupSharedNoteListener();
                 
                 initSpeechRecognition();
                 initClipper();
