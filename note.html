@@ -3546,10 +3546,17 @@ function parseInternalLinks(htmlContent) {
 // These functions use the helpers defined above.
 
 const handleShareNote = async (noteToShare) => {
-    // This now accepts an argument, or defaults to the active note
-    const note = noteToShare || findItem(state.settings.activeNoteId)?.item;
-    if (!note) {
+    // If a note object is passed (e.g., from a command), use it. Otherwise, find the active note.
+    const noteStub = noteToShare || findItem(state.settings.activeNoteId)?.item;
+    if (!noteStub) {
         showToast('❌ No note selected to share.', 'error');
+        return;
+    }
+
+    // FIX: Get the full note data, including content, from the cache using the note's ID.
+    const noteData = window.noteCache[noteStub.id];
+    if (!noteData) {
+        showToast('❌ Could not load note content to share.', 'error');
         return;
     }
 
@@ -3561,8 +3568,8 @@ const handleShareNote = async (noteToShare) => {
         const publicNoteRef = doc(publicNotesCol);
 
         await setDoc(publicNoteRef, {
-            name: note.name,
-            content: note.content,
+            name: noteData.name,         // FIX: Use name from the full cached data
+            content: noteData.content,   // FIX: Use content from the full cached data
             originalAuthor: window.auth.currentUser.uid,
             sharedAt: new Date().toISOString()
         });
@@ -3570,6 +3577,7 @@ const handleShareNote = async (noteToShare) => {
         const shareUrl = `${window.location.origin}${window.location.pathname}?view=${publicNoteRef.id}`;
         dismissToast(toastId);
 
+        // This will now be called correctly.
         await showPrompt({
             title: 'Share Link Created',
             message: 'Anyone with this link can view a read-only version of this note.',
@@ -3580,7 +3588,7 @@ const handleShareNote = async (noteToShare) => {
     } catch (error) {
         console.error("Error creating share link:", error);
         dismissToast(toastId);
-        // showToast('Could not create share link.', 'error');
+        showToast('Could not create share link.', 'error');
     }
 };
 
@@ -8094,7 +8102,7 @@ const commands = [
     { name: 'summary', description: 'Summarize a note. Usage: /summary [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleSummarize(c)})},
     { name: 'quiz', description: 'Generate quiz. Usage: /quiz [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleGenerateQuiz(c,n)})},
     { name: 'flashcard', description: 'Open flashcards. Usage: /flashcard [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>handleFlashcardMode(n))},
-    { name: 'share', description: 'Create share link. Usage: /share [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>handleShareNote(n))},
+    { name: 'share', description: 'Create share link. Usage: /share [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(noteStub)=>handleShareNote(noteStub))},
     {
         name: 'checkpoint',
         description: 'Save Note Version. Usage: /checkpoint [message]',
@@ -9449,7 +9457,7 @@ fileUploadInput.addEventListener('change', (e) => {
     // Reset the input so you can upload the same file again if needed
     e.target.value = '';
 });
-                document.getElementById('header-share-btn').addEventListener('click', handleShareNote);
+                document.getElementById('header-share-btn').addEventListener('click', () => handleShareNote());
                 await loadState();
                 buildLunrIndex();
                 
@@ -9489,7 +9497,7 @@ const handleHeaderAIAction = (action) => {
 headerSummarizeBtn.addEventListener('click', () => handleHeaderAIAction('summarize'));
 headerQuizBtn.addEventListener('click', () => handleHeaderAIAction('quiz'));
 headerQuizBtn.addEventListener('click', () => handleHeaderAIAction('quiz'));
-document.getElementById('header-share-btn').addEventListener('click', handleShareNote);
+document.getElementById('header-share-btn').addEventListener('click', () => handleShareNote());
 document.getElementById('header-share-btn').addEventListener('click', () => handleHeaderAIAction('share'));
 document.getElementById('header-flashcard-btn').addEventListener('click', () => handleHeaderAIAction('flashcard')); // ADD THIS
                 
