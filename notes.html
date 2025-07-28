@@ -31,6 +31,7 @@
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+        
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/diff_match_patch/20121119/diff_match_patch.js"></script>
     
@@ -2209,6 +2210,7 @@ window.functions = getFunctions(app,);
                         <button id="dictate-btn" class="p-2 hover:bg-bg-main" title="Dictate Text"><i data-feather="mic" class="w-4 h-4"></i></button>
                         <button id="graph-btn" class="p-2 hover:bg-bg-main" title="Show Note Graph"><i data-feather="git-merge" class="w-4 h-4"></i></button>
                         <button id="header-checkpoint-btn" class="p-2 hover:bg-bg-main" title="Save Checkpoint"><i data-feather="flag" class="w-4 h-4"></i></button>
+                        <button id="header-template-btn" class="p-2 hover:bg-bg-main" title="Save as Template"><i data-feather="save" class="w-4 h-4"></i></button>
 
                         <button id="history-btn" class="p-2 hover:bg-bg-main" title="Version History"><i data-feather="clock" class="w-4 h-4"></i></button>
                         <button id="editor-mode-toggle" class="p-2 hover:bg-bg-main disabled:opacity-50 disabled:cursor-not-allowed" title="Toggle Markdown Preview"><i data-feather="eye" class="w-4 h-4"></i></button>
@@ -2220,7 +2222,13 @@ window.functions = getFunctions(app,);
                        <i id="toolbar-toggle-icon" data-feather="chevron-right" class="w-4 h-4"></i>
                    </button>
                </div>
-               <button id="desktop-new-note-btn" class="brand-button text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 hover:opacity-90 transition-opacity" title="New Note (Cmd+N)">New Note <i data-feather="plus" class="w-4 h-4"></i></button>
+               <div class="relative" id="new-note-dropdown-container">
+    <button id="desktop-new-note-btn" class="brand-button text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 hover:opacity-90 transition-opacity" title="New Note (Cmd+N)">New Note <i data-feather="chevron-down" class="w-4 h-4"></i></button>
+    <div id="new-note-dropdown" class="dropdown-menu hidden absolute top-full right-0 mt-2 w-48 bg-bg-pane-light shadow-2xl rounded-md p-1 border border-border-color origin-top-right z-20">
+        <button data-action="new-blank-note" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="file" class="w-4 h-4"></i>New Blank Note</button>
+        <button data-action="new-from-template" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="file-plus" class="w-4 h-4"></i>New from Template</button>
+    </div>
+</div>
            </div>
        </div>
 
@@ -2545,6 +2553,7 @@ window.functions = getFunctions(app,);
         <hr class="my-1 border-border-color">
         <button data-action="toggle-pin" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="paperclip" class="w-4 h-4"></i><span id="pin-action-text">Pin</span></button>
         <button data-action="duplicate" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="copy" class="w-4 h-4"></i>Duplicate</button>
+        <button data-action="save-as-template" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="save" class="w-4 h-4"></i>Save as Template</button>
         <button data-action="rename" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2"><i data-feather="edit-2" class="w-4 h-4"></i>Rename</button>
         <button data-action="delete" class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark text-red-500 rounded flex items-center gap-2"><i data-feather="trash-2" class="w-4 h-4"></i>Delete</button>
     </div>
@@ -4430,6 +4439,7 @@ console.log(\`Total: \${calculateTotal(cart)}\`); // Total: 45</code></pre></div
         propertiesVisible: true,
 
     },
+    templates: [],
     kanbanColumns: {
         'c1': [{ id: 'col1', title: 'To Do' }, { id: 'col2', title: 'In Progress' }, { id: 'col3', title: 'Done' }]
     },
@@ -4505,6 +4515,7 @@ console.log(\`Total: \${calculateTotal(cart)}\`); // Total: 45</code></pre></div
 
     if (!loadedState.kanbanColumns) loadedState.kanbanColumns = {};
     if (!Array.isArray(loadedState.chatHistory)) loadedState.chatHistory = [];
+    if (!Array.isArray(loadedState.templates)) loadedState.templates = [];
 
     // Now that we've confirmed .collections is an array, we can safely loop through it.
     loadedState.collections.forEach(migrateNode);
@@ -5020,6 +5031,7 @@ if (propertiesBtn) {
     app.toolbar.editorModeToggle.disabled = !noteActive;
     app.toolbar.dictateBtn.disabled = !noteActive || !speechRecognizer;
     app.toolbar.graphBtn.disabled = !noteActive;
+    document.getElementById('header-template-btn').style.display = noteActive ? 'flex' : 'none';
 
     feather.replace();
 }
@@ -5264,12 +5276,18 @@ const createItemHTML = (item, currentLevel) => {
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-new-note">
     <i data-feather="file-plus" class="w-4 h-4"></i>New Note
 </button>
+<button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-new-from-template">
+    <i data-feather="file-plus" class="w-4 h-4"></i>New from Template
+</button>
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-rename">
                 <i data-feather="edit-2" class="w-4 h-4"></i>Rename
             </button>
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-duplicate">
                 <i data-feather="copy" class="w-4 h-4"></i>Duplicate
             </button>
+            <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-save-as-template">
+    <i data-feather="save" class="w-4 h-4"></i>Save as Template
+</button>
             <button class="w-full text-left px-3 py-1.5 text-sm hover:bg-bg-pane-dark rounded flex items-center gap-2" data-action="mobile-share">
     <i data-feather="share-2" class="w-4 h-4"></i>Share Note
 </button>
@@ -6273,50 +6291,53 @@ const upgradePastedTables = (html) => {
 // =================================================================
 // START: REPLACEMENT createNewNote FUNCTION
 // =================================================================
-const createNewNote = (andSwitchToIt = true, initialContent = '', parentId = undefined) => {
+const createNewNote = (andSwitchToIt = true, template = {}, parentId = undefined) => {
     let parentCollection;
     let targetArray;
     let finalParentId = parentId;
 
-    // If no parent is specified, fall back to the currently active folder
     if (finalParentId === undefined) {
         finalParentId = state.settings.activeCollectionId;
     }
 
     const parentResult = findItem(finalParentId);
 
-    // Determine where to add the new note (in a folder or at the root)
     if (parentResult && parentResult.item.type === 'folder') {
         parentCollection = parentResult.item;
         targetArray = parentCollection.children;
     } else {
-        finalParentId = null; // Default to the root level if the parent isn't a valid folder
+        finalParentId = null;
         targetArray = state.collections;
     }
-    
-    // Automatically expand the parent folder to show the new note
+
     if (parentCollection) {
         parentCollection.expanded = true;
     }
 
     const now = new Date().toISOString();
     const newNote = {
-        id: generateId('n'), name: 'Untitled Note', type: 'note', content: initialContent,
+        id: generateId('n'),
+        name: template.name ? `${template.name}` : 'Untitled Note', // Use template name or default
+        type: 'note',
+        content: template.content || '', // Use template content or blank
+        properties: template.properties ? JSON.parse(JSON.stringify(template.properties)) : {}, // Deep copy properties
         status: finalParentId ? state.kanbanColumns[finalParentId]?.[0]?.id || null : null,
-        createdAt: now, modifiedAt: now,
-        pinned: false, links: [], tags: [], properties: {}, propertiesCollapsed: false,
+        createdAt: now,
+        modifiedAt: now,
+        pinned: false,
+        links: [],
+        tags: []
     };
 
-    targetArray.unshift(newNote); // Add the new note to the top of the list
-    
+    targetArray.unshift(newNote);
+
     if(andSwitchToIt) {
         state.settings.activeNoteId = newNote.id;
         state.settings.activeCollectionId = finalParentId;
         state.settings.activeTag = null;
         state.settings.editorMode = 'editor';
     }
-    
-    // Save, update search index, and re-render the app
+
     saveState();
     buildLunrIndex();
     render();
@@ -6325,8 +6346,8 @@ const createNewNote = (andSwitchToIt = true, initialContent = '', parentId = und
         app.elements.noteEditorTitle.focus();
         app.elements.noteEditorTitle.select();
     }
-    
-    return newNote; // Return the newly created note object
+
+    return newNote;
 };
 // =================================================================
 // END: REPLACEMENT createNewNote FUNCTION
@@ -7662,6 +7683,115 @@ document.addEventListener('click', (e) => {
 // --- START: SLASH COMMAND CONSOLE ---
 
 // --- START: SLASH COMMAND CONSOLE ---
+const renderTemplatesInModal = (templatesToRender) => {
+    const container = document.getElementById('template-list-container');
+    if (templatesToRender.length === 0) {
+        container.innerHTML = `<p class="text-text-secondary text-center md:col-span-2">No templates found. Save a note as a template to get started.</p>`;
+        return;
+    }
+    container.innerHTML = templatesToRender.map(template => `
+        <div class="template-item cursor-pointer p-4 border border-border-color rounded-lg hover:bg-bg-pane-dark hover:border-accent-primary transition-all" data-template-id="${template.id}">
+            <h4 class="font-semibold text-text-primary truncate">${template.name}</h4>
+            <p class="text-sm text-text-secondary mt-1 truncate-multiline" style="-webkit-line-clamp: 2;">${template.content.replace(/<[^>]*>?/gm, '') || 'No content.'}</p>
+        </div>
+    `).join('');
+};
+const renderManageTemplatesModal = () => {
+    const container = document.getElementById('manage-template-list');
+    if (state.templates.length === 0) {
+        container.innerHTML = `<p class="text-text-secondary text-center p-4">You have no saved templates.</p>`;
+        return;
+    }
+    container.innerHTML = state.templates.map(template => `
+        <div class="flex items-center justify-between p-2 bg-bg-pane-dark rounded-md" data-template-id="${template.id}">
+            <span class="font-medium text-text-primary truncate">${template.name}</span>
+            <div class="flex items-center gap-2">
+                <button class="manage-template-rename-btn p-2 rounded-md hover:bg-bg-main text-text-secondary hover:text-accent-primary" title="Rename Template">
+                    <i data-feather="edit-2" class="w-4 h-4 pointer-events-none"></i>
+                </button>
+                <button class="manage-template-delete-btn p-2 rounded-md hover:bg-bg-main text-text-secondary hover:text-red-500" title="Delete Template">
+                    <i data-feather="trash-2" class="w-4 h-4 pointer-events-none"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+    feather.replace();
+};
+
+const renameTemplate = async (templateId) => {
+    const template = state.templates.find(t => t.id === templateId);
+    if (!template) return;
+
+    const newName = await showPrompt({
+        title: 'Rename Template',
+        message: 'Enter a new name:',
+        initialValue: template.name
+    });
+
+    if (newName && newName !== template.name) {
+        template.name = newName;
+        await saveState();
+        renderManageTemplatesModal(); // Refresh the list
+        showToast('✅ Template renamed!', 'success');
+    }
+};
+
+const deleteTemplate = async (templateId) => {
+    const template = state.templates.find(t => t.id === templateId);
+    if (!template) return;
+
+    // Directly delete the template without confirmation
+    state.templates = state.templates.filter(t => t.id !== templateId);
+    await saveState();
+    renderManageTemplatesModal(); // Refresh the list
+    showToast('🗑️ Template deleted.', 'success');
+};
+const openTemplateModal = () => {
+    const modal = document.getElementById('template-modal');
+    const searchInput = document.getElementById('template-search-input');
+
+    renderTemplatesInModal(state.templates);
+    searchInput.value = '';
+
+    const searchHandler = () => {
+        const query = searchInput.value.toLowerCase();
+        const filtered = state.templates.filter(t => t.name.toLowerCase().includes(query));
+        renderTemplatesInModal(filtered);
+    };
+
+    searchInput.addEventListener('input', searchHandler);
+
+    openModal(modal);
+    feather.replace();
+};
+const saveAsTemplate = async (note) => {
+    if (!note) return showToast('❌ No note selected.', 'error');
+
+    const templateName = await showPrompt({
+        title: 'Save as Template',
+        message: 'Enter a name for this template:',
+        initialValue: note.name
+    });
+
+    if (templateName) {
+        // Check for duplicate template name
+        if (state.templates.some(t => t.name.toLowerCase() === templateName.toLowerCase())) {
+            showToast(`❌ A template named "${templateName}" already exists.`, 'error');
+            return;
+        }
+
+        const newTemplate = {
+            id: generateId('template'),
+            name: templateName,
+            content: note.content,
+            properties: JSON.parse(JSON.stringify(note.properties || {})) // Deep copy properties
+        };
+
+        state.templates.push(newTemplate);
+        await saveState();
+        showToast(`✅ Template "${templateName}" saved!`, 'success');
+    }
+};
 
 const createContentSnippet = (content, query) => {
     const plainText = content.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ');
@@ -8853,6 +8983,47 @@ document.getElementById('linked-notes-modal').addEventListener('click', (e) => {
 // --- END: SLASH COMMAND CONSOLE ---
 
 // --- END: SLASH COMMAND CONSOLE ---
+// --- Template Modal Listeners ---
+// --- Manage Templates Modal Listeners ---
+document.getElementById('manage-templates-btn').addEventListener('click', () => {
+    closeModal(document.getElementById('template-modal'));
+    renderManageTemplatesModal();
+    openModal(document.getElementById('manage-templates-modal'));
+});
+
+document.getElementById('manage-templates-close-btn').addEventListener('click', () => {
+    closeModal(document.getElementById('manage-templates-modal'));
+});
+
+document.getElementById('manage-templates-done-btn').addEventListener('click', () => {
+    closeModal(document.getElementById('manage-templates-modal'));
+});
+
+document.getElementById('manage-template-list').addEventListener('click', (e) => {
+    const templateId = e.target.closest('[data-template-id]')?.dataset.templateId;
+    if (!templateId) return;
+
+    if (e.target.closest('.manage-template-rename-btn')) {
+        renameTemplate(templateId);
+    } else if (e.target.closest('.manage-template-delete-btn')) {
+        deleteTemplate(templateId);
+    }
+});
+document.getElementById('template-modal-close-btn').addEventListener('click', () => {
+    closeModal(document.getElementById('template-modal'));
+});
+
+document.getElementById('template-list-container').addEventListener('click', (e) => {
+    const item = e.target.closest('.template-item');
+    if (item) {
+        const templateId = item.dataset.templateId;
+        const template = state.templates.find(t => t.id === templateId);
+        if (template) {
+            createNewNote(true, template);
+            closeModal(document.getElementById('template-modal'));
+        }
+    }
+});
                 // --- Source Snippet Click Listener ---
 document.getElementById('global-ai-modal').addEventListener('click', (e) => {
     const link = e.target.closest('.source-snippet-link');
@@ -9582,6 +9753,12 @@ notionMenu.addEventListener('click', (e) => {
     if (!item) return;
 
     switch (action) {
+        case 'mobile-new-from-template':
+    openTemplateModal();
+    break;
+        case 'mobile-save-as-template':
+    saveAsTemplate(note);
+    break;
         case 'toggle-expand':
             if (item.type === 'folder') {
                 item.expanded = !item.expanded;
@@ -10840,6 +11017,13 @@ app.elements.noteEditorBody.addEventListener('paste', (e) => {
                         // showToast('Could not create note graph.', 'error');
                     }
                 });
+                document.getElementById('header-template-btn').addEventListener('click', () => {
+    const note = findItem(state.settings.activeNoteId)?.item;
+    if (note) {
+        saveAsTemplate(note);
+    }
+});
+                
                 app.modals.graphCloseBtn.addEventListener('click', () => closeModal(app.modals.graph));
                 
                 app.modals.aiCancelBtn.addEventListener('click', () => closeModal(app.modals.aiPrompt));
@@ -11126,7 +11310,28 @@ app.modals.quizContent.addEventListener('click', e => {
     }
 });
 
-                app.elements.desktopNewNoteBtn.addEventListener('click', () => createNewNote());
+                // --- New Note Dropdown Logic ---
+const newNoteContainer = document.getElementById('new-note-dropdown-container');
+const newNoteDropdown = document.getElementById('new-note-dropdown');
+newNoteContainer.addEventListener('click', (e) => {
+    const action = e.target.closest('button')?.dataset.action;
+    if (action === 'new-blank-note') {
+        createNewNote(true, {}); // Pass empty object for a blank note
+        newNoteDropdown.classList.add('hidden');
+    } else if (action === 'new-from-template') {
+        openTemplateModal();
+        newNoteDropdown.classList.add('hidden');
+    } else {
+        // If the main button is clicked, just toggle the dropdown
+        newNoteDropdown.classList.toggle('hidden');
+        if(!newNoteDropdown.classList.contains('hidden')) feather.replace();
+    }
+});
+document.addEventListener('click', (e) => {
+    if (!newNoteContainer.contains(e.target)) {
+        newNoteDropdown.classList.add('hidden');
+    }
+});
 
                 const openSearch = () => {
                     buildLunrIndex(); // Ensure index is fresh before searching
@@ -11463,6 +11668,7 @@ const originalButton = originalToolbar.querySelector(selector);
                     app.contextMenu.renameBtn.style.display = 'none';
                     app.contextMenu.deleteBtn.style.display = 'none';
                     app.contextMenu.duplicateBtn.style.display = 'none';
+                    document.querySelector('[data-action="save-as-template"]').style.display = 'none';
 
                     if (!itemWrapper && e.target.closest('#collections-list-container')) {
                         app.contextMenu.targetId = null;
@@ -11478,9 +11684,10 @@ const originalButton = originalToolbar.querySelector(selector);
                         app.contextMenu.duplicateBtn.style.display = 'flex';
 
                         if (item && item.type === 'note') {
-                            app.contextMenu.togglePinBtn.style.display = 'flex';
-                            app.contextMenu.pinActionText.textContent = item.pinned ? 'Unpin' : 'Pin';
-                        }
+    app.contextMenu.togglePinBtn.style.display = 'flex';
+    document.querySelector('[data-action="save-as-template"]').style.display = 'flex';
+    app.contextMenu.pinActionText.textContent = item.pinned ? 'Unpin' : 'Pin';
+}
                     } else {
                         return;
                     }
@@ -11634,6 +11841,11 @@ const originalButton = originalToolbar.querySelector(selector);
                 render();
             }
             break;
+        case 'save-as-template':
+    if (targetItem && targetItem.type === 'note') {
+        saveAsTemplate(targetItem);
+    }
+    break;
         case 'duplicate':
             if (!targetItem) return;
             const newItem = duplicateItem(targetItem);
@@ -12943,6 +13155,38 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
             <button class="calc-btn equals-btn">=</button>
         </div>
     </div>
+</div>
+<div id="template-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-4 rounded-lg shadow-2xl w-[90vw] max-w-2xl z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-3 flex-shrink-0">
+        <h3 class="text-lg font-semibold flex items-center gap-2">
+            <i data-feather="file-plus" class="w-5 h-5 text-accent-primary"></i>
+            <span>Create from Template</span>
+        </h3>
+        <button id="template-modal-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    <div class="relative flex-shrink-0 mb-2">
+        <i data-feather="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary"></i>
+        <input type="text" id="template-search-input" placeholder="Search templates..." class="w-full bg-bg-main border border-border-color rounded-md py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-accent-primary">
+    </div>
+    <div id="template-list-container" class="flex-grow overflow-y-auto custom-scrollbar -mr-2 pr-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+        </div>
+    <footer class="flex justify-end gap-3 mt-4 flex-shrink-0 border-t border-border-color pt-3">
+         <button id="manage-templates-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80 text-sm">Manage Templates</button>
+    </footer>
+</div>
+<div id="manage-templates-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-4 rounded-lg shadow-2xl w-[90vw] max-w-lg z-[999] transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-3 flex-shrink-0">
+        <h3 class="text-lg font-semibold flex items-center gap-2">
+            <i data-feather="edit" class="w-5 h-5 text-accent-primary"></i>
+            <span>Manage Templates</span>
+        </h3>
+        <button id="manage-templates-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+    <div id="manage-template-list" class="flex-grow overflow-y-auto custom-scrollbar -mr-2 pr-2 space-y-2 max-h-[60vh]">
+        </div>
+    <footer class="flex justify-end gap-3 mt-4 flex-shrink-0 border-t border-border-color pt-3">
+         <button id="manage-templates-done-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90 text-sm">Done</button>
+    </footer>
 </div>
 <div id="timer-modal" class="modal hidden fixed top-1/4 left-1/2 -translate-x-1/2 bg-bg-pane-dark p-3 rounded-lg shadow-2xl w-[280px] z-[1001] transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
     <header id="timer-header" class="flex justify-between items-center pb-2 mb-2 border-b border-border-color cursor-move flex-shrink-0">
