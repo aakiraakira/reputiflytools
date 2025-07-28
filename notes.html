@@ -6396,7 +6396,51 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
 // =================================================================
 // END: REPLACEMENT createNewNote FUNCTION
 // =================================================================
+// ADD THIS ENTIRE NEW FUNCTION
+const handleNoteRename = async (noteId, oldName, newName) => {
+    const { writeBatch, doc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+    const batch = writeBatch(db);
 
+    // 1. Update the name of the note being renamed
+    const noteRef = doc(db, "notes", noteId);
+    batch.update(noteRef, { name: newName });
+    
+    // Update local cache immediately
+    if(window.noteCache[noteId]) window.noteCache[noteId].name = newName;
+    const noteStub = findItem(noteId)?.item;
+    if(noteStub) noteStub.name = newName;
+
+    // 2. Find and update all notes that link to the old name
+    const linkRegex = new RegExp(`\\[\\[${oldName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\]\\]`, 'gi');
+    
+    for (const id in window.noteCache) {
+        const note = window.noteCache[id];
+        if (note.content && note.content.includes(`[[${oldName}]]`)) {
+            console.log(`Updating link in: "${note.name}"`);
+            const updatedContent = note.content.replace(linkRegex, `[[${newName}]]`);
+            
+            // Update the document in the batch
+            const refToUpdate = doc(db, "notes", id);
+            batch.update(refToUpdate, { content: updatedContent });
+
+            // Also update the local cache for immediate UI consistency
+            note.content = updatedContent;
+        }
+    }
+
+    // 3. Commit all changes to the database at once
+    try {
+        await batch.commit();
+        showToast(`Renamed to "${newName}" and updated links.`, 'success');
+    } catch (error) {
+        console.error("Failed to batch update renamed links:", error);
+        showToast("Error updating note links.", "error");
+    } finally {
+        // 4. Re-render the entire app UI
+        buildLunrIndex();
+        render();
+    }
+};
 /**
  * MODIFIED: Now generates a '+' button for each item.
  */
@@ -8139,6 +8183,26 @@ const commands = [
     { name: 'help', description: 'Shows this list of all available commands.', execute: renderHelpModal },
     { name: 'commands', description: 'Alias for /help.', execute: renderHelpModal },
     { name: 'calculator', description: 'Opens a draggable calculator.', execute: () => openModal(document.getElementById('calculator-modal')) },// Add this command object inside the `commands` array
+    {
+    name: 'collab',
+    description: 'Invite a user to a note. Usage: /collab [note] to [email]',
+    suggest: 'notes',
+    execute: (args) => {
+        const separator = /\s+to\s+/i;
+        if (!separator.test(args)) {
+            return showToast('❌ Invalid format. Use: /collab [note name] to [email]', 'error');
+        }
+
+        const [noteName, email] = args.split(separator).map(s => s.trim());
+        if (!noteName || !email) {
+            return showToast('❌ Both note name and email are required.', 'error');
+        }
+
+        executeWithSmartFind(noteName, 'notes', (note) => {
+            handleInviteCollaborator(note.id, email);
+        });
+    }
+},
 { 
     name: 'timer', 
     description: 'Opens a draggable timer and stopwatch.', 
@@ -9474,11 +9538,35 @@ toggleToolbarBtn.addEventListener('click', () => {
     }
     feather.replace(); // This redraws the chevron icon
 });
+// REPLACE the existing titleTextarea listener
 const titleTextarea = app.elements.noteEditorTitle;
-                titleTextarea.addEventListener('input', () => {
-                    titleTextarea.style.height = 'auto';
-                    titleTextarea.style.height = (titleTextarea.scrollHeight) + 'px';
-                });
+titleTextarea.addEventListener('input', () => {
+    // This part handles the dynamic height adjustment
+    titleTextarea.style.height = 'auto';
+    titleTextarea.style.height = (titleTextarea.scrollHeight) + 'px';
+});
+
+// ADD this new listener for when the user is done editing the title
+titleTextarea.addEventListener('blur', () => {
+    const noteId = state.settings.activeNoteId;
+    if (!noteId) return;
+
+    const noteStub = findItem(noteId)?.item;
+    const noteData = window.noteCache[noteId];
+    if (!noteStub || !noteData) return;
+
+    const newName = titleTextarea.value.trim();
+
+    // Only proceed if the name has actually changed
+    if (newName && noteData.name !== newName) {
+        console.log(`Title changed from "${noteData.name}" to "${newName}". Saving and re-rendering.`);
+        
+        // This is the advanced function from Step 2.
+        // For now, it will just save the note. After you add the function,
+        // it will also update all links.
+        handleNoteRename(noteId, noteData.name, newName);
+    }
+});
 // Add this new event listener for the Settings panel
                 document.getElementById('toggle-settings-btn').addEventListener('click', () => {
                     const settingsContainer = document.getElementById('settings-list-container');
