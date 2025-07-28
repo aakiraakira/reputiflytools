@@ -6505,47 +6505,57 @@ function setupSharedNoteListener() {
                         );
 
                         onSnapshot(sharedNotesQuery, (snapshot) => {
-                            let wasNoteAdded = false;
+                            let stateChanged = false;
                             snapshot.docChanges().forEach((change) => {
-                                // We only care about notes that were NEWLY shared
-                                if (change.type === "added") {
-                                    const noteData = change.doc.data();
-                                    const noteId = change.doc.id;
+                                const noteData = change.doc.data();
+                                const noteId = change.doc.id;
 
+                                // This runs when a note is NEWLY shared with you
+                                if (change.type === "added") {
                                     if (!window.noteCache[noteId]) {
                                         console.log('New shared note detected:', noteData.name);
-                                        
-                                        // 1. Add the note's full data to the cache
                                         window.noteCache[noteId] = noteData;
-
-                                        // 2. Create a 'stub' and add it to the main UI structure (sidebar)
-                                        const noteStub = {
-                                            id: noteId,
-                                            name: noteData.name,
-                                            type: 'note',
-                                            createdAt: noteData.createdAt,
-                                            modifiedAt: noteData.modifiedAt,
-                                            pinned: false
-                                        };
+                                        const noteStub = { id: noteId, name: noteData.name, type: 'note', createdAt: noteData.createdAt, modifiedAt: noteData.modifiedAt, pinned: false };
                                         state.collections.unshift(noteStub);
 
-                                        // 3. NEW: Automatically open the shared note
+                                        // Automatically open the shared note
                                         state.settings.activeNoteId = noteId;
-                                        // A shared note doesn't belong to a folder on the recipient's side
                                         state.settings.activeCollectionId = null;
                                         state.settings.activeTag = null;
 
-                                        showToast(`📬 A note was shared with you: "${noteData.name}"`, 'success');
-                                        wasNoteAdded = true;
+                                        showToast(`📬 Note shared with you: "${noteData.name}"`, 'success');
+                                        stateChanged = true;
                                     }
+                                } 
+                                // FIX: This runs when a note is UN-SHARED from you
+                                else if (change.type === "removed") {
+                                    console.log('Shared note access revoked:', noteData.name);
+                                    
+                                    // 1. Remove the note's data from the cache
+                                    delete window.noteCache[noteId];
+
+                                    // 2. Find and remove the note from the sidebar structure
+                                    const findResult = findItem(noteId);
+                                    if (findResult) {
+                                        const parentArray = Array.isArray(findResult.parent) ? findResult.parent : findResult.parent.children;
+                                        parentArray.splice(findResult.index, 1);
+                                    }
+
+                                    // 3. If you were viewing the note, close it
+                                    if (state.settings.activeNoteId === noteId) {
+                                        state.settings.activeNoteId = null;
+                                    }
+                                    
+                                    showToast(`🚫 Access to "${noteData.name}" was revoked.`, 'info');
+                                    stateChanged = true;
                                 }
                             });
 
-                            // 4. If a note was added, save the new state and re-render everything
-                            if (wasNoteAdded) {
+                            // If any notes were added or removed, update the app
+                            if (stateChanged) {
                                 saveState();
                                 buildLunrIndex();
-                                render(); // This will now open the note in the editor
+                                render();
                             }
                         }, (error) => {
                             console.error("Error listening for shared notes:", error);
