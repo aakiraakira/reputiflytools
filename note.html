@@ -6682,6 +6682,26 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: Sharing Modal Navigation Logic ---
+document.getElementById('sharing-management-modal').addEventListener('click', (e) => {
+    const link = e.target.closest('.sharing-modal-note-link');
+    if (link) {
+        e.preventDefault();
+        const noteId = link.dataset.noteId;
+        if (noteId) {
+            // Logic to switch to the note
+            state.settings.activeNoteId = noteId;
+            const { parent } = findItem(noteId);
+            state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+            state.settings.activeTag = null;
+            saveState();
+            render();
+            // Close the modal after navigating
+            closeModal(document.getElementById('sharing-management-modal'));
+        }
+    }
+});
+// --- END: Sharing Modal Navigation Logic ---
                 // --- START: SHARING MANAGEMENT LOGIC ---
 
 const openSharingModal = async () => {
@@ -6697,7 +6717,8 @@ const openSharingModal = async () => {
     openModal(modal);
     feather.replace();
 
-    const allNotesData = Object.values(window.noteCache);
+    // MODIFIED: Find the note ID to prevent it from being null
+    const allNotesData = Object.entries(window.noteCache).map(([id, data]) => ({ id, ...data }));
     const ownedAndSharedNotes = allNotesData.filter(note => note.ownerId === user.uid && note.sharedWith?.length > 0);
     const sharedWithUserNotes = allNotesData.filter(note => note.sharedWith?.includes(user.uid));
 
@@ -6712,17 +6733,19 @@ const openSharingModal = async () => {
         const emailMap = new Map(profilesResult.data.users.map(u => [u.uid, u.email]));
 
         byMeList.innerHTML = ownedAndSharedNotes.map(note => {
+            // MODIFIED: This whole block is new for better layout and clickability
             const collaboratorsHTML = note.sharedWith.map(uid => `
-                <div class="flex items-center justify-between text-xs p-1 pl-6 rounded hover:bg-bg-pane-dark">
-                    <span>${emailMap.get(uid) || 'Unknown User'}</span>
-                    <button class="revoke-access-btn text-red-500 hover:underline" data-note-id="${note.id}" data-uid="${uid}">Revoke</button>
-                </div>
+                <div class="text-xs text-text-secondary">${emailMap.get(uid) || 'Unknown User'}</div>
             `).join('');
             return `
-                <div class="p-2 bg-bg-pane-dark rounded-md">
-                    <p class="font-semibold text-text-primary">${note.name}</p>
-                    ${collaboratorsHTML}
-                </div>`;
+                <a href="#" class="sharing-modal-note-link block p-3 bg-bg-pane-dark rounded-md hover:bg-bg-pane-light" data-note-id="${note.id}">
+                    <div class="flex justify-between items-center">
+                        <span class="font-semibold text-text-primary truncate">${note.name}</span>
+                        <div class="flex flex-col items-end">
+                            ${collaboratorsHTML}
+                        </div>
+                    </div>
+                </a>`;
         }).join('');
     }
 
@@ -6737,11 +6760,14 @@ const openSharingModal = async () => {
             const profilesResult = await getUserProfiles({ uids: ownerUIDs });
             const ownerEmailMap = new Map(profilesResult.data.users.map(u => [u.uid, u.email]));
 
-            withMeList.innerHTML = sharedWithUserNotes.map(note => 
-                `<div class="p-2 bg-bg-pane-dark rounded-md">
-                    <p class="font-semibold text-text-primary">${note.name}</p>
-                    <p class="text-xs text-text-secondary pl-1">Shared by ${ownerEmailMap.get(note.ownerId) || 'an unknown user'}</p>
-                </div>`
+            // MODIFIED: This block is new for better layout and clickability
+            withMeList.innerHTML = sharedWithUserNotes.map(note => `
+                <a href="#" class="sharing-modal-note-link block p-3 bg-bg-pane-dark rounded-md hover:bg-bg-pane-light" data-note-id="${note.id}">
+                    <div class="flex justify-between items-center">
+                        <span class="font-semibold text-text-primary truncate">${note.name}</span>
+                        <span class="text-xs text-text-secondary whitespace-nowrap">by ${ownerEmailMap.get(note.ownerId) || '...'}</span>
+                    </div>
+                </a>`
             ).join('');
         }
     }
@@ -6751,22 +6777,7 @@ document.getElementById('manage-sharing-btn').addEventListener('click', openShar
 document.getElementById('sharing-modal-close-btn').addEventListener('click', () => closeModal(document.getElementById('sharing-management-modal')));
 document.getElementById('sharing-modal-done-btn').addEventListener('click', () => closeModal(document.getElementById('sharing-management-modal')));
 
-document.getElementById('shared-by-me-list').addEventListener('click', async (e) => {
-    const button = e.target.closest('.revoke-access-btn');
-    if (button) {
-        const { noteId, uid } = button.dataset;
-        try {
-            const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
-            const revoke = httpsCallable(functions, 'revokeAccess');
-            await revoke({ noteId: noteId, uidToRevoke: uid });
-            showToast('Access revoked.', 'success');
-            // Refresh the modal content by re-opening it
-            openSharingModal();
-        } catch (error) {
-            showToast(`Error: ${error.message}`, 'error');
-        }
-    }
-});
+
 
 // --- END: SHARING MANAGEMENT LOGIC ---
                 // --- START: NEW INVITATION LOGIC ---
