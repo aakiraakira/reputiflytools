@@ -106,6 +106,32 @@
             --brand-grad-from: #E6397F;
             --brand-grad-to: #FF8A00;
         }
+        /* --- START: Save Indicator Styles --- */
+/* --- START: Save Indicator Styles --- */
+#save-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: var(--accent-primary);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+
+    /* Start hidden */
+    opacity: 0;
+    transform: scale(0) translateY(2px);
+}
+#save-indicator.visible {
+    /* Become visible and move down slightly for perfect centering */
+    opacity: 1;
+    transform: scale(1) translateY(1px);
+}
+/* --- END: Save Indicator Styles --- */
+/* --- START: Save Indicator Alignment Fix --- */
+#current-view-title {
+    /* This removes any default browser margins that can interfere with centering */
+    margin-bottom: 0; 
+}
+/* --- END: Save Indicator Alignment Fix --- */
+/* --- END: Save Indicator Styles --- */
         .reputify-theme .prose {
     color: var(--text-secondary);
 }
@@ -2186,7 +2212,10 @@ window.functions = getFunctions(app,);
    <div id="header-main-content" class="flex justify-between items-center w-full transition-opacity duration-200">
        <div class="flex items-center gap-2 flex-shrink min-w-0">
          <button id="mobile-menu-button" class="md:hidden p-1 -ml-1"><i data-feather="menu" class="w-6 h-6"></i></button>
-         <h2 id="current-view-title" class="text-lg font-semibold"></h2>
+         <div class="flex items-center gap-2">
+    <h2 id="current-view-title" class="text-lg font-semibold"></h2>
+    <div id="save-indicator" title="Unsaved Changes"></div>
+</div>
        </div>
        
        <div id="desktop-header-controls" class="hidden md:flex items-center gap-4">
@@ -4077,6 +4106,8 @@ quizDoneBtn: document.getElementById('quiz-done-btn'),
             };
 
             let state = {};
+            let isNoteDirty = false; // Tracks if the current note has unsaved changes
+let activeNoteCleanCopy = ''; // Stores the last saved version of the content
             let isSearchActive = false;
             let editorSelectionRange = null;
             let speechRecognizer = null;
@@ -5989,6 +6020,10 @@ function renderNoteEditor() {
     app.elements.noteEditorTitle.style.height = (app.elements.noteEditorTitle.scrollHeight) + 'px';
 
     app.elements.noteEditorBody.innerHTML = DOMPurify.sanitize(noteData.content || '');
+    activeNoteCleanCopy = noteData.content || ''; // <-- ADD THIS MISSING LINE
+
+    isNoteDirty = false; // ADD THIS LINE: When a note loads, it's clean.
+updateSaveIndicator(); // ADD THIS LINE: Update the UI.
 
     renderBacklinks(noteStub, noteData);
     updateEditorStats();
@@ -6682,6 +6717,12 @@ ${noteContent}`;
 };
 
             async function init() {
+                const updateSaveIndicator = () => {
+    const indicator = document.getElementById('save-indicator');
+    if (indicator) {
+        indicator.classList.toggle('visible', isNoteDirty);
+    }
+};
                 // --- START: Ctrl+S Manual Save Logic ---
 document.addEventListener('keydown', (e) => {
     // Check for Ctrl+S or Cmd+S
@@ -10979,6 +11020,11 @@ app.elements.noteEditorBody.addEventListener('change', (e) => {
 // =================================================================
 // START: REPLACEMENT saveNoteContent FUNCTION (FOR COLLABORATION)
 // =================================================================
+// notetakeapp.html
+
+// =================================================================
+// START: REPLACEMENT performImmediateSave FUNCTION
+// =================================================================
 performImmediateSave = async () => {
     const noteId = state.settings.activeNoteId;
     if (!noteId) return;
@@ -10994,7 +11040,8 @@ performImmediateSave = async () => {
     const newContent = app.elements.noteEditorBody.innerHTML;
 
     // Only proceed if there's an actual change.
-    if (noteContent.name === newName && noteContent.content === newContent) {
+    // THIS CHECK IS NOW CORRECTLY COMPARING AGAINST THE CLEAN COPY
+    if (noteContent.name === newName && activeNoteCleanCopy === newContent) {
         return;
     }
 
@@ -11039,12 +11086,24 @@ performImmediateSave = async () => {
                 modifiedAt: noteContent.modifiedAt
             });
         }
+        
+        // --- THIS IS THE NEW LOGIC TO ADD ---
+        // On successful save, update the clean copy and hide the indicator
+        activeNoteCleanCopy = newContent;
+        isNoteDirty = false;
+        updateSaveIndicator();
+        // --- END OF NEW LOGIC ---
+
         scheduleRebuildIndex();
+
     } catch (error) {
         console.error("Failed to save note:", error);
         showToast("Error saving note. " + (error.message || ''), 'error');
     }
 };
+// =================================================================
+// END: REPLACEMENT performImmediateSave FUNCTION
+// =================================================================
 // Find Here If Broken
 // This re-introduces the debounced function that was missing
 saveNoteContent = debounce(performImmediateSave, 5000);
@@ -11052,8 +11111,16 @@ saveNoteContent = debounce(performImmediateSave, 5000);
 // END: REPLACEMENT saveNoteContent FUNCTION
 // =================================================================
 app.elements.noteEditorTitle.addEventListener('input', () => {
+    isNoteDirty = true;
+    updateSaveIndicator();
     saveNoteContent();
     updateEditorStats();
+});
+app.elements.noteEditorBody.addEventListener('input', () => {
+    isNoteDirty = true;
+    updateSaveIndicator();
+    saveNoteContent();
+    updateStatsDebounced();
 });
                 app.elements.noteEditorBody.addEventListener('input', () => {
                     saveNoteContent();
