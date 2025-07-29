@@ -6678,6 +6678,84 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: NEW INVITATION LOGIC ---
+
+const setupInvitationListener = () => {
+    const user = window.auth.currentUser;
+    if (!user) return;
+
+    import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js").then(({ collection, query, where, onSnapshot }) => {
+        const invitationsQuery = query(
+            collection(db, "invitations"),
+            where('inviteeEmail', '==', user.email),
+            where('status', '==', 'pending')
+        );
+
+        onSnapshot(invitationsQuery, (snapshot) => {
+            snapshot.docChanges().forEach((change) => {
+                if (change.type === "added") {
+                    showInvitationToast({ id: change.doc.id, ...change.doc.data() });
+                }
+                if (change.type === "removed") {
+                    document.getElementById(`invite-${change.doc.id}`)?.remove();
+                }
+            });
+        });
+    });
+};
+
+const showInvitationToast = (invitation) => {
+    const container = document.getElementById('invitation-toast-container');
+    const toast = document.createElement('div');
+    toast.id = `invite-${invitation.id}`;
+    toast.className = 'bg-bg-pane-dark w-80 rounded-lg shadow-2xl p-4 border border-border-color';
+    toast.innerHTML = `
+        <div class="flex items-start gap-3">
+            <div class="bg-gradient-to-r from-[var(--brand-grad-from)] to-[var(--brand-grad-to)] w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0">
+                ${invitation.inviterEmail.charAt(0).toUpperCase()}
+            </div>
+            <div class="flex-grow">
+                <p class="text-sm font-semibold text-text-primary">${invitation.inviterEmail}</p>
+                <p class="text-sm text-text-secondary">wants to collaborate with you on <strong>${invitation.noteName}</strong></p>
+            </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-3">
+            <button data-invite-id="${invitation.id}" data-action="decline" class="px-3 py-1 text-sm rounded-md bg-bg-pane-light hover:opacity-80">Decline</button>
+            <button data-invite-id="${invitation.id}" data-action="accept" class="px-3 py-1 text-sm rounded-md brand-button hover:opacity-90">Accept</button>
+        </div>
+    `;
+    container.appendChild(toast);
+};
+
+document.getElementById('invitation-toast-container').addEventListener('click', async (e) => {
+    const button = e.target.closest('button[data-invite-id]');
+    if (!button) return;
+
+    const { inviteId, action } = button.dataset;
+    const toastElement = document.getElementById(`invite-${inviteId}`);
+
+    try {
+        const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
+
+        if (action === 'accept') {
+            const acceptInvite = httpsCallable(functions, 'acceptInvitation');
+            const result = await acceptInvite({ invitationId: inviteId });
+            showToast(`🎉 You can now collaborate on "${result.data.noteName}"!`, 'success');
+        } else {
+            const declineInvite = httpsCallable(functions, 'declineInvitation');
+            await declineInvite({ invitationId: inviteId });
+            showToast('Invitation declined.', 'info');
+        }
+
+        toastElement?.remove();
+
+    } catch (error) {
+        console.error(`Failed to ${action} invitation:`, error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+});
+
+// --- END: NEW INVITATION LOGIC ---
                 // --- START: Timer/Stopwatch Logic ---
 // --- START: Timer/Stopwatch Logic ---
 const initTimer = () => {
@@ -7832,29 +7910,48 @@ const openShareModal = async () => {
 // =================================================================
 // START: REPLACEMENT renderCollaboratorsList FUNCTION
 // =================================================================
+// REPLACE THE ENTIRE renderCollaboratorsList FUNCTION
 const renderCollaboratorsList = async (noteData) => {
     const listEl = document.getElementById('share-collaborators-list');
     const ownerId = noteData.ownerId;
     const sharedWithUIDs = noteData.sharedWith || [];
 
+    const currentUserEmail = window.auth.currentUser.email;
     let html = `<div class="flex items-center justify-between p-2">
-        <span class="font-medium">You (Owner)</span>
+        <div class="flex items-center gap-2">
+            <span class="font-medium">${currentUserEmail}</span>
+            <span class="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">Owner</span>
+        </div>
         <span class="text-sm text-text-tertiary">Full Access</span>
     </div>`;
 
-    // *** THIS IS THE FIX ***
-    // The previous version was missing the logic to get the emails for collaborators.
-    // This new logic fetches them from your Cloud Function.
-    for (const uid of sharedWithUIDs) {
-        // We can't get other users' emails directly from the client for security reasons.
-        // So we just display their unique ID for now. A future improvement could
-        // be a Cloud Function that returns emails for valid collaborators.
-        html += `<div class="flex items-center justify-between p-2 rounded-md hover:bg-bg-pane-dark">
-            <span class="font-mono text-xs text-text-secondary">${uid}</span>
-            <button class="remove-collaborator-btn text-xs text-red-500 hover:underline" data-uid="${uid}">Remove</button>
-        </div>`;
+    if (sharedWithUIDs.length > 0) {
+        try {
+            // Call the new Cloud Function to get emails
+            const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
+            const getUserProfiles = httpsCallable(window.functions, 'getUserProfiles');
+            const result = await getUserProfiles({ uids: sharedWithUIDs });
+            const collaborators = result.data.users;
+
+            html += collaborators.map(user => `
+                <div class="flex items-center justify-between p-2 rounded-md hover:bg-bg-pane-dark">
+                    <span class="text-text-primary">${user.email}</span>
+                    <button class="remove-collaborator-btn text-xs text-red-500 hover:underline" data-uid="${user.uid}">Remove</button>
+                </div>
+            `).join('');
+
+        } catch (error) {
+            console.error("Error fetching collaborator profiles:", error);
+            // Fallback to showing UIDs if the function call fails
+            html += sharedWithUIDs.map(uid => `
+                 <div class="flex items-center justify-between p-2 rounded-md hover:bg-bg-pane-dark">
+                    <span class="font-mono text-xs text-text-secondary">Error loading email (${uid})</span>
+                    <button class="remove-collaborator-btn text-xs text-red-500 hover:underline" data-uid="${uid}">Remove</button>
+                </div>
+            `).join('');
+            showToast("Couldn't load collaborator emails.", "error");
+        }
     }
-    // *** END OF FIX ***
 
     listEl.innerHTML = html;
 };
@@ -7862,6 +7959,7 @@ const renderCollaboratorsList = async (noteData) => {
 // END: REPLACEMENT renderCollaboratorsList FUNCTION
 // =================================================================
 
+// REPLACE the existing handleInviteCollaborator function
 const handleInviteCollaborator = async () => {
     const input = document.getElementById('share-email-input');
     const errorEl = document.getElementById('share-error');
@@ -7869,33 +7967,25 @@ const handleInviteCollaborator = async () => {
     if (!email) return;
 
     const noteId = state.settings.activeNoteId;
-    const user = window.auth.currentUser;
-    if (!noteId || !user) return;
-
-    
+    const note = findItem(noteId)?.item;
+    if (!note) return;
 
     errorEl.textContent = '';
-    const toastId = showToast('Inviting user...', 'loading');
+    const toastId = showToast('Sending invitation...', 'loading');
 
     try {
         const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
-        const getUserByEmail = httpsCallable(functions, 'getUserByEmail');
-        const result = await getUserByEmail({ email: email });
-        const invitedUser = result.data;
+        const inviteUser = httpsCallable(functions, 'inviteUserByEmail');
 
-        const { doc, updateDoc, getDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
-const noteRef = doc(db, "notes", noteId);
-
-await updateDoc(noteRef, {
-    sharedWith: arrayUnion(invitedUser.uid)
-});
-
-        const noteSnap = await getDoc(noteRef);
-        renderCollaboratorsList(noteSnap.data());
+        await inviteUser({
+            email: email,
+            noteId: noteId,
+            noteName: note.name
+        });
 
         input.value = '';
         dismissToast(toastId);
-        showToast('User invited successfully!', 'success');
+        showToast('Invitation sent!', 'success');
 
     } catch (error) {
         dismissToast(toastId);
@@ -7903,7 +7993,6 @@ await updateDoc(noteRef, {
         console.error("Error inviting user:", error);
     }
 };
-
 const handleRemoveCollaborator = async (uidToRemove) => {
     const noteId = state.settings.activeNoteId;
     if (!noteId || !uidToRemove) return;
@@ -9461,7 +9550,7 @@ app.elements.toggleTagsBtn.addEventListener('click', () => {
     feather.replace(); // To ensure the icon animation is smooth
 });
 fileUploadInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files[0];y
     if (file) {
         handleFileUpload(file);
     }
@@ -9472,6 +9561,7 @@ fileUploadInput.addEventListener('change', (e) => {
                 await loadState();
                 buildLunrIndex();
                 setupSharedNoteListener();
+                setupInvitationListener();
                 
                 initSpeechRecognition();
                 initClipper();
@@ -13399,6 +13489,8 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
         <div id="timer-laps-container" class="text-xs text-text-secondary max-h-24 overflow-y-auto custom-scrollbar space-y-1 p-1"></div>
     </div>
 </div>
+<div id="invitation-toast-container" class="fixed bottom-4 right-4 z-[1001] flex flex-col items-end gap-3">
+    </div>
 <div id="share-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-lg z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
     <header class="flex justify-between items-center mb-4 flex-shrink-0">
         <h3 class="text-lg font-semibold flex items-center gap-2">
