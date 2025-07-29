@@ -4627,7 +4627,43 @@ async function loadState() {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
+// ADD THIS ENTIRE FUNCTION
+async function ensureAllNotesLoaded() {
+    const noteIdsToLoad = window.chatbotContextNoteIds.filter(id => !window.noteCache[id]);
+    if (noteIdsToLoad.length === 0) {
+        return true; // All required notes are already in the cache.
+    }
 
+    const toastId = showToast(`Loading ${noteIdsToLoad.length} context note(s)...`, 'loading');
+
+    try {
+        const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+        
+        const fetchPromises = noteIdsToLoad.map(id => {
+            const noteRef = doc(db, "notes", id);
+            return getDoc(noteRef).then(noteSnap => {
+                if (noteSnap.exists()) {
+                    window.noteCache[id] = noteSnap.data(); // Add the loaded note to the cache.
+                } else {
+                    console.warn(`Context note with ID ${id} not found.`);
+                    // Remove missing note from context to prevent future errors
+                    window.chatbotContextNoteIds = window.chatbotContextNoteIds.filter(noteId => noteId !== id);
+                }
+            });
+        });
+
+        await Promise.all(fetchPromises);
+        dismissToast(toastId);
+        renderContextPills(); // Re-render pills in case a note was removed
+        return true;
+
+    } catch (error) {
+        console.error("Error loading context notes:", error);
+        dismissToast(toastId);
+        showToast("Failed to load context notes for the chat.", "error");
+        return false;
+    }
+}
 const handleFileUpload = async (file) => {
     const user = window.auth.currentUser;
     if (!file || !user) return;
@@ -6289,22 +6325,28 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
         finalParentId = state.settings.activeCollectionId;
     }
 
+    // --- START: NEW EXCERPT LOGIC ---
+    const initialContent = template.content || '';
+    const plainText = initialContent.replace(/<[^>]*>?/gm, ' ').trim();
+    const initialExcerpt = plainText.substring(0, 200);
+    // --- END: NEW EXCERPT LOGIC ---
+
     const now = new Date().toISOString();
     const newNoteData = {
         ownerId: user.uid,
         name: template.name || 'Untitled Note',
-        content: template.content || '',
+        content: initialContent,
+        excerpt: initialExcerpt, // ADD THIS
         properties: template.properties ? JSON.parse(JSON.stringify(template.properties)) : {},
         createdAt: now,
         modifiedAt: now,
         tags: [],
-        sharedWith: [] // New field for collaboration
+        sharedWith: []
     };
 
     const newNoteRef = doc(collection(db, "notes"));
     const noteId = newNoteRef.id;
 
-    // Add note to the local state representation of the folder structure
     const parentResult = findItem(finalParentId);
     let targetArray = state.collections;
     if (parentResult && parentResult.item.type === 'folder') {
@@ -6319,15 +6361,14 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
         id: noteId,
         type: 'note',
         name: newNoteData.name,
+        excerpt: initialExcerpt, // ADD THIS
         pinned: false
     };
     targetArray.unshift(newNoteStub);
 
-    // Use a batch write to save the new note and update the user's appState
     const batch = writeBatch(db);
     batch.set(newNoteRef, newNoteData);
     window.noteCache[noteId] = newNoteData;
-
 
     const userDocRef = doc(db, "users", user.uid, "data", "appState");
     batch.update(userDocRef, { collections: state.collections });
@@ -6339,7 +6380,7 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
         state.settings.activeCollectionId = finalParentId;
         state.settings.activeTag = null;
         state.settings.editorMode = 'editor';
-        await saveState(); // Save the new active note settings
+        await saveState();
     }
 
     buildLunrIndex();
@@ -6350,7 +6391,6 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
         app.elements.noteEditorTitle.select();
     }
 
-    // Return the full note data for other functions to use
     return { ...newNoteStub, ...newNoteData };
 };
 // =================================================================
@@ -11721,50 +11761,45 @@ app.modals.quizContent.addEventListener('click', e => {
                     }
                 });
 
-                const handleChatSubmit = async () => {
+                // REPLACE the existing handleChatSubmit function with this one
+const handleChatSubmit = async () => {
     const userInput = app.modals.chatbotInput.value.trim();
     if (!userInput) return;
+
+    // This check will now work correctly with the function you added
+    if (window.chatbotContextNoteIds.length > 0) {
+        if (!(await ensureAllNotesLoaded())) return; // Stop if notes fail to load
+    }
 
     app.modals.chatbotError.textContent = '';
     app.modals.chatbotInput.value = '';
     app.modals.chatbotSendBtn.disabled = true;
 
-    // --- STEP 1: Capture the current context ---
-    // Find the full note objects for the context provided in this turn.
-    const allNotes = getAllNotes(state.collections);
-    const contextNotesForThisTurn = allNotes.filter(n => window.chatbotContextNoteIds.includes(n.id));
-
-    // --- STEP 2: Add the user's message AND its context to the history ---
-    state.chatHistory.push({
-        role: 'user',
-        text: userInput,
-        // *** THE FIX ***: Store the context with the message.
-        context: contextNotesForThisTurn.map(n => ({ name: n.name, content: n.content.replace(/<[^>]*>?/gm, '') }))
-    });
-
-    // Now that the context is saved in the history, we can clear the temporary holder.
-    window.chatbotContextNoteIds = [];
-    renderContextPills(); // This will clear the pills from the UI.
+    state.chatHistory.push({ role: 'user', text: userInput });
     renderChatHistory();
 
-    // --- Show the "thinking" bubble ---
     const thinkingBubble = document.createElement('div');
     thinkingBubble.className = 'chat-bubble thinking w-fit rounded-lg px-3 py-2 self-start model';
     thinkingBubble.innerHTML = '● ● ●';
     app.modals.chatbotHistory.appendChild(thinkingBubble);
     app.modals.chatbotHistory.scrollTop = app.modals.chatbotHistory.scrollHeight;
 
-    // --- STEP 3: Build the complete prompt with FULL history and context ---
     let fullPrompt = "You are a helpful AI assistant. Answer the user's question based on the conversation history and any provided note context.\n\n---\n\n";
 
-    // Rebuild the entire history for every turn.
+    // ** START: THIS IS THE NEW LOGIC TO ADD CONTEXT **
+    if (window.chatbotContextNoteIds.length > 0) {
+        const context = window.chatbotContextNoteIds.map(id => {
+            const noteData = window.noteCache[id];
+            if (!noteData) return ''; // Should not happen after ensureAllNotesLoaded, but is a safeguard
+            const plainContent = (noteData.content || '').replace(/<[^>]*>?/gm, '');
+            return `--- Note Context: "${noteData.name}" ---\n${plainContent}`;
+        }).join('\n\n');
+        fullPrompt += `CONTEXT FROM NOTES:\n${context}\n\n---\n\n`;
+    }
+    // ** END: NEW LOGIC **
+
     state.chatHistory.forEach(msg => {
-        let contextBlock = '';
-        // If a historical message has context, add it before the user's text.
-        if (msg.context && msg.context.length > 0) {
-            contextBlock = "CONTEXT PROVIDED:\n" + msg.context.map(n => `--- NOTE: ${n.name} ---\n${n.content}\n--- END NOTE ---`).join('\n\n') + "\n\n";
-        }
-        fullPrompt += `${contextBlock}${msg.role === 'user' ? 'User' : 'AI'}: ${msg.text}\n\n`;
+        fullPrompt += `${msg.role === 'user' ? 'User' : 'AI'}: ${msg.text}\n\n`;
     });
 
     const payload = { contents: [{ parts: [{ text: fullPrompt }] }] };
@@ -11773,7 +11808,6 @@ app.modals.quizContent.addEventListener('click', e => {
     thinkingBubble.remove();
 
     if (modelResponse) {
-        // Add only the AI's response to the history. The context is already stored with the user's message.
         state.chatHistory.push({ role: 'model', text: modelResponse });
         renderChatHistory();
     }
