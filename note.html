@@ -4118,16 +4118,15 @@ const listenToActiveNote = () => {
                 const serverNoteData = docSnap.data();
                 window.noteCache[noteId] = serverNoteData; 
 
-                // --- FIX STARTS HERE ---
-                // Find the note stub in the sidebar data and update its name.
+                // Find the sidebar data and update its name if it changed.
                 const noteStub = findItem(noteId)?.item;
                 if (noteStub && noteStub.name !== serverNoteData.name) {
                     noteStub.name = serverNoteData.name;
-                    // Re-render the collections list to show the new name.
+                    // Re-render the sidebar to show the new name.
                     renderCollectionsList();
                 }
-                // --- FIX ENDS HERE ---
 
+                // Update the main editor view if it's the active note.
                 if (noteId === state.settings.activeNoteId) {
                     const editorTitle = app.elements.noteEditorTitle;
                     const editorBody = app.elements.noteEditorBody;
@@ -8096,8 +8095,7 @@ const executeWithSmartFind = async (args, itemType, action) => {
 const commands = [
     { name: 'nn', description: 'New Note. Usage: /nn [note name]', execute: (args)=>{const n=createNewNote(true,'');n.name=args||'Untitled Note';saveState();render();showToast(`✅ Note "${n.name}" created`)} },
     { name: 'nf', description: 'New Folder. Usage: /nf [folder name]', execute: (args)=>{const n=args||'Untitled Folder';const c={id:generateId('c'),name:n,type:'folder',children:[],expanded:true};state.kanbanColumns[c.id]=[{id:generateId('col'),title:'To Do'}];state.collections.push(c);saveState();buildLunrIndex();render();showToast(`✅ Folder "${n}" created`)}},
-    { name: 'rename', description: 'Rename item. Usage: /rename [old] to [new]', suggest: 'items', execute: async(args)=>{const s=/\s+to\s+/i;if(!s.test(args))return showToast('❌ Use: /rename [old] to [new]','error');const p=args.split(s);const o=p[0].trim();const n=p[1].trim();if(!o||!n)return showToast('❌ Both names required.','error');const i=findBestMatch(o,[...getAllNotes(state.collections),...getAllFolders()]);if(!i)return showToast(`❌ Not found: "${o}"`,'error');const c=await showConfirm({title:'Confirm Rename',message:`Rename "${i.name}" to "${n}"?`,confirmText:'Rename'});if(c){i.name=n;saveState();buildLunrIndex();render();showToast(`✅ Renamed to "${n}"`)}} },
-    { name: 'link', description: 'Link notes. Usage: /link [source] to [target]', suggest: 'notes', execute: (args)=>{const s=/\s+to\s+/i;if(!s.test(args))return showToast('❌ Use: /link [source] to [target]','error');const p=args.split(s);const sN=p[0].trim();const tN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');if(sO.id===tO.id)return showToast('❌ Cannot link a note to itself.','error');sO.content+=`\n<p>[[${tO.name}]]</p>`;updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Linked "${sO.name}" to "${tO.name}"`)}},
+{ name: 'rename', description: 'Rename item. Usage: /rename [old] to [new]', suggest: 'items', execute: async(args)=>{ const separator = /\s+to\s+/i; if (!separator.test(args)) return showToast('❌ Use: /rename [old] to [new]','error'); const parts = args.split(separator); const oldName = parts[0].trim(); const newName = parts[1].trim(); if (!oldName || !newName) return showToast('❌ Both names required.','error'); const itemToRenameCopy = findBestMatch(oldName, [...getAllNotes(state.collections), ...getAllFolders()]); if (!itemToRenameCopy) return showToast(`❌ Not found: "${oldName}"`,'error'); const findResult = findItem(itemToRenameCopy.id); if (!findResult || !findResult.item) { return showToast('❌ Could not locate the original item to rename.', 'error'); } const originalItem = findResult.item; const confirmed = await showConfirm({title:'Confirm Rename', message:`Rename "${originalItem.name}" to "${newName}"?`, confirmText:'Rename'}); if (confirmed) { const previousName = originalItem.name; originalItem.name = newName; try { if (originalItem.type === 'note') { const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"); const noteRef = doc(db, "notes", originalItem.id); await updateDoc(noteRef, { name: newName }); if (window.noteCache[originalItem.id]) { window.noteCache[originalItem.id].name = newName; } } await saveState(); buildLunrIndex(); render(); showToast(`✅ Renamed to "${newName}"`); } catch (error) { console.error("Error renaming item:", error); showToast('❌ A database error occurred. Rename failed.', 'error'); originalItem.name = previousName; } } } },    { name: 'link', description: 'Link notes. Usage: /link [source] to [target]', suggest: 'notes', execute: (args)=>{const s=/\s+to\s+/i;if(!s.test(args))return showToast('❌ Use: /link [source] to [target]','error');const p=args.split(s);const sN=p[0].trim();const tN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');if(sO.id===tO.id)return showToast('❌ Cannot link a note to itself.','error');sO.content+=`\n<p>[[${tO.name}]]</p>`;updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Linked "${sO.name}" to "${tO.name}"`)}},
     { name: 'unlink', description: 'Unlink notes. Usage: /unlink [target] from [source]', suggest: 'notes', execute: (args)=>{const s=/\s+from\s+/i;if(!s.test(args))return showToast('❌ Use: /unlink [target] from [source]','error');const p=args.split(s);const tN=p[0].trim();const sN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');const r=new RegExp(`\\[\\[\\s*${tO.name}\\s*\\]\\]`,'gi');if(!r.test(sO.content))return showToast(`❌ Link to "${tO.name}" not found in "${sO.name}".`,'info');sO.content=sO.content.replace(r,'').replace(/<p>\s*<\/p>|\n\s*\n/gi,'');updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Unlinked "${tO.name}" from "${sO.name}"`)}},
     { name: 'go', description: 'Go to item or tag. Usage: /go [item] or /go #[tag] [item]', suggest: 'items_or_tags', execute: (args)=>{if(!args)return showToast('❌ Specify item or tag.','error');if(args.startsWith('#')){const tN=args.split(' ')[0].substring(1).trim();const nN=args.substring(tN.length+2).trim();if(!tN)return showToast('❌ Tag name needed.','error');if(!getAllTags().includes(tN))return showToast(`❌ Tag not found: #${tN}`,'error');if(nN){const nT=getAllNotes(state.collections).filter(n=>(n.tags||[]).includes(tN));const t=findBestMatch(nN,nT);if(t){executeWithSmartFind(t.name,'notes',(i)=>{state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id}showToast(`🚀 Navigated to "${i.name}"`);saveState();render()})}else{showToast(`❌ Note "${nN}" not in tag #${tN}.`,'error')}}else{state.settings.activeTag=tN;state.settings.activeNoteId=null;state.settings.activeCollectionId=null;showToast(`🏷️ Showing notes tagged with #${tN}`);saveState();render()}}else{executeWithSmartFind(args,'items',(i)=>{state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id}else{state.settings.activeCollectionId=i.id;state.settings.activeNoteId=null}showToast(`🚀 Navigated to "${i.name}"`);saveState();render()})}} },
     { name: 'theme', description: 'Toggle through color themes.', execute: ()=>document.getElementById('theme-toggle')?.click() },
@@ -10748,30 +10746,28 @@ performImmediateSave = async () => {
     const newName = app.elements.noteEditorTitle.value;
     const newContent = app.elements.noteEditorBody.innerHTML;
 
-    // Only save if there's a change
+    // Only proceed if there's an actual change.
     if (noteContent.name === newName && noteContent.content === newContent) {
         return;
     }
 
-    // --- FIX STARTS HERE ---
-    // Check if the name specifically has changed before saving.
     const nameChanged = noteStub.name !== newName;
 
-    // Update both the sidebar stub AND the full note cache immediately.
+    // --- STEP 1: Update local data for an instant UI response ---
     noteStub.name = newName; 
     noteContent.name = newName;
     noteContent.content = newContent;
     noteContent.modifiedAt = new Date().toISOString();
-    // --- FIX ENDS HERE ---
 
     updateNoteLinks(noteContent);
     updateNoteTags(noteContent);
 
-    // If the name changed, re-render the sidebar list to show the new name.
+    // --- STEP 2: Update the sidebar UI if the name changed ---
     if (nameChanged) {
         renderCollectionsList();
     }
 
+    // --- STEP 3: Save the new data to the Firestore database ---
     try {
         if (user.uid === noteContent.ownerId) {
             const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
