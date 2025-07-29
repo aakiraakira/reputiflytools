@@ -4110,31 +4110,35 @@ const listenToActiveNote = () => {
         const noteRef = doc(db, "notes", noteId);
 
         activeNoteListener = onSnapshot(noteRef, (docSnap) => {
-            // This is the crucial check. It tells us if the update is from a
-            // local change we just made. If so, we ignore it to prevent the cursor from jumping.
             if (docSnap.metadata.hasPendingWrites) {
-                console.log("Ignoring local echo of write.");
                 return;
             }
 
-            console.log("Remote update received. Applying changes.");
-
             if (docSnap.exists()) {
                 const serverNoteData = docSnap.data();
-                window.noteCache[noteId] = serverNoteData; // Keep cache updated
+                window.noteCache[noteId] = serverNoteData; 
+
+                // --- FIX STARTS HERE ---
+                // Find the note stub in the sidebar data and update its name.
+                const noteStub = findItem(noteId)?.item;
+                if (noteStub && noteStub.name !== serverNoteData.name) {
+                    noteStub.name = serverNoteData.name;
+                    // Re-render the collections list to show the new name.
+                    renderCollectionsList();
+                }
+                // --- FIX ENDS HERE ---
 
                 if (noteId === state.settings.activeNoteId) {
                     const editorTitle = app.elements.noteEditorTitle;
                     const editorBody = app.elements.noteEditorBody;
 
-                    // Directly apply changes from other users without checking for active focus.
                     if (editorTitle.value !== serverNoteData.name) {
                         editorTitle.value = serverNoteData.name;
                     }
                     if (editorBody.innerHTML !== serverNoteData.content) {
                         editorBody.innerHTML = serverNoteData.content;
                         updateEditorStats();
-                        feather.replace(); // Important to re-render any icons in the note content
+                        feather.replace();
                     }
                 }
             } else {
@@ -10749,22 +10753,27 @@ performImmediateSave = async () => {
         return;
     }
 
-    // Update local cache immediately
-    noteStub.name = newName;
+    // --- FIX STARTS HERE ---
+    // Check if the name specifically has changed before saving.
+    const nameChanged = noteStub.name !== newName;
+
+    // Update both the sidebar stub AND the full note cache immediately.
+    noteStub.name = newName; 
     noteContent.name = newName;
     noteContent.content = newContent;
     noteContent.modifiedAt = new Date().toISOString();
+    // --- FIX ENDS HERE ---
 
     updateNoteLinks(noteContent);
     updateNoteTags(noteContent);
 
-    if (noteStub.name !== newName) {
+    // If the name changed, re-render the sidebar list to show the new name.
+    if (nameChanged) {
         renderCollectionsList();
     }
 
     try {
         if (user.uid === noteContent.ownerId) {
-            // --- OWNER'S SAVE LOGIC (Directly update the document) ---
             const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
             const noteRef = doc(db, "notes", noteId);
 
@@ -10775,9 +10784,7 @@ performImmediateSave = async () => {
                 links: noteContent.links,
                 tags: noteContent.tags
             });
-            console.log(`Owner saved note ${noteId} to Firestore.`);
         } else {
-            // --- COLLABORATOR'S SAVE LOGIC (Use the Cloud Function) ---
             const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
             const updateNote = httpsCallable(window.functions, 'updateNoteAsCollaborator');
             await updateNote({
@@ -10788,11 +10795,8 @@ performImmediateSave = async () => {
                 newTags: noteContent.tags,
                 modifiedAt: noteContent.modifiedAt
             });
-            console.log(`Collaborator saved note ${noteId} via Cloud Function.`);
         }
-        
         scheduleRebuildIndex();
-
     } catch (error) {
         console.error("Failed to save note:", error);
         showToast("Error saving note. " + (error.message || ''), 'error');
@@ -10804,6 +10808,10 @@ saveNoteContent = debounce(performImmediateSave, 500);
 // =================================================================
 // END: REPLACEMENT saveNoteContent FUNCTION
 // =================================================================
+app.elements.noteEditorTitle.addEventListener('input', () => {
+    saveNoteContent();
+    updateEditorStats();
+});
                 app.elements.noteEditorBody.addEventListener('input', () => {
                     saveNoteContent();
                     updateStatsDebounced();
