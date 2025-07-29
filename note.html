@@ -3394,18 +3394,23 @@ const handleGlobalAIQuery = async () => {
 
     if (!query) return;
 
-    // --- START: MODIFIED SECTION ---
-    // Clear previous results and set loading state right when a new question is asked
     askBtn.disabled = true;
     askBtn.querySelector('span').textContent = 'Thinking...';
     answerContainer.classList.add('hidden');
     sourcesContainer.classList.add('hidden');
     copyBtnFooter.classList.add('hidden');
     answerEl.innerHTML = '';
-    // --- END: MODIFIED SECTION ---
 
     const searchResults = lunrIndex.search(query);
-    const topNotes = searchResults.slice(0, 5).map(res => findItem(res.ref)?.item).filter(Boolean);
+
+    // --- FIX STARTS HERE ---
+    // The original code used findItem(), which only returns a data stub.
+    // This now correctly pulls the FULL note data from the global note cache.
+    const topNotes = searchResults.slice(0, 5).map(res => {
+        const fullNoteData = window.noteCache[res.ref];
+        return fullNoteData ? { id: res.ref, ...fullNoteData } : null;
+    }).filter(Boolean);
+    // --- FIX ENDS HERE ---
 
     if (topNotes.length === 0) {
         showToast('No relevant notes found.', 'info');
@@ -3414,12 +3419,14 @@ const handleGlobalAIQuery = async () => {
         return;
     }
 
+    // This part now works correctly because note.content is available.
     const context = topNotes.map(note => {
-    const contentWithMarkdownTables = convertTablesToMarkdown(note.content);
-    return `--- Note: "${note.name}" ---\n${contentWithMarkdownTables.replace(/<[^>]*>?/gm, '')}`;
-}).join('\n\n');
+        const contentWithMarkdownTables = convertTablesToMarkdown(note.content);
+        return `--- Note: "${note.name}" ---\n${contentWithMarkdownTables.replace(/<[^>]*>?/gm, '')}`;
+    }).join('\n\n');
+
     const historyContext = askYourNotesHistory.map(item => `Previous Question: ${item.question}\nPrevious Answer: ${item.answer}`).join('\n\n');
-    
+
     const prompt = `You are a helpful assistant.
 ${historyContext ? `For context, here is the previous turn of our conversation:\n${historyContext}\n\n` : ''}
 Based ONLY on the context from the provided notes below, answer the user's new question. If the answer cannot be found in the notes, say "I could not find an answer in your notes." Do not use any external knowledge.
@@ -3428,7 +3435,7 @@ User's Question: "${query}"
 
 Context from Notes:
 ${context}`;
-    
+
     const payload = { contents: [{ parts: [{ text: prompt }] }] };
     const aiResponse = await callGeminiAPI(payload);
 
@@ -3436,9 +3443,9 @@ ${context}`;
         answerEl.innerHTML = marked.parse(aiResponse);
         answerContainer.classList.remove('hidden');
         copyBtnFooter.classList.remove('hidden');
-        
+
         findAndDisplaySourceSnippets(aiResponse, topNotes);
-        
+
         askYourNotesHistory.push({ question: query, answer: aiResponse });
     } else {
         showToast('The AI could not provide an answer.', 'error');
@@ -3448,7 +3455,6 @@ ${context}`;
     askBtn.querySelector('span').textContent = 'Ask';
     feather.replace();
 };
-
 const findAndDisplaySourceSnippets = (aiAnswer, sourceNotes) => {
     const sourcesEl = document.getElementById('global-ai-sources');
     const sourcesContainer = document.getElementById('global-ai-sources-container');
@@ -9474,15 +9480,18 @@ const headerSummarizeBtn = document.getElementById('header-summarize-btn');
 const headerQuizBtn = document.getElementById('header-quiz-btn');
 
 const handleHeaderAIAction = (action) => {
-    const note = findItem(state.settings.activeNoteId)?.item;
+    const noteId = state.settings.activeNoteId;
+    // --- FIX STARTS HERE ---
+    // Get the full note object from the cache instead of the sidebar stub.
+    const note = window.noteCache[noteId] ? { id: noteId, ...window.noteCache[noteId] } : null;
+    // --- FIX ENDS HERE ---
+
     if (note) {
-        // The share action does not depend on content, so we handle it first.
         if (action === 'share') {
-            handleShareNote(note); // Pass the note object directly
-            return; // Exit the function
+            handleShareNote(note);
+            return;
         }
 
-        // For all other AI actions, we check for content first.
         const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
         if (plainContent) {
             if (action === 'summarize') {
@@ -10555,160 +10564,153 @@ case 'mobile-checkpoint':
                 });
                 
                 app.containers.mainContentArea.addEventListener('click', (e) => {
-                    const exitBtn = e.target.closest('.exit-code-btn');
-                    if (exitBtn) {
-                        const wrapper = exitBtn.closest('.code-block-wrapper');
-                        if (wrapper) {
-                            // Create a new empty paragraph after the code block
-                            const newP = document.createElement('p');
-                            newP.innerHTML = '<br>';
-                            wrapper.after(newP);
-                            
-                            // Place the user's cursor in the new paragraph
-                            const selection = window.getSelection();
-                            const range = document.createRange();
-                            range.setStart(newP, 0);
-                            range.collapse(true);
-                            selection.removeAllRanges();
-                            selection.addRange(range);
-                            
-                            // Save the change
-                            saveNoteContent();
-                        }
-                        return; // Stop further execution
-                    }
-                    // Add this block to handle backlink clicks
-const backlink = e.target.closest('.backlink-item');
-if (backlink) {
-    e.preventDefault();
-    state.settings.activeNoteId = backlink.dataset.noteId;
-    saveState();
-    render(); // Re-render the editor with the new note
-    if (window.innerWidth < 768) { // ADD THIS LINE
-            toggleMobileSidebar(false);   // ADD THIS LINE
-        }                                 // ADD THIS LINE
-        return;
-    
-}
+    const exitBtn = e.target.closest('.exit-code-btn');
+    if (exitBtn) {
+        const wrapper = exitBtn.closest('.code-block-wrapper');
+        if (wrapper) {
+            const newP = document.createElement('p');
+            newP.innerHTML = '<br>';
+            wrapper.after(newP);
 
-                    const deleteBlockBtn = e.target.closest('.delete-block-btn');
-                    if (deleteBlockBtn) {
-                        const wrapper = deleteBlockBtn.closest('.code-block-wrapper');
-                        if (wrapper) {
-                            const parentEditor = wrapper.parentNode;
-                            const wasLastElement = (wrapper.nextElementSibling === null);
+            const selection = window.getSelection();
+            const range = document.createRange();
+            range.setStart(newP, 0);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
 
-                            // If there's an empty <p> tag right after, remove it too for cleanup
-                            const nextEl = wrapper.nextElementSibling;
-                            if (nextEl && nextEl.tagName === 'P' && (nextEl.innerHTML === '<br>' || nextEl.innerHTML === '')) {
-                                nextEl.remove();
-                            }
-                            
-                            wrapper.remove();
-
-                            // ** THE FIX **: If the deleted block was the last element, add a new paragraph.
-                            if (wasLastElement) {
-                                const newP = document.createElement('p');
-                                newP.innerHTML = '<br>';
-                                parentEditor.appendChild(newP);
-                                // Place the cursor in the new paragraph
-                                const selection = window.getSelection();
-                                const range = document.createRange();
-                                range.setStart(newP, 0);
-                                range.collapse(true);
-                                selection.removeAllRanges();
-                                selection.addRange(range);
-                            }
-
-                            saveNoteContent();
-                            showToast('Code block deleted', 'info');
-                        }
-                        return;
-                    }
-                    
-                    const summarizeBtn = e.target.closest('.summarize-btn');
-if (summarizeBtn) {
-    e.preventDefault();
-    e.stopPropagation();
-    const noteId = summarizeBtn.dataset.noteId;
-    const { item: note } = findItem(noteId);
-    const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
-    if (!plainContent) {
-        showToast("Note is empty, nothing to summarize.", "info");
-        return;
-    }
-    // No longer needs the second argument
-    handleSummarize(plainContent);
-    return;
-}
-                    const quizBtn = e.target.closest('.quiz-btn');
-if (quizBtn) {
-    e.preventDefault();
-    e.stopPropagation();
-    const noteId = quizBtn.dataset.noteId;
-    const { item: note } = findItem(noteId);
-    const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
-    if (!plainContent) {
-        showToast("Note is empty, cannot generate a quiz.", "info");
-        return;
-    }
-    handleGenerateQuiz(plainContent, note);
-    return;
-}
-                    const copyBtn = e.target.closest('.copy-code-btn');
-                    if (copyBtn) {
-                         const codeBlock = copyBtn.closest('.code-block-wrapper, .hljs').querySelector('pre, code');
-                         if(codeBlock) {
-                            const code = codeBlock.innerText;
-                            navigator.clipboard.writeText(code)
-                                .then(() => showToast('Code copied!', 'success'))
-                                .catch(err => showToast('Failed to copy code', 'error'));
-                         }
-                        return;
-                    }
-
-                    const card = e.target.closest('.kanban-card, .list-note-item, .search-result-item');
-                    if (card) {
-    // If clicking a search result, store the query for highlighting
-    if (isSearchActive && card.classList.contains('search-result-item')) {
-        state.settings.searchHighlightQuery = app.search.input.value;
-        closeSearch(true); // Don't re-render immediately
-    }
-    state.settings.activeNoteId = card.dataset.noteId;
-    const { parent } = findItem(state.settings.activeNoteId);
-    state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
-    state.settings.activeTag = null;
-    saveState();
-    render();
-    return;
-}
-                    
-                    const internalLink = e.target.closest('a.internal-link');
-                    if (internalLink) {
-                        e.preventDefault();
-                        const noteId = internalLink.dataset.noteId;
-                        if(noteId) {
-                            state.settings.activeNoteId = noteId;
-                            const { parent } = findItem(noteId);
-                            state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
-                            state.settings.activeTag = null;
-                            saveState();
-                            render();
-                            showToast(`Mapsd to "${internalLink.textContent}"`);
-                            if (window.innerWidth < 768) { // ADD THIS LINE
-            toggleMobileSidebar(false);   // ADD THIS LINE
+            saveNoteContent();
         }
-                        }
-                        return;
-                    }
-                    
-                    const link = e.target.closest('a');
-                    if (link && link.href && (app.elements.noteEditorBody.contains(link) || app.elements.markdownPreview.contains(link))) {
-                        e.preventDefault();
-                        window.open(link.href, '_blank');
-                    }
-                });
+        return;
+    }
+    const backlink = e.target.closest('.backlink-item');
+    if (backlink) {
+        e.preventDefault();
+        state.settings.activeNoteId = backlink.dataset.noteId;
+        saveState();
+        render();
+        if (window.innerWidth < 768) {
+            toggleMobileSidebar(false);
+        }
+        return;
+    }
 
+    const deleteBlockBtn = e.target.closest('.delete-block-btn');
+    if (deleteBlockBtn) {
+        const wrapper = deleteBlockBtn.closest('.code-block-wrapper');
+        if (wrapper) {
+            const parentEditor = wrapper.parentNode;
+            const wasLastElement = (wrapper.nextElementSibling === null);
+
+            const nextEl = wrapper.nextElementSibling;
+            if (nextEl && nextEl.tagName === 'P' && (nextEl.innerHTML === '<br>' || nextEl.innerHTML === '')) {
+                nextEl.remove();
+            }
+
+            wrapper.remove();
+
+            if (wasLastElement) {
+                const newP = document.createElement('p');
+                newP.innerHTML = '<br>';
+                parentEditor.appendChild(newP);
+                const selection = window.getSelection();
+                const range = document.createRange();
+                range.setStart(newP, 0);
+                range.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+
+            saveNoteContent();
+            showToast('Code block deleted', 'info');
+        }
+        return;
+    }
+
+    // --- FIX STARTS HERE FOR SUMMARIZE/QUIZ BUTTONS ---
+    const summarizeBtn = e.target.closest('.summarize-btn');
+    if (summarizeBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const noteId = summarizeBtn.dataset.noteId;
+        const noteData = window.noteCache[noteId]; // Get full data from cache
+        const plainContent = (noteData?.content || '').replace(/<[^>]*>?/gm, '').trim();
+        if (!plainContent) {
+            showToast("Note is empty, nothing to summarize.", "info");
+            return;
+        }
+        handleSummarize(plainContent);
+        return;
+    }
+    const quizBtn = e.target.closest('.quiz-btn');
+    if (quizBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const noteId = quizBtn.dataset.noteId;
+        const noteData = window.noteCache[noteId]; // Get full data from cache
+        const note = noteData ? { id: noteId, ...noteData } : null; // Reconstruct note object for the handler
+        const plainContent = (noteData?.content || '').replace(/<[^>]*>?/gm, '').trim();
+        if (!plainContent) {
+            showToast("Note is empty, cannot generate a quiz.", "info");
+            return;
+        }
+        handleGenerateQuiz(plainContent, note);
+        return;
+    }
+    // --- FIX ENDS HERE ---
+
+    const copyBtn = e.target.closest('.copy-code-btn');
+    if (copyBtn) {
+         const codeBlock = copyBtn.closest('.code-block-wrapper, .hljs').querySelector('pre, code');
+         if(codeBlock) {
+            const code = codeBlock.innerText;
+            navigator.clipboard.writeText(code)
+                .then(() => showToast('Code copied!', 'success'))
+                .catch(err => showToast('Failed to copy code', 'error'));
+         }
+        return;
+    }
+
+    const card = e.target.closest('.kanban-card, .list-note-item, .search-result-item');
+    if (card) {
+        if (isSearchActive && card.classList.contains('search-result-item')) {
+            state.settings.searchHighlightQuery = app.search.input.value;
+            closeSearch(true);
+        }
+        state.settings.activeNoteId = card.dataset.noteId;
+        const { parent } = findItem(state.settings.activeNoteId);
+        state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+        state.settings.activeTag = null;
+        saveState();
+        render();
+        return;
+    }
+
+    const internalLink = e.target.closest('a.internal-link');
+    if (internalLink) {
+        e.preventDefault();
+        const noteId = internalLink.dataset.noteId;
+        if(noteId) {
+            state.settings.activeNoteId = noteId;
+            const { parent } = findItem(noteId);
+            state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+            state.settings.activeTag = null;
+            saveState();
+            render();
+            showToast(`Mapsd to "${internalLink.textContent}"`);
+            if (window.innerWidth < 768) {
+                toggleMobileSidebar(false);
+            }
+        }
+        return;
+    }
+
+    const link = e.target.closest('a');
+    if (link && link.href && (app.elements.noteEditorBody.contains(link) || app.elements.markdownPreview.contains(link))) {
+        e.preventDefault();
+        window.open(link.href, '_blank');
+    }
+});
                 // This is the core save logic
                 // This listener handles checklist state changes reliably
 app.elements.noteEditorBody.addEventListener('change', (e) => {
