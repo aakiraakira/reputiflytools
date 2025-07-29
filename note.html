@@ -2164,6 +2164,10 @@ window.functions = getFunctions(app,);
                             <i data-feather="eye" class="w-5 h-5"></i>
                             <span>Hide Properties</span>
                         </button>
+                        <button id="manage-sharing-btn" class="settings-footer-item">
+    <i data-feather="share-2" class="w-5 h-5"></i>
+    <span>Manage Sharing</span>
+</button>
                         </div>
                     </div>
                     <input type="file" id="import-file-input" class="hidden" accept=".json">
@@ -6678,6 +6682,93 @@ ${noteContent}`;
 };
 
             async function init() {
+                // --- START: SHARING MANAGEMENT LOGIC ---
+
+const openSharingModal = async () => {
+    const user = window.auth.currentUser;
+    if (!user) return;
+
+    const modal = document.getElementById('sharing-management-modal');
+    const byMeList = document.getElementById('shared-by-me-list');
+    const withMeList = document.getElementById('shared-with-me-list');
+    
+    byMeList.innerHTML = '<p class="text-sm text-text-tertiary p-2">Loading...</p>';
+    withMeList.innerHTML = '<p class="text-sm text-text-tertiary p-2">Loading...</p>';
+    openModal(modal);
+    feather.replace();
+
+    const allNotesData = Object.values(window.noteCache);
+    const ownedAndSharedNotes = allNotesData.filter(note => note.ownerId === user.uid && note.sharedWith?.length > 0);
+    const sharedWithUserNotes = allNotesData.filter(note => note.sharedWith?.includes(user.uid));
+
+    // Render notes shared BY the user
+    if (ownedAndSharedNotes.length === 0) {
+        byMeList.innerHTML = '<p class="text-sm text-text-tertiary p-2">You are not sharing any notes.</p>';
+    } else {
+        const allCollaboratorUIDs = [...new Set(ownedAndSharedNotes.flatMap(note => note.sharedWith))];
+        const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
+        const getUserProfiles = httpsCallable(window.functions, 'getUserProfiles');
+        const profilesResult = await getUserProfiles({ uids: allCollaboratorUIDs });
+        const emailMap = new Map(profilesResult.data.users.map(u => [u.uid, u.email]));
+
+        byMeList.innerHTML = ownedAndSharedNotes.map(note => {
+            const collaboratorsHTML = note.sharedWith.map(uid => `
+                <div class="flex items-center justify-between text-xs p-1 pl-6 rounded hover:bg-bg-pane-dark">
+                    <span>${emailMap.get(uid) || 'Unknown User'}</span>
+                    <button class="revoke-access-btn text-red-500 hover:underline" data-note-id="${note.id}" data-uid="${uid}">Revoke</button>
+                </div>
+            `).join('');
+            return `
+                <div class="p-2 bg-bg-pane-dark rounded-md">
+                    <p class="font-semibold text-text-primary">${note.name}</p>
+                    ${collaboratorsHTML}
+                </div>`;
+        }).join('');
+    }
+
+    // Render notes shared WITH the user
+    if (sharedWithUserNotes.length === 0) {
+        withMeList.innerHTML = '<p class="text-sm text-text-tertiary p-2">No notes have been shared with you.</p>';
+    } else {
+        const ownerUIDs = [...new Set(sharedWithUserNotes.map(note => note.ownerId))];
+        if (ownerUIDs.length > 0) {
+            const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
+            const getUserProfiles = httpsCallable(window.functions, 'getUserProfiles');
+            const profilesResult = await getUserProfiles({ uids: ownerUIDs });
+            const ownerEmailMap = new Map(profilesResult.data.users.map(u => [u.uid, u.email]));
+
+            withMeList.innerHTML = sharedWithUserNotes.map(note => 
+                `<div class="p-2 bg-bg-pane-dark rounded-md">
+                    <p class="font-semibold text-text-primary">${note.name}</p>
+                    <p class="text-xs text-text-secondary pl-1">Shared by ${ownerEmailMap.get(note.ownerId) || 'an unknown user'}</p>
+                </div>`
+            ).join('');
+        }
+    }
+};
+
+document.getElementById('manage-sharing-btn').addEventListener('click', openSharingModal);
+document.getElementById('sharing-modal-close-btn').addEventListener('click', () => closeModal(document.getElementById('sharing-management-modal')));
+document.getElementById('sharing-modal-done-btn').addEventListener('click', () => closeModal(document.getElementById('sharing-management-modal')));
+
+document.getElementById('shared-by-me-list').addEventListener('click', async (e) => {
+    const button = e.target.closest('.revoke-access-btn');
+    if (button) {
+        const { noteId, uid } = button.dataset;
+        try {
+            const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
+            const revoke = httpsCallable(functions, 'revokeAccess');
+            await revoke({ noteId: noteId, uidToRevoke: uid });
+            showToast('Access revoked.', 'success');
+            // Refresh the modal content by re-opening it
+            openSharingModal();
+        } catch (error) {
+            showToast(`Error: ${error.message}`, 'error');
+        }
+    }
+});
+
+// --- END: SHARING MANAGEMENT LOGIC ---
                 // --- START: NEW INVITATION LOGIC ---
 
 const setupInvitationListener = () => {
@@ -13517,6 +13608,28 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
 
     <footer class="flex justify-end gap-3 mt-6 flex-shrink-0 pt-4 border-t border-border-color">
         <button id="share-done-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Done</button>
+    </footer>
+</div>
+<div id="sharing-management-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-lg z-50 transition-all duration-300 transform scale-95 opacity-0 flex flex-col">
+    <header class="flex justify-between items-center mb-4 flex-shrink-0">
+        <h3 class="text-lg font-semibold flex items-center gap-2"><i data-feather="share-2" class="w-5 h-5 text-accent-primary"></i>Manage Sharing</h3>
+        <button id="sharing-modal-close-btn" class="p-2 rounded-full hover:bg-bg-pane-dark"><i data-feather="x" class="w-5 h-5"></i></button>
+    </header>
+
+    <div class="flex-grow overflow-y-auto custom-scrollbar -mr-3 pr-3 space-y-4 max-h-[60vh]">
+        <div id="shared-by-me-section">
+            <h4 class="font-semibold text-text-secondary mb-2">Notes You Are Sharing</h4>
+            <div id="shared-by-me-list" class="space-y-2"></div>
+        </div>
+        <hr class="my-4 border-border-color">
+        <div id="shared-with-me-section">
+            <h4 class="font-semibold text-text-secondary mb-2">Notes Shared With You</h4>
+            <div id="shared-with-me-list" class="space-y-2"></div>
+        </div>
+    </div>
+    
+    <footer class="flex justify-end mt-6 flex-shrink-0 pt-4 border-t border-border-color">
+        <button id="sharing-modal-done-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Done</button>
     </footer>
 </div>
 </body>
