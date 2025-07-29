@@ -7941,6 +7941,35 @@ const renderTemplatesInModal = (templatesToRender) => {
         </div>
     `).join('');
 };
+// ADD THIS ENTIRE FUNCTION
+const openTemplateModal = () => {
+    const modal = document.getElementById('template-modal');
+    const searchInput = document.getElementById('template-search-input');
+
+    // Initial render with all available templates
+    renderTemplatesInModal(state.templates);
+
+    // Clear any previous search and open the modal
+    searchInput.value = '';
+    openModal(modal);
+
+    // Set up a search listener for the template modal input
+    const handleSearch = debounce(() => {
+        const query = searchInput.value.toLowerCase().trim();
+        if (!query) {
+            renderTemplatesInModal(state.templates); // Show all if search is empty
+            return;
+        }
+        const filtered = state.templates.filter(t => t.name.toLowerCase().includes(query));
+        renderTemplatesInModal(filtered);
+    }, 200);
+
+    // Ensure we only add the listener once to prevent duplicates
+    if (!searchInput.hasAttribute('data-listener-added')) {
+        searchInput.addEventListener('input', handleSearch);
+        searchInput.setAttribute('data-listener-added', 'true');
+    }
+};
 const renderManageTemplatesModal = () => {
     const container = document.getElementById('manage-template-list');
     if (state.templates.length === 0) {
@@ -8117,10 +8146,16 @@ const deleteTemplate = async (templateId) => {
 const saveAsTemplate = async (note) => {
     if (!note) return showToast('❌ No note selected.', 'error');
 
+    // FIX: Get the full note data, including content, from the cache.
+    const noteData = window.noteCache[note.id];
+    if (!noteData) {
+        return showToast('❌ Could not load note content to create template.', 'error');
+    }
+
     const templateName = await showPrompt({
         title: 'Save as Template',
         message: 'Enter a name for this template:',
-        initialValue: note.name
+        initialValue: note.name // Use the name from the note stub
     });
 
     if (templateName) {
@@ -8133,8 +8168,9 @@ const saveAsTemplate = async (note) => {
         const newTemplate = {
             id: generateId('template'),
             name: templateName,
-            content: note.content,
-            properties: JSON.parse(JSON.stringify(note.properties || {})) // Deep copy properties
+            // FIX: Use the content and properties from the full noteData object.
+            content: noteData.content,
+            properties: JSON.parse(JSON.stringify(noteData.properties || {}))
         };
 
         state.templates.push(newTemplate);
