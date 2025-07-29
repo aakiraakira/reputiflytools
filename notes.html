@@ -4627,7 +4627,43 @@ async function loadState() {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
+// ADD THIS ENTIRE FUNCTION
+async function ensureAllNotesLoaded() {
+    const noteIdsToLoad = window.chatbotContextNoteIds.filter(id => !window.noteCache[id]);
+    if (noteIdsToLoad.length === 0) {
+        return true; // All required notes are already in the cache.
+    }
 
+    const toastId = showToast(`Loading ${noteIdsToLoad.length} context note(s)...`, 'loading');
+
+    try {
+        const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+        
+        const fetchPromises = noteIdsToLoad.map(id => {
+            const noteRef = doc(db, "notes", id);
+            return getDoc(noteRef).then(noteSnap => {
+                if (noteSnap.exists()) {
+                    window.noteCache[id] = noteSnap.data(); // Add the loaded note to the cache.
+                } else {
+                    console.warn(`Context note with ID ${id} not found.`);
+                    // Remove missing note from context to prevent future errors
+                    window.chatbotContextNoteIds = window.chatbotContextNoteIds.filter(noteId => noteId !== id);
+                }
+            });
+        });
+
+        await Promise.all(fetchPromises);
+        dismissToast(toastId);
+        renderContextPills(); // Re-render pills in case a note was removed
+        return true;
+
+    } catch (error) {
+        console.error("Error loading context notes:", error);
+        dismissToast(toastId);
+        showToast("Failed to load context notes for the chat.", "error");
+        return false;
+    }
+}
 const handleFileUpload = async (file) => {
     const user = window.auth.currentUser;
     if (!file || !user) return;
@@ -5862,8 +5898,7 @@ const noteData = window.noteCache[note.id] || { content: '', properties: {} };
         }
     }
     
-    const plainContent = noteData.content.replace(/<[^>]*>?/gm, '').trim();
-    const excerpt = plainContent.substring(0, 120) + (plainContent.length > 120 ? '...' : '');
+    const excerpt = note.excerpt || 'No content preview...';
     const modifiedDate = formatDateTime(note.modifiedAt);
 
     return `
@@ -6290,22 +6325,28 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
         finalParentId = state.settings.activeCollectionId;
     }
 
+    // --- START: NEW EXCERPT LOGIC ---
+    const initialContent = template.content || '';
+    const plainText = initialContent.replace(/<[^>]*>?/gm, ' ').trim();
+    const initialExcerpt = plainText.substring(0, 200);
+    // --- END: NEW EXCERPT LOGIC ---
+
     const now = new Date().toISOString();
     const newNoteData = {
         ownerId: user.uid,
         name: template.name || 'Untitled Note',
-        content: template.content || '',
+        content: initialContent,
+        excerpt: initialExcerpt, // ADD THIS
         properties: template.properties ? JSON.parse(JSON.stringify(template.properties)) : {},
         createdAt: now,
         modifiedAt: now,
         tags: [],
-        sharedWith: [] // New field for collaboration
+        sharedWith: []
     };
 
     const newNoteRef = doc(collection(db, "notes"));
     const noteId = newNoteRef.id;
 
-    // Add note to the local state representation of the folder structure
     const parentResult = findItem(finalParentId);
     let targetArray = state.collections;
     if (parentResult && parentResult.item.type === 'folder') {
@@ -6320,15 +6361,14 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
         id: noteId,
         type: 'note',
         name: newNoteData.name,
+        excerpt: initialExcerpt, // ADD THIS
         pinned: false
     };
     targetArray.unshift(newNoteStub);
 
-    // Use a batch write to save the new note and update the user's appState
     const batch = writeBatch(db);
     batch.set(newNoteRef, newNoteData);
     window.noteCache[noteId] = newNoteData;
-
 
     const userDocRef = doc(db, "users", user.uid, "data", "appState");
     batch.update(userDocRef, { collections: state.collections });
@@ -6340,7 +6380,7 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
         state.settings.activeCollectionId = finalParentId;
         state.settings.activeTag = null;
         state.settings.editorMode = 'editor';
-        await saveState(); // Save the new active note settings
+        await saveState();
     }
 
     buildLunrIndex();
@@ -6351,7 +6391,6 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
         app.elements.noteEditorTitle.select();
     }
 
-    // Return the full note data for other functions to use
     return { ...newNoteStub, ...newNoteData };
 };
 // =================================================================
@@ -6492,29 +6531,23 @@ const renderNotionStyleMenu = () => {
             }
             
             function buildLunrIndex() {
-    // This gets the basic note "stubs" (id, name, type)
+    // Get all note stubs, which now contain the excerpt
     const allNoteStubs = getAllNotes(state.collections);
 
     lunrIndex = lunr(function () {
         this.ref('id');
-        this.field('name');
-        this.field('content');
+        this.field('name', { boost: 10 }); // Boost titles in search results
+        this.field('excerpt'); // Index the new excerpt field
         this.field('tags');
 
+        // This now iterates through the stubs directly, without needing the full content
         allNoteStubs.forEach(noteStub => {
-            // *** THE FIX IS HERE ***
-            // For each stub, get the full note data from the cache
-            const fullNoteData = window.noteCache[noteStub.id];
-
-            // Only add the note to the index if we have its full data
-            if (fullNoteData) {
-                this.add({
-                    id: noteStub.id,
-                    name: fullNoteData.name,
-                    content: (fullNoteData.content || '').replace(/<[^>]*>?/gm, ''), // Safely handle content
-                    tags: (fullNoteData.tags || []).join(' ')
-                });
-            }
+            this.add({
+                id: noteStub.id,
+                name: noteStub.name,
+                excerpt: noteStub.excerpt || '', // Use the saved excerpt
+                tags: (noteStub.tags || []).join(' ')
+            });
         });
     });
 }
@@ -7480,7 +7513,7 @@ document.getElementById('assign-note-list').addEventListener('click', (e) => {
     const noteItem = e.target.closest('.link-modal-item');
     if (noteItem) {
         const noteId = noteItem.dataset.noteId;
-        const note = findItem(noteId)?.item;
+        const note = window.noteCache[noteId];
         if (note && assignNoteTargetTimestamp) {
             if (!note.properties) note.properties = {};
 
@@ -8343,6 +8376,58 @@ const executeWithSmartFind = async (args, itemType, action) => {
 
 const commands = [
     { name: 'nn', description: 'New Note. Usage: /nn [note name]', execute: async(args)=>{ const noteName = args || 'Untitled Note'; await createNewNote(true, { name: noteName }); showToast(`✅ Note "${noteName}" created`); } },
+    // ADD THIS ENTIRE OBJECT TO YOUR COMMANDS ARRAY
+{
+    name: 'load',
+    description: 'Fetch all Note Data.',
+    execute: async () => {
+        const toastId = showToast('🧠 Loading all note contents...', 'loading');
+        try {
+            const { getDoc, doc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const allNoteStubs = getAllNotes(state.collections);
+            let notesWereLoaded = false;
+
+            const fetchPromises = allNoteStubs.map(noteStub => {
+                if (!window.noteCache[noteStub.id]) {
+                    notesWereLoaded = true;
+                    const noteRef = doc(db, "notes", noteStub.id);
+                    return getDoc(noteRef).then(noteSnap => {
+                        if (noteSnap.exists()) {
+                            const fullNoteData = noteSnap.data();
+                            window.noteCache[noteStub.id] = fullNoteData;
+
+                            // --- THIS IS THE FIX ---
+                            // 1. Generate an excerpt from the full content.
+                            const plainText = (fullNoteData.content || '').replace(/<[^>]*>?/gm, ' ').trim();
+                            const excerpt = plainText.substring(0, 200);
+                            
+                            // 2. Update the note stub in the main state with the new excerpt.
+                            noteStub.excerpt = excerpt;
+                            // --- END OF FIX ---
+                        }
+                    });
+                }
+                return Promise.resolve();
+            });
+
+            await Promise.all(fetchPromises);
+            
+            if (notesWereLoaded) {
+                await saveState(); // Persist the new excerpts to the main state document
+                buildLunrIndex();  // Rebuild the search index with all content
+                render();          // Re-render the UI to show the new excerpts in lists
+            }
+            
+            dismissToast(toastId);
+            showToast(`✅ All ${allNoteStubs.length} notes loaded and indexed.`, 'success');
+
+        } catch (error) {
+            dismissToast(toastId);
+            showToast('Error loading all notes.', 'error');
+            console.error(error);
+        }
+    }
+},
     { name: 'nf', description: 'New Folder. Usage: /nf [folder name]', execute: (args)=>{const n=args||'Untitled Folder';const c={id:generateId('c'),name:n,type:'folder',children:[],expanded:true};state.kanbanColumns[c.id]=[{id:generateId('col'),title:'To Do'}];state.collections.push(c);saveState();buildLunrIndex();render();showToast(`✅ Folder "${n}" created`)}},
 { name: 'rename', description: 'Rename item. Usage: /rename [old] to [new]', suggest: 'items', execute: async(args)=>{ const separator = /\s+to\s+/i; if (!separator.test(args)) return showToast('❌ Use: /rename [old] to [new]','error'); const parts = args.split(separator); const oldName = parts[0].trim(); const newName = parts[1].trim(); if (!oldName || !newName) return showToast('❌ Both names required.','error'); const itemToRenameCopy = findBestMatch(oldName, [...getAllNotes(state.collections), ...getAllFolders()]); if (!itemToRenameCopy) return showToast(`❌ Not found: "${oldName}"`,'error'); const findResult = findItem(itemToRenameCopy.id); if (!findResult || !findResult.item) { return showToast('❌ Could not locate the original item to rename.', 'error'); } const originalItem = findResult.item; const confirmed = await showConfirm({title:'Confirm Rename', message:`Rename "${originalItem.name}" to "${newName}"?`, confirmText:'Rename'}); if (confirmed) { const previousName = originalItem.name; originalItem.name = newName; try { if (originalItem.type === 'note') { const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"); const noteRef = doc(db, "notes", originalItem.id); await updateDoc(noteRef, { name: newName }); if (window.noteCache[originalItem.id]) { window.noteCache[originalItem.id].name = newName; } } await saveState(); buildLunrIndex(); render(); showToast(`✅ Renamed to "${newName}"`); } catch (error) { console.error("Error renaming item:", error); showToast('❌ A database error occurred. Rename failed.', 'error'); originalItem.name = previousName; } } } },    { name: 'link', description: 'Link notes. Usage: /link [source] to [target]', suggest: 'notes', execute: (args)=>{const s=/\s+to\s+/i;if(!s.test(args))return showToast('❌ Use: /link [source] to [target]','error');const p=args.split(s);const sN=p[0].trim();const tN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');if(sO.id===tO.id)return showToast('❌ Cannot link a note to itself.','error');sO.content+=`\n<p>[[${tO.name}]]</p>`;updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Linked "${sO.name}" to "${tO.name}"`)}},
     { name: 'unlink', description: 'Unlink notes. Usage: /unlink [target] from [source]', suggest: 'notes', execute: (args)=>{const s=/\s+from\s+/i;if(!s.test(args))return showToast('❌ Use: /unlink [target] from [source]','error');const p=args.split(s);const tN=p[0].trim();const sN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');const r=new RegExp(`\\[\\[\\s*${tO.name}\\s*\\]\\]`,'gi');if(!r.test(sO.content))return showToast(`❌ Link to "${tO.name}" not found in "${sO.name}".`,'info');sO.content=sO.content.replace(r,'').replace(/<p>\s*<\/p>|\n\s*\n/gi,'');updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Unlinked "${tO.name}" from "${sO.name}"`)}},
@@ -8375,7 +8460,7 @@ const commands = [
                 return showToast('❌ A message is required for the checkpoint.', 'error');
             }
             performImmediateSave();
-            const { item: note } = findItem(noteId);
+            const note = window.noteCache[noteId];
             if (note) {
                 saveNoteVersion(note.id, note.content, args);
                 saveState();
@@ -8584,7 +8669,7 @@ const commands = [
 
         performImmediateSave(); // Ensure latest content is captured before versioning
 
-        const { item: note } = findItem(noteId);
+        const note = window.noteCache[noteId];
         if (note) {
             const versions = state.versions?.[noteId] || [];
             const savedRegex = /^Saved(\s(\d+))?$/;
@@ -11021,17 +11106,21 @@ performImmediateSave = async () => {
     }
 
     // --- START: ADDED EXCERPT LOGIC ---
+    // Generate a 200-character plain text excerpt for search and previews
     const plainText = newContent.replace(/<[^>]*>?/gm, ' ').trim();
-    const excerpt = plainText.substring(0, 150);
+    const excerpt = plainText.substring(0, 200);
     // --- END: ADDED EXCERPT LOGIC ---
 
     const nameChanged = noteStub.name !== newName;
 
+    // Save the excerpt to the note's "stub" in the main state
     noteStub.name = newName;
-    noteStub.excerpt = excerpt; // Add excerpt to the note stub
+    noteStub.excerpt = excerpt;
+
+    // Save the excerpt to the full note data in the cache
     noteContent.name = newName;
     noteContent.content = newContent;
-    noteContent.excerpt = excerpt; // Add excerpt to the full note data
+    noteContent.excerpt = excerpt;
     noteContent.modifiedAt = new Date().toISOString();
 
     updateNoteLinks(noteContent);
@@ -11042,15 +11131,15 @@ performImmediateSave = async () => {
     }
 
     try {
+        // This logic now saves the excerpt to the full note document in Firestore
         if (user.uid === noteContent.ownerId) {
             const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
             const noteRef = doc(db, "notes", noteId);
 
-            // Add 'excerpt' to the data being saved to the cloud
             await updateDoc(noteRef, {
                 name: newName,
                 content: newContent,
-                excerpt: excerpt, // ADD THIS LINE
+                excerpt: excerpt, // ADDED
                 modifiedAt: noteContent.modifiedAt,
                 links: noteContent.links,
                 tags: noteContent.tags
@@ -11058,12 +11147,12 @@ performImmediateSave = async () => {
         } else {
             const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
             const updateNote = httpsCallable(window.functions, 'updateNoteAsCollaborator');
-            // Add 'newExcerpt' to the data being sent via the cloud function
+            
             await updateNote({
                 noteId: noteId,
                 newName: newName,
                 newContent: newContent,
-                newExcerpt: excerpt, // ADD THIS LINE
+                newExcerpt: excerpt, // ADDED
                 newLinks: noteContent.links,
                 newTags: noteContent.tags,
                 modifiedAt: noteContent.modifiedAt
@@ -11672,50 +11761,45 @@ app.modals.quizContent.addEventListener('click', e => {
                     }
                 });
 
-                const handleChatSubmit = async () => {
+                // REPLACE the existing handleChatSubmit function with this one
+const handleChatSubmit = async () => {
     const userInput = app.modals.chatbotInput.value.trim();
     if (!userInput) return;
+
+    // This check will now work correctly with the function you added
+    if (window.chatbotContextNoteIds.length > 0) {
+        if (!(await ensureAllNotesLoaded())) return; // Stop if notes fail to load
+    }
 
     app.modals.chatbotError.textContent = '';
     app.modals.chatbotInput.value = '';
     app.modals.chatbotSendBtn.disabled = true;
 
-    // --- STEP 1: Capture the current context ---
-    // Find the full note objects for the context provided in this turn.
-    const allNotes = getAllNotes(state.collections);
-    const contextNotesForThisTurn = allNotes.filter(n => window.chatbotContextNoteIds.includes(n.id));
-
-    // --- STEP 2: Add the user's message AND its context to the history ---
-    state.chatHistory.push({
-        role: 'user',
-        text: userInput,
-        // *** THE FIX ***: Store the context with the message.
-        context: contextNotesForThisTurn.map(n => ({ name: n.name, content: n.content.replace(/<[^>]*>?/gm, '') }))
-    });
-
-    // Now that the context is saved in the history, we can clear the temporary holder.
-    window.chatbotContextNoteIds = [];
-    renderContextPills(); // This will clear the pills from the UI.
+    state.chatHistory.push({ role: 'user', text: userInput });
     renderChatHistory();
 
-    // --- Show the "thinking" bubble ---
     const thinkingBubble = document.createElement('div');
     thinkingBubble.className = 'chat-bubble thinking w-fit rounded-lg px-3 py-2 self-start model';
     thinkingBubble.innerHTML = '● ● ●';
     app.modals.chatbotHistory.appendChild(thinkingBubble);
     app.modals.chatbotHistory.scrollTop = app.modals.chatbotHistory.scrollHeight;
 
-    // --- STEP 3: Build the complete prompt with FULL history and context ---
     let fullPrompt = "You are a helpful AI assistant. Answer the user's question based on the conversation history and any provided note context.\n\n---\n\n";
 
-    // Rebuild the entire history for every turn.
+    // ** START: THIS IS THE NEW LOGIC TO ADD CONTEXT **
+    if (window.chatbotContextNoteIds.length > 0) {
+        const context = window.chatbotContextNoteIds.map(id => {
+            const noteData = window.noteCache[id];
+            if (!noteData) return ''; // Should not happen after ensureAllNotesLoaded, but is a safeguard
+            const plainContent = (noteData.content || '').replace(/<[^>]*>?/gm, '');
+            return `--- Note Context: "${noteData.name}" ---\n${plainContent}`;
+        }).join('\n\n');
+        fullPrompt += `CONTEXT FROM NOTES:\n${context}\n\n---\n\n`;
+    }
+    // ** END: NEW LOGIC **
+
     state.chatHistory.forEach(msg => {
-        let contextBlock = '';
-        // If a historical message has context, add it before the user's text.
-        if (msg.context && msg.context.length > 0) {
-            contextBlock = "CONTEXT PROVIDED:\n" + msg.context.map(n => `--- NOTE: ${n.name} ---\n${n.content}\n--- END NOTE ---`).join('\n\n') + "\n\n";
-        }
-        fullPrompt += `${contextBlock}${msg.role === 'user' ? 'User' : 'AI'}: ${msg.text}\n\n`;
+        fullPrompt += `${msg.role === 'user' ? 'User' : 'AI'}: ${msg.text}\n\n`;
     });
 
     const payload = { contents: [{ parts: [{ text: fullPrompt }] }] };
@@ -11724,7 +11808,6 @@ app.modals.quizContent.addEventListener('click', e => {
     thinkingBubble.remove();
 
     if (modelResponse) {
-        // Add only the AI's response to the history. The context is already stored with the user's message.
         state.chatHistory.push({ role: 'model', text: modelResponse });
         renderChatHistory();
     }
