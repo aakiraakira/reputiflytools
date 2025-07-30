@@ -2757,7 +2757,8 @@ const openVersionHistoryModal = () => {
         return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
     };
 
-    const renderVersionList = (filteredVersions) => {
+    // Located inside the init() function
+const renderVersionList = (filteredVersions) => {
         if (filteredVersions.length === 0) {
             listContainer.innerHTML = `<p class="p-4 text-sm text-center text-text-tertiary">No matching versions found.</p>`;
             document.getElementById('version-content-viewer').innerHTML = '';
@@ -2782,10 +2783,15 @@ const openVersionHistoryModal = () => {
                 const relativeTime = formatRelativeTime(savedAt);
                 
                 return `
-                <div class="version-item" data-version-index="${originalIndex}" title="${formattedDate}">
-                    <div class="version-timestamp">${relativeTime}</div>
-                    <div class="version-fulldate">${formattedDate}</div>
-                    ${message ? `<div class="version-message">${message.replace(/</g, "&lt;")}</div>` : ''}
+                <div class="version-item group flex items-center justify-between" data-version-index="${originalIndex}" title="${formattedDate}">
+                    <div class="version-item-content flex-grow cursor-pointer p-2 -m-2">
+                        <div class="version-timestamp">${relativeTime}</div>
+                        <div class="version-fulldate">${formattedDate}</div>
+                        ${message ? `<div class="version-message">${message.replace(/</g, "&lt;")}</div>` : ''}
+                    </div>
+                    <button class="delete-version-btn p-1.5 rounded-full text-text-tertiary hover:text-red-500 hover:bg-bg-pane-dark opacity-0 group-hover:opacity-100 transition-opacity" data-action="delete-version" data-version-index="${originalIndex}" title="Delete this version">
+                        <i data-feather="trash-2" class="w-4 h-4 pointer-events-none"></i>
+                    </button>
                 </div>
                 `;
             }).join('');
@@ -2843,20 +2849,47 @@ const saveNoteVersion = (noteId, content, message = null) => {
 
 document.getElementById('version-history-close-btn').addEventListener('click', closeVersionHistoryModal);
 
-document.getElementById('version-sidebar').addEventListener('click', (e) => {
-    const versionItem = e.target.closest('.version-item');
-    if (!versionItem || versionItem.classList.contains('active')) return;
+// Located inside the init() function
+// Located inside the init() function
+document.getElementById('version-sidebar').addEventListener('click', async (e) => {
+    // Handle Delete Action
+    const deleteBtn = e.target.closest('.delete-version-btn');
+    if (deleteBtn) {
+        e.stopPropagation(); // Prevent item selection from firing
 
-    document.querySelectorAll('#version-sidebar .version-item.active').forEach(el => el.classList.remove('active'));
-    versionItem.classList.add('active');
+        const versionIndex = parseInt(deleteBtn.dataset.versionIndex, 10);
+        const noteId = state.settings.activeNoteId;
+        const versions = state.versions?.[noteId] || [];
+        const versionToDelete = versions[versionIndex];
 
-    const noteId = state.settings.activeNoteId;
-    const versions = state.versions?.[noteId] || [];
-    const selectedIndex = parseInt(versionItem.dataset.versionIndex);
-    const selectedVersion = versions[selectedIndex];
+        if (!versionToDelete) return;
 
-    if (selectedVersion) {
-        displayVersionDiff(selectedVersion.content);
+        // Directly delete without confirmation
+        state.versions[noteId].splice(versionIndex, 1);
+        await saveState();
+        openVersionHistoryModal(); // Refresh the modal to show the updated list
+        showToast('Version deleted successfully.', 'success');
+        
+        return; // Stop after handling delete
+    }
+
+    // Handle Item Selection Action
+    const versionItemContent = e.target.closest('.version-item-content');
+    if (versionItemContent) {
+        const versionItem = versionItemContent.closest('.version-item');
+        if (!versionItem || versionItem.classList.contains('active')) return;
+
+        document.querySelectorAll('#version-sidebar .version-item.active').forEach(el => el.classList.remove('active'));
+        versionItem.classList.add('active');
+
+        const noteId = state.settings.activeNoteId;
+        const versions = state.versions?.[noteId] || [];
+        const selectedIndex = parseInt(versionItem.dataset.versionIndex);
+        const selectedVersion = versions[selectedIndex];
+
+        if (selectedVersion) {
+            displayVersionDiff(selectedVersion.content);
+        }
     }
 });
 
@@ -6517,16 +6550,29 @@ ${noteContent}`;
     }
 };
                 // --- START: Ctrl+S Manual Save Logic ---
+// REPLACE WITH THIS BLOCK
+// --- START: Throttled Ctrl+S Manual Save Logic ---
+// REPLACE WITH THIS *IMPROVED* BLOCK
+// --- START: Throttled Ctrl+S Manual Save Logic (1-Second Cooldown) ---
+let isSavingManual = false; // Add a flag to prevent spamming
 document.addEventListener('keydown', (e) => {
     // Check for Ctrl+S or Cmd+S
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault(); // Prevent the browser's save dialog
-        if (state.settings.activeNoteId) {
-            performImmediateSave(); // Trigger our save function instantly
+        e.preventDefault(); 
+        if (state.settings.activeNoteId && !isSavingManual) {
+            isSavingManual = true; // Set the flag to true
+            performImmediateSave(); 
             showToast('✅ Saved', 'success');
+            
+            // Set a 1-second cooldown. Solves the fast-edit scenario.
+            setTimeout(() => {
+                isSavingManual = false; 
+            }, 1000); 
         }
     }
 });
+// --- END: Throttled Ctrl+S Manual Save Logic (1-Second Cooldown) ---
+// --- END: Throttled Ctrl+S Manual Save Logic ---
 // --- END: Ctrl+S Manual Save Logic ---
                 // --- START: Sharing Modal Navigation Logic ---
 document.getElementById('sharing-management-modal').addEventListener('click', (e) => {
@@ -10516,8 +10562,9 @@ app.containers.collectionsList.addEventListener('click', (e) => {
                     }
                 });
 
-                app.containers.mobileControlsDropdown.addEventListener('click', async (e) => {
-                    
+                // Located inside the init() function
+app.containers.mobileControlsDropdown.addEventListener('click', async (e) => {
+    
     const button = e.target.closest('button');
     if (!button) return;
 
@@ -10529,6 +10576,18 @@ app.containers.collectionsList.addEventListener('click', (e) => {
 
     const action = button.dataset.action;
     const noteId = state.settings.activeNoteId;
+    
+    // START: Actions that DON'T need an active note
+    if (action === 'mobile-new-note') {
+        closeDropdown();
+        createNewNote();
+        return;
+    }
+    if (action === 'mobile-new-from-template') {
+        closeDropdown();
+        openTemplateModal();
+        return;
+    }
     if (action === 'mobile-delete-folder') {
         closeDropdown();
         const collectionId = state.settings.activeCollectionId;
@@ -10554,38 +10613,35 @@ app.containers.collectionsList.addEventListener('click', (e) => {
             buildLunrIndex();
             render();
         }
-        return; // Stop after handling this action
+        return;
     }
     if (action === 'mobile-rename-folder') {
-    closeDropdown();
-    const collectionId = state.settings.activeCollectionId;
-    if (!collectionId) return;
+        closeDropdown();
+        const collectionId = state.settings.activeCollectionId;
+        if (!collectionId) return;
 
-    const { item: folder } = findItem(collectionId);
-    if (!folder) return;
+        const { item: folder } = findItem(collectionId);
+        if (!folder) return;
 
-    const newName = await showPrompt({
-        title: 'Rename Folder',
-        message: `Enter a new name for "${folder.name}":`,
-        initialValue: folder.name
-    });
+        const newName = await showPrompt({
+            title: 'Rename Folder',
+            message: `Enter a new name for "${folder.name}":`,
+            initialValue: folder.name
+        });
 
-    if (newName && newName !== folder.name) {
-        folder.name = newName;
-        saveState();
-        buildLunrIndex();
-        render();
-        showToast(`Folder renamed to "${newName}"`, 'success');
+        if (newName && newName !== folder.name) {
+            folder.name = newName;
+            saveState();
+            buildLunrIndex();
+            render();
+            showToast(`Folder renamed to "${newName}"`, 'success');
+        }
+        return;
     }
-    return;
-}
+    // END: Actions that DON'T need an active note
+
 
     // Handle all actions that require an active note
-    if (action === 'mobile-new-note') {
-    closeDropdown();
-    createNewNote();
-    return;
-}
     if (action && noteId) {
         closeDropdown(); // Close menu immediately after an action is clicked
         const { item: note, parent, index } = findItem(noteId);
@@ -10601,9 +10657,12 @@ app.containers.collectionsList.addEventListener('click', (e) => {
             case 'mobile-quiz':
                 handleGenerateQuiz(plainContent, note);
                 break;
-                case 'mobile-flashcard':
-    handleFlashcardMode(note);
-    break;
+            case 'mobile-flashcard':
+                handleFlashcardMode(note);
+                break;
+            case 'mobile-save-as-template': // ADDED THIS CASE
+                saveAsTemplate(note);
+                break;
             case 'mobile-rename':
                 const newName = await showPrompt({ title: 'Rename', message: `Enter a new name for "${note.name}":`, initialValue: note.name });
                 if (newName) {
@@ -10638,10 +10697,10 @@ app.containers.collectionsList.addEventListener('click', (e) => {
                     render();
                 }
                 break;
-                case 'mobile-history':
-    openVersionHistoryModal();
-    break;
-case 'mobile-checkpoint':
+            case 'mobile-history':
+                openVersionHistoryModal();
+                break;
+            case 'mobile-checkpoint':
     const message = await showPrompt({
         title: 'Save Checkpoint',
         message: 'Add a short message to describe this version:',
@@ -10649,26 +10708,28 @@ case 'mobile-checkpoint':
     });
     if (message) {
         performImmediateSave(); // Ensure latest content is captured
-        const { item: currentNote } = findItem(noteId);
+        // FIX: Get the full note data from the global cache, which includes the content.
+        const currentNote = window.noteCache[noteId];
         if (currentNote) {
-            saveNoteVersion(currentNote.id, currentNote.content, message);
+            // FIX: Pass the correct properties to the save function.
+            saveNoteVersion(noteId, currentNote.content, message);
             saveState();
             showToast('✅ Checkpoint saved!', 'success');
         }
     }
     break;
-                case 'mobile-share':
-    handleShareNote();
-    break;
-    case 'mobile-upload':
-    document.getElementById('file-upload-input').click();
-    break;
-    case 'mobile-collaborate':
+            case 'mobile-share':
+                handleShareNote();
+                break;
+            case 'mobile-upload':
+                document.getElementById('file-upload-input').click();
+                break;
+            case 'mobile-collaborate':
                 openShareModal();
                 break;
-    case 'mobile-add-checklist':
-    restoreSelectionAndExec(() => {
-        const newDefaultChecklistHTML = `
+            case 'mobile-add-checklist':
+                restoreSelectionAndExec(() => {
+                    const newDefaultChecklistHTML = `
 <div class="checklist-container" contenteditable="false">
     <div class="checklist-header">
         <h4 class="checklist-title font-semibold text-text-primary flex-grow">Untitled Checklist</h4>
@@ -10687,11 +10748,10 @@ case 'mobile-checkpoint':
 </div>
 <p><br></p>
 `;
-        // THE FIX: Use the 'newDefaultChecklistHTML' variable.
-        document.execCommand('insertHTML', false, newDefaultChecklistHTML);
-        feather.replace();
-    });
-    break;
+                    document.execCommand('insertHTML', false, newDefaultChecklistHTML);
+                    feather.replace();
+                });
+                break;
         }
     } 
     // Handle view switching, which doesn't need an active note
@@ -10702,13 +10762,6 @@ case 'mobile-checkpoint':
         renderMobileControls();
     }
 });
-                
-                app.elements.sortOrderSelect.addEventListener('change', (e) => {
-                    state.settings.listSortOrder = e.target.value;
-                    saveState();
-                    renderListView();
-                    feather.replace();
-                });
                 
                 app.containers.mainContentArea.addEventListener('click', (e) => {
     const exitBtn = e.target.closest('.exit-code-btn');
