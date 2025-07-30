@@ -2672,6 +2672,12 @@ window.functions = getFunctions(app,);
 // ==================================================================
 //  START: UPGRADED FUNCTION BLOCK
 // ==================================================================
+// ==================================================================
+//  START: CORRECT FUNCTION BLOCK
+// ==================================================================
+// ==================================================================
+//  START: UPGRADED FUNCTION BLOCK
+// ==================================================================
 const formatRelativeTime = (isoString) => {
     const date = new Date(isoString);
     const now = new Date();
@@ -2687,46 +2693,17 @@ const formatRelativeTime = (isoString) => {
     return date.toLocaleDateString();
 };
 
-/**
- * Displays a visual diff between a selected version and the current note.
- */
-/**
- * Displays a clean, read-only, interactive snapshot of a selected version.
- */
 const displayVersionDiff = (selectedVersionContent) => {
     const viewer = document.getElementById('version-content-viewer');
     
-    // Create a temporary container to process the HTML
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = selectedVersionContent;
-
-    // --- Make the preview interactive and clean ---
-    
-    // 1. Remove all 'contenteditable' attributes to make it read-only.
-    tempDiv.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
-
-    // 2. Make checklist items clickable within the preview.
-    tempDiv.querySelectorAll('.checklist-container').forEach(checklist => {
-        checklist.addEventListener('click', e => {
-            const item = e.target.closest('.checklist-item');
-            if (item) {
-                const checkbox = item.querySelector('.checklist-item-checkbox');
-                const isChecked = !item.classList.contains('checked');
-                item.classList.toggle('checked', isChecked);
-                if (checkbox) checkbox.checked = isChecked;
-                updateChecklistProgress(checklist); // Update the progress bar visually
-            }
-        });
-    });
-
-    // Finally, set the viewer's content to our processed HTML.
-    viewer.innerHTML = ''; // Clear previous content
     // Sanitize the historical content before adding it to the viewer
-viewer.innerHTML = DOMPurify.sanitize(selectedVersionContent);
+    viewer.innerHTML = DOMPurify.sanitize(selectedVersionContent);
     
     // Re-render Feather icons inside the new preview content.
     feather.replace();
 };
+// --- Manual Checkpoint Listener ---
+// --- Manual Checkpoint Listener ---
 // --- Manual Checkpoint Listener ---
 document.getElementById('header-checkpoint-btn').addEventListener('click', async () => {
     const noteId = state.settings.activeNoteId;
@@ -2739,9 +2716,10 @@ document.getElementById('header-checkpoint-btn').addEventListener('click', async
     });
 
     if (message) {
-        const note = findItem(noteId)?.item;
-        if (note) {
-            saveNoteVersion(note.id, note.content, message);
+        // FIX: Get the full note data from the cache, which includes the content.
+        const noteData = window.noteCache[noteId];
+        if (noteData) {
+            saveNoteVersion(noteId, noteData.content, message);
             saveState(); // Persist the new version
             showToast('✅ Checkpoint saved!', 'success');
         }
@@ -2752,21 +2730,9 @@ document.getElementById('header-checkpoint-btn').addEventListener('click', async
  */
 const closeVersionHistoryModal = () => {
     closeModal(document.getElementById('version-history-modal'));
-    const toggleBtn = document.getElementById('sidebar-toggle-btn');
-    const resizer = document.getElementById('pane-resizer');
-
-    // Reset inline styles to let the stylesheet control visibility
-    if (toggleBtn) toggleBtn.style.display = '';
-    if (resizer) resizer.style.display = '';
 };
-const openVersionHistoryModal = () => {
-        const toggleBtn = document.getElementById('sidebar-toggle-btn');
-    const resizer = document.getElementById('pane-resizer');
-    
-    // Hide both the button and the resizer
-    if (toggleBtn) toggleBtn.style.display = 'none';
-    if (resizer) resizer.style.display = 'none';
 
+const openVersionHistoryModal = () => {
     const noteId = state.settings.activeNoteId;
     if (!noteId) return;
 
@@ -2774,277 +2740,89 @@ const openVersionHistoryModal = () => {
     const listContainer = document.getElementById('version-list-container');
     const searchInput = document.getElementById('version-search-input');
     const allVersions = state.versions?.[noteId] || [];
+
     const formatDateHeader = (isoString) => {
-    const date = new Date(isoString);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
+        const date = new Date(isoString);
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
 
-    today.setHours(0, 0, 0, 0);
-    yesterday.setHours(0, 0, 0, 0);
-    date.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        yesterday.setHours(0, 0, 0, 0);
+        date.setHours(0, 0, 0, 0);
 
-    if (date.getTime() === today.getTime()) return 'Today';
-    if (date.getTime() === yesterday.getTime()) return 'Yesterday';
-    
-    return date.toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-    });
-};
+        if (date.getTime() === today.getTime()) return 'Today';
+        if (date.getTime() === yesterday.getTime()) return 'Yesterday';
+        
+        return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+    };
 
-    // Helper function to render the list of versions
     const renderVersionList = (filteredVersions) => {
-    if (filteredVersions.length === 0) {
-        listContainer.innerHTML = `<p class="p-4 text-sm text-center text-text-tertiary">No matching versions found.</p>`;
-        document.getElementById('version-content-viewer').innerHTML = '';
-        document.getElementById('version-restore-btn').style.display = 'none';
-        return;
-    }
-
-    const groupedVersions = {};
-    filteredVersions.forEach(version => {
-        const header = formatDateHeader(version.savedAt);
-        if (!groupedVersions[header]) {
-            groupedVersions[header] = [];
-        }
-        const originalIndex = allVersions.indexOf(version);
-        groupedVersions[header].push({ ...version, originalIndex });
-    });
-
-    let finalHTML = '';
-    for (const header in groupedVersions) {
-        finalHTML += `<h4 class="version-group-header">${header}</h4>`;
-        finalHTML += groupedVersions[header].map(versionData => {
-            const { savedAt, message, content, originalIndex } = versionData;
-            const index = originalIndex;
-            const formattedDate = new Date(savedAt).toLocaleString();
-            const relativeTime = formatRelativeTime(savedAt);
-            const plainText = content.replace(/<[^>]*>?/gm, ' ').trim();
-            const preview = plainText.substring(0, 75) + (plainText.length > 75 ? '...' : '');
-
-            return `
-            <div class="version-item ${index === 0 && !searchInput.value ? 'active' : ''}" data-version-index="${index}" title="${formattedDate}">
-                <div class="flex-grow">
-                    <div class="flex justify-between items-start gap-2">
-                        <div>
-                            <div class="version-timestamp">${relativeTime}</div>
-                            <div class="version-fulldate">${formattedDate}</div>
-                        </div>
-                        <div class="flex items-center gap-2 flex-shrink-0">
-                            <input type="checkbox" class="version-compare-checkbox">
-                            <button class="delete-version-btn p-1 rounded hover:bg-bg-main text-text-tertiary hover:text-red-500 -mt-0.5" title="Delete this version"><i data-feather="trash-2" class="w-4 h-4 pointer-events-none"></i></button>
-                        </div>
-                    </div>
-                    <div>
-                        ${message ? `<div class="version-message">${message.replace(/</g, "&lt;")}</div>` : ''}
-                        <div class="version-preview mt-2 text-xs text-text-secondary italic border-l-2 border-border-color pl-2">${preview || 'Empty Note'}</div>
-                    </div>
-                </div>
-            </div>
-            `;
-        }).join('');
-    }
-
-    document.getElementById('version-restore-btn').style.display = 'inline-flex';
-    listContainer.innerHTML = finalHTML;
-
-    displayVersionDiff(filteredVersions[0].content);
-    listContainer.querySelector('.version-item')?.classList.add('active');
-    feather.replace();
-};
-
-    // Initial render
-    searchInput.value = ''; // Clear search on open
-    if (allVersions.length > 0) {
-        renderVersionList(allVersions);
-    } else {
-        listContainer.innerHTML = `<p class="p-4 text-sm text-center text-text-tertiary">No versions saved yet.</p>`;
-        document.getElementById('version-content-viewer').innerHTML = '';
-        document.getElementById('version-restore-btn').style.display = 'none';
-    }
-    // --- START: Compare Versions Logic ---
-const compareBtn = document.getElementById('compare-versions-btn');
-const versionList = document.getElementById('version-list-container');
-
-const updateCompareButtonState = () => {
-    const checked = versionList.querySelectorAll('.version-compare-checkbox:checked');
-    if (checked.length === 2) {
-        compareBtn.disabled = false;
-        compareBtn.classList.remove('opacity-50');
-    } else {
-        compareBtn.disabled = true;
-        compareBtn.classList.add('opacity-50');
-    }
-};
-
-versionList.addEventListener('change', (e) => {
-    if (e.target.classList.contains('version-compare-checkbox')) {
-        updateCompareButtonState();
-    }
-});
-
-compareBtn.addEventListener('click', async () => {
-    const checked = versionList.querySelectorAll('.version-compare-checkbox:checked');
-    if (checked.length !== 2) return;
-
-    const viewer = document.getElementById('version-content-viewer');
-    const titleEl = document.getElementById('version-history-title');
-
-    // Show a loading state immediately
-    titleEl.textContent = 'Generating Comparison...';
-    viewer.innerHTML = `<div class="p-4 text-center text-text-secondary">🧠 Asking the AI to summarize the changes...</div>`;
-    
-    // Disable button to prevent multiple clicks
-    compareBtn.disabled = true;
-    compareBtn.classList.add('opacity-50');
-
-    try {
-        const allVersions = state.versions?.[state.settings.activeNoteId] || [];
-        const index1 = parseInt(checked[0].closest('.version-item').dataset.versionIndex, 10);
-        const index2 = parseInt(checked[1].closest('.version-item').dataset.versionIndex, 10);
-        
-        // Ensure "Version 1" is always the older content for a logical comparison
-        const oldVersion = allVersions[Math.max(index1, index2)];
-        const newVersion = allVersions[Math.min(index1, index2)];
-
-        // Convert HTML to plain text for the AI to process
-        const plainTextOld = oldVersion.content.replace(/<[^>]*>?/gm, ' ');
-        const plainTextNew = newVersion.content.replace(/<[^>]*>?/gm, ' ');
-        
-        const prompt = `
-            You are a helpful assistant that analyzes changes between two versions of a document.
-            Summarize the key differences between "Old Version" and "New Version".
-            Structure your response with the following three Markdown headings: "## ✨ Added", "## ✏️ Changed", and "## 🗑️ Removed".
-            Under each heading, use bullet points to list the specific changes.
-            If there are no changes for a category, state "No major changes."
-            Be concise and focus on the most important modifications.
-
-            ---
-            ### Old Version (from ${formatRelativeTime(oldVersion.savedAt)}):
-            ${plainTextOld}
-            ---
-            ### New Version (from ${formatRelativeTime(newVersion.savedAt)}):
-            ${plainTextNew}
-            ---
-        `;
-        
-        const payload = { contents: [{ parts: [{ text: prompt }] }] };
-        const aiResponse = await callGeminiAPI(payload);
-
-        if (aiResponse) {
-            // Use marked.parse to render the AI's Markdown response as HTML
-            viewer.innerHTML = marked.parse(aiResponse);
-            titleEl.textContent = 'Comparison Summary';
-        } else {
-            viewer.innerHTML = `<p class="p-4 text-center text-red-500">The AI could not generate a comparison. Please try again.</p>`;
-            titleEl.textContent = 'Error';
-        }
-
-    } catch (error) {
-        console.error("Error generating AI comparison:", error);
-        viewer.innerHTML = `<p class="p-4 text-center text-red-500">A technical error occurred while generating the comparison.</p>`;
-        titleEl.textContent = 'Error';
-    } finally {
-        // Reset the UI state after completion or error
-        compareBtn.disabled = true; // Keep it disabled until new boxes are checked
-        compareBtn.classList.add('opacity-50');
-        checked.forEach(cb => cb.checked = false);
-    }
-});
-// --- END: Compare Versions Logic ---
-
-    // --- Search Event Listener ---
-    const handleSearch = () => {
-        const query = searchInput.value.toLowerCase().trim();
-        if (!query) {
-            renderVersionList(allVersions);
+        if (filteredVersions.length === 0) {
+            listContainer.innerHTML = `<p class="p-4 text-sm text-center text-text-tertiary">No matching versions found.</p>`;
+            document.getElementById('version-content-viewer').innerHTML = '';
+            document.getElementById('version-restore-btn').style.display = 'none';
             return;
         }
-        const filtered = allVersions.filter(v => {
-            const contentMatch = (v.content || '').toLowerCase().includes(query);
-            const messageMatch = (v.message || '').toLowerCase().includes(query);
-            return contentMatch || messageMatch;
+
+        const groupedVersions = {};
+        filteredVersions.forEach(version => {
+            const header = formatDateHeader(version.savedAt);
+            if (!groupedVersions[header]) groupedVersions[header] = [];
+            const originalIndex = allVersions.indexOf(version);
+            groupedVersions[header].push({ ...version, originalIndex });
         });
+
+        let finalHTML = '';
+        for (const header in groupedVersions) {
+            finalHTML += `<h4 class="version-group-header">${header}</h4>`;
+            finalHTML += groupedVersions[header].map(versionData => {
+                const { savedAt, message, content, originalIndex } = versionData;
+                const formattedDate = new Date(savedAt).toLocaleString();
+                const relativeTime = formatRelativeTime(savedAt);
+                
+                return `
+                <div class="version-item" data-version-index="${originalIndex}" title="${formattedDate}">
+                    <div class="version-timestamp">${relativeTime}</div>
+                    <div class="version-fulldate">${formattedDate}</div>
+                    ${message ? `<div class="version-message">${message.replace(/</g, "&lt;")}</div>` : ''}
+                </div>
+                `;
+            }).join('');
+        }
+        
+        document.getElementById('version-restore-btn').style.display = 'inline-flex';
+        listContainer.innerHTML = finalHTML;
+        
+        const firstItem = listContainer.querySelector('.version-item');
+        if (firstItem) {
+            displayVersionDiff(filteredVersions[0].content);
+            firstItem.classList.add('active');
+        }
+        feather.replace();
+    };
+
+    searchInput.value = '';
+    renderVersionList(allVersions);
+
+    const handleSearch = () => {
+        const query = searchInput.value.toLowerCase().trim();
+        const filtered = query ? allVersions.filter(v => 
+            (v.content || '').toLowerCase().includes(query) || 
+            (v.message || '').toLowerCase().includes(query)
+        ) : allVersions;
         renderVersionList(filtered);
     };
 
-    // Use a variable to prevent adding multiple listeners
     if (!searchInput.hasAttribute('data-listener-added')) {
         searchInput.addEventListener('input', debounce(handleSearch, 200));
         searchInput.setAttribute('data-listener-added', 'true');
     }
-    // --- START: Keyboard Navigation for Version History ---
-const versionListContainer = document.getElementById('version-list-container');
-
-const handleKeyboardNav = (e) => {
-    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Enter') return;
-    
-    e.preventDefault();
-    const items = Array.from(versionListContainer.querySelectorAll('.version-item'));
-    if (items.length === 0) return;
-
-    let currentIndex = items.findIndex(item => item.classList.contains('active'));
-
-    if (e.key === 'ArrowUp') {
-        currentIndex = (currentIndex > 0) ? currentIndex - 1 : 0;
-    } else if (e.key === 'ArrowDown') {
-        currentIndex = (currentIndex < items.length - 1) ? currentIndex + 1 : items.length - 1;
-    } else if (e.key === 'Enter' && currentIndex !== -1) {
-        items[currentIndex].click(); // Simulate a click to select
-        const restoreButton = document.querySelector('#banner-restore-btn, #version-restore-btn');
-        if (restoreButton) {
-            restoreButton.click(); // Simulate clicking the restore button
-            if(restoreButton.classList.contains('confirm-state')) {
-                 restoreButton.click(); // Click again to confirm
-            }
-        }
-        return;
-    }
-    
-    items.forEach(item => item.classList.remove('active'));
-    items[currentIndex].classList.add('active');
-    items[currentIndex].scrollIntoView({ block: 'nearest' });
-    
-    // Trigger a click to update the preview pane
-    items[currentIndex].click();
-};
-
-modal.addEventListener('keydown', handleKeyboardNav);
-// --- END: Keyboard Navigation for Version History ---
     
     openModal(modal);
     feather.replace();
 };
-// --- START: Version Deletion Logic ---
-document.getElementById('version-history-modal').addEventListener('click', (e) => {
-    const deleteBtn = e.target.closest('.delete-version-btn');
-    if (deleteBtn) {
-        e.stopPropagation(); // Prevent the version item from being selected
-        e.preventDefault();
 
-        const versionItem = deleteBtn.closest('.version-item');
-        const versionIndex = parseInt(versionItem.dataset.versionIndex, 10);
-        const noteId = state.settings.activeNoteId;
-        const versions = state.versions?.[noteId];
-
-        if (versions && typeof versions[versionIndex] !== 'undefined') {
-            // Remove the version from the array in the state
-            versions.splice(versionIndex, 1);
-            
-            // Save the updated state to the database
-            saveState();
-
-            // Provide feedback to the user
-            showToast('Version deleted.', 'success');
-
-            // Refresh the modal content to reflect the deletion
-            openVersionHistoryModal();
-        }
-    }
-});
-// --- END: Version Deletion Logic ---
 const saveNoteVersion = (noteId, content, message = null) => {
     if (!state.versions) state.versions = {};
     if (!state.versions[noteId]) state.versions[noteId] = [];
@@ -3052,16 +2830,35 @@ const saveNoteVersion = (noteId, content, message = null) => {
     const newVersion = {
         savedAt: new Date().toISOString(),
         content: content,
-        message: message // Add the message to the version object
+        message: message
     };
 
     state.versions[noteId].unshift(newVersion);
 
-    const MAX_VERSIONS = 20;
+    const MAX_VERSIONS = 50; // Increased limit
     if (state.versions[noteId].length > MAX_VERSIONS) {
         state.versions[noteId] = state.versions[noteId].slice(0, MAX_VERSIONS);
     }
 };
+
+document.getElementById('version-history-close-btn').addEventListener('click', closeVersionHistoryModal);
+
+document.getElementById('version-sidebar').addEventListener('click', (e) => {
+    const versionItem = e.target.closest('.version-item');
+    if (!versionItem || versionItem.classList.contains('active')) return;
+
+    document.querySelectorAll('#version-sidebar .version-item.active').forEach(el => el.classList.remove('active'));
+    versionItem.classList.add('active');
+
+    const noteId = state.settings.activeNoteId;
+    const versions = state.versions?.[noteId] || [];
+    const selectedIndex = parseInt(versionItem.dataset.versionIndex);
+    const selectedVersion = versions[selectedIndex];
+
+    if (selectedVersion) {
+        displayVersionDiff(selectedVersion.content);
+    }
+});
 
 // Find and replace the version history close button listener
 document.getElementById('version-history-close-btn').addEventListener('click', closeVersionHistoryModal);
@@ -3089,7 +2886,7 @@ document.getElementById('version-sidebar').addEventListener('click', (e) => {
 
 // --- Integrated Version Restore Logic ---
 // --- Integrated Version Restore Logic ---
-let restoreConfirmTimeout; // Holds the timer for reverting the confirm button
+let restoreConfirmTimeout; 
 
 document.getElementById('version-restore-btn').addEventListener('click', async (e) => {
     const restoreBtn = e.currentTarget;
@@ -3098,61 +2895,55 @@ document.getElementById('version-restore-btn').addEventListener('click', async (
 
     if (!noteId || !activeItem) return;
 
-    // If the button is in the "Confirm?" state, proceed with the restore
     if (restoreBtn.classList.contains('confirm-state')) {
-        clearTimeout(restoreConfirmTimeout); // Stop the revert timer
+        clearTimeout(restoreConfirmTimeout);
 
         const versions = state.versions?.[noteId] || [];
         const selectedIndex = parseInt(activeItem.dataset.versionIndex);
         const versionToRestore = versions[selectedIndex];
+        const noteData = window.noteCache[noteId]; // FIX: Get current note data from the cache
 
-        if (versionToRestore) {
-    const { item: note } = findItem(noteId);
-    if (note) {
-        // 1. Create a checkpoint of the current content BEFORE overwriting it.
-        saveNoteVersion(
-            note.id,
-            note.content, // The current content being replaced
-            `Automatic checkpoint before restore`
-        );
+        if (versionToRestore && noteData) {
+            // 1. (NEW) Create a checkpoint of the current content BEFORE overwriting it.
+            saveNoteVersion(
+                noteId,
+                noteData.content, // The current content being replaced
+                `Automatic checkpoint before restore`
+            );
 
-        // 2. Overwrite the note's content with the restored version.
-        note.content = versionToRestore.content;
-        note.modifiedAt = new Date().toISOString();
-        updateNoteLinks(note);
-        updateNoteTags(note);
+            // 2. Overwrite the note's content in the cache with the restored version.
+            noteData.content = versionToRestore.content;
+            noteData.modifiedAt = new Date().toISOString();
+            updateNoteLinks(noteData);
+            updateNoteTags(noteData);
 
-        // 3. Create a second log to show that a restore happened.
-        saveNoteVersion(
-            note.id,
-            note.content, // The newly restored content
-            `Restored from version ${formatRelativeTime(versionToRestore.savedAt)}`
-        );
+            // 3. (NEW) Create a log to show that a restore happened.
+            saveNoteVersion(
+                noteId,
+                noteData.content, // The newly restored content
+                `Restored from version ${formatRelativeTime(versionToRestore.savedAt)}`
+            );
 
-        // 4. Update the UI and save everything to the database.
-        app.elements.noteEditorBody.innerHTML = note.content;
-        await saveState(); // Await ensures the save completes before proceeding
-        buildLunrIndex();
+            // 4. Update the UI and save everything.
+            app.elements.noteEditorBody.innerHTML = noteData.content;
+            await performImmediateSave(); // Use immediate save
+            buildLunrIndex();
 
-        closeVersionHistoryModal();
-        showToast('Note restored successfully!', 'success');
-    }
-}
+            closeVersionHistoryModal();
+            showToast('Note restored successfully!', 'success');
+        }
 
-        // Reset button after restoring
         restoreBtn.classList.remove('confirm-state');
-        restoreBtn.textContent = 'Restore'; // Correctly matches your button's text
+        restoreBtn.innerHTML = 'Restore';
 
     } else {
-        // First click: Change the button to a "Confirm?" state
         restoreBtn.classList.add('confirm-state');
-        restoreBtn.textContent = 'Confirm Restore?';
+        restoreBtn.innerHTML = 'Confirm Restore?';
 
-        // Set a timer to automatically revert the button if not clicked again
         restoreConfirmTimeout = setTimeout(() => {
             restoreBtn.classList.remove('confirm-state');
-            restoreBtn.textContent = 'Restore'; // Correctly matches your button's text
-        }, 3000); // Reverts after 3 seconds
+            restoreBtn.innerHTML = 'Restore';
+        }, 3000);
     }
 });
 const updateChecklistProgress = (checklistContainer) => {
@@ -7513,7 +7304,7 @@ document.getElementById('assign-note-list').addEventListener('click', (e) => {
     const noteItem = e.target.closest('.link-modal-item');
     if (noteItem) {
         const noteId = noteItem.dataset.noteId;
-        const note = findItem(noteId)?.item;
+        const note = window.noteCache[noteId];
         if (note && assignNoteTargetTimestamp) {
             if (!note.properties) note.properties = {};
 
@@ -8449,25 +8240,29 @@ const commands = [
     { name: 'flashcard', description: 'Open flashcards. Usage: /flashcard [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>handleFlashcardMode(n))},
     { name: 'share', description: 'Create share link. Usage: /share [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(noteStub)=>handleShareNote(noteStub))},
     {
-        name: 'checkpoint',
-        description: 'Save Note Version. Usage: /checkpoint [message]',
-        execute: (args) => {
-            const noteId = state.settings.activeNoteId;
-            if (!noteId) {
-                return showToast('❌ You must be in a note to save a checkpoint.', 'error');
-            }
-            if (!args) {
-                return showToast('❌ A message is required for the checkpoint.', 'error');
-            }
-            performImmediateSave();
-            const { item: note } = findItem(noteId);
-            if (note) {
-                saveNoteVersion(note.id, note.content, args);
-                saveState();
-                showToast(`✅ Checkpoint saved: "${args}"`, 'success');
-            }
+    name: 'checkpoint',
+    description: 'Save Note Version. Usage: /checkpoint [message]',
+    execute: (args) => {
+        const noteId = state.settings.activeNoteId;
+        if (!noteId) {
+            return showToast('❌ You must be in a note to save a checkpoint.', 'error');
         }
-    },{
+        if (!args) {
+            return showToast('❌ A message is required for the checkpoint.', 'error');
+        }
+        
+        // This ensures the very latest typed content is captured before versioning
+        performImmediateSave(); 
+        
+        // FIX: Get note data from the global cache
+        const noteData = window.noteCache[noteId];
+        if (noteData) {
+            saveNoteVersion(noteId, noteData.content, args);
+            saveState();
+            showToast(`✅ Checkpoint saved: "${args}"`, 'success');
+        }
+    }
+},{
     name: 'list',
     description: 'Switch to list view. Usage: /list [folder name]',
     suggest: 'folders',
@@ -8669,7 +8464,7 @@ const commands = [
 
         performImmediateSave(); // Ensure latest content is captured before versioning
 
-        const { item: note } = findItem(noteId);
+        const note = window.noteCache[noteId];
         if (note) {
             const versions = state.versions?.[noteId] || [];
             const savedRegex = /^Saved(\s(\d+))?$/;
