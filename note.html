@@ -11708,32 +11708,38 @@ const handleChatSubmit = async () => {
                 });
 
                 app.elements.newCollectionBtn.addEventListener('click', async () => {
-    const name = await showPrompt({ title: 'New Collection', message: 'Enter a name for your new collection:', placeholder: 'e.g. Project Phoenix' });
+    const name = await showPrompt({
+        title: 'New Project Folder',
+        message: 'Enter a name for your new project:',
+        placeholder: 'e.g. Project Phoenix'
+    });
     if (name) {
         const newCollection = {
-            id: generateId('c'), name, type: 'folder', children: [], expanded: true
+            id: generateId('c'),
+            name,
+            type: 'folder',
+            children: [],
+            expanded: true
         };
-        
-        // --- START: Auto-create note logic ---
-        const firstColumnId = generateId('col');
-        state.kanbanColumns[newCollection.id] = [{ id: firstColumnId, title: 'To Do' }];
+        state.kanbanColumns[newCollection.id] = [{
+            id: generateId('col'),
+            title: 'To Do'
+        }];
+        state.collections.unshift(newCollection);
 
-        const now = new Date().toISOString();
-        const newNote = {
-            id: generateId('n'), name: 'Untitled Note', type: 'note', content: '',
-            status: firstColumnId,
-            createdAt: now, modifiedAt: now,
-            pinned: false, links: [], tags: []
-        };
-        newCollection.children.push(newNote);
-        // --- END: Auto-create note logic ---
-        
-        state.collections.push(newCollection);
+        // This now uses your corrected createNewNote function,
+        // which properly handles creating the Firestore document.
+        const newNote = await createNewNote(true, {
+            name: 'Getting Started'
+        }, newCollection.id);
+
+        // The createNewNote function already saves state and re-renders,
+        // so we just need to update the active collection and do one final render.
         state.settings.activeCollectionId = newCollection.id;
-        state.settings.activeNoteId = newNote.id; // Make the new note active
-        saveState();
-        buildLunrIndex(); // Rebuild search index
+        state.settings.activeNoteId = newNote.id;
+        await saveState();
         render();
+        showToast(`Project "${name}" created!`, 'success');
     }
 });
 
@@ -12150,14 +12156,12 @@ const originalButton = originalToolbar.querySelector(selector);
     const button = e.target.closest('button');
     if (!button) return;
 
-    // This closes the menu immediately after any action is clicked.
-    closeContextMenu(); 
+    closeContextMenu();
 
     const action = button.dataset.action;
     const id = app.contextMenu.targetId;
-    
-    let findResult, targetItem, parent, parentArray;
 
+    let findResult, targetItem, parent, parentArray;
     if (id) {
         findResult = findItem(id);
         if (findResult) {
@@ -12167,101 +12171,144 @@ const originalButton = originalToolbar.querySelector(selector);
         }
     }
 
-    switch(action) {
-        // --- FIXED: 'New Note' now uses the correct global function ---
-        case 'new-note': {
-            let parentId = null;
-            if (targetItem) {
-                parentId = targetItem.type === 'folder' ? targetItem.id : (Array.isArray(parent) ? null : parent.id);
-            }
-            createNewNote(true, {}, parentId);
-            break;
-        }
-
-        // --- FIXED: 'New Folder' now uses the correct global function ---
-        case 'new-folder': {
-            let parentId = null;
-            if (targetItem) {
-                parentId = targetItem.type === 'folder' ? targetItem.id : (Array.isArray(parent) ? null : parent.id);
-            }
-             const name = 'New Folder';
-            const newCollection = { id: generateId('c'), name, type: 'folder', children: [], expanded: true };
-            state.kanbanColumns[newCollection.id] = [{ id: generateId('col'), title: 'To Do' }];
-            
-            let destinationArray = state.collections;
-            if(parentId) {
-                const parentFolder = findItem(parentId)?.item;
-                if(parentFolder) {
-                   if(!parentFolder.children) parentFolder.children = [];
-                   destinationArray = parentFolder.children;
-                   parentFolder.expanded = true;
+    switch (action) {
+        case 'new-note':
+        case 'new-folder':
+            {
+                const isFolder = action === 'new-folder';
+                let parentId = null;
+                if (targetItem) {
+                    parentId = targetItem.type === 'folder' ? targetItem.id : (Array.isArray(parent) ? null : parent.id);
                 }
+                if (isFolder) {
+                    const name = 'New Folder';
+                    const newCollection = {
+                        id: generateId('c'), name, type: 'folder', children: [], expanded: true
+                    };
+                    state.kanbanColumns[newCollection.id] = [{
+                        id: generateId('col'),
+                        title: 'To Do'
+                    }];
+                    let destArray = parentId ? findItem(parentId).item.children : state.collections;
+                    destArray.unshift(newCollection);
+                    saveState();
+                    render();
+                } else {
+                    createNewNote(true, {}, parentId);
+                }
+                break;
             }
-            destinationArray.unshift(newCollection);
-            saveState();
-            render();
-            break;
-        }
 
-        // --- PRESERVED: 'Delete' functionality ---
-        case 'delete': {
-            const confirmed = await showConfirm({ title: `Delete "${targetItem.name}"`, message: 'This action cannot be undone.', confirmText: 'Delete', confirmClass: 'bg-red-600' });
-            if (confirmed) {
-               const index = parentArray.findIndex(i => i.id === id);
-               parentArray.splice(index, 1);
-               showToast(`"${targetItem.name}" deleted.`);
-               if (state.settings.activeNoteId === id) state.settings.activeNoteId = null;
-               if (state.settings.activeCollectionId === id) state.settings.activeCollectionId = null;
-               saveState();
-               buildLunrIndex();
-               render();
+        case 'delete':
+            {
+                if (!targetItem) return;
+                const message = targetItem.type === 'folder' ? 'This will delete the folder and <strong>all notes inside</strong>. This action cannot be undone.' : 'This action cannot be undone.';
+                const confirmed = await showConfirm({
+                    title: `Delete "${targetItem.name}"`,
+                    message: message,
+                    confirmText: 'Delete'
+                });
+                if (confirmed) {
+                    const index = parentArray.findIndex(i => i.id === id);
+                    parentArray.splice(index, 1);
+                    showToast(`"${targetItem.name}" deleted.`);
+                    if (state.settings.activeNoteId === id) state.settings.activeNoteId = null;
+                    if (state.settings.activeCollectionId === id) state.settings.activeCollectionId = null;
+                    saveState();
+                    buildLunrIndex();
+                    render();
+                }
+                break;
             }
-            break;
-        }
 
-        // --- PRESERVED: 'Rename' functionality ---
-        case 'rename': {
-            const newName = await showPrompt({ title: 'Rename', 
-                message: `Enter a new name for "${targetItem.name}":`, initialValue: targetItem.name });
-            if (newName) {
-                targetItem.name = newName;
+        case 'rename':
+            {
+                if (!targetItem) return;
+                const newName = await showPrompt({
+                    title: 'Rename',
+                    message: `Enter a new name for "${targetItem.name}":`,
+                    initialValue: targetItem.name
+                });
+                if (newName && newName !== targetItem.name) {
+                    targetItem.name = newName;
+                    if (targetItem.type === 'note') {
+                        const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+                        const noteRef = doc(db, "notes", targetItem.id);
+                        await updateDoc(noteRef, { name: newName });
+                    }
+                    saveState();
+                    buildLunrIndex();
+                    render();
+                }
+                break;
+            }
+
+        case 'toggle-pin':
+            {
+                if (targetItem && targetItem.type === 'note') {
+                    targetItem.pinned = !targetItem.pinned;
+                    showToast(targetItem.pinned ? `Pinned "${targetItem.name}"` : `Unpinned "${targetItem.name}"`);
+                    saveState();
+                    render();
+                }
+                break;
+            }
+
+        case 'save-as-template':
+            {
+                if (targetItem && targetItem.type === 'note') {
+                    saveAsTemplate(targetItem);
+                }
+                break;
+            }
+
+        case 'duplicate':
+            {
+                if (!targetItem) return;
+
+                const {
+                    doc,
+                    collection,
+                    writeBatch
+                } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+                const batch = writeBatch(db);
+
+                const duplicateRecursive = (item) => {
+                    const newItemStub = JSON.parse(JSON.stringify(item));
+                    const newId = generateId(item.type[0]);
+                    newItemStub.id = newId;
+                    newItemStub.name = `${item.name} (copy)`;
+
+                    if (item.type === 'note') {
+                        const sourceNoteData = window.noteCache[item.id];
+                        if (sourceNoteData) {
+                            const newNoteData = { ...sourceNoteData,
+                                name: newItemStub.name
+                            };
+                            const newNoteRef = doc(db, "notes", newId);
+                            batch.set(newNoteRef, newNoteData);
+                        }
+                    } else if (item.type === 'folder') {
+                        if (state.kanbanColumns[item.id]) {
+                            state.kanbanColumns[newId] = JSON.parse(JSON.stringify(state.kanbanColumns[item.id]));
+                        }
+                        if (item.children) {
+                            newItemStub.children = item.children.map(duplicateRecursive);
+                        }
+                    }
+                    return newItemStub;
+                };
+
+                const newItem = duplicateRecursive(targetItem);
+                parentArray.splice(findResult.index + 1, 0, newItem);
+
+                await batch.commit();
                 saveState();
                 buildLunrIndex();
                 render();
+                showToast(`Duplicated "${targetItem.name}"`);
+                break;
             }
-            break;
-        }
-        
-        // --- PRESERVED: 'Pin' functionality ---
-        case 'toggle-pin': {
-            if(targetItem && targetItem.type === 'note') {
-                targetItem.pinned = !targetItem.pinned;
-                showToast(targetItem.pinned ? `Pinned "${targetItem.name}"` : `Unpinned "${targetItem.name}"`);
-                saveState();
-                render();
-            }
-            break;
-        }
-        
-        // --- PRESERVED: 'Save as Template' functionality ---
-        case 'save-as-template': {
-            if (targetItem && targetItem.type === 'note') {
-                saveAsTemplate(targetItem);
-            }
-            break;
-        }
-
-        // --- PRESERVED: 'Duplicate' functionality ---
-        case 'duplicate': {
-            if (!targetItem) return;
-            const newItem = duplicateItem(targetItem);
-            parentArray.splice(findResult.index + 1, 0, newItem);
-            showToast(`Note Copied: "${targetItem.name}"`);
-            saveState();
-            buildLunrIndex();
-            render();
-            break;
-        }
     }
 });
                 
