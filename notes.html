@@ -2757,7 +2757,8 @@ const openVersionHistoryModal = () => {
         return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
     };
 
-    const renderVersionList = (filteredVersions) => {
+    // Located inside the init() function
+const renderVersionList = (filteredVersions) => {
         if (filteredVersions.length === 0) {
             listContainer.innerHTML = `<p class="p-4 text-sm text-center text-text-tertiary">No matching versions found.</p>`;
             document.getElementById('version-content-viewer').innerHTML = '';
@@ -2782,10 +2783,15 @@ const openVersionHistoryModal = () => {
                 const relativeTime = formatRelativeTime(savedAt);
                 
                 return `
-                <div class="version-item" data-version-index="${originalIndex}" title="${formattedDate}">
-                    <div class="version-timestamp">${relativeTime}</div>
-                    <div class="version-fulldate">${formattedDate}</div>
-                    ${message ? `<div class="version-message">${message.replace(/</g, "&lt;")}</div>` : ''}
+                <div class="version-item group flex items-center justify-between" data-version-index="${originalIndex}" title="${formattedDate}">
+                    <div class="version-item-content flex-grow cursor-pointer p-2 -m-2">
+                        <div class="version-timestamp">${relativeTime}</div>
+                        <div class="version-fulldate">${formattedDate}</div>
+                        ${message ? `<div class="version-message">${message.replace(/</g, "&lt;")}</div>` : ''}
+                    </div>
+                    <button class="delete-version-btn p-1.5 rounded-full text-text-tertiary hover:text-red-500 hover:bg-bg-pane-dark opacity-0 group-hover:opacity-100 transition-opacity" data-action="delete-version" data-version-index="${originalIndex}" title="Delete this version">
+                        <i data-feather="trash-2" class="w-4 h-4 pointer-events-none"></i>
+                    </button>
                 </div>
                 `;
             }).join('');
@@ -2843,20 +2849,47 @@ const saveNoteVersion = (noteId, content, message = null) => {
 
 document.getElementById('version-history-close-btn').addEventListener('click', closeVersionHistoryModal);
 
-document.getElementById('version-sidebar').addEventListener('click', (e) => {
-    const versionItem = e.target.closest('.version-item');
-    if (!versionItem || versionItem.classList.contains('active')) return;
+// Located inside the init() function
+// Located inside the init() function
+document.getElementById('version-sidebar').addEventListener('click', async (e) => {
+    // Handle Delete Action
+    const deleteBtn = e.target.closest('.delete-version-btn');
+    if (deleteBtn) {
+        e.stopPropagation(); // Prevent item selection from firing
 
-    document.querySelectorAll('#version-sidebar .version-item.active').forEach(el => el.classList.remove('active'));
-    versionItem.classList.add('active');
+        const versionIndex = parseInt(deleteBtn.dataset.versionIndex, 10);
+        const noteId = state.settings.activeNoteId;
+        const versions = state.versions?.[noteId] || [];
+        const versionToDelete = versions[versionIndex];
 
-    const noteId = state.settings.activeNoteId;
-    const versions = state.versions?.[noteId] || [];
-    const selectedIndex = parseInt(versionItem.dataset.versionIndex);
-    const selectedVersion = versions[selectedIndex];
+        if (!versionToDelete) return;
 
-    if (selectedVersion) {
-        displayVersionDiff(selectedVersion.content);
+        // Directly delete without confirmation
+        state.versions[noteId].splice(versionIndex, 1);
+        await saveState();
+        openVersionHistoryModal(); // Refresh the modal to show the updated list
+        showToast('Version deleted successfully.', 'success');
+        
+        return; // Stop after handling delete
+    }
+
+    // Handle Item Selection Action
+    const versionItemContent = e.target.closest('.version-item-content');
+    if (versionItemContent) {
+        const versionItem = versionItemContent.closest('.version-item');
+        if (!versionItem || versionItem.classList.contains('active')) return;
+
+        document.querySelectorAll('#version-sidebar .version-item.active').forEach(el => el.classList.remove('active'));
+        versionItem.classList.add('active');
+
+        const noteId = state.settings.activeNoteId;
+        const versions = state.versions?.[noteId] || [];
+        const selectedIndex = parseInt(versionItem.dataset.versionIndex);
+        const selectedVersion = versions[selectedIndex];
+
+        if (selectedVersion) {
+            displayVersionDiff(selectedVersion.content);
+        }
     }
 });
 
