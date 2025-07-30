@@ -4986,6 +4986,7 @@ if (themeMeta) {
             }
 
             function renderCollectionsList(collections = state.collections, level = 0) {
+    // Helper function to create the HTML for a single item (note or folder)
     const createItemHTML = (item, currentLevel) => {
         const isActive = item.id === state.settings.activeCollectionId;
         const isNoteActive = item.id === state.settings.activeNoteId;
@@ -5001,18 +5002,16 @@ if (themeMeta) {
                 newNoteParentId = parent.id;
             }
         }
-        
-        // --- FIX & UI IMPROVEMENT IS HERE ---
+
         let sharedIconHTML = '';
-        if (item.type === 'note') {
-            const noteData = window.noteCache[item.id];
-            const user = window.auth.currentUser;
-            // A note is shared if its owner is not the current user
-            if (noteData && user && noteData.ownerId !== user.uid) {
-                sharedIconHTML = `<i data-feather="users" class="w-3 h-3 text-text-tertiary ml-auto" title="Shared with you"></i>`;
-            }
+        const noteData = window.noteCache[item.id];
+        const user = window.auth.currentUser;
+        const isSharedWithMe = noteData && user && noteData.ownerId !== user.uid;
+
+        // Add the 'users' icon only if it's a shared note
+        if (item.type === 'note' && isSharedWithMe) {
+            sharedIconHTML = `<i data-feather="users" class="w-4 h-4 text-text-secondary ml-auto mr-2" title="Shared with you"></i>`;
         }
-        // --- END OF FIX ---
 
         if (isFolder && item.children) {
             item.children.sort((a, b) => {
@@ -5026,7 +5025,7 @@ if (themeMeta) {
                 <div class="collection-item flex items-center justify-between gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
                     <a href="#" class="collection-item-link flex items-center gap-2 flex-grow min-w-0">
                         ${isFolder ? `<i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i>` : ''}
-                        <i data-feather="${isFolder ? 'folder' : (item.pinned ? 'paperclip' : 'file-text')}" class="w-4 h-4 flex-shrink-0 text-text-secondary ${item.pinned ? 'text-accent-primary': ''}"></i>
+                        ${!isSharedWithMe ? `<i data-feather="${isFolder ? 'folder' : (item.pinned ? 'paperclip' : 'file-text')}" class="w-4 h-4 flex-shrink-0 text-text-secondary ${item.pinned ? 'text-accent-primary': ''}"></i>` : ''}
                         <span class="truncate">${item.name}</span>
                     </a>
                     ${sharedIconHTML}
@@ -5039,18 +5038,53 @@ if (themeMeta) {
         `;
     };
 
-    collections.sort((a, b) => {
-        if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-        return a.name.localeCompare(b.name);
-    });
-
-    const listHTML = collections.map(item => createItemHTML(item, level)).join('');
-
+    // --- NEW LOGIC IS HERE ---
+    // This only runs for the top-level rendering (level 0)
     if (level === 0) {
-        app.containers.collectionsList.innerHTML = `<ul class="space-y-1">${listHTML}</ul>`;
+        const user = window.auth.currentUser;
+        const userItems = [];
+        const sharedItems = [];
+
+        // 1. Separate user's own items from shared items
+        collections.forEach(item => {
+            const noteData = window.noteCache[item.id];
+            if (item.type === 'note' && user && noteData && noteData.ownerId !== user.uid) {
+                sharedItems.push(item);
+            } else {
+                userItems.push(item);
+            }
+        });
+
+        // 2. Sort both lists independently
+        userItems.sort((a, b) => {
+            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+        sharedItems.sort((a, b) => a.name.localeCompare(b.name));
+        
+        // 3. Build the final HTML string with the new structure
+        let finalHTML = `<ul class="space-y-1">${userItems.map(item => createItemHTML(item, 0)).join('')}</ul>`;
+
+        if (sharedItems.length > 0) {
+            finalHTML += `
+                <div class="px-2 pt-4 pb-1">
+                    <h3 class="font-bold text-xs uppercase tracking-wider text-text-tertiary">Shared with You</h3>
+                </div>
+                <ul class="space-y-1">${sharedItems.map(item => createItemHTML(item, 0)).join('')}</ul>
+            `;
+        }
+
+        app.containers.collectionsList.innerHTML = finalHTML;
         feather.replace();
+
+    } else {
+        // For nested levels (folders), render as before
+        collections.sort((a, b) => {
+            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+        return collections.map(item => createItemHTML(item, level)).join('');
     }
-    return listHTML;
 }
             function renderTagList() {
     const allNotes = getAllNotes(state.collections);
