@@ -4986,71 +4986,106 @@ if (themeMeta) {
             }
 
             function renderCollectionsList(collections = state.collections, level = 0) {
-                const createItemHTML = (item, currentLevel) => {
-                    const isActive = item.id === state.settings.activeCollectionId;
-                    const isNoteActive = item.id === state.settings.activeNoteId;
-                    const isFolder = item.type === 'folder';
+    // Helper function to create the HTML for a single item (note or folder)
+    const createItemHTML = (item, currentLevel) => {
+        const isActive = item.id === state.settings.activeCollectionId;
+        const isNoteActive = item.id === state.settings.activeNoteId;
+        const isFolder = item.type === 'folder';
 
-                    let newNoteParentId = null;
-                    if (isFolder) {
-                        newNoteParentId = item.id;
-                    } else {
-                        const findResult = findItem(item.id);
-                        const parent = findResult ? findResult.parent : null;
-                        if (parent && !Array.isArray(parent)) {
-                            newNoteParentId = parent.id;
-                        }
-                    }
-                    
-                    // FIX: Check if the note is shared by comparing its ownerId to the current user's ID
-                    let sharedIconHTML = '';
-                    if (item.type === 'note') {
-                        const noteData = window.noteCache[item.id];
-                        const user = window.auth.currentUser;
-                        if (noteData && user && noteData.ownerId !== user.uid) {
-                            sharedIconHTML = `<i data-feather="users" class="w-3 h-3 text-text-tertiary ml-auto" title="Shared with you"></i>`;
-                        }
-                    }
-
-                    if (isFolder && item.children) {
-                        item.children.sort((a, b) => {
-                            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-                            return a.name.localeCompare(b.name);
-                        });
-                    }
-
-                    return `
-                        <li data-id="${item.id}" draggable="true" class="collection-item-wrapper group rounded-md">
-                            <div class="collection-item flex items-center justify-between gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
-                                <a href="#" class="collection-item-link flex items-center gap-2 flex-grow min-w-0">
-                                    ${isFolder ? `<i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i>` : ''}
-                                    <i data-feather="${isFolder ? 'folder' : (item.pinned ? 'paperclip' : 'file-text')}" class="w-4 h-4 flex-shrink-0 text-text-secondary ${item.pinned ? 'text-accent-primary': ''}"></i>
-                                    <span class="truncate">${item.name}</span>
-                                </a>
-                                ${sharedIconHTML}
-                                <button class="add-note-btn opacity-0 group-hover:opacity-100 transition-opacity" data-parent-id="${newNoteParentId}" title="Add New Note">
-                                    <i data-feather="plus" class="w-4 h-4 pointer-events-none"></i>
-                                </button>
-                            </div>
-                            ${isFolder && item.expanded && item.children ? `<ul class="collection-children">${renderCollectionsList(item.children, currentLevel + 1)}</ul>` : ''}
-                        </li>
-                    `;
-                };
-
-                collections.sort((a, b) => {
-                    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-                    return a.name.localeCompare(b.name);
-                });
-
-                const listHTML = collections.map(item => createItemHTML(item, level)).join('');
-
-                if (level === 0) {
-                    app.containers.collectionsList.innerHTML = `<ul class="space-y-1">${listHTML}</ul>`;
-                    feather.replace();
-                }
-                return listHTML;
+        let newNoteParentId = null;
+        if (isFolder) {
+            newNoteParentId = item.id;
+        } else {
+            const findResult = findItem(item.id);
+            const parent = findResult ? findResult.parent : null;
+            if (parent && !Array.isArray(parent)) {
+                newNoteParentId = parent.id;
             }
-            
+        }
+
+        let sharedIconHTML = '';
+        const noteData = window.noteCache[item.id];
+        const user = window.auth.currentUser;
+        const isSharedWithMe = noteData && user && noteData.ownerId !== user.uid;
+
+        // Add the 'users' icon only if it's a shared note
+        if (item.type === 'note' && isSharedWithMe) {
+            sharedIconHTML = `<i data-feather="users" class="w-4 h-4 text-text-secondary ml-auto mr-2" title="Shared with you"></i>`;
+        }
+
+        if (isFolder && item.children) {
+            item.children.sort((a, b) => {
+                if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+                return a.name.localeCompare(b.name);
+            });
+        }
+
+        return `
+            <li data-id="${item.id}" draggable="true" class="collection-item-wrapper group rounded-md">
+                <div class="collection-item flex items-center justify-between gap-2 p-2 rounded-md hover:bg-bg-pane-dark ${isActive || isNoteActive ? 'bg-bg-pane-dark font-semibold' : ''}" style="padding-left: ${8 + currentLevel * 16}px;">
+                    <a href="#" class="collection-item-link flex items-center gap-2 flex-grow min-w-0">
+                        ${isFolder ? `<i data-feather="chevron-right" class="chevron w-4 h-4 flex-shrink-0 text-text-tertiary ${item.expanded ? 'open' : ''}"></i>` : ''}
+                        ${!isSharedWithMe ? `<i data-feather="${isFolder ? 'folder' : (item.pinned ? 'paperclip' : 'file-text')}" class="w-4 h-4 flex-shrink-0 text-text-secondary ${item.pinned ? 'text-accent-primary': ''}"></i>` : ''}
+                        <span class="truncate">${item.name}</span>
+                    </a>
+                    ${sharedIconHTML}
+                    <button class="add-note-btn opacity-0 group-hover:opacity-100 transition-opacity" data-parent-id="${newNoteParentId}" title="Add New Note">
+                        <i data-feather="plus" class="w-4 h-4 pointer-events-none"></i>
+                    </button>
+                </div>
+                ${isFolder && item.expanded && item.children ? `<ul class="collection-children">${renderCollectionsList(item.children, currentLevel + 1)}</ul>` : ''}
+            </li>
+        `;
+    };
+
+    // --- NEW LOGIC IS HERE ---
+    // This only runs for the top-level rendering (level 0)
+    if (level === 0) {
+        const user = window.auth.currentUser;
+        const userItems = [];
+        const sharedItems = [];
+
+        // 1. Separate user's own items from shared items
+        collections.forEach(item => {
+            const noteData = window.noteCache[item.id];
+            if (item.type === 'note' && user && noteData && noteData.ownerId !== user.uid) {
+                sharedItems.push(item);
+            } else {
+                userItems.push(item);
+            }
+        });
+
+        // 2. Sort both lists independently
+        userItems.sort((a, b) => {
+            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+        sharedItems.sort((a, b) => a.name.localeCompare(b.name));
+        
+        // 3. Build the final HTML string with the new structure
+        let finalHTML = `<ul class="space-y-1">${userItems.map(item => createItemHTML(item, 0)).join('')}</ul>`;
+
+        if (sharedItems.length > 0) {
+            finalHTML += `
+                <div class="px-2 pt-4 pb-1">
+                    <h3 class="font-bold text-xs uppercase tracking-wider text-text-tertiary">Shared with You</h3>
+                </div>
+                <ul class="space-y-1">${sharedItems.map(item => createItemHTML(item, 0)).join('')}</ul>
+            `;
+        }
+
+        app.containers.collectionsList.innerHTML = finalHTML;
+        feather.replace();
+
+    } else {
+        // For nested levels (folders), render as before
+        collections.sort((a, b) => {
+            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+        return collections.map(item => createItemHTML(item, level)).join('');
+    }
+}
             function renderTagList() {
     const allNotes = getAllNotes(state.collections);
     // Get a flat list of all tags, including duplicates.
@@ -6376,75 +6411,74 @@ const renderNotionStyleMenu = () => {
     });
 }
 function setupSharedNoteListener() {
-                const user = window.auth.currentUser;
-                if (!user) return;
+    const user = window.auth.currentUser;
+    if (!user) return;
 
-                import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js")
-                    .then(({ collection, query, where, onSnapshot }) => {
+    import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js")
+        .then(({ collection, query, where, onSnapshot }) => {
+            
+            const sharedNotesQuery = query(
+                collection(db, "notes"),
+                where('sharedWith', 'array-contains', user.uid)
+            );
+
+            onSnapshot(sharedNotesQuery, (snapshot) => {
+                let stateChanged = false;
+                snapshot.docChanges().forEach((change) => {
+                    const noteData = change.doc.data();
+                    const noteId = change.doc.id;
+
+                    if (change.type === "added") {
+                        // --- FIX IS HERE ---
+                        // Check if the note doesn't already exist in the sidebar state
+                        if (!findItem(noteId)) { 
+                            console.log('New shared note detected:', noteData.name);
+                            window.noteCache[noteId] = noteData;
+                            const noteStub = { 
+                                id: noteId, 
+                                name: noteData.name, 
+                                type: 'note', 
+                                createdAt: noteData.createdAt, 
+                                modifiedAt: noteData.modifiedAt, 
+                                pinned: false 
+                            };
+                            // Add the shared note to the root of the collections list
+                            state.collections.unshift(noteStub);
+
+                            showToast(`📬 Note shared with you: "${noteData.name}"`, 'success');
+                            stateChanged = true;
+                        }
+                    } 
+                    else if (change.type === "removed") {
+                        console.log('Shared note access revoked:', noteData.name);
                         
-                        const sharedNotesQuery = query(
-                            collection(db, "notes"),
-                            where('sharedWith', 'array-contains', user.uid)
-                        );
+                        delete window.noteCache[noteId];
+                        const findResult = findItem(noteId);
+                        
+                        if (findResult) {
+                            const parentArray = Array.isArray(findResult.parent) ? findResult.parent : findResult.parent.children;
+                            parentArray.splice(findResult.index, 1);
+                        }
 
-                        onSnapshot(sharedNotesQuery, (snapshot) => {
-                            let stateChanged = false;
-                            snapshot.docChanges().forEach((change) => {
-                                const noteData = change.doc.data();
-                                const noteId = change.doc.id;
+                        if (state.settings.activeNoteId === noteId) {
+                            state.settings.activeNoteId = null;
+                        }
+                        
+                        showToast(`🚫 Access to "${noteData.name}" was revoked.`, 'info');
+                        stateChanged = true;
+                    }
+                });
 
-                                // This runs when a note is NEWLY shared with you
-                                if (change.type === "added") {
-                                    if (!window.noteCache[noteId]) {
-                                        console.log('New shared note detected:', noteData.name);
-                                        window.noteCache[noteId] = noteData;
-                                        const noteStub = { id: noteId, name: noteData.name, type: 'note', createdAt: noteData.createdAt, modifiedAt: noteData.modifiedAt, pinned: false };
-                                        state.collections.unshift(noteStub);
-
-                                        // Automatically open the shared note
-                                        state.settings.activeNoteId = noteId;
-                                        state.settings.activeCollectionId = null;
-                                        state.settings.activeTag = null;
-
-                                        showToast(`📬 Note shared with you: "${noteData.name}"`, 'success');
-                                        stateChanged = true;
-                                    }
-                                } 
-                                // FIX: This runs when a note is UN-SHARED from you
-                                else if (change.type === "removed") {
-                                    console.log('Shared note access revoked:', noteData.name);
-                                    
-                                    // 1. Remove the note's data from the cache
-                                    delete window.noteCache[noteId];
-
-                                    // 2. Find and remove the note from the sidebar structure
-                                    const findResult = findItem(noteId);
-                                    if (findResult) {
-                                        const parentArray = Array.isArray(findResult.parent) ? findResult.parent : findResult.parent.children;
-                                        parentArray.splice(findResult.index, 1);
-                                    }
-
-                                    // 3. If you were viewing the note, close it
-                                    if (state.settings.activeNoteId === noteId) {
-                                        state.settings.activeNoteId = null;
-                                    }
-                                    
-                                    showToast(`🚫 Access to "${noteData.name}" was revoked.`, 'info');
-                                    stateChanged = true;
-                                }
-                            });
-
-                            // If any notes were added or removed, update the app
-                            if (stateChanged) {
-                                saveState();
-                                buildLunrIndex();
-                                render();
-                            }
-                        }, (error) => {
-                            console.error("Error listening for shared notes:", error);
-                        });
-                    });
-            }
+                if (stateChanged) {
+                    saveState();
+                    buildLunrIndex();
+                    render();
+                }
+            }, (error) => {
+                console.error("Error listening for shared notes:", error);
+            });
+        });
+}
             /**
  * Renders the generated quiz data into the quiz modal.
  * @param {Array<Object>} quizArray - An array of quiz question objects.
@@ -12116,7 +12150,7 @@ const originalButton = originalToolbar.querySelector(selector);
     const button = e.target.closest('button');
     if (!button) return;
 
-    // MOVED THIS LINE UP: This now closes the menu immediately, BEFORE the switch statement runs.
+    // This closes the menu immediately after any action is clicked.
     closeContextMenu(); 
 
     const action = button.dataset.action;
@@ -12126,84 +12160,51 @@ const originalButton = originalToolbar.querySelector(selector);
 
     if (id) {
         findResult = findItem(id);
-        targetItem = findResult.item;
-        parent = findResult.parent;
-        parentArray = Array.isArray(parent) ? parent : parent.children;
+        if (findResult) {
+            targetItem = findResult.item;
+            parent = findResult.parent;
+            parentArray = Array.isArray(parent) ? parent : parent.children;
+        }
     }
 
-    const createNewItem = (type) => {
-        const name = type === 'note' ? 'Untitled Note' : 'New Folder';
-        const now = new Date().toISOString();
-        const newItem = {
-            id: generateId(type[0]), name, type,
-            ...(type === 'note' && { content: '', status: null, createdAt: now, modifiedAt: now, pinned: false, links: [], tags: [] }),
-            ...(type === 'folder' && { children: [], expanded: true })
-        };
-
-        let destinationArray = state.collections;
-        let parentFolder = null;
-        
-        if (targetItem) {
-            if (targetItem.type === 'folder') {
-                destinationArray = targetItem.children;
-                targetItem.expanded = true;
-                parentFolder = targetItem;
-            } else {
-                destinationArray = parentArray;
-                parentFolder = Array.isArray(parent) ? null : parent;
-            }
-        }
-        if (type === 'folder') {
-            const name = 'New Folder';
-            const newItem = {
-                id: generateId('folder'), name, type, children: [], expanded: true
-            };
-
-            const firstColumnId = generateId('col');
-            state.kanbanColumns[newItem.id] = [{ id: firstColumnId, title: 'To Do' }];
-
-            const now = new Date().toISOString();
-            const newNote = {
-                id: generateId('n'), name: 'Untitled Note', type: 'note', content: '',
-                status: firstColumnId,
-                createdAt: now, modifiedAt: now,
-                pinned: false, links: [], tags: []
-            };
-            newItem.children.push(newNote);
-
-            let destinationArray = state.collections;
+    switch(action) {
+        // --- FIXED: 'New Note' now uses the correct global function ---
+        case 'new-note': {
+            let parentId = null;
             if (targetItem) {
-                if (targetItem.type === 'folder') {
-                    destinationArray = targetItem.children;
-                    targetItem.expanded = true;
-                } else {
-                    destinationArray = parentArray;
+                parentId = targetItem.type === 'folder' ? targetItem.id : (Array.isArray(parent) ? null : parent.id);
+            }
+            createNewNote(true, {}, parentId);
+            break;
+        }
+
+        // --- FIXED: 'New Folder' now uses the correct global function ---
+        case 'new-folder': {
+            let parentId = null;
+            if (targetItem) {
+                parentId = targetItem.type === 'folder' ? targetItem.id : (Array.isArray(parent) ? null : parent.id);
+            }
+             const name = 'New Folder';
+            const newCollection = { id: generateId('c'), name, type: 'folder', children: [], expanded: true };
+            state.kanbanColumns[newCollection.id] = [{ id: generateId('col'), title: 'To Do' }];
+            
+            let destinationArray = state.collections;
+            if(parentId) {
+                const parentFolder = findItem(parentId)?.item;
+                if(parentFolder) {
+                   if(!parentFolder.children) parentFolder.children = [];
+                   destinationArray = parentFolder.children;
+                   parentFolder.expanded = true;
                 }
             }
-            destinationArray.unshift(newItem);
-            
-            state.settings.activeNoteId = newNote.id;
+            destinationArray.unshift(newCollection);
+            saveState();
+            render();
+            break;
         }
-        if (newItem.type === 'note' && parentFolder?.id) {
-            newItem.status = state.kanbanColumns[parentFolder.id]?.[0]?.id || null;
-        }
-        
-        destinationArray.unshift(newItem);
-        
-        if (type === 'note') {
-            state.settings.activeNoteId = newItem.id;
-        } else {
-           state.kanbanColumns[newItem.id] = [{ id: generateId('col'), title: 'To Do' }];
-        }
-        
-        saveState();
-        render();
-    };
 
-    switch(action) {
-        case 'new-note': createNewItem('note'); break;
-        case 'new-folder': createNewItem('folder'); break;
-        case 'delete':
+        // --- PRESERVED: 'Delete' functionality ---
+        case 'delete': {
             const confirmed = await showConfirm({ title: `Delete "${targetItem.name}"`, message: 'This action cannot be undone.', confirmText: 'Delete', confirmClass: 'bg-red-600' });
             if (confirmed) {
                const index = parentArray.findIndex(i => i.id === id);
@@ -12216,7 +12217,10 @@ const originalButton = originalToolbar.querySelector(selector);
                render();
             }
             break;
-        case 'rename':
+        }
+
+        // --- PRESERVED: 'Rename' functionality ---
+        case 'rename': {
             const newName = await showPrompt({ title: 'Rename', 
                 message: `Enter a new name for "${targetItem.name}":`, initialValue: targetItem.name });
             if (newName) {
@@ -12226,7 +12230,10 @@ const originalButton = originalToolbar.querySelector(selector);
                 render();
             }
             break;
-        case 'toggle-pin':
+        }
+        
+        // --- PRESERVED: 'Pin' functionality ---
+        case 'toggle-pin': {
             if(targetItem && targetItem.type === 'note') {
                 targetItem.pinned = !targetItem.pinned;
                 showToast(targetItem.pinned ? `Pinned "${targetItem.name}"` : `Unpinned "${targetItem.name}"`);
@@ -12234,12 +12241,18 @@ const originalButton = originalToolbar.querySelector(selector);
                 render();
             }
             break;
-        case 'save-as-template':
-    if (targetItem && targetItem.type === 'note') {
-        saveAsTemplate(targetItem);
-    }
-    break;
-        case 'duplicate':
+        }
+        
+        // --- PRESERVED: 'Save as Template' functionality ---
+        case 'save-as-template': {
+            if (targetItem && targetItem.type === 'note') {
+                saveAsTemplate(targetItem);
+            }
+            break;
+        }
+
+        // --- PRESERVED: 'Duplicate' functionality ---
+        case 'duplicate': {
             if (!targetItem) return;
             const newItem = duplicateItem(targetItem);
             parentArray.splice(findResult.index + 1, 0, newItem);
@@ -12248,6 +12261,7 @@ const originalButton = originalToolbar.querySelector(selector);
             buildLunrIndex();
             render();
             break;
+        }
     }
 });
                 
