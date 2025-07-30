@@ -10529,8 +10529,9 @@ app.containers.collectionsList.addEventListener('click', (e) => {
                     }
                 });
 
-                app.containers.mobileControlsDropdown.addEventListener('click', async (e) => {
-                    
+                // Located inside the init() function
+app.containers.mobileControlsDropdown.addEventListener('click', async (e) => {
+    
     const button = e.target.closest('button');
     if (!button) return;
 
@@ -10542,6 +10543,18 @@ app.containers.collectionsList.addEventListener('click', (e) => {
 
     const action = button.dataset.action;
     const noteId = state.settings.activeNoteId;
+    
+    // START: Actions that DON'T need an active note
+    if (action === 'mobile-new-note') {
+        closeDropdown();
+        createNewNote();
+        return;
+    }
+    if (action === 'mobile-new-from-template') {
+        closeDropdown();
+        openTemplateModal();
+        return;
+    }
     if (action === 'mobile-delete-folder') {
         closeDropdown();
         const collectionId = state.settings.activeCollectionId;
@@ -10567,38 +10580,35 @@ app.containers.collectionsList.addEventListener('click', (e) => {
             buildLunrIndex();
             render();
         }
-        return; // Stop after handling this action
+        return;
     }
     if (action === 'mobile-rename-folder') {
-    closeDropdown();
-    const collectionId = state.settings.activeCollectionId;
-    if (!collectionId) return;
+        closeDropdown();
+        const collectionId = state.settings.activeCollectionId;
+        if (!collectionId) return;
 
-    const { item: folder } = findItem(collectionId);
-    if (!folder) return;
+        const { item: folder } = findItem(collectionId);
+        if (!folder) return;
 
-    const newName = await showPrompt({
-        title: 'Rename Folder',
-        message: `Enter a new name for "${folder.name}":`,
-        initialValue: folder.name
-    });
+        const newName = await showPrompt({
+            title: 'Rename Folder',
+            message: `Enter a new name for "${folder.name}":`,
+            initialValue: folder.name
+        });
 
-    if (newName && newName !== folder.name) {
-        folder.name = newName;
-        saveState();
-        buildLunrIndex();
-        render();
-        showToast(`Folder renamed to "${newName}"`, 'success');
+        if (newName && newName !== folder.name) {
+            folder.name = newName;
+            saveState();
+            buildLunrIndex();
+            render();
+            showToast(`Folder renamed to "${newName}"`, 'success');
+        }
+        return;
     }
-    return;
-}
+    // END: Actions that DON'T need an active note
+
 
     // Handle all actions that require an active note
-    if (action === 'mobile-new-note') {
-    closeDropdown();
-    createNewNote();
-    return;
-}
     if (action && noteId) {
         closeDropdown(); // Close menu immediately after an action is clicked
         const { item: note, parent, index } = findItem(noteId);
@@ -10614,9 +10624,12 @@ app.containers.collectionsList.addEventListener('click', (e) => {
             case 'mobile-quiz':
                 handleGenerateQuiz(plainContent, note);
                 break;
-                case 'mobile-flashcard':
-    handleFlashcardMode(note);
-    break;
+            case 'mobile-flashcard':
+                handleFlashcardMode(note);
+                break;
+            case 'mobile-save-as-template': // ADDED THIS CASE
+                saveAsTemplate(note);
+                break;
             case 'mobile-rename':
                 const newName = await showPrompt({ title: 'Rename', message: `Enter a new name for "${note.name}":`, initialValue: note.name });
                 if (newName) {
@@ -10651,10 +10664,10 @@ app.containers.collectionsList.addEventListener('click', (e) => {
                     render();
                 }
                 break;
-                case 'mobile-history':
-    openVersionHistoryModal();
-    break;
-case 'mobile-checkpoint':
+            case 'mobile-history':
+                openVersionHistoryModal();
+                break;
+            case 'mobile-checkpoint':
     const message = await showPrompt({
         title: 'Save Checkpoint',
         message: 'Add a short message to describe this version:',
@@ -10662,26 +10675,28 @@ case 'mobile-checkpoint':
     });
     if (message) {
         performImmediateSave(); // Ensure latest content is captured
-        const { item: currentNote } = findItem(noteId);
+        // FIX: Get the full note data from the global cache, which includes the content.
+        const currentNote = window.noteCache[noteId];
         if (currentNote) {
-            saveNoteVersion(currentNote.id, currentNote.content, message);
+            // FIX: Pass the correct properties to the save function.
+            saveNoteVersion(noteId, currentNote.content, message);
             saveState();
             showToast('✅ Checkpoint saved!', 'success');
         }
     }
     break;
-                case 'mobile-share':
-    handleShareNote();
-    break;
-    case 'mobile-upload':
-    document.getElementById('file-upload-input').click();
-    break;
-    case 'mobile-collaborate':
+            case 'mobile-share':
+                handleShareNote();
+                break;
+            case 'mobile-upload':
+                document.getElementById('file-upload-input').click();
+                break;
+            case 'mobile-collaborate':
                 openShareModal();
                 break;
-    case 'mobile-add-checklist':
-    restoreSelectionAndExec(() => {
-        const newDefaultChecklistHTML = `
+            case 'mobile-add-checklist':
+                restoreSelectionAndExec(() => {
+                    const newDefaultChecklistHTML = `
 <div class="checklist-container" contenteditable="false">
     <div class="checklist-header">
         <h4 class="checklist-title font-semibold text-text-primary flex-grow">Untitled Checklist</h4>
@@ -10700,11 +10715,10 @@ case 'mobile-checkpoint':
 </div>
 <p><br></p>
 `;
-        // THE FIX: Use the 'newDefaultChecklistHTML' variable.
-        document.execCommand('insertHTML', false, newDefaultChecklistHTML);
-        feather.replace();
-    });
-    break;
+                    document.execCommand('insertHTML', false, newDefaultChecklistHTML);
+                    feather.replace();
+                });
+                break;
         }
     } 
     // Handle view switching, which doesn't need an active note
@@ -10715,13 +10729,6 @@ case 'mobile-checkpoint':
         renderMobileControls();
     }
 });
-                
-                app.elements.sortOrderSelect.addEventListener('change', (e) => {
-                    state.settings.listSortOrder = e.target.value;
-                    saveState();
-                    renderListView();
-                    feather.replace();
-                });
                 
                 app.containers.mainContentArea.addEventListener('click', (e) => {
     const exitBtn = e.target.closest('.exit-code-btn');
