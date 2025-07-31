@@ -3390,16 +3390,20 @@ const findAndDisplaySourceSnippets = (aiAnswer, sourceNotes) => {
     feather.replace();
 };
 function parseInternalLinks(htmlContent) {
-    
-    // This check now prevents the function from running if state or state.collections is missing.
+    // This check prevents the function from running if state or state.collections is missing.
     if (!htmlContent || !state || !state.collections) return htmlContent;
 
     const allNotes = getAllNotes(state.collections);
     return htmlContent.replace(/\[\[(.*?)\]\]/g, (match, noteName) => {
         const trimmedName = noteName.trim();
-        const foundNote = allNotes.find(n => n.name.toLowerCase() === trimmedName.toLowerCase());
+        
+        // --- THIS IS THE FIX ---
+        // We now trim the note name from the state data (n.name.trim()) before comparing.
+        // This protects against invisible leading/trailing spaces from bad data.
+        const foundNote = allNotes.find(n => n.name.trim().toLowerCase() === trimmedName.toLowerCase());
+        
         if (foundNote) {
-            return `<a href="#" class="internal-link" title="Link to '${foundNote.name}'" data-note-id="${foundNote.id}">${trimmedName}</a>`;
+            return `<a href="#" class="internal-link" title="Link to '${foundNote.name.trim()}'" data-note-id="${foundNote.id}">${trimmedName}</a>`;
         } else {
             return `<span class="internal-link-broken" title="Note not found: '${trimmedName}'">${trimmedName}</span>`;
         }
@@ -3580,33 +3584,121 @@ if (checklistItem) {
     }
 };
 // --- START: NEW RESEARCH AGENT LOGIC ---
+// --- START: NEW RESEARCH AGENT LOGIC ---
+// Add this new function
+const updateAllLinksAgent = async () => {
+    const toastId = showToast('🔗 Scanning all notes for link updates...', 'loading');
+    const { doc, writeBatch, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+
+    try {
+        // Step 1: Ensure all notes are loaded into the cache
+        const allNoteStubs = getAllNotes(state.collections);
+        const notesToLoad = allNoteStubs.filter(stub => !window.noteCache[stub.id]);
+        if (notesToLoad.length > 0) {
+            const fetchPromises = notesToLoad.map(stub => getDoc(doc(db, "notes", stub.id)).then(snap => {
+                if (snap.exists()) window.noteCache[stub.id] = snap.data();
+            }));
+            await Promise.all(fetchPromises);
+        }
+
+        const batch = writeBatch(db);
+        let updatedCount = 0;
+        const allNotes = Object.values(window.noteCache);
+        const nameToIdMap = new Map(allNoteStubs.map(n => [n.name.toLowerCase(), n.id]));
+
+        // Step 2: Iterate through every note and update its links
+        for (const note of allNotes) {
+            let contentChanged = false;
+            let newContent = note.content;
+
+            newContent = newContent.replace(/\[\[(.*?)\]\]/g, (match, noteName) => {
+                const trimmedName = noteName.trim();
+                const targetId = nameToIdMap.get(trimmedName.toLowerCase());
+                if (targetId) {
+                    return `[[${trimmedName}]]`; // Link is valid, keep it
+                }
+                // If link is broken, try to find note by old name (more complex) or leave as is for now.
+                // This basic implementation focuses on ensuring valid links are preserved.
+                return match; // For now, we leave broken links as they are.
+            });
+            
+            // This regex is for already-parsed links (<a> tags)
+            newContent = newContent.replace(/<a[^>]*class="internal-link"[^>]*data-note-id="([^"]+)"[^>]*>(.*?)<\/a>/g, (match, noteId, linkText) => {
+                const targetNote = findItem(noteId)?.item;
+                if (targetNote && targetNote.name !== linkText) {
+                    contentChanged = true;
+                    return `<a href="#" class="internal-link" title="Link to '${targetNote.name}'" data-note-id="${noteId}">${targetNote.name}</a>`;
+                }
+                return match; // No change needed
+            });
+
+
+            if (contentChanged) {
+                updatedCount++;
+                const noteRef = doc(db, "notes", note.id);
+                batch.update(noteRef, { content: newContent });
+            }
+        }
+
+        if (updatedCount > 0) {
+            await batch.commit();
+            dismissToast(toastId);
+            showToast(`✅ Updated links in ${updatedCount} note(s).`, 'success');
+        } else {
+            dismissToast(toastId);
+            showToast('👍 All links are already up to date.', 'info');
+        }
+    } catch (error) {
+        console.error("Link update failed:", error);
+        dismissToast(toastId);
+        showToast('❌ Failed to update links.', 'error');
+    }
+};
 const researchAgent = async (topic) => {
     const toastId = showToast(`🔬 Researching "${topic}"...`, 'loading');
 
-    // STEP 1: FIND RELEVANT NOTES (Use existing search tool)
+    // STEP 1: FIND RELEVANT NOTE IDs
     const searchResults = lunrIndex.search(topic);
-    const sourceNotes = searchResults.slice(0, 5).map(res => findItem(res.ref)?.item).filter(Boolean);
+    const sourceNoteIds = searchResults.slice(0, 5).map(res => res.ref);
 
-    if (sourceNotes.length === 0) {
+    if (sourceNoteIds.length === 0) {
         dismissToast(toastId);
         showToast(`No relevant notes found for "${topic}".`, 'info');
         return;
     }
 
-    // STEP 2: READ & PREPARE CONTEXT (Use existing tools)
-    const context = sourceNotes.map(note => {
-        return `--- Note Source: "${note.name}" ---\n${note.content.replace(/<[^>]*>?/gm, '')}`;
-    }).join('\n\n');
+    // STEP 2: ENSURE REQUIRED NOTES ARE LOADED INTO THE CACHE
+    const notesToLoad = sourceNoteIds.filter(id => !window.noteCache[id]);
+    if (notesToLoad.length > 0) {
+        try {
+            const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const fetchPromises = notesToLoad.map(id => {
+                const noteRef = doc(db, "notes", id);
+                return getDoc(noteRef).then(noteSnap => {
+                    if (noteSnap.exists()) {
+                        window.noteCache[id] = noteSnap.data(); // Add to cache
+                    }
+                });
+            });
+            await Promise.all(fetchPromises);
+        } catch (error) {
+            dismissToast(toastId);
+            console.error("Error loading notes for research:", error);
+            showToast("Failed to load source notes.", "error");
+            return;
+        }
+    }
 
-    // STEP 3: SYNTHESIZE WITH AI (Use existing AI tool)
-    const prompt = `You are a research assistant. Based ONLY on the provided notes, write a comprehensive research brief about "${topic}".
-    Structure your response in well-written Markdown.
-    At the end of your response, include a "Sources" section listing the names of the notes you used, like this:
-    ## Sources
-    - [[Note Name 1]]
-    - [[Note Name 2]]`;
+    // STEP 3: READ & PREPARE CONTEXT FROM CACHED NOTES
+    const context = sourceNoteIds
+        .map(id => window.noteCache[id]) // Get full note data from cache
+        .filter(Boolean) // Filter out any notes that failed to load
+        .map(noteData => {
+            return `--- Note Source: "${noteData.name}" ---\n${(noteData.content || '').replace(/<[^>]*>?/gm, '')}`;
+        }).join('\n\n');
 
-    // We add the context after the main prompt
+    // STEP 4: SYNTHESIZE WITH AI
+    const prompt = `You are a research assistant. Based ONLY on the provided notes, write a comprehensive research brief about "${topic}". Structure your response in well-written Markdown. At the end of your response, include a "Sources" section listing the names of the notes you used, like this:\n## Sources\n- [[Note Name 1]]\n- [[Note Name 2]]`;
     const finalPrompt = `${prompt}\n\nContext from Notes:\n${context}`;
     const payload = { contents: [{ parts: [{ text: finalPrompt }] }] };
     const aiBrief = await callGeminiAPI(payload);
@@ -3617,16 +3709,23 @@ const researchAgent = async (topic) => {
         return;
     }
 
-    // STEP 4: CREATE & LINK THE NEW NOTE (Use existing tools)
-    const newNoteName = `Research Brief: ${topic}`;
-    // The createNewNote function will automatically switch to and focus the new note.
-    const newNote = createNewNote(true, marked.parse(aiBrief), null);
-    newNote.name = newNoteName;
-    updateNoteLinks(newNote); // This will automatically turn [[Note Name]] into clickable links!
+    // STEP 5: CREATE & LINK THE NEW NOTE
+    // STEP 5: CREATE & LINK THE NEW NOTE
+const newNoteName = `Research Brief: ${topic}`;
 
-    // Final save and render
-    saveState();
-    render();
+// Convert markdown to HTML, then find and convert [[links]] to clickable <a> tags
+const initialHtml = marked.parse(aiBrief);
+const finalHtmlWithLinks = parseInternalLinks(initialHtml);
+
+const newNote = await createNewNote(true, { name: newNoteName, content: finalHtmlWithLinks }, null);
+
+    // After creation, the note is active. We need to update its links and save again.
+    const activeNoteFullData = window.noteCache[newNote.id];
+    if (activeNoteFullData) {
+        updateNoteLinks(activeNoteFullData);
+        await performImmediateSave(); // Save the link updates
+    }
+    
     showToast(`✅ Research brief created!`, 'success');
 };
 // --- START: NEW MEETING ASSISTANT LOGIC ---
@@ -5894,7 +5993,9 @@ async function renderNoteEditor() {
     app.elements.noteEditorTitle.style.height = 'auto';
     app.elements.noteEditorTitle.style.height = (app.elements.noteEditorTitle.scrollHeight) + 'px';
 
-    app.elements.noteEditorBody.innerHTML = DOMPurify.sanitize(noteData.content || '');
+    // Convert any [[Note Name]] text into clickable links
+const contentWithLinks = parseInternalLinks(noteData.content || '');
+app.elements.noteEditorBody.innerHTML = DOMPurify.sanitize(contentWithLinks);
 
     renderBacklinks(noteStub, noteData); // Helper function depends on noteData
     updateEditorStats();
@@ -8304,6 +8405,12 @@ const commands = [
     { name: 'unlink', description: 'Unlink notes. Usage: /unlink [target] from [source]', suggest: 'notes', execute: (args)=>{const s=/\s+from\s+/i;if(!s.test(args))return showToast('❌ Use: /unlink [target] from [source]','error');const p=args.split(s);const tN=p[0].trim();const sN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');const r=new RegExp(`\\[\\[\\s*${tO.name}\\s*\\]\\]`,'gi');if(!r.test(sO.content))return showToast(`❌ Link to "${tO.name}" not found in "${sO.name}".`,'info');sO.content=sO.content.replace(r,'').replace(/<p>\s*<\/p>|\n\s*\n/gi,'');updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Unlinked "${tO.name}" from "${sO.name}"`)}},
     { name: 'go', description: 'Go to item or tag. Usage: /go [item] or /go #[tag] [item]', suggest: 'items_or_tags', execute: (args)=>{if(!args)return showToast('❌ Specify item or tag.','error');if(args.startsWith('#')){const tN=args.split(' ')[0].substring(1).trim();const nN=args.substring(tN.length+2).trim();if(!tN)return showToast('❌ Tag name needed.','error');if(!getAllTags().includes(tN))return showToast(`❌ Tag not found: #${tN}`,'error');if(nN){const nT=getAllNotes(state.collections).filter(n=>(n.tags||[]).includes(tN));const t=findBestMatch(nN,nT);if(t){executeWithSmartFind(t.name,'notes',(i)=>{state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id}showToast(`🚀 Navigated to "${i.name}"`);saveState();render()})}else{showToast(`❌ Note "${nN}" not in tag #${tN}.`,'error')}}else{state.settings.activeTag=tN;state.settings.activeNoteId=null;state.settings.activeCollectionId=null;showToast(`🏷️ Showing notes tagged with #${tN}`);saveState();render()}}else{executeWithSmartFind(args,'items',(i)=>{state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id}else{state.settings.activeCollectionId=i.id;state.settings.activeNoteId=null}showToast(`🚀 Navigated to "${i.name}"`);saveState();render()})}} },
     { name: 'theme', description: 'Toggle through color themes.', execute: ()=>document.getElementById('theme-toggle')?.click() },
+    // Add this object inside your commands array
+{
+    name: 'updatelinks',
+    description: 'Scans all notes and fixes links pointing to renamed notes.',
+    execute: updateAllLinksAgent
+},
     { name: 'voice', description: 'Start/stop voice dictation in current note.', execute: ()=>{if(!state.settings.activeNoteId)return showToast('❌ Must be in a note.','error');document.getElementById('dictate-btn')?.click()} },
     { name: 'linked', description: 'Show all connections for a note. Usage: /linked [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args, 'notes', (note)=>renderLinkedNotesModal(note)) },
     { name: 'help', description: 'Shows this list of all available commands.', execute: renderHelpModal },
@@ -10287,17 +10394,14 @@ if (button) {
 // --- END: New Mobile Menu Logic ---
                 // REPLACE the existing event listener with this one
 // REPLACE the existing event listener with this one
-app.containers.collectionsList.addEventListener('click', (e) => {
+app.containers.collectionsList.addEventListener('click', async (e) => {
     // First, check if the new plus button was clicked
     const addBtn = e.target.closest('.add-note-btn');
     if (addBtn) {
         e.preventDefault();
         e.stopPropagation(); // This stops the click from also navigating to the note/folder
-        
-        // Get the parent folder's ID that we stored on the button
-        const parentId = addBtn.dataset.parentId === 'null' ? null : addBtn.dataset.parentId;
 
-        // Call your existing createNewNote function with the correct parent ID
+        const parentId = addBtn.dataset.parentId === 'null' ? null : addBtn.dataset.parentId;
         createNewNote(true, '', parentId); 
         return; // Action is done, so we stop here
     }
@@ -10305,13 +10409,13 @@ app.containers.collectionsList.addEventListener('click', (e) => {
     // If the plus button wasn't clicked, run the original navigation logic
     const itemLink = e.target.closest('.collection-item-link');
     if (!itemLink) return;
-    
+
     e.preventDefault();
 
     const wrapper = itemLink.closest('.collection-item-wrapper');
     const id = wrapper.dataset.id;
     const { item } = findItem(id);
-    
+
     state.settings.activeTag = null; // Deactivate tag filter
 
     if (item.type === 'folder') {
@@ -10322,6 +10426,13 @@ app.containers.collectionsList.addEventListener('click', (e) => {
         state.settings.activeNoteId = null;
         item.expanded = !item.expanded;
     } else if (item.type === 'note') {
+        // ---💾 THIS IS THE FIX ---
+        // It now works because the function is async
+        if (isNoteDirty && state.settings.activeNoteId !== id) {
+            await performImmediateSave();
+        }
+        // ---💾 END OF FIX ---
+
         state.settings.activeNoteId = id;
         const result = findItem(id);
         const parent = result.parent;
@@ -11708,32 +11819,38 @@ const handleChatSubmit = async () => {
                 });
 
                 app.elements.newCollectionBtn.addEventListener('click', async () => {
-    const name = await showPrompt({ title: 'New Collection', message: 'Enter a name for your new collection:', placeholder: 'e.g. Project Phoenix' });
+    const name = await showPrompt({
+        title: 'New Project Folder',
+        message: 'Enter a name for your new project:',
+        placeholder: 'e.g. Project Phoenix'
+    });
     if (name) {
         const newCollection = {
-            id: generateId('c'), name, type: 'folder', children: [], expanded: true
+            id: generateId('c'),
+            name,
+            type: 'folder',
+            children: [],
+            expanded: true
         };
-        
-        // --- START: Auto-create note logic ---
-        const firstColumnId = generateId('col');
-        state.kanbanColumns[newCollection.id] = [{ id: firstColumnId, title: 'To Do' }];
+        state.kanbanColumns[newCollection.id] = [{
+            id: generateId('col'),
+            title: 'To Do'
+        }];
+        state.collections.unshift(newCollection);
 
-        const now = new Date().toISOString();
-        const newNote = {
-            id: generateId('n'), name: 'Untitled Note', type: 'note', content: '',
-            status: firstColumnId,
-            createdAt: now, modifiedAt: now,
-            pinned: false, links: [], tags: []
-        };
-        newCollection.children.push(newNote);
-        // --- END: Auto-create note logic ---
-        
-        state.collections.push(newCollection);
+        // This now uses your corrected createNewNote function,
+        // which properly handles creating the Firestore document.
+        const newNote = await createNewNote(true, {
+            name: 'Getting Started'
+        }, newCollection.id);
+
+        // The createNewNote function already saves state and re-renders,
+        // so we just need to update the active collection and do one final render.
         state.settings.activeCollectionId = newCollection.id;
-        state.settings.activeNoteId = newNote.id; // Make the new note active
-        saveState();
-        buildLunrIndex(); // Rebuild search index
+        state.settings.activeNoteId = newNote.id;
+        await saveState();
         render();
+        showToast(`Project "${name}" created!`, 'success');
     }
 });
 
@@ -12150,14 +12267,12 @@ const originalButton = originalToolbar.querySelector(selector);
     const button = e.target.closest('button');
     if (!button) return;
 
-    // This closes the menu immediately after any action is clicked.
-    closeContextMenu(); 
+    closeContextMenu();
 
     const action = button.dataset.action;
     const id = app.contextMenu.targetId;
-    
-    let findResult, targetItem, parent, parentArray;
 
+    let findResult, targetItem, parent, parentArray;
     if (id) {
         findResult = findItem(id);
         if (findResult) {
@@ -12167,101 +12282,144 @@ const originalButton = originalToolbar.querySelector(selector);
         }
     }
 
-    switch(action) {
-        // --- FIXED: 'New Note' now uses the correct global function ---
-        case 'new-note': {
-            let parentId = null;
-            if (targetItem) {
-                parentId = targetItem.type === 'folder' ? targetItem.id : (Array.isArray(parent) ? null : parent.id);
-            }
-            createNewNote(true, {}, parentId);
-            break;
-        }
-
-        // --- FIXED: 'New Folder' now uses the correct global function ---
-        case 'new-folder': {
-            let parentId = null;
-            if (targetItem) {
-                parentId = targetItem.type === 'folder' ? targetItem.id : (Array.isArray(parent) ? null : parent.id);
-            }
-             const name = 'New Folder';
-            const newCollection = { id: generateId('c'), name, type: 'folder', children: [], expanded: true };
-            state.kanbanColumns[newCollection.id] = [{ id: generateId('col'), title: 'To Do' }];
-            
-            let destinationArray = state.collections;
-            if(parentId) {
-                const parentFolder = findItem(parentId)?.item;
-                if(parentFolder) {
-                   if(!parentFolder.children) parentFolder.children = [];
-                   destinationArray = parentFolder.children;
-                   parentFolder.expanded = true;
+    switch (action) {
+        case 'new-note':
+        case 'new-folder':
+            {
+                const isFolder = action === 'new-folder';
+                let parentId = null;
+                if (targetItem) {
+                    parentId = targetItem.type === 'folder' ? targetItem.id : (Array.isArray(parent) ? null : parent.id);
                 }
+                if (isFolder) {
+                    const name = 'New Folder';
+                    const newCollection = {
+                        id: generateId('c'), name, type: 'folder', children: [], expanded: true
+                    };
+                    state.kanbanColumns[newCollection.id] = [{
+                        id: generateId('col'),
+                        title: 'To Do'
+                    }];
+                    let destArray = parentId ? findItem(parentId).item.children : state.collections;
+                    destArray.unshift(newCollection);
+                    saveState();
+                    render();
+                } else {
+                    createNewNote(true, {}, parentId);
+                }
+                break;
             }
-            destinationArray.unshift(newCollection);
-            saveState();
-            render();
-            break;
-        }
 
-        // --- PRESERVED: 'Delete' functionality ---
-        case 'delete': {
-            const confirmed = await showConfirm({ title: `Delete "${targetItem.name}"`, message: 'This action cannot be undone.', confirmText: 'Delete', confirmClass: 'bg-red-600' });
-            if (confirmed) {
-               const index = parentArray.findIndex(i => i.id === id);
-               parentArray.splice(index, 1);
-               showToast(`"${targetItem.name}" deleted.`);
-               if (state.settings.activeNoteId === id) state.settings.activeNoteId = null;
-               if (state.settings.activeCollectionId === id) state.settings.activeCollectionId = null;
-               saveState();
-               buildLunrIndex();
-               render();
+        case 'delete':
+            {
+                if (!targetItem) return;
+                const message = targetItem.type === 'folder' ? 'This will delete the folder and <strong>all notes inside</strong>. This action cannot be undone.' : 'This action cannot be undone.';
+                const confirmed = await showConfirm({
+                    title: `Delete "${targetItem.name}"`,
+                    message: message,
+                    confirmText: 'Delete'
+                });
+                if (confirmed) {
+                    const index = parentArray.findIndex(i => i.id === id);
+                    parentArray.splice(index, 1);
+                    showToast(`"${targetItem.name}" deleted.`);
+                    if (state.settings.activeNoteId === id) state.settings.activeNoteId = null;
+                    if (state.settings.activeCollectionId === id) state.settings.activeCollectionId = null;
+                    saveState();
+                    buildLunrIndex();
+                    render();
+                }
+                break;
             }
-            break;
-        }
 
-        // --- PRESERVED: 'Rename' functionality ---
-        case 'rename': {
-            const newName = await showPrompt({ title: 'Rename', 
-                message: `Enter a new name for "${targetItem.name}":`, initialValue: targetItem.name });
-            if (newName) {
-                targetItem.name = newName;
+        case 'rename':
+            {
+                if (!targetItem) return;
+                const newName = await showPrompt({
+                    title: 'Rename',
+                    message: `Enter a new name for "${targetItem.name}":`,
+                    initialValue: targetItem.name
+                });
+                if (newName && newName !== targetItem.name) {
+                    targetItem.name = newName;
+                    if (targetItem.type === 'note') {
+                        const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+                        const noteRef = doc(db, "notes", targetItem.id);
+                        await updateDoc(noteRef, { name: newName });
+                    }
+                    saveState();
+                    buildLunrIndex();
+                    render();
+                }
+                break;
+            }
+
+        case 'toggle-pin':
+            {
+                if (targetItem && targetItem.type === 'note') {
+                    targetItem.pinned = !targetItem.pinned;
+                    showToast(targetItem.pinned ? `Pinned "${targetItem.name}"` : `Unpinned "${targetItem.name}"`);
+                    saveState();
+                    render();
+                }
+                break;
+            }
+
+        case 'save-as-template':
+            {
+                if (targetItem && targetItem.type === 'note') {
+                    saveAsTemplate(targetItem);
+                }
+                break;
+            }
+
+        case 'duplicate':
+            {
+                if (!targetItem) return;
+
+                const {
+                    doc,
+                    collection,
+                    writeBatch
+                } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+                const batch = writeBatch(db);
+
+                const duplicateRecursive = (item) => {
+                    const newItemStub = JSON.parse(JSON.stringify(item));
+                    const newId = generateId(item.type[0]);
+                    newItemStub.id = newId;
+                    newItemStub.name = `${item.name} (copy)`;
+
+                    if (item.type === 'note') {
+                        const sourceNoteData = window.noteCache[item.id];
+                        if (sourceNoteData) {
+                            const newNoteData = { ...sourceNoteData,
+                                name: newItemStub.name
+                            };
+                            const newNoteRef = doc(db, "notes", newId);
+                            batch.set(newNoteRef, newNoteData);
+                        }
+                    } else if (item.type === 'folder') {
+                        if (state.kanbanColumns[item.id]) {
+                            state.kanbanColumns[newId] = JSON.parse(JSON.stringify(state.kanbanColumns[item.id]));
+                        }
+                        if (item.children) {
+                            newItemStub.children = item.children.map(duplicateRecursive);
+                        }
+                    }
+                    return newItemStub;
+                };
+
+                const newItem = duplicateRecursive(targetItem);
+                parentArray.splice(findResult.index + 1, 0, newItem);
+
+                await batch.commit();
                 saveState();
                 buildLunrIndex();
                 render();
+                showToast(`Duplicated "${targetItem.name}"`);
+                break;
             }
-            break;
-        }
-        
-        // --- PRESERVED: 'Pin' functionality ---
-        case 'toggle-pin': {
-            if(targetItem && targetItem.type === 'note') {
-                targetItem.pinned = !targetItem.pinned;
-                showToast(targetItem.pinned ? `Pinned "${targetItem.name}"` : `Unpinned "${targetItem.name}"`);
-                saveState();
-                render();
-            }
-            break;
-        }
-        
-        // --- PRESERVED: 'Save as Template' functionality ---
-        case 'save-as-template': {
-            if (targetItem && targetItem.type === 'note') {
-                saveAsTemplate(targetItem);
-            }
-            break;
-        }
-
-        // --- PRESERVED: 'Duplicate' functionality ---
-        case 'duplicate': {
-            if (!targetItem) return;
-            const newItem = duplicateItem(targetItem);
-            parentArray.splice(findResult.index + 1, 0, newItem);
-            showToast(`Note Copied: "${targetItem.name}"`);
-            saveState();
-            buildLunrIndex();
-            render();
-            break;
-        }
     }
 });
                 
@@ -12279,53 +12437,156 @@ const originalButton = originalToolbar.querySelector(selector);
                 app.modals.bookmarkletCloseBtn.addEventListener('click', () => closeModal(app.modals.bookmarklet));
 
                 app.elements.notesListPane.addEventListener('click', async e => {
-                    const button = e.target.closest('button[data-action]');
-                    if (!button) return;
-                    const action = button.dataset.action;
+    const button = e.target.closest('button[data-action]');
+    if (!button) return;
+    const action = button.dataset.action;
 
-                    if (action === 'export') {
-                        const dataStr = JSON.stringify(state, null, 2);
-                        const dataBlob = new Blob([dataStr], {type: "application/json"});
-                        const url = URL.createObjectURL(dataBlob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `codex-notes-backup-${new Date().toISOString().split('T')[0]}.json`;
-                        a.click();
-                        URL.revokeObjectURL(url);
-                        showToast('Data exported successfully!', 'success');
-                    } else if (action === 'import') {
-                        app.elements.importFileInput.click();
-                    }
+    if (action === 'export') {
+        const toastId = showToast('Preparing export... This may take a moment.', 'loading');
+        
+        try {
+            // Step 1: Ensure all notes are loaded from Firestore into the cache.
+            const allNoteStubs = getAllNotes(state.collections);
+            const notesToLoad = allNoteStubs.filter(stub => !window.noteCache[stub.id]);
+
+            if (notesToLoad.length > 0) {
+                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+                const fetchPromises = notesToLoad.map(stub => {
+                    const noteRef = doc(db, "notes", stub.id);
+                    return getDoc(noteRef).then(noteSnap => {
+                        if (noteSnap.exists()) { window.noteCache[stub.id] = noteSnap.data(); }
+                    });
                 });
+                await Promise.all(fetchPromises);
+            }
+
+            // Step 2: Create a full state object for export by combining stubs and cached data.
+            const stateForExport = JSON.parse(JSON.stringify(state)); // Deep copy to avoid modifying live state
+            const populateNotes = (items) => {
+                for (let i = 0; i < items.length; i++) {
+                    if (items[i].type === 'note') {
+                        const fullNoteData = window.noteCache[items[i].id];
+                        if (fullNoteData) {
+                            items[i] = { ...items[i], ...fullNoteData };
+                        }
+                    } else if (items[i].type === 'folder' && items[i].children) {
+                        populateNotes(items[i].children);
+                    }
+                }
+            };
+            populateNotes(stateForExport.collections);
+            
+            // Step 3: Stringify and download the complete data object.
+            const dataStr = JSON.stringify(stateForExport, null, 2);
+            const dataBlob = new Blob([dataStr], {type: "application/json"});
+            const url = URL.createObjectURL(dataBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `reputifly-notes-backup-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            dismissToast(toastId);
+            showToast('✅ Data exported successfully!', 'success');
+
+        } catch (error) {
+            dismissToast(toastId);
+            console.error("Export failed:", error);
+            showToast('❌ Failed to load all note data for export.', 'error');
+        }
+    }
+
+    // THIS IS THE NEWLY ADDED FIX FOR THE IMPORT BUTTON
+    if (action === 'import') {
+        app.elements.importFileInput.click();
+    }
+});
 
                 app.elements.importFileInput.addEventListener('change', async e => {
-                    const file = e.target.files[0];
-                    if (!file) return;
+    const file = e.target.files[0];
+    if (!file) return;
 
-                    const confirmed = await showConfirm({
-                        title: 'Import Data',
-                        message: 'This will <strong>overwrite all current data</strong> in the app. Are you sure you want to continue?',
-                        confirmText: 'Overwrite and Import',
-                        confirmClass: 'bg-orange-500'
-                    });
-                    if (!confirmed) return;
+    const confirmed = await showConfirm({
+        title: 'Import Data',
+        message: 'This will <strong>overwrite all current data</strong> in this app. This action cannot be undone. Are you sure you want to continue?',
+        confirmText: 'Overwrite and Import',
+        confirmClass: 'bg-orange-500'
+    });
 
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                        try {
-                            const importedState = JSON.parse(event.target.result);
-                            state = migrateState(importedState);
-                            saveState();
-                            showToast('Data imported successfully!', 'success');
-                            location.reload();
-                        } catch (err) {
-                            console.error("Import error:", err);
-                            showToast('Invalid or corrupted data file.', 'error');
-                        }
-                    };
-                    reader.readAsText(file);
-                    app.elements.importFileInput.value = '';
+    if (!confirmed) {
+        app.elements.importFileInput.value = ''; // Reset file input
+        return;
+    }
+    
+    const toastId = showToast('Importing data... Do not close this tab.', 'loading');
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+        try {
+            const importedState = JSON.parse(event.target.result);
+            const user = window.auth.currentUser;
+            if (!user) {
+                dismissToast(toastId);
+                showToast('❌ You must be logged in to import data.', 'error');
+                return;
+            }
+
+            const allImportedNotes = getAllNotes(importedState.collections);
+            const fullNoteDataById = {};
+            allImportedNotes.forEach(note => {
+                const { content, excerpt, properties, createdAt, modifiedAt, tags, links, sharedWith, ownerId, ...stub } = note;
+                fullNoteDataById[stub.id] = { content, excerpt, properties, createdAt, modifiedAt, tags, links, sharedWith, ownerId, name: stub.name };
+            });
+
+            const newStateForStubs = migrateState(importedState);
+            const scrubStubs = (items) => {
+                items.forEach(item => {
+                    if (item.type === 'note') {
+                        const stubKeys = ['id', 'type', 'name', 'excerpt', 'pinned', 'status'];
+                        Object.keys(item).forEach(key => {
+                            if (!stubKeys.includes(key)) delete item[key];
+                        });
+                    } else if (item.children) {
+                        scrubStubs(item.children);
+                    }
                 });
+            };
+            scrubStubs(newStateForStubs.collections);
+
+            const { doc, collection, writeBatch, deleteDoc, getDocs, query, where } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const batch = writeBatch(db);
+
+            const notesColRef = collection(db, "notes");
+            const userNotesQuery = query(notesColRef, where("ownerId", "==", user.uid));
+            const existingNotesSnap = await getDocs(userNotesQuery);
+            existingNotesSnap.forEach(doc => batch.delete(doc.ref));
+
+            for (const noteId in fullNoteDataById) {
+                const noteRef = doc(db, "notes", noteId);
+                batch.set(noteRef, fullNoteDataById[noteId]);
+            }
+            
+            const userDocRef = doc(db, "users", user.uid, "data", "appState");
+            batch.set(userDocRef, newStateForStubs);
+
+            await batch.commit();
+            
+            dismissToast(toastId);
+            showToast('✅ Import complete! App will now reload.', 'success');
+            setTimeout(() => window.location.reload(), 1500);
+
+        } catch (err) {
+            dismissToast(toastId);
+            console.error("Import error:", err);
+            showToast('❌ Invalid or corrupted data file.', 'error');
+        } finally {
+            app.elements.importFileInput.value = '';
+        }
+    };
+    reader.readAsText(file);
+});
                 
                 document.addEventListener('keydown', (e) => {
                 if (e.key === ' ' && state.settings.activeNoteId) {
