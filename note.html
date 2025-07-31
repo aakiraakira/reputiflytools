@@ -3585,6 +3585,75 @@ if (checklistItem) {
 };
 // --- START: NEW RESEARCH AGENT LOGIC ---
 // --- START: NEW RESEARCH AGENT LOGIC ---
+// Add this new function
+const updateAllLinksAgent = async () => {
+    const toastId = showToast('🔗 Scanning all notes for link updates...', 'loading');
+    const { doc, writeBatch, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+
+    try {
+        // Step 1: Ensure all notes are loaded into the cache
+        const allNoteStubs = getAllNotes(state.collections);
+        const notesToLoad = allNoteStubs.filter(stub => !window.noteCache[stub.id]);
+        if (notesToLoad.length > 0) {
+            const fetchPromises = notesToLoad.map(stub => getDoc(doc(db, "notes", stub.id)).then(snap => {
+                if (snap.exists()) window.noteCache[stub.id] = snap.data();
+            }));
+            await Promise.all(fetchPromises);
+        }
+
+        const batch = writeBatch(db);
+        let updatedCount = 0;
+        const allNotes = Object.values(window.noteCache);
+        const nameToIdMap = new Map(allNoteStubs.map(n => [n.name.toLowerCase(), n.id]));
+
+        // Step 2: Iterate through every note and update its links
+        for (const note of allNotes) {
+            let contentChanged = false;
+            let newContent = note.content;
+
+            newContent = newContent.replace(/\[\[(.*?)\]\]/g, (match, noteName) => {
+                const trimmedName = noteName.trim();
+                const targetId = nameToIdMap.get(trimmedName.toLowerCase());
+                if (targetId) {
+                    return `[[${trimmedName}]]`; // Link is valid, keep it
+                }
+                // If link is broken, try to find note by old name (more complex) or leave as is for now.
+                // This basic implementation focuses on ensuring valid links are preserved.
+                return match; // For now, we leave broken links as they are.
+            });
+            
+            // This regex is for already-parsed links (<a> tags)
+            newContent = newContent.replace(/<a[^>]*class="internal-link"[^>]*data-note-id="([^"]+)"[^>]*>(.*?)<\/a>/g, (match, noteId, linkText) => {
+                const targetNote = findItem(noteId)?.item;
+                if (targetNote && targetNote.name !== linkText) {
+                    contentChanged = true;
+                    return `<a href="#" class="internal-link" title="Link to '${targetNote.name}'" data-note-id="${noteId}">${targetNote.name}</a>`;
+                }
+                return match; // No change needed
+            });
+
+
+            if (contentChanged) {
+                updatedCount++;
+                const noteRef = doc(db, "notes", note.id);
+                batch.update(noteRef, { content: newContent });
+            }
+        }
+
+        if (updatedCount > 0) {
+            await batch.commit();
+            dismissToast(toastId);
+            showToast(`✅ Updated links in ${updatedCount} note(s).`, 'success');
+        } else {
+            dismissToast(toastId);
+            showToast('👍 All links are already up to date.', 'info');
+        }
+    } catch (error) {
+        console.error("Link update failed:", error);
+        dismissToast(toastId);
+        showToast('❌ Failed to update links.', 'error');
+    }
+};
 const researchAgent = async (topic) => {
     const toastId = showToast(`🔬 Researching "${topic}"...`, 'loading');
 
@@ -8336,6 +8405,12 @@ const commands = [
     { name: 'unlink', description: 'Unlink notes. Usage: /unlink [target] from [source]', suggest: 'notes', execute: (args)=>{const s=/\s+from\s+/i;if(!s.test(args))return showToast('❌ Use: /unlink [target] from [source]','error');const p=args.split(s);const tN=p[0].trim();const sN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');const r=new RegExp(`\\[\\[\\s*${tO.name}\\s*\\]\\]`,'gi');if(!r.test(sO.content))return showToast(`❌ Link to "${tO.name}" not found in "${sO.name}".`,'info');sO.content=sO.content.replace(r,'').replace(/<p>\s*<\/p>|\n\s*\n/gi,'');updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Unlinked "${tO.name}" from "${sO.name}"`)}},
     { name: 'go', description: 'Go to item or tag. Usage: /go [item] or /go #[tag] [item]', suggest: 'items_or_tags', execute: (args)=>{if(!args)return showToast('❌ Specify item or tag.','error');if(args.startsWith('#')){const tN=args.split(' ')[0].substring(1).trim();const nN=args.substring(tN.length+2).trim();if(!tN)return showToast('❌ Tag name needed.','error');if(!getAllTags().includes(tN))return showToast(`❌ Tag not found: #${tN}`,'error');if(nN){const nT=getAllNotes(state.collections).filter(n=>(n.tags||[]).includes(tN));const t=findBestMatch(nN,nT);if(t){executeWithSmartFind(t.name,'notes',(i)=>{state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id}showToast(`🚀 Navigated to "${i.name}"`);saveState();render()})}else{showToast(`❌ Note "${nN}" not in tag #${tN}.`,'error')}}else{state.settings.activeTag=tN;state.settings.activeNoteId=null;state.settings.activeCollectionId=null;showToast(`🏷️ Showing notes tagged with #${tN}`);saveState();render()}}else{executeWithSmartFind(args,'items',(i)=>{state.settings.activeTag=null;if(i.type==='note'){const{parent}=findItem(i.id);state.settings.activeCollectionId=(Array.isArray(parent)||!parent)?null:parent.id;state.settings.activeNoteId=i.id}else{state.settings.activeCollectionId=i.id;state.settings.activeNoteId=null}showToast(`🚀 Navigated to "${i.name}"`);saveState();render()})}} },
     { name: 'theme', description: 'Toggle through color themes.', execute: ()=>document.getElementById('theme-toggle')?.click() },
+    // Add this object inside your commands array
+{
+    name: 'updatelinks',
+    description: 'Scans all notes and fixes links pointing to renamed notes.',
+    execute: updateAllLinksAgent
+},
     { name: 'voice', description: 'Start/stop voice dictation in current note.', execute: ()=>{if(!state.settings.activeNoteId)return showToast('❌ Must be in a note.','error');document.getElementById('dictate-btn')?.click()} },
     { name: 'linked', description: 'Show all connections for a note. Usage: /linked [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args, 'notes', (note)=>renderLinkedNotesModal(note)) },
     { name: 'help', description: 'Shows this list of all available commands.', execute: renderHelpModal },
@@ -10319,17 +10394,14 @@ if (button) {
 // --- END: New Mobile Menu Logic ---
                 // REPLACE the existing event listener with this one
 // REPLACE the existing event listener with this one
-app.containers.collectionsList.addEventListener('click', (e) => {
+app.containers.collectionsList.addEventListener('click', async (e) => {
     // First, check if the new plus button was clicked
     const addBtn = e.target.closest('.add-note-btn');
     if (addBtn) {
         e.preventDefault();
         e.stopPropagation(); // This stops the click from also navigating to the note/folder
-        
-        // Get the parent folder's ID that we stored on the button
-        const parentId = addBtn.dataset.parentId === 'null' ? null : addBtn.dataset.parentId;
 
-        // Call your existing createNewNote function with the correct parent ID
+        const parentId = addBtn.dataset.parentId === 'null' ? null : addBtn.dataset.parentId;
         createNewNote(true, '', parentId); 
         return; // Action is done, so we stop here
     }
@@ -10337,13 +10409,13 @@ app.containers.collectionsList.addEventListener('click', (e) => {
     // If the plus button wasn't clicked, run the original navigation logic
     const itemLink = e.target.closest('.collection-item-link');
     if (!itemLink) return;
-    
+
     e.preventDefault();
 
     const wrapper = itemLink.closest('.collection-item-wrapper');
     const id = wrapper.dataset.id;
     const { item } = findItem(id);
-    
+
     state.settings.activeTag = null; // Deactivate tag filter
 
     if (item.type === 'folder') {
@@ -10354,6 +10426,13 @@ app.containers.collectionsList.addEventListener('click', (e) => {
         state.settings.activeNoteId = null;
         item.expanded = !item.expanded;
     } else if (item.type === 'note') {
+        // ---💾 THIS IS THE FIX ---
+        // It now works because the function is async
+        if (isNoteDirty && state.settings.activeNoteId !== id) {
+            await performImmediateSave();
+        }
+        // ---💾 END OF FIX ---
+
         state.settings.activeNoteId = id;
         const result = findItem(id);
         const parent = result.parent;
