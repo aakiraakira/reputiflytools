@@ -3390,16 +3390,20 @@ const findAndDisplaySourceSnippets = (aiAnswer, sourceNotes) => {
     feather.replace();
 };
 function parseInternalLinks(htmlContent) {
-    
-    // This check now prevents the function from running if state or state.collections is missing.
+    // This check prevents the function from running if state or state.collections is missing.
     if (!htmlContent || !state || !state.collections) return htmlContent;
 
     const allNotes = getAllNotes(state.collections);
     return htmlContent.replace(/\[\[(.*?)\]\]/g, (match, noteName) => {
         const trimmedName = noteName.trim();
-        const foundNote = allNotes.find(n => n.name.toLowerCase() === trimmedName.toLowerCase());
+        
+        // --- THIS IS THE FIX ---
+        // We now trim the note name from the state data (n.name.trim()) before comparing.
+        // This protects against invisible leading/trailing spaces from bad data.
+        const foundNote = allNotes.find(n => n.name.trim().toLowerCase() === trimmedName.toLowerCase());
+        
         if (foundNote) {
-            return `<a href="#" class="internal-link" title="Link to '${foundNote.name}'" data-note-id="${foundNote.id}">${trimmedName}</a>`;
+            return `<a href="#" class="internal-link" title="Link to '${foundNote.name.trim()}'" data-note-id="${foundNote.id}">${trimmedName}</a>`;
         } else {
             return `<span class="internal-link-broken" title="Note not found: '${trimmedName}'">${trimmedName}</span>`;
         }
@@ -3637,8 +3641,14 @@ const researchAgent = async (topic) => {
     }
 
     // STEP 5: CREATE & LINK THE NEW NOTE
-    const newNoteName = `Research Brief: ${topic}`;
-    const newNote = await createNewNote(true, { name: newNoteName, content: marked.parse(aiBrief) }, null);
+    // STEP 5: CREATE & LINK THE NEW NOTE
+const newNoteName = `Research Brief: ${topic}`;
+
+// Convert markdown to HTML, then find and convert [[links]] to clickable <a> tags
+const initialHtml = marked.parse(aiBrief);
+const finalHtmlWithLinks = parseInternalLinks(initialHtml);
+
+const newNote = await createNewNote(true, { name: newNoteName, content: finalHtmlWithLinks }, null);
 
     // After creation, the note is active. We need to update its links and save again.
     const activeNoteFullData = window.noteCache[newNote.id];
@@ -5914,7 +5924,9 @@ async function renderNoteEditor() {
     app.elements.noteEditorTitle.style.height = 'auto';
     app.elements.noteEditorTitle.style.height = (app.elements.noteEditorTitle.scrollHeight) + 'px';
 
-    app.elements.noteEditorBody.innerHTML = DOMPurify.sanitize(noteData.content || '');
+    // Convert any [[Note Name]] text into clickable links
+const contentWithLinks = parseInternalLinks(noteData.content || '');
+app.elements.noteEditorBody.innerHTML = DOMPurify.sanitize(contentWithLinks);
 
     renderBacklinks(noteStub, noteData); // Helper function depends on noteData
     updateEditorStats();
