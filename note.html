@@ -3580,33 +3580,52 @@ if (checklistItem) {
     }
 };
 // --- START: NEW RESEARCH AGENT LOGIC ---
+// --- START: NEW RESEARCH AGENT LOGIC ---
 const researchAgent = async (topic) => {
     const toastId = showToast(`🔬 Researching "${topic}"...`, 'loading');
 
-    // STEP 1: FIND RELEVANT NOTES (Use existing search tool)
+    // STEP 1: FIND RELEVANT NOTE IDs
     const searchResults = lunrIndex.search(topic);
-    const sourceNotes = searchResults.slice(0, 5).map(res => findItem(res.ref)?.item).filter(Boolean);
+    const sourceNoteIds = searchResults.slice(0, 5).map(res => res.ref);
 
-    if (sourceNotes.length === 0) {
+    if (sourceNoteIds.length === 0) {
         dismissToast(toastId);
         showToast(`No relevant notes found for "${topic}".`, 'info');
         return;
     }
 
-    // STEP 2: READ & PREPARE CONTEXT (Use existing tools)
-    const context = sourceNotes.map(note => {
-        return `--- Note Source: "${note.name}" ---\n${note.content.replace(/<[^>]*>?/gm, '')}`;
-    }).join('\n\n');
+    // STEP 2: ENSURE REQUIRED NOTES ARE LOADED INTO THE CACHE
+    const notesToLoad = sourceNoteIds.filter(id => !window.noteCache[id]);
+    if (notesToLoad.length > 0) {
+        try {
+            const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const fetchPromises = notesToLoad.map(id => {
+                const noteRef = doc(db, "notes", id);
+                return getDoc(noteRef).then(noteSnap => {
+                    if (noteSnap.exists()) {
+                        window.noteCache[id] = noteSnap.data(); // Add to cache
+                    }
+                });
+            });
+            await Promise.all(fetchPromises);
+        } catch (error) {
+            dismissToast(toastId);
+            console.error("Error loading notes for research:", error);
+            showToast("Failed to load source notes.", "error");
+            return;
+        }
+    }
 
-    // STEP 3: SYNTHESIZE WITH AI (Use existing AI tool)
-    const prompt = `You are a research assistant. Based ONLY on the provided notes, write a comprehensive research brief about "${topic}".
-    Structure your response in well-written Markdown.
-    At the end of your response, include a "Sources" section listing the names of the notes you used, like this:
-    ## Sources
-    - [[Note Name 1]]
-    - [[Note Name 2]]`;
+    // STEP 3: READ & PREPARE CONTEXT FROM CACHED NOTES
+    const context = sourceNoteIds
+        .map(id => window.noteCache[id]) // Get full note data from cache
+        .filter(Boolean) // Filter out any notes that failed to load
+        .map(noteData => {
+            return `--- Note Source: "${noteData.name}" ---\n${(noteData.content || '').replace(/<[^>]*>?/gm, '')}`;
+        }).join('\n\n');
 
-    // We add the context after the main prompt
+    // STEP 4: SYNTHESIZE WITH AI
+    const prompt = `You are a research assistant. Based ONLY on the provided notes, write a comprehensive research brief about "${topic}". Structure your response in well-written Markdown. At the end of your response, include a "Sources" section listing the names of the notes you used, like this:\n## Sources\n- [[Note Name 1]]\n- [[Note Name 2]]`;
     const finalPrompt = `${prompt}\n\nContext from Notes:\n${context}`;
     const payload = { contents: [{ parts: [{ text: finalPrompt }] }] };
     const aiBrief = await callGeminiAPI(payload);
@@ -3617,16 +3636,17 @@ const researchAgent = async (topic) => {
         return;
     }
 
-    // STEP 4: CREATE & LINK THE NEW NOTE (Use existing tools)
+    // STEP 5: CREATE & LINK THE NEW NOTE
     const newNoteName = `Research Brief: ${topic}`;
-    // The createNewNote function will automatically switch to and focus the new note.
-    const newNote = createNewNote(true, marked.parse(aiBrief), null);
-    newNote.name = newNoteName;
-    updateNoteLinks(newNote); // This will automatically turn [[Note Name]] into clickable links!
+    const newNote = await createNewNote(true, { name: newNoteName, content: marked.parse(aiBrief) }, null);
 
-    // Final save and render
-    saveState();
-    render();
+    // After creation, the note is active. We need to update its links and save again.
+    const activeNoteFullData = window.noteCache[newNote.id];
+    if (activeNoteFullData) {
+        updateNoteLinks(activeNoteFullData);
+        await performImmediateSave(); // Save the link updates
+    }
+    
     showToast(`✅ Research brief created!`, 'success');
 };
 // --- START: NEW MEETING ASSISTANT LOGIC ---
@@ -12326,53 +12346,156 @@ const originalButton = originalToolbar.querySelector(selector);
                 app.modals.bookmarkletCloseBtn.addEventListener('click', () => closeModal(app.modals.bookmarklet));
 
                 app.elements.notesListPane.addEventListener('click', async e => {
-                    const button = e.target.closest('button[data-action]');
-                    if (!button) return;
-                    const action = button.dataset.action;
+    const button = e.target.closest('button[data-action]');
+    if (!button) return;
+    const action = button.dataset.action;
 
-                    if (action === 'export') {
-                        const dataStr = JSON.stringify(state, null, 2);
-                        const dataBlob = new Blob([dataStr], {type: "application/json"});
-                        const url = URL.createObjectURL(dataBlob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `codex-notes-backup-${new Date().toISOString().split('T')[0]}.json`;
-                        a.click();
-                        URL.revokeObjectURL(url);
-                        showToast('Data exported successfully!', 'success');
-                    } else if (action === 'import') {
-                        app.elements.importFileInput.click();
-                    }
+    if (action === 'export') {
+        const toastId = showToast('Preparing export... This may take a moment.', 'loading');
+        
+        try {
+            // Step 1: Ensure all notes are loaded from Firestore into the cache.
+            const allNoteStubs = getAllNotes(state.collections);
+            const notesToLoad = allNoteStubs.filter(stub => !window.noteCache[stub.id]);
+
+            if (notesToLoad.length > 0) {
+                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+                const fetchPromises = notesToLoad.map(stub => {
+                    const noteRef = doc(db, "notes", stub.id);
+                    return getDoc(noteRef).then(noteSnap => {
+                        if (noteSnap.exists()) { window.noteCache[stub.id] = noteSnap.data(); }
+                    });
                 });
+                await Promise.all(fetchPromises);
+            }
+
+            // Step 2: Create a full state object for export by combining stubs and cached data.
+            const stateForExport = JSON.parse(JSON.stringify(state)); // Deep copy to avoid modifying live state
+            const populateNotes = (items) => {
+                for (let i = 0; i < items.length; i++) {
+                    if (items[i].type === 'note') {
+                        const fullNoteData = window.noteCache[items[i].id];
+                        if (fullNoteData) {
+                            items[i] = { ...items[i], ...fullNoteData };
+                        }
+                    } else if (items[i].type === 'folder' && items[i].children) {
+                        populateNotes(items[i].children);
+                    }
+                }
+            };
+            populateNotes(stateForExport.collections);
+            
+            // Step 3: Stringify and download the complete data object.
+            const dataStr = JSON.stringify(stateForExport, null, 2);
+            const dataBlob = new Blob([dataStr], {type: "application/json"});
+            const url = URL.createObjectURL(dataBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `reputifly-notes-backup-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            dismissToast(toastId);
+            showToast('✅ Data exported successfully!', 'success');
+
+        } catch (error) {
+            dismissToast(toastId);
+            console.error("Export failed:", error);
+            showToast('❌ Failed to load all note data for export.', 'error');
+        }
+    }
+
+    // THIS IS THE NEWLY ADDED FIX FOR THE IMPORT BUTTON
+    if (action === 'import') {
+        app.elements.importFileInput.click();
+    }
+});
 
                 app.elements.importFileInput.addEventListener('change', async e => {
-                    const file = e.target.files[0];
-                    if (!file) return;
+    const file = e.target.files[0];
+    if (!file) return;
 
-                    const confirmed = await showConfirm({
-                        title: 'Import Data',
-                        message: 'This will <strong>overwrite all current data</strong> in the app. Are you sure you want to continue?',
-                        confirmText: 'Overwrite and Import',
-                        confirmClass: 'bg-orange-500'
-                    });
-                    if (!confirmed) return;
+    const confirmed = await showConfirm({
+        title: 'Import Data',
+        message: 'This will <strong>overwrite all current data</strong> in this app. This action cannot be undone. Are you sure you want to continue?',
+        confirmText: 'Overwrite and Import',
+        confirmClass: 'bg-orange-500'
+    });
 
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                        try {
-                            const importedState = JSON.parse(event.target.result);
-                            state = migrateState(importedState);
-                            saveState();
-                            showToast('Data imported successfully!', 'success');
-                            location.reload();
-                        } catch (err) {
-                            console.error("Import error:", err);
-                            showToast('Invalid or corrupted data file.', 'error');
-                        }
-                    };
-                    reader.readAsText(file);
-                    app.elements.importFileInput.value = '';
+    if (!confirmed) {
+        app.elements.importFileInput.value = ''; // Reset file input
+        return;
+    }
+    
+    const toastId = showToast('Importing data... Do not close this tab.', 'loading');
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+        try {
+            const importedState = JSON.parse(event.target.result);
+            const user = window.auth.currentUser;
+            if (!user) {
+                dismissToast(toastId);
+                showToast('❌ You must be logged in to import data.', 'error');
+                return;
+            }
+
+            const allImportedNotes = getAllNotes(importedState.collections);
+            const fullNoteDataById = {};
+            allImportedNotes.forEach(note => {
+                const { content, excerpt, properties, createdAt, modifiedAt, tags, links, sharedWith, ownerId, ...stub } = note;
+                fullNoteDataById[stub.id] = { content, excerpt, properties, createdAt, modifiedAt, tags, links, sharedWith, ownerId, name: stub.name };
+            });
+
+            const newStateForStubs = migrateState(importedState);
+            const scrubStubs = (items) => {
+                items.forEach(item => {
+                    if (item.type === 'note') {
+                        const stubKeys = ['id', 'type', 'name', 'excerpt', 'pinned', 'status'];
+                        Object.keys(item).forEach(key => {
+                            if (!stubKeys.includes(key)) delete item[key];
+                        });
+                    } else if (item.children) {
+                        scrubStubs(item.children);
+                    }
                 });
+            };
+            scrubStubs(newStateForStubs.collections);
+
+            const { doc, collection, writeBatch, deleteDoc, getDocs, query, where } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const batch = writeBatch(db);
+
+            const notesColRef = collection(db, "notes");
+            const userNotesQuery = query(notesColRef, where("ownerId", "==", user.uid));
+            const existingNotesSnap = await getDocs(userNotesQuery);
+            existingNotesSnap.forEach(doc => batch.delete(doc.ref));
+
+            for (const noteId in fullNoteDataById) {
+                const noteRef = doc(db, "notes", noteId);
+                batch.set(noteRef, fullNoteDataById[noteId]);
+            }
+            
+            const userDocRef = doc(db, "users", user.uid, "data", "appState");
+            batch.set(userDocRef, newStateForStubs);
+
+            await batch.commit();
+            
+            dismissToast(toastId);
+            showToast('✅ Import complete! App will now reload.', 'success');
+            setTimeout(() => window.location.reload(), 1500);
+
+        } catch (err) {
+            dismissToast(toastId);
+            console.error("Import error:", err);
+            showToast('❌ Invalid or corrupted data file.', 'error');
+        } finally {
+            app.elements.importFileInput.value = '';
+        }
+    };
+    reader.readAsText(file);
+});
                 
                 document.addEventListener('keydown', (e) => {
                 if (e.key === ' ' && state.settings.activeNoteId) {
