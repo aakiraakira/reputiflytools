@@ -5221,11 +5221,12 @@ if (themeMeta) {
             
 
             function updateNoteTags(note) {
-                if (!note || typeof note.content !== 'string') return;
-                const plainText = note.content.replace(/<[^>]*>?/gm, '');
-                const matches = plainText.match(/#(\w+)/g) || [];
-                note.tags = [...new Set(matches.map(tag => tag.substring(1)))];
-            }
+    if (!note || typeof note.content !== 'string') return;
+    // This regex now allows letters, numbers, underscores, and hyphens in tags.
+    const plainText = note.content.replace(/<[^>]*>?/gm, ' ');
+    const matches = plainText.match(/#([a-zA-Z0-9_-]+)/g) || [];
+    note.tags = [...new Set(matches.map(tag => tag.substring(1)))];
+}
 
             function updateNoteLinks(note) {
                 if (!note || typeof note.content !== 'string') return;
@@ -11128,33 +11129,31 @@ performImmediateSave = async () => {
         return;
     }
 
-    // --- START: ADDED EXCERPT LOGIC ---
-    // Generate a 200-character plain text excerpt for search and previews
     const plainText = newContent.replace(/<[^>]*>?/gm, ' ').trim();
     const excerpt = plainText.substring(0, 200);
-    // --- END: ADDED EXCERPT LOGIC ---
 
     const nameChanged = noteStub.name !== newName;
 
-    // Save the excerpt to the note's "stub" in the main state
-    noteStub.name = newName;
-    noteStub.excerpt = excerpt;
-
-    // Save the excerpt to the full note data in the cache
+    // Update the full note data in the cache
     noteContent.name = newName;
     noteContent.content = newContent;
     noteContent.excerpt = excerpt;
     noteContent.modifiedAt = new Date().toISOString();
-
     updateNoteLinks(noteContent);
     updateNoteTags(noteContent);
+
+    // --- THIS IS THE CRUCIAL FIX ---
+    // Sync the tags from the cache to the main state object used for rendering
+    noteStub.tags = noteContent.tags;
+    noteStub.name = newName;
+    noteStub.excerpt = excerpt;
+    // --- END OF FIX ---
 
     if (nameChanged) {
         renderCollectionsList();
     }
 
     try {
-        // This logic now saves the excerpt to the full note document in Firestore
         if (user.uid === noteContent.ownerId) {
             const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
             const noteRef = doc(db, "notes", noteId);
@@ -11162,7 +11161,7 @@ performImmediateSave = async () => {
             await updateDoc(noteRef, {
                 name: newName,
                 content: newContent,
-                excerpt: excerpt, // ADDED
+                excerpt: excerpt,
                 modifiedAt: noteContent.modifiedAt,
                 links: noteContent.links,
                 tags: noteContent.tags
@@ -11175,7 +11174,7 @@ performImmediateSave = async () => {
                 noteId: noteId,
                 newName: newName,
                 newContent: newContent,
-                newExcerpt: excerpt, // ADDED
+                newExcerpt: excerpt,
                 newLinks: noteContent.links,
                 newTags: noteContent.tags,
                 modifiedAt: noteContent.modifiedAt
@@ -11187,6 +11186,7 @@ performImmediateSave = async () => {
         updateSaveIndicator();
 
         scheduleRebuildIndex();
+        renderTagList(); // Re-render the tag list immediately after saving
 
     } catch (error) {
         console.error("Failed to save note:", error);
