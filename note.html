@@ -119,6 +119,51 @@
     opacity: 0;
     transform: scale(0) translateY(2px);
 }
+/* --- START: New Backlinks Section Styles --- */
+.backlink-item {
+    display: block;
+    background-color: var(--bg-pane-dark);
+    border-radius: 0.5rem; /* 8px */
+    padding: 0.75rem 1rem; /* 12px 16px */
+    text-decoration: none;
+    transition: background-color 0.2s ease-in-out;
+}
+.backlink-item:hover {
+    background-color: var(--bg-pane-light);
+}
+
+.backlink-item-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem; /* 8px */
+    font-size: 1rem; /* 16px */
+}
+
+.backlink-item-header .note-name {
+    font-weight: 600; /* bold */
+    color: var(--text-primary);
+}
+
+.backlink-item-header .folder-name {
+    color: var(--text-secondary);
+}
+
+.backlink-item-excerpt {
+    font-size: 0.875rem; /* 14px */
+    color: var(--text-secondary);
+    margin-top: 0.5rem; /* 8px */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.backlink-item-footer {
+    font-size: 0.75rem; /* 12px */
+    color: var(--text-tertiary);
+    margin-top: 0.75rem; /* 12px */
+}
+/* --- END: New Backlinks Section Styles --- */
 #save-indicator.visible {
     /* Become visible and move down slightly for perfect centering */
     opacity: 1;
@@ -2360,15 +2405,9 @@ window.functions = getFunctions(app,);
                     <div id="markdown-preview" class="hidden flex-grow text-lg leading-relaxed focus:outline-none p-4 md:p-8 prose"></div>
                     <div id="backlinks-pane" class="hidden p-4 md:px-8 border-t border-border-color">
     <div class="flex justify-between items-center mb-3">
-        <div class="flex items-center gap-2">
+        <button id="toggle-backlinks-btn" class="flex items-center gap-2 text-left w-full">
+            <i data-feather="chevron-down" class="w-4 h-4 transition-transform duration-200 text-text-tertiary"></i>
             <h4 class="font-semibold text-sm uppercase tracking-wider text-text-secondary">Linked Here</h4>
-            <button id="toggle-backlinks-btn" class="p-1 rounded-full hover:bg-bg-pane-dark">
-                <i data-feather="chevron-down" class="w-4 h-4 transition-transform duration-200"></i>
-            </button>
-        </div>
-        <button id="summarize-backlinks-btn" class="flex items-center gap-2 text-sm text-accent-primary hover:opacity-80 transition-opacity" title="Summarize all linked notes with AI">
-            <i data-feather="zap" class="w-4 h-4"></i>
-            <span>AI Summary</span>
         </button>
     </div>
     <div id="backlinks-list" class="space-y-3 transition-all duration-300"></div>
@@ -6039,10 +6078,54 @@ app.elements.noteEditorBody.innerHTML = DOMPurify.sanitize(contentWithLinks);
 function renderBacklinks(noteStub, noteData) {
     const backlinksPane = document.getElementById('backlinks-pane');
     const backlinksList = document.getElementById('backlinks-list');
+
+    // Ensure we have the necessary data to find links
+    if (!noteData || !noteData.name) {
+        backlinksPane.classList.add('hidden');
+        return;
+    }
+
+    const currentNoteName = noteData.name.toLowerCase();
+    const currentNoteId = noteStub.id;
+
+    // Use the complete, cached note data to find backlinks
+    const allCachedNotes = Object.entries(window.noteCache).map(([id, data]) => ({ id, ...data }));
     
-    // We can't search for backlinks until more notes are cached.
-    // For now, this is a simplified approach. A full backlink search would be more complex.
-    backlinksPane.classList.add('hidden');
+    const backlinkingNotes = allCachedNotes.filter(note => 
+        note.id !== currentNoteId && 
+        (note.links || []).some(linkName => linkName.toLowerCase() === currentNoteName)
+    );
+
+    if (backlinkingNotes.length === 0) {
+        backlinksPane.classList.add('hidden');
+        return;
+    }
+
+    backlinksPane.classList.remove('hidden');
+
+    backlinksList.innerHTML = backlinkingNotes.map(note => {
+        // Find the folder name for the backlinking note
+        const findResult = findItem(note.id);
+        const parent = findResult ? findResult.parent : null;
+        const parentName = parent && !Array.isArray(parent) ? parent.name : 'Uncategorized';
+        
+        const modifiedDate = formatDateTime(note.modifiedAt);
+        const excerpt = note.excerpt || 'No additional context.';
+
+        return `
+            <a href="#" class="backlink-item" data-note-id="${note.id}">
+                <div class="backlink-item-header">
+                    <span class="note-name">${note.name}</span>
+                    <span class="text-text-tertiary">|</span>
+                    <span class="folder-name">${parentName}</span>
+                </div>
+                <p class="backlink-item-excerpt">${excerpt}</p>
+                <div class="backlink-item-footer">Modified: ${modifiedDate}</div>
+            </a>
+        `;
+    }).join('');
+
+    renderBacklinksState(); // This function will correctly show/hide the list based on state
 }
 // =================================================================
 // END: REPLACEMENT renderNoteEditor FUNCTION
