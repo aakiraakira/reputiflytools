@@ -6012,13 +6012,59 @@ app.elements.noteEditorBody.innerHTML = DOMPurify.sanitize(contentWithLinks);
 }
 
 // Helper for renderNoteEditor
-function renderBacklinks(noteStub, noteData) {
+// Helper for renderNoteEditor
+async function renderBacklinks(noteStub, noteData) {
     const backlinksPane = document.getElementById('backlinks-pane');
     const backlinksList = document.getElementById('backlinks-list');
-    
-    // We can't search for backlinks until more notes are cached.
-    // For now, this is a simplified approach. A full backlink search would be more complex.
-    backlinksPane.classList.add('hidden');
+    // This finds and hides the AI Summary button as you requested.
+    const summarizeBtn = document.getElementById('summarize-backlinks-btn');
+    if (summarizeBtn) {
+        summarizeBtn.style.display = 'none';
+    }
+
+    // Use a case-insensitive regex to find links to the current note
+    const backlinkRegex = new RegExp(`\\[\\[${noteStub.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\]`, 'i');
+
+    const backlinkingNotes = Object.values(window.noteCache).filter(n =>
+        n.id !== noteStub.id &&
+        backlinkRegex.test(n.content || '')
+    );
+
+    if (backlinkingNotes.length > 0) {
+        backlinksList.innerHTML = backlinkingNotes.map(note => {
+            const findResult = findItem(note.id);
+            const parentFolder = (findResult && findResult.parent && !Array.isArray(findResult.parent)) ? findResult.parent.name : 'Uncategorized';
+
+            // Custom date formatting to match your screenshot
+            const modifiedDate = new Date(note.modifiedAt).toLocaleString('en-SG', {
+                day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
+            }).replace(',', '');
+
+            // Create a text excerpt around the link
+            const plainContent = (note.content || '').replace(/<[^>]*>?/gm, ' ');
+            const matchIndex = plainContent.search(backlinkRegex);
+            const start = Math.max(0, matchIndex - 40);
+            const excerpt = plainContent.substring(start, start + 120)
+                .replace(backlinkRegex, `<strong>[[${noteStub.name}]]</strong>`);
+
+            return `
+                <a href="#" class="backlink-item block p-3 rounded-lg bg-bg-main border border-border-color" data-note-id="${note.id}">
+                    <div class="flex items-center gap-2 text-sm font-medium text-text-primary">
+                        <span>${note.name}</span>
+                        <span class="text-text-tertiary">|</span>
+                        <span class="text-text-secondary">${parentFolder}</span>
+                    </div>
+                    <p class="text-sm text-text-secondary mt-1 italic">...${excerpt}...</div>
+                    <p class="text-xs text-text-tertiary mt-2">Modified: ${modifiedDate}</p>
+                </a>
+            `;
+        }).join('');
+        
+        backlinksPane.classList.remove('hidden');
+        renderBacklinksState(); // This makes the expand/collapse arrow work
+    } else {
+        backlinksPane.classList.add('hidden');
+    }
 }
 // =================================================================
 // END: REPLACEMENT renderNoteEditor FUNCTION
@@ -6686,6 +6732,13 @@ ${noteContent}`;
 };
 
             async function init() {
+            // Add this inside the init() function
+document.getElementById('toggle-backlinks-btn').addEventListener('click', () => {
+    state.settings.backlinksCollapsed = !state.settings.backlinksCollapsed;
+    saveState();
+    renderBacklinksState();
+    feather.replace(); // This rotates the chevron icon
+});
                 const updateSaveIndicator = () => {
     const indicator = document.getElementById('save-indicator');
     if (indicator) {
