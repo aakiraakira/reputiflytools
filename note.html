@@ -4414,10 +4414,7 @@ const defaultState = {
     app.containers.tagList.classList.toggle('collapsed', isCollapsed);
 }
             function migrateState(loadedState) {
-    // This function ensures that data loaded from the cloud has all the necessary properties,
-    // preventing errors if the data structure is old or incomplete.
-
-    const migrateNode = (node) => {
+    const migrateNode = (node, parentFolder = null) => {
         if (node.type === 'note') {
             if (typeof node.pinned === 'undefined') node.pinned = false;
             if (!Array.isArray(node.links)) node.links = [];
@@ -4425,47 +4422,47 @@ const defaultState = {
             const now = new Date().toISOString();
             if (typeof node.createdAt === 'undefined') node.createdAt = now;
             if (typeof node.modifiedAt === 'undefined') node.modifiedAt = node.createdAt;
-                    if (typeof node.properties === 'undefined') node.properties = {}; // ADD THIS LINE
-                    if (typeof node.propertiesCollapsed === 'undefined') node.propertiesCollapsed = false; // ADD THIS LINE
+            if (typeof node.properties === 'undefined') node.properties = {};
+            if (typeof node.propertiesCollapsed === 'undefined') node.propertiesCollapsed = false;
 
-
+            // --- THIS IS THE NEW MIGRATION LOGIC ---
+            // If an old note is missing a status, assign it a default one.
+            if (typeof node.status === 'undefined') {
+                if (parentFolder && loadedState.kanbanColumns[parentFolder.id] && loadedState.kanbanColumns[parentFolder.id][0]) {
+                    node.status = loadedState.kanbanColumns[parentFolder.id][0].id;
+                } else {
+                    node.status = null;
+                }
+            }
+            // --- END OF NEW LOGIC ---
         }
         if (node.children) {
-            // Ensure children is an array before trying to loop through it
             if (Array.isArray(node.children)) {
-                node.children.forEach(migrateNode);
+                // Pass the current folder as the parent for its children
+                node.children.forEach(child => migrateNode(child, node));
             } else {
                 node.children = [];
             }
         }
     };
-    if (typeof loadedState.settings.backlinksCollapsed === 'undefined') loadedState.settings.backlinksCollapsed = false; // Add this line
-
 
     if (!loadedState) loadedState = {};
     if (!loadedState.settings) loadedState.settings = {};
-        if (typeof loadedState.settings.chatbotVisible === 'undefined') loadedState.settings.chatbotVisible = true; // ADD THIS LINE
-        if (typeof loadedState.settings.propertiesVisible === 'undefined') loadedState.settings.propertiesVisible = true;
-
-
-
-    // THIS IS THE KEY FIX: Ensure .collections is always an array.
-    if (!Array.isArray(loadedState.collections)) {
-        loadedState.collections = [];
-    }
-
+    if (typeof loadedState.settings.backlinksCollapsed === 'undefined') loadedState.settings.backlinksCollapsed = false;
+    if (typeof loadedState.settings.chatbotVisible === 'undefined') loadedState.settings.chatbotVisible = true;
+    if (typeof loadedState.settings.propertiesVisible === 'undefined') loadedState.settings.propertiesVisible = true;
+    if (!Array.isArray(loadedState.collections)) loadedState.collections = [];
     if (!loadedState.kanbanColumns) loadedState.kanbanColumns = {};
     if (!Array.isArray(loadedState.chatHistory)) loadedState.chatHistory = [];
     if (!Array.isArray(loadedState.templates)) loadedState.templates = [];
 
-    // Now that we've confirmed .collections is an array, we can safely loop through it.
-    loadedState.collections.forEach(migrateNode);
+    // This initial call passes `null` as the parent for top-level items
+    loadedState.collections.forEach(node => migrateNode(node, null));
 
-    // Set default settings if they are missing
     if (typeof loadedState.settings.sidebarCollapsed === 'undefined') loadedState.settings.sidebarCollapsed = false;
     if (typeof loadedState.settings.paneWidth === 'undefined') loadedState.settings.paneWidth = 280;
     if (typeof loadedState.settings.activeTag === 'undefined') loadedState.settings.activeTag = null;
-    if (typeof loadedState.settings.tagsCollapsed === 'undefined') loadedState.settings.tagsCollapsed = false; // Add this line
+    if (typeof loadedState.settings.tagsCollapsed === 'undefined') loadedState.settings.tagsCollapsed = false;
     if (!loadedState.settings.listSortOrder) loadedState.settings.listSortOrder = 'modifiedAt-desc';
     if (!loadedState.settings.editorMode) loadedState.settings.editorMode = 'editor';
 
@@ -5668,58 +5665,79 @@ function renderDayView(date) {
 }
 // END OF NEW FUNCTION
             function renderKanbanView() {
-                app.views.board.classList.remove('hidden');
-                const collectionId = state.settings.activeCollectionId;
-                const collection = findItem(collectionId)?.item;
+    app.views.board.classList.remove('hidden');
+    const collectionId = state.settings.activeCollectionId;
+    const collection = findItem(collectionId)?.item;
 
-                if (!collection || collection.type !== 'folder') {
-                    app.containers.kanbanBoard.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="trello" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">Board View</h3><p>This view is only available for project folders.</p></div>`;
-                    feather.replace();
-                    return;
-                }
-                
-                const columns = state.kanbanColumns[collectionId] || [];
-                const notesInCollection = collection.children.filter(c => c.type === 'note') || [];
-                
-                const columnsHTML = columns.map(column => {
-                    const notesInColumn = [...notesInCollection]
-                        .filter(note => note.status === column.id)
-                        .sort((a,b) => notesInCollection.indexOf(a) - notesInCollection.indexOf(b));
-                        
-                    const cardsHTML = notesInColumn.map(note => {
-                            const date = formatDateTime(note.modifiedAt);
-                            const pinnedClass = note.pinned ? 'pinned' : '';
-                            return `
-                                <div class="kanban-card p-3 rounded-md shadow-sm border border-border-color mb-3 cursor-pointer hover:shadow-lg transition-all ${pinnedClass}" draggable="true" data-note-id="${note.id}">
-                                    <div class="pointer-events-none flex-grow overflow-hidden">
-                                        <h4 class="font-semibold pointer-events-none truncate">${note.name}</h4>
-                                        <p class="text-sm text-text-secondary mt-1 pointer-events-none truncate-multiline card-content">${note.excerpt || ''}</p>
-                                    </div>
-                                    <div class="text-xs text-text-tertiary mt-2 pointer-events-none flex-shrink-0">Modified: ${date}</div>
-                                </div>
-                            `;
-                        }).join('');
+    if (!collection || collection.type !== 'folder') {
+        app.containers.kanbanBoard.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="trello" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">Board View</h3><p>This view is only available for project folders.</p></div>`;
+        feather.replace();
+        return;
+    }
+    
+    const columns = state.kanbanColumns[collectionId] || [];
+    const notesInCollection = (collection.children || []).filter(c => c.type === 'note');
+    
+    // --- START: KANBAN FIX & MIGRATION ---
+    // This new logic checks every note and assigns it to the first column if its status is missing or invalid.
+    if (columns.length > 0) {
+        let needsSave = false;
+        const firstColumnId = columns[0].id;
+        const validColumnIds = new Set(columns.map(c => c.id));
 
-                    return `
-                        <div class="kanban-column w-[280px] md:w-[300px] flex-shrink-0 bg-bg-pane-dark p-3 rounded-lg" data-column-id="${column.id}">
-                            <div class="column-header flex justify-between items-center font-semibold mb-3 text-text-primary">
-                                <span class="rename-column-btn cursor-pointer flex-grow p-1">${column.title}</span>
-                                <button class="delete-column-btn text-text-tertiary hover:text-red-500 opacity-0 transition-opacity p-1"><i data-feather="x" class="w-4 h-4"></i></button>
-                            </div>
-                            <div class="cards-container min-h-[100px]">${cardsHTML}</div>
-                        </div>
-                    `;
-                }).join('');
-                
-                const addColumnBtnHTML = columns.length < 5 ? `
-                     <div class="w-[280px] md:w-[300px] flex-shrink-0">
-                        <button id="add-column-btn" class="w-full bg-bg-pane-light p-3 rounded-lg text-text-secondary hover:bg-main hover:text-accent-primary transition-colors">
-                            <i data-feather="plus" class="inline-block mr-2"></i>Add Column
-                        </button>
-                    </div>` : '';
-
-                app.containers.kanbanBoard.innerHTML = columnsHTML + addColumnBtnHTML;
+        notesInCollection.forEach(note => {
+            if (!note.status || !validColumnIds.has(note.status)) {
+                note.status = firstColumnId;
+                needsSave = true;
             }
+        });
+
+        // If we fixed any notes, save the changes back to the database.
+        if (needsSave) {
+            console.log("Kanban view is correcting note statuses...");
+            saveState();
+        }
+    }
+    // --- END: KANBAN FIX & MIGRATION ---
+    
+    const columnsHTML = columns.map(column => {
+        const notesInColumn = notesInCollection.filter(note => note.status === column.id);
+            
+        const cardsHTML = notesInColumn.map(note => {
+                const date = formatDateTime(note.modifiedAt);
+                const pinnedClass = note.pinned ? 'pinned' : '';
+                return `
+                    <div class="kanban-card p-3 rounded-md shadow-sm border border-border-color mb-3 cursor-pointer hover:shadow-lg transition-all ${pinnedClass}" draggable="true" data-note-id="${note.id}">
+                        <div class="pointer-events-none flex-grow overflow-hidden">
+                            <h4 class="font-semibold pointer-events-none truncate">${note.name}</h4>
+                            <p class="text-sm text-text-secondary mt-1 pointer-events-none truncate-multiline card-content">${note.excerpt || ''}</p>
+                        </div>
+                        <div class="text-xs text-text-tertiary mt-2 pointer-events-none flex-shrink-0">Modified: ${date}</div>
+                    </div>
+                `;
+            }).join('');
+
+        return `
+            <div class="kanban-column w-[280px] md:w-[300px] flex-shrink-0 bg-bg-pane-dark p-3 rounded-lg" data-column-id="${column.id}">
+                <div class="column-header flex justify-between items-center font-semibold mb-3 text-text-primary">
+                    <span class="rename-column-btn cursor-pointer flex-grow p-1">${column.title}</span>
+                    <button class="delete-column-btn text-text-tertiary hover:text-red-500 opacity-0 transition-opacity p-1"><i data-feather="x" class="w-4 h-4"></i></button>
+                </div>
+                <div class="cards-container min-h-[100px]">${cardsHTML}</div>
+            </div>
+        `;
+    }).join('');
+    
+    const addColumnBtnHTML = columns.length < 5 ? `
+         <div class="w-[280px] md:w-[300px] flex-shrink-0">
+            <button id="add-column-btn" class="w-full bg-bg-pane-light p-3 rounded-lg text-text-secondary hover:bg-main hover:text-accent-primary transition-colors">
+                <i data-feather="plus" class="inline-block mr-2"></i>Add Column
+            </button>
+        </div>` : '';
+
+    app.containers.kanbanBoard.innerHTML = columnsHTML + addColumnBtnHTML;
+    feather.replace();
+}
 
 function renderListView() {
     app.views.list.classList.remove('hidden');
@@ -6332,29 +6350,28 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
     const user = window.auth.currentUser;
     if (!user) return null;
 
-    const { doc, collection, writeBatch, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+    const { doc, collection, writeBatch, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
 
     let finalParentId = parentId;
     if (finalParentId === undefined) {
         finalParentId = state.settings.activeCollectionId;
     }
 
-    // --- START: NEW EXCERPT LOGIC ---
     const initialContent = template.content || '';
     const plainText = initialContent.replace(/<[^>]*>?/gm, ' ').trim();
     const initialExcerpt = plainText.substring(0, 200);
-    // --- END: NEW EXCERPT LOGIC ---
-
     const now = new Date().toISOString();
+
     const newNoteData = {
         ownerId: user.uid,
         name: template.name || 'Untitled Note',
         content: initialContent,
-        excerpt: initialExcerpt, // ADD THIS
+        excerpt: initialExcerpt,
         properties: template.properties ? JSON.parse(JSON.stringify(template.properties)) : {},
         createdAt: now,
         modifiedAt: now,
         tags: [],
+        links: [],
         sharedWith: []
     };
 
@@ -6371,15 +6388,24 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
         finalParentId = null;
     }
 
+    // --- THIS IS THE KANBAN FIX ---
+    // Determine the initial Kanban status for the new note.
+    let initialStatus = null;
+    if (finalParentId && state.kanbanColumns[finalParentId] && state.kanbanColumns[finalParentId].length > 0) {
+        initialStatus = state.kanbanColumns[finalParentId][0].id;
+    }
+
     const newNoteStub = {
         id: noteId,
         type: 'note',
         name: newNoteData.name,
-        excerpt: initialExcerpt, // ADD THIS
-        pinned: false
+        excerpt: initialExcerpt,
+        pinned: false,
+        status: initialStatus // Assign the default status
     };
     targetArray.unshift(newNoteStub);
 
+    // Save both the full note data and the updated folder structure
     const batch = writeBatch(db);
     batch.set(newNoteRef, newNoteData);
     window.noteCache[noteId] = newNoteData;
