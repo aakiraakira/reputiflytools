@@ -4471,14 +4471,8 @@ const defaultState = {
 
             // REPLACE the old loadState function with this one.
 
-// =================================================================
-// START: FINAL REPLACEMENT loadState FUNCTION (WITH MIGRATION)
-// =================================================================
-// =================================================================
-// START: FINAL REPLACEMENT loadState FUNCTION (WITH ALL FIXES)
-// =================================================================
-// =================================================================
-// START: FINAL REPLACEMENT loadState FUNCTION (WITH ALL FIXES)
+
+// START: REPLACEMENT loadState FUNCTION (Lazy Loading)
 // =================================================================
 // notetakeapp.html
 
@@ -4490,12 +4484,24 @@ async function loadState() {
     if (!user) return;
 
     const toastId = showToast('Loading workspace...', 'loading');
-    // We only need the user's settings and folder structure on initial load.
-    const userDocRef = doc(window.db, "users", user.uid, "data", "appState");
-
+    
     try {
-        const { getDoc, collection, writeBatch, doc: createDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+        // CORRECTED: Added getDocs, query, where, and setDoc to the import
+        const { getDoc, getDocs, collection, query, where, setDoc, doc: createDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
 
+        // 1. Initialize an empty note cache
+        window.noteCache = {};
+
+        // 2. Pre-fetch data for all notes shared with the user and populate the cache
+        // This ensures the sidebar can correctly identify shared notes on first render.
+        const sharedNotesQuery = query(collection(db, "notes"), where("sharedWith", "array-contains", user.uid));
+        const sharedNotesSnap = await getDocs(sharedNotesQuery);
+        sharedNotesSnap.forEach(doc => {
+            window.noteCache[doc.id] = doc.data();
+        });
+
+        // 3. Load the user's main state (folder structure, settings, etc.)
+        const userDocRef = createDoc(window.db, "users", user.uid, "data", "appState");
         const userSettingsSnap = await getDoc(userDocRef);
         let settingsAndFolders;
 
@@ -4503,15 +4509,11 @@ async function loadState() {
             settingsAndFolders = userSettingsSnap.data();
         } else {
             console.log("New user detected, creating default state.");
-            // For new users, create the default folder structure but don't create note documents yet.
-            // They will be created when the user first clicks on them.
             settingsAndFolders = JSON.parse(JSON.stringify(defaultState));
             await setDoc(userDocRef, settingsAndFolders);
         }
         
-        // This is the key change: The note cache starts empty!
-        window.noteCache = {};
-        
+        // 4. Migrate the state (this remains unchanged)
         state = migrateState(settingsAndFolders);
 
     } catch (error) {
@@ -4525,6 +4527,9 @@ async function loadState() {
         state.settings.theme = localStorage.getItem('codex-notes-theme') || 'reputify';
     }
 }
+// =================================================================
+// END: REPLACEMENT loadState FUNCTION
+// =================================================================
 // =================================================================
 // END: REPLACEMENT loadState FUNCTION
 // =================================================================
