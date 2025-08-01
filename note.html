@@ -11451,155 +11451,151 @@ app.elements.noteEditorBody.addEventListener('paste', (e) => {
                 });
 
                 app.toolbar.graphBtn.addEventListener('click', () => {
-                    const noteId = state.settings.activeNoteId;
-                    if (!noteId) return;
-                        document.getElementById('sidebar-toggle-btn').style.display = 'none'; // ADD THIS LINE
+    const noteId = state.settings.activeNoteId;
+    if (!noteId) return;
+    document.getElementById('sidebar-toggle-btn').style.display = 'none';
 
+    try {
+        // --- FIX START: Use full note data from the cache ---
+        const allNotes = Object.entries(window.noteCache).map(([id, data]) => ({ id, ...data }));
+        const currentNote = window.noteCache[noteId];
 
-                    try {
-                        const allNotes = getAllNotes(state.collections);
-                        const { item: currentNote } = findItem(noteId);
+        if (!currentNote) {
+            return showToast('❌ Note content not loaded. Use /load or open the note first.', 'error');
+        }
+        // --- FIX END ---
 
-                        const nodes = new vis.DataSet([{ id: currentNote.id, label: currentNote.name, color: getComputedStyle(document.documentElement).getPropertyValue('--accent-primary') }]);
-                        const edges = new vis.DataSet();
+        const nodes = new vis.DataSet([{ id: noteId, label: currentNote.name, color: getComputedStyle(document.documentElement).getPropertyValue('--accent-primary') }]);
+        const edges = new vis.DataSet();
 
-                        // Links from current note
-                        (currentNote.links || []).forEach(linkName => {
-                            const targetNote = allNotes.find(n => n.name.toLowerCase() === linkName.toLowerCase());
-                            if (targetNote && targetNote.id !== currentNote.id) {
-                                if (!nodes.get(targetNote.id)) {
-                                    nodes.add({ id: targetNote.id, label: targetNote.name });
-                                }
-                                edges.add({ from: currentNote.id, to: targetNote.id, arrows: 'to' });
-                            }
-                        });
+        // Links from current note
+        (currentNote.links || []).forEach(linkName => {
+            const targetNote = allNotes.find(n => n.name.toLowerCase() === linkName.toLowerCase());
+            if (targetNote && targetNote.id !== noteId) {
+                if (!nodes.get(targetNote.id)) {
+                    nodes.add({ id: targetNote.id, label: targetNote.name });
+                }
+                edges.add({ from: noteId, to: targetNote.id, arrows: 'to' });
+            }
+        });
 
-                        // Links to current note (backlinks)
-                        allNotes.forEach(note => {
-                            if (note.id !== currentNote.id && (note.links || []).some(link => link.toLowerCase() === currentNote.name.toLowerCase())) {
-                                 if (!nodes.get(note.id)) {
-                                    nodes.add({ id: note.id, label: note.name });
-                                }
-                                edges.add({ from: note.id, to: currentNote.id, arrows: 'to' });
-                            }
-                        });
-                        
-                        const computedStyles = getComputedStyle(document.documentElement);
+        // Links to current note (backlinks)
+        allNotes.forEach(note => {
+            if (note.id !== noteId && (note.links || []).some(link => link.toLowerCase() === currentNote.name.toLowerCase())) {
+                 if (!nodes.get(note.id)) {
+                    nodes.add({ id: note.id, label: note.name });
+                }
+                edges.add({ from: note.id, to: noteId, arrows: 'to' });
+            }
+        });
+        
+        const computedStyles = getComputedStyle(document.documentElement);
 
-                        const options = {
-                            nodes: {
-                                shape: 'box',
-                                color: computedStyles.getPropertyValue('--bg-pane-dark').trim(),
-                                font: { color: computedStyles.getPropertyValue('--text-primary').trim() },
-                                borderWidth: 1,
-                            },
-                            edges: {
-                                color: {
-                                    color: computedStyles.getPropertyValue('--text-tertiary').trim(),
-                                    highlight: computedStyles.getPropertyValue('--accent-primary').trim(),
-                                }
-                            },
-                            physics: {
-                                enabled: true,
-                                solver: 'barnesHut',
-                                barnesHut: {
-                                    gravitationalConstant: -4000,
-                                    centralGravity: 0.1,
-                                    springLength: 150,
-                                }
-                            },
-                            interaction: {
-                                dragNodes: true,
-                                dragView: true,
-                                zoomView: true
-                            }
-                        };
-                        new vis.Network(app.modals.graphContainer, { nodes, edges }, options);
-                        const network = new vis.Network(app.modals.graphContainer, { nodes, edges }, options);
+        const options = {
+            nodes: {
+                shape: 'box',
+                color: computedStyles.getPropertyValue('--bg-pane-dark').trim(),
+                font: { color: computedStyles.getPropertyValue('--text-primary').trim() },
+                borderWidth: 1,
+            },
+            edges: {
+                color: {
+                    color: computedStyles.getPropertyValue('--text-tertiary').trim(),
+                    highlight: computedStyles.getPropertyValue('--accent-primary').trim(),
+                }
+            },
+            physics: {
+                enabled: true,
+                solver: 'barnesHut',
+                barnesHut: {
+                    gravitationalConstant: -4000,
+                    centralGravity: 0.1,
+                    springLength: 150,
+                }
+            },
+            interaction: {
+                dragNodes: true,
+                dragView: true,
+                zoomView: true
+            }
+        };
+        const network = new vis.Network(app.modals.graphContainer, { nodes, edges }, options);
 
-                        // --- START: NEW & IMPROVED INTERACTIVITY CODE ---
-                        network.on('click', function(params) {
-                            if (params.nodes.length > 0) {
-                                const noteId = params.nodes[0];
-                                const noteToOpen = findItem(noteId)?.item;
-                                if (noteToOpen) {
-                                    state.settings.activeNoteId = noteId;
-                                    const { parent } = findItem(noteId);
-                                    state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
-                                    state.settings.activeTag = null;
-                                    saveState();
-                                    render();
-                                    closeModal(app.modals.graph);
-                                }
-                            }
-                        });
+        network.on('click', function(params) {
+            if (params.nodes.length > 0) {
+                const clickedNoteId = params.nodes[0];
+                const noteToOpen = findItem(clickedNoteId)?.item;
+                if (noteToOpen) {
+                    state.settings.activeNoteId = clickedNoteId;
+                    const { parent } = findItem(clickedNoteId);
+                    state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+                    state.settings.activeTag = null;
+                    saveState();
+                    render();
+                    closeModal(app.modals.graph);
+                }
+            }
+        });
 
-                        const createTooltip = () => {
-                            let tooltip = document.getElementById('note-graph-tooltip');
-                            if (!tooltip) {
-                                tooltip = document.createElement('div');
-                                tooltip.id = 'note-graph-tooltip';
-                                tooltip.style.position = 'absolute';
-                                tooltip.style.visibility = 'hidden';
-                                tooltip.style.backgroundColor = 'var(--bg-pane-dark)';
-                                tooltip.style.border = '1px solid var(--border-color)';
-                                tooltip.style.borderRadius = '8px';
-                                tooltip.style.padding = '12px';
-                                tooltip.style.maxWidth = '300px';
-                                tooltip.style.color = 'var(--text-primary)';
-                                tooltip.style.boxShadow = '0 4px 12px var(--shadow-color)';
-                                tooltip.style.pointerEvents = 'none';
-                                tooltip.style.zIndex = '10000';
-                                tooltip.style.opacity = '0';
-                                tooltip.style.transition = 'opacity 0.2s ease-in-out';
-                                document.body.appendChild(tooltip);
-                            }
-                            return tooltip;
-                        };
-                        
-                        network.on('hoverNode', function(params) {
-                            const noteId = params.node;
-                            const note = findItem(noteId)?.item;
-                            const tooltip = createTooltip();
+        const createTooltip = () => {
+            let tooltip = document.getElementById('note-graph-tooltip');
+            if (!tooltip) {
+                tooltip = document.createElement('div');
+                tooltip.id = 'note-graph-tooltip';
+                tooltip.style.position = 'absolute';
+                tooltip.style.visibility = 'hidden';
+                tooltip.style.backgroundColor = 'var(--bg-pane-dark)';
+                tooltip.style.border = '1px solid var(--border-color)';
+                tooltip.style.borderRadius = '8px';
+                tooltip.style.padding = '12px';
+                tooltip.style.maxWidth = '300px';
+                tooltip.style.color = 'var(--text-primary)';
+                tooltip.style.boxShadow = '0 4px 12px var(--shadow-color)';
+                tooltip.style.pointerEvents = 'none';
+                tooltip.style.zIndex = '10000';
+                tooltip.style.opacity = '0';
+                tooltip.style.transition = 'opacity 0.2s ease-in-out';
+                document.body.appendChild(tooltip);
+            }
+            return tooltip;
+        };
+        
+        network.on('hoverNode', function(params) {
+            const hoveredNoteId = params.node;
+            // --- FIX: Get excerpt from the full note data in the cache ---
+            const noteData = window.noteCache[hoveredNoteId];
+            const tooltip = createTooltip();
 
-                            if (note) {
-                                const excerpt = note.excerpt || 'No content preview...';
+            if (noteData) {
+                const excerpt = noteData.excerpt || 'No content preview...';
 
-                                tooltip.innerHTML = `
-                                    <h4 style="font-weight: 600; margin: 0 0 5px 0;">${note.name}</h4>
-                                    <p style="font-size: 0.875rem; margin: 0; color: var(--text-secondary);">${excerpt || 'This note is empty.'}</p>
-                                `;
+                tooltip.innerHTML = `
+                    <h4 style="font-weight: 600; margin: 0 0 5px 0;">${noteData.name}</h4>
+                    <p style="font-size: 0.875rem; margin: 0; color: var(--text-secondary);">${excerpt}</p>
+                `;
 
-                                tooltip.style.left = `${params.event.pointer.DOM.x + 15}px`;
-                                tooltip.style.top = `${params.event.pointer.DOM.y + 15}px`;
-                                tooltip.style.visibility = 'visible';
-                                tooltip.style.opacity = '1';
-                            }
-                        });
+                tooltip.style.left = `${params.event.pointer.DOM.x + 15}px`;
+                tooltip.style.top = `${params.event.pointer.DOM.y + 15}px`;
+                tooltip.style.visibility = 'visible';
+                tooltip.style.opacity = '1';
+            }
+        });
 
-                        network.on('blurNode', function(params) {
-                            const tooltip = document.getElementById('note-graph-tooltip');
-                            if (tooltip) {
-                                tooltip.style.opacity = '0';
-                                tooltip.style.visibility = 'hidden';
-                            }
-                        });
-                        // --- END: NEW & IMPROVED INTERACTIVITY CODE ---
+        network.on('blurNode', function(params) {
+            const tooltip = document.getElementById('note-graph-tooltip');
+            if (tooltip) {
+                tooltip.style.opacity = '0';
+                tooltip.style.visibility = 'hidden';
+            }
+        });
 
-                        network.on('blurNode', function(params) {
-                            let tooltip = document.getElementById('note-graph-tooltip');
-                            if (tooltip) {
-                                tooltip.style.opacity = '0';
-                            }
-                        });
-                        // --- END: ADD THIS NEW CODE ---
-                        openModal(app.modals.graph);
+        openModal(app.modals.graph);
 
-                    } catch(err) {
-                        console.error("Error creating note graph:", err);
-                        // showToast('Could not create note graph.', 'error');
-                    }
-                });
+    } catch(err) {
+        console.error("Error creating note graph:", err);
+        showToast('Could not create note graph.', 'error');
+    }
+});
                 document.getElementById('header-template-btn').addEventListener('click', () => {
     const note = findItem(state.settings.activeNoteId)?.item;
     if (note) {
