@@ -8304,11 +8304,11 @@ const deleteTemplate = async (templateId) => {
 // --- START: Real-time Note Synchronization Logic ---
 
 // --- END: Real-time Note Synchronization Logic ---
-const saveAsTemplate = async (note) => {
-    if (!note) return showToast('❌ No note selected.', 'error');
+const saveAsTemplate = async (noteStub) => {
+    if (!noteStub) return showToast('❌ No note selected.', 'error');
 
     // FIX: Get the full note data, including content, from the cache.
-    const noteData = window.noteCache[note.id];
+    const noteData = window.noteCache[noteStub.id];
     if (!noteData) {
         return showToast('❌ Could not load note content to create template.', 'error');
     }
@@ -8316,11 +8316,10 @@ const saveAsTemplate = async (note) => {
     const templateName = await showPrompt({
         title: 'Save as Template',
         message: 'Enter a name for this template:',
-        initialValue: note.name // Use the name from the note stub
+        initialValue: noteStub.name // Use the name from the note stub
     });
 
     if (templateName) {
-        // Check for duplicate template name
         if (state.templates.some(t => t.name.toLowerCase() === templateName.toLowerCase())) {
             showToast(`❌ A template named "${templateName}" already exists.`, 'error');
             return;
@@ -8339,7 +8338,6 @@ const saveAsTemplate = async (note) => {
         showToast(`✅ Template "${templateName}" saved!`, 'success');
     }
 };
-
 const createContentSnippet = (content, query) => {
     const plainText = content.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ');
     const lowerQuery = query.toLowerCase();
@@ -8556,9 +8554,17 @@ const commands = [
     execute: () => openModal(document.getElementById('timer-modal')) 
 },
     { name: 'ask', description: 'Ask Your Notes AI. Usage: /ask [question]', execute: (args)=>{if(!args)return showToast('❌ Question needed.','error');openModal(document.getElementById('global-ai-modal'));document.getElementById('global-ai-input').value=args;document.getElementById('global-ai-ask-btn').click();feather.replace()} },
-    { name: 'summary', description: 'Summarize a note. Usage: /summary [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleSummarize(c)})},
-    { name: 'quiz', description: 'Generate quiz. Usage: /quiz [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>{const c=(n.content||'').replace(/<[^>]*>?/gm,'').trim();if(!c)return showToast('Note empty.','info');handleGenerateQuiz(c,n)})},
-    { name: 'flashcard', description: 'Open flashcards. Usage: /flashcard [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(n)=>handleFlashcardMode(n))},
+    { name: 'summary', description: 'Summarize a note. Usage: /summary [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(noteStub)=>{
+        const noteData = window.noteCache[noteStub.id]; // FIX: Get full data from cache
+        const plainContent=(noteData?.content||'').replace(/<[^>]*>?/gm,'').trim();if(!plainContent)return showToast('Note empty.','info');handleSummarize(plainContent)})},
+    { name: 'quiz', description: 'Generate quiz. Usage: /quiz [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(noteStub)=>{
+        const noteData = window.noteCache[noteStub.id]; // FIX: Get full data from cache
+        const note = noteData ? {id: noteStub.id, ...noteData} : null;
+        const plainContent=(noteData?.content||'').replace(/<[^>]*>?/gm,'').trim();if(!plainContent)return showToast('Note empty.','info');handleGenerateQuiz(plainContent, note)})},
+    { name: 'flashcard', description: 'Open flashcards. Usage: /flashcard [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(noteStub)=>{
+        const noteData = window.noteCache[noteStub.id]; // FIX: Get full data from cache
+        const note = noteData ? {id: noteStub.id, ...noteData} : null;
+        handleFlashcardMode(note)})},
     { name: 'share', description: 'Create share link. Usage: /share [note name]', suggest: 'notes', execute: (args)=>executeWithSmartFind(args,'notes',(noteStub)=>handleShareNote(noteStub))},
     {
     name: 'checkpoint',
@@ -10913,10 +10919,20 @@ app.containers.mobileControlsDropdown.addEventListener('click', async (e) => {
 
 
     // Handle all actions that require an active note
+    // Handle all actions that require an active note
     if (action && noteId) {
         closeDropdown(); // Close menu immediately after an action is clicked
-        const { item: note, parent, index } = findItem(noteId);
+        
+        // --- FIX STARTS HERE ---
+        // Get the full note object from the cache instead of the sidebar stub.
+        const noteData = window.noteCache[noteId];
+        const note = noteData ? { id: noteId, ...noteData } : null; 
         if (!note) return;
+        
+        const { parent, index } = findItem(noteId);
+        // --- FIX ENDS HERE ---
+
+        if (!parent) return; // Added a safety check for the parent object
 
         const parentArray = Array.isArray(parent) ? parent : parent.children;
         const plainContent = (note.content || '').replace(/<[^>]*>?/gm, '').trim();
