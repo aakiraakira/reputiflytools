@@ -5284,6 +5284,12 @@ if (themeMeta) {
         if (item.type === 'note' && isSharedWithMe) {
             sharedIconHTML = `<i data-feather="users" class="w-4 h-4 text-text-secondary ml-auto mr-2" title="Shared with you"></i>`;
         }
+        // --- START: NEW AI-GENERATED ICON LOGIC ---
+        // If the note is AI-generated, add the 'box' icon
+        if (item.isAiGenerated) {
+            sharedIconHTML += `<i data-feather="box" class="w-4 h-4 text-accent-primary ml-auto mr-2" title="AI Agent Generated"></i>`;
+        }
+        // --- END: NEW AI-GENERATED ICON LOGIC ---
 
         if (isFolder && item.children) {
             item.children.sort((a, b) => {
@@ -8724,16 +8730,22 @@ const agentActionLibrary = {
         }
     },
     createNewNote: {
-        description: "Creates a new note. Returns the ID of the new note.",
-        parameters: { name: "string", content: "string", parentId: "string (optional)" },
-        execute: async ({ name, content, parentId }) => {
-            const newNote = await createNewNote(false, { name, content }, parentId);
-            if (!window.noteCache[newNote.id]) {
-                 window.noteCache[newNote.id] = newNote;
-            }
-            return newNote.id;
+    description: "Creates a new note. Returns the ID of the new note.",
+    parameters: { name: "string", content: "string", parentId: "string (optional)", switchToIt: "boolean (optional, default: false)" },
+    execute: async ({ name, content, parentId, switchToIt = false }) => {
+        // We now pass the 'switchToIt' variable to the core createNewNote function
+        const newNote = await createNewNote(switchToIt, { name, content }, parentId);
+        if (!window.noteCache[newNote.id]) {
+             window.noteCache[newNote.id] = newNote;
         }
-    },
+        // Add a flag to the note stub to mark it as AI-generated
+        const noteStub = findItem(newNote.id)?.item;
+        if (noteStub) {
+            noteStub.isAiGenerated = true;
+        }
+        return newNote.id;
+    }
+},
     promptAI: {
         description: "Sends a prompt to a general-purpose AI and returns the text response. Use this for content generation, summarization, etc, based on text you provide in the prompt itself.",
         parameters: { prompt: "string" },
@@ -10084,192 +10096,65 @@ const executeCommand = (inputValue) => {
 };
 
 document.addEventListener('keydown', (e) => {
-// --- START: Modal Keyboard Shortcuts ---
-const confirmModal = document.getElementById('confirm-modal');
-const checklistModal = document.getElementById('checklist-edit-modal');
-
-if (!confirmModal.classList.contains('hidden')) {
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        document.getElementById('confirm-confirm-btn').click();
-    } else if (e.key === 'Escape') {
-        e.preventDefault();
-        document.getElementById('confirm-cancel-btn').click();
-    }
-    return; // Stop further keydown processing for this modal
-}
-
-if (!checklistModal.classList.contains('hidden')) {
-    if (e.key === 'Enter') {
-        // Only trigger save if not focused on a button, allowing keyboard navigation
-        if (document.activeElement.tagName !== 'INPUT')  {
-            e.preventDefault();
-            document.getElementById('checklist-modal-save-btn').click();
-        }
-    } else if (e.key === 'Escape') {
-        e.preventDefault();
-        document.getElementById('checklist-modal-cancel-btn').click();
-    }
-    return; // Stop further keydown processing for this modal
-}
-// --- END: Modal Keyboard Shortcuts ---
-    
-    if ((e.metaKey || e.ctrlKey) && e.key === '/') { e.preventDefault(); isCommandPromptOpen ? closeCommandPrompt() : openCommandPrompt(); }
-    if (!isCommandPromptOpen) {
-        // --- START: Modal Keyboard Shortcuts ---
-        const confirmModal = document.getElementById('confirm-modal');
-        const checklistModal = document.getElementById('checklist-edit-modal');
-
-        if (!confirmModal.classList.contains('hidden')) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                document.getElementById('confirm-confirm-btn').click();
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                document.getElementById('confirm-cancel-btn').click();
-            }
-            return; 
-        }
-
-        if (!checklistModal.classList.contains('hidden')) {
-            if (e.key === 'Enter') {
-                if (document.activeElement.tagName !== 'INPUT') {
-                    e.preventDefault();
-                    document.getElementById('checklist-modal-save-btn').click();
-                }
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                document.getElementById('checklist-modal-cancel-btn').click();
-            }
-            return; 
-        }
-        // --- END: Modal Keyboard Shortcuts ---
+    // --- START: Modal Keyboard Shortcuts ---
+    const confirmModal = document.getElementById('confirm-modal');
+    if (!confirmModal.classList.contains('hidden')) {
+        if (e.key === 'Enter') { e.preventDefault(); document.getElementById('confirm-confirm-btn').click(); }
+        else if (e.key === 'Escape') { e.preventDefault(); document.getElementById('confirm-cancel-btn').click(); }
         return;
     }
+    // --- END: Modal Keyboard Shortcuts ---
+
+    if ((e.metaKey || e.ctrlKey) && e.key === '/') { e.preventDefault(); isCommandPromptOpen ? closeCommandPrompt() : openCommandPrompt(); }
+    if (!isCommandPromptOpen) { return; }
     if (e.key === 'Escape') { e.preventDefault(); closeCommandPrompt(); return; }
 
-    const activeSuggestion = commandSuggestionsContainer.querySelector('.command-suggestion-item.active');
+    const suggestions = Array.from(commandSuggestionsContainer.querySelectorAll('.command-suggestion-item'));
+    const activeSuggestion = suggestions[suggestionIndex];
 
-    const completeAndExecute = (suggestionEl) => {
+    const completeSuggestion = (suggestionEl) => {
         const commandParts = commandInput.value.slice(1).split(' ');
-        const commandName = commandParts[0];
-        const argString = commandParts.slice(1).join(' ');
-        const itemName = suggestionEl.dataset.itemName;
-        const tagName = suggestionEl.dataset.tagName;
         const commandSuggestion = suggestionEl.dataset.commandName;
+        const agentTrigger = suggestionEl.dataset.agentTrigger;
+        const noteArgument = suggestionEl.dataset.noteArgument;
+        const placeholderText = suggestionEl.dataset.placeholderText;
+        
+        let completedValue = commandInput.value;
 
-        let finalCommand;
         if (commandSuggestion) {
-            finalCommand = `/${commandSuggestion}`;
-        } else if (tagName) {
-            finalCommand = `/go ${tagName}`;
-        } else if (itemName) {
-            const toSeparator = /\s+to\s+/i;
-            const fromSeparator = /\s+from\s+/i;
-
-            // --- START: FIX FOR MULTI-ARGUMENT COMMANDS ---
-            if (commandName === 'add' || commandName === 'remove') {
-                const noteId = state.settings.activeNoteId;
-                let checklistNamePart = '';
-                if (noteId) {
-                    const editorChecklists = Array.from(app.elements.noteEditorBody.querySelectorAll('.checklist-container')).map(cl => cl.querySelector('.checklist-title')?.textContent.trim() || '').filter(Boolean).sort((a, b) => b.length - a.length);
-                    for (const clName of editorChecklists) {
-                        if (argString.toLowerCase().startsWith(clName.toLowerCase())) {
-                            checklistNamePart = clName;
-                            break;
-                        }
-                    }
-                }
-                finalCommand = `/${commandName} ${checklistNamePart} ${itemName}`;
-            // --- END: FIX FOR MULTI-ARGUMENT COMMANDS ---
-            } else if ((commandName === 'move' || commandName === 'link' || commandName === 'rename') && toSeparator.test(argString)) {
-                finalCommand = `/${commandName} ${argString.split(toSeparator)[0]} to ${itemName}`;
-            } else if (commandName === 'unlink' && fromSeparator.test(argString)) {
-                finalCommand = `/${commandName} ${argString.split(fromSeparator)[0]} from ${itemName}`;
-            } else if (commandName === 'go' && argString.startsWith('#')) {
-                 const tagPart = argString.split(' ')[0];
-                 finalCommand = `/go ${tagPart} ${itemName}`;
-            }
-            else {
-                finalCommand = `/${commandName} ${itemName}`;
-            }
+            completedValue = `/${commandSuggestion} `;
+        } else if (agentTrigger) {
+            completedValue = `/run ${agentTrigger} `;
+        } else if (noteArgument) {
+            completedValue = `/run ${commandParts[1]} ${noteArgument}`; // Keeps the agent trigger
+        } else if (placeholderText) {
+            const words = commandInput.value.split(' ');
+            words.pop(); // remove the partial {{...}}
+            words.push(placeholderText);
+            completedValue = words.join(' ');
         }
-        executeCommand(finalCommand);
+        
+        commandInput.value = completedValue;
+        renderSuggestions(completedValue);
+        const end = commandInput.value.length;
+        commandInput.setSelectionRange(end, end);
     };
-
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        if (activeSuggestion) {
-            completeAndExecute(activeSuggestion);
-        } else {
-            executeCommand(commandInput.value);
-        }
-        return;
-    }
 
     if (e.key === 'Tab') {
         e.preventDefault();
-        const suggestionToUse = activeSuggestion || commandSuggestionsContainer.querySelector('.command-suggestion-item');
+        const suggestionToUse = activeSuggestion || suggestions[0];
         if (suggestionToUse) {
-            const commandName = commandInput.value.slice(1).split(' ')[0];
-            const argString = commandInput.value.slice(1).substring(commandName.length).trim();
-            const itemName = suggestionToUse.dataset.itemName;
-            const tagName = suggestionToUse.dataset.tagName;
-            const commandSuggestion = suggestionToUse.dataset.commandName;
-
-            let completedValue = commandInput.value;
-            if (commandSuggestion) {
-                completedValue = `/${commandSuggestion} `;
-            } else if (tagName) {
-                completedValue = `/go ${tagName} `;
-            } else if (itemName) {
-                const toSeparator = /\s+to\s+/i;
-                const fromSeparator = /\s+from\s+/i;
-
-                // --- START: FIX FOR MULTI-ARGUMENT COMMANDS ---
-                if (commandName === 'add' || commandName === 'remove') {
-                    const noteId = state.settings.activeNoteId;
-                    let checklistNamePart = '';
-                    if (noteId) {
-                        const editorChecklists = Array.from(app.elements.noteEditorBody.querySelectorAll('.checklist-container')).map(cl => cl.querySelector('.checklist-title')?.textContent.trim() || '').filter(Boolean).sort((a, b) => b.length - a.length);
-                        for (const clName of editorChecklists) {
-                            if (argString.toLowerCase().startsWith(clName.toLowerCase())) {
-                                checklistNamePart = clName;
-                                break;
-                            }
-                        }
-                    }
-                    if (checklistNamePart) {
-                        completedValue = `/${commandName} ${checklistNamePart} ${itemName} `;
-                    } else {
-                        completedValue = `/${commandName} ${itemName} `;
-                    }
-                // --- END: FIX FOR MULTI-ARGUMENT COMMANDS ---
-                } else if ((commandName === 'move' || commandName === 'link' || commandName === 'rename') && toSeparator.test(argString)) {
-                    completedValue = `/${commandName} ${argString.split(toSeparator)[0]} to ${itemName} `;
-                } else if (commandName === 'unlink' && fromSeparator.test(argString)) {
-                    completedValue = `/${commandName} ${argString.split(fromSeparator)[0]} from ${itemName} `;
-                } else if (commandName === 'go' && argString.startsWith('#')) {
-                    completedValue = `/go ${argString.split(' ')[0]} ${itemName} `;
-                } else if (commandName === 'move' || commandName === 'link' || commandName === 'rename') {
-                     completedValue = `/${commandName} ${itemName} to `;
-                } else if (commandName === 'unlink') {
-                     completedValue = `/${commandName} ${itemName} from `;
-                } else {
-                    completedValue = `/${commandName} ${itemName} `;
-                }
-            }
-            commandInput.value = completedValue;
-            renderSuggestions(completedValue);
-            const end = commandInput.value.length;
-            commandInput.setSelectionRange(end, end);
+            completeSuggestion(suggestionToUse);
         }
-        return;
-    }
-
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    } else if (e.key === 'Enter') {
         e.preventDefault();
-        const suggestions = Array.from(commandSuggestionsContainer.querySelectorAll('.command-suggestion-item'));
+        if (activeSuggestion) {
+            // If a suggestion is highlighted, complete it first before executing
+            completeSuggestion(activeSuggestion);
+        }
+        executeCommand(commandInput.value);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
         if (suggestions.length === 0) return;
         if(activeSuggestion) activeSuggestion.classList.remove('active');
         const direction = e.key === 'ArrowDown' ? 1 : -1;
