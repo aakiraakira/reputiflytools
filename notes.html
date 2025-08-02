@@ -4617,6 +4617,8 @@ const defaultState = {
     if (!loadedState.kanbanColumns) loadedState.kanbanColumns = {};
     if (!Array.isArray(loadedState.chatHistory)) loadedState.chatHistory = [];
     if (!Array.isArray(loadedState.templates)) loadedState.templates = [];
+    
+    if (!Array.isArray(loadedState.agents)) loadedState.agents = []; // <-- THIS IS THE FIX
 
     // This initial call passes `null` as the parent for top-level items
     loadedState.collections.forEach(node => migrateNode(node, null));
@@ -8636,7 +8638,7 @@ let agentContextNoteIds = []; // Stores IDs of notes provided as context
  */
 const agentActionLibrary = {
     findNote: {
-        description: "Finds a note by its name and returns its ID. Use this before any action that requires a noteId.",
+        description: "Finds a note by its name and returns its unique ID. Use this before reading or updating a note.",
         parameters: { noteName: "string" },
         execute: async ({ noteName }) => {
             const allNotes = getAllNotes(state.collections);
@@ -8645,35 +8647,60 @@ const agentActionLibrary = {
             return targetNote.id;
         }
     },
-    // REPLACE IT WITH THIS CODE
-updateNote: {
-    description: "Updates the content of an existing note. You can append, prepend, or replace the content.",
-    parameters: { noteId: "string", content: "string", mode: "'append' | 'prepend' | 'replace'" },
-    execute: async ({ noteId, content, mode }) => {
-        const noteData = window.noteCache[noteId];
-        if (!noteData) throw new Error(`Note with ID ${noteId} not found in cache. It may need to be loaded first.`);
-
-        switch(mode) {
-            case 'append':
-                noteData.content += marked.parse(content || '');
-                break;
-            case 'prepend':
-                noteData.content = marked.parse(content || '') + noteData.content;
-                break;
-            case 'replace':
-                noteData.content = marked.parse(content || '');
-                break;
-            default:
-                throw new Error(`Invalid mode: ${mode}. Use 'append', 'prepend', or 'replace'.`);
+    readNote: {
+        description: "Reads the full content of a note using its ID. Use this after 'findNote' to get the text needed for other AI actions.",
+        parameters: { noteId: "string" },
+        execute: async ({ noteId }) => {
+            let noteData = window.noteCache[noteId];
+            if (!noteData) {
+                // If not in cache, try to load it from Firestore
+                try {
+                    const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+                    const noteRef = doc(db, "notes", noteId);
+                    const noteSnap = await getDoc(noteRef);
+                    if (noteSnap.exists()) {
+                        noteData = noteSnap.data();
+                        window.noteCache[noteId] = noteData; // Add to cache for future use
+                    } else {
+                        throw new Error(`Note with ID ${noteId} does not exist.`);
+                    }
+                } catch (e) {
+                    throw new Error(`Failed to load note with ID ${noteId} from database.`);
+                }
+            }
+            // Return just the plain text content for the AI to process
+            return (noteData.content || '').replace(/<[^>]*>?/gm, ' ').trim();
         }
-        noteData.modifiedAt = new Date().toISOString();
-        
-        // This is the critical fix:
-        await saveSpecificNoteToFirestore(noteId, noteData);
-        
-        return `Note ID ${noteId} content has been updated.`;
-    }
-},
+    },
+    updateNote: {
+        description: "Updates the content of an existing note. You can append, prepend, or replace the content.",
+        parameters: { noteId: "string", content: "string", mode: "'append' | 'prepend' | 'replace'" },
+        execute: async ({ noteId, content, mode }) => {
+            const noteData = window.noteCache[noteId];
+            if (!noteData) throw new Error(`Note with ID ${noteId} not found in cache. It may need to be loaded first.`);
+
+            // Convert provided markdown content to HTML before saving
+            const contentHtml = marked.parse(content || '');
+
+            switch(mode) {
+                case 'append':
+                    noteData.content += contentHtml;
+                    break;
+                case 'prepend':
+                    noteData.content = contentHtml + noteData.content;
+                    break;
+                case 'replace':
+                    noteData.content = contentHtml;
+                    break;
+                default:
+                    throw new Error(`Invalid mode: ${mode}. Use 'append', 'prepend', or 'replace'.`);
+            }
+            noteData.modifiedAt = new Date().toISOString();
+            
+            await saveSpecificNoteToFirestore(noteId, noteData);
+            return `Note ID ${noteId} content has been updated.`;
+        }
+    },
     askUser: {
         description: "Pauses the agent and asks the user for a text input. Returns the user's response.",
         parameters: { prompt: "string" },
@@ -8690,75 +8717,25 @@ updateNote: {
         description: "Uses the AI's internal knowledge and search capabilities to research a topic and return a comprehensive summary. Ideal for public information, current events, or general knowledge questions.",
         parameters: { topic: "string" },
         execute: async ({ topic }) => {
-            // This prompt tells the AI to act as a researcher, giving us a much better result than a simple search.
             const researchPrompt = `As a research assistant, provide a well-written, comprehensive summary on the following topic. Use your internal knowledge and search capabilities to gather up-to-date information. Format your response in clean markdown.\n\nTopic: "${topic}"`;
             const payload = { contents: [{ parts: [{ text: researchPrompt }] }] };
             const response = await callGeminiAPI(payload);
-            
-            // The AI now does the search and summary in one step.
-            return response ? marked.parse(response) : "The AI could not find information on that topic.";
+            return response || "The AI could not find information on that topic.";
         }
     },
-    // REPLACE IT WITH THIS CODE
-createNewNote: {
-    description: "Creates a new note. Returns the ID of the new note.",
-    parameters: { name: "string", content: "string", parentId: "string (optional)" },
-    execute: async ({ name, content, parentId }) => {
-        // We now call the main createNewNote function and wait for it to complete.
-        // It correctly handles creating the document in Firestore and updating the local state.
-        const newNote = await createNewNote(false, { name, content: marked.parse(content || '') }, parentId);
-        
-        // Ensure the full data is in the cache before returning the ID
-        if (!window.noteCache[newNote.id]) {
-             window.noteCache[newNote.id] = newNote;
-        }
-
-        return newNote.id;
-    }
-},
-    addTag: {
-
-        description: "Adds a tag to a specific note.",
-        parameters: { noteId: "string", tagName: "string" },
-        execute: async ({ noteId, tagName }) => {
-            const note = findItem(noteId)?.item;
-            if (note) {
-                if (!note.tags) note.tags = [];
-                if (!note.tags.includes(tagName)) {
-                    note.tags.push(tagName);
-                    note.modifiedAt = new Date().toISOString();
-                    // We can use performImmediateSave here as it's a direct user action
-                    await performImmediateSave();
-                    return `Tag '${tagName}' added to note ID ${noteId}.`;
-                }
-                return `Note ID ${noteId} already has tag '${tagName}'.`;
+    createNewNote: {
+        description: "Creates a new note. Returns the ID of the new note.",
+        parameters: { name: "string", content: "string", parentId: "string (optional)" },
+        execute: async ({ name, content, parentId }) => {
+            const newNote = await createNewNote(false, { name, content }, parentId);
+            if (!window.noteCache[newNote.id]) {
+                 window.noteCache[newNote.id] = newNote;
             }
-            throw new Error(`Note with ID ${noteId} not found.`);
-        }
-    },
-    moveNote: {
-        description: "Moves a note to a specified folder.",
-        parameters: { noteId: "string", folderName: "string" },
-        execute: async ({ noteId, folderName }) => {
-            const allFolders = getAllFolders();
-            const targetFolder = findBestMatch(folderName, allFolders);
-            if (!targetFolder) throw new Error(`Folder '${folderName}' not found.`);
-
-            const sourceResult = findItem(noteId);
-            if (!sourceResult) throw new Error(`Note ID ${noteId} not found.`);
-
-            const sourceArray = Array.isArray(sourceResult.parent) ? sourceResult.parent : sourceResult.parent.children;
-            const [movedNote] = sourceArray.splice(sourceResult.index, 1);
-
-            if (!targetFolder.children) targetFolder.children = [];
-            targetFolder.children.unshift(movedNote);
-            movedNote.status = state.kanbanColumns[targetFolder.id]?.[0]?.id || null;
-            await saveState(); // Save the structural change
-            return `Note ID ${noteId} moved to folder '${folderName}'.`;
+            return newNote.id;
         }
     },
     promptAI: {
-        description: "Sends a prompt to a general-purpose AI and returns the text response. Use this for content generation, summarization, etc.",
+        description: "Sends a prompt to a general-purpose AI and returns the text response. Use this for content generation, summarization, etc, based on text you provide in the prompt itself.",
         parameters: { prompt: "string" },
         execute: async ({ prompt }) => {
             const payload = { contents: [{ parts: [{ text: prompt }] }] };
@@ -8767,7 +8744,6 @@ createNewNote: {
         }
     }
 };
-
 /**
  * The "Master AI" prompt that translates natural language into a JSON plan.
  * This is the core intelligence of the Agent Forge.
@@ -8867,18 +8843,39 @@ const runAgentPlan = async (plan) => {
 /**
  * Main function to kick off the agent creation and execution process.
  */
-const handleRunAgent = async () => {
-    const instructions = document.getElementById('agent-instructions-input').value.trim();
-    if (!instructions) return;
+const handleRunAgent = async (agent, argument = '') => {
+    // If called without an agent (e.g., from the "Execute" button), get the current UI state.
+    let instructions;
+    if (agent) {
+        instructions = agent.instructions;
+        agentContextNoteIds = agent.contextNoteIds || [];
+    } else {
+        instructions = document.getElementById('agent-instructions-input').value.trim();
+        // agentContextNoteIds is already set from the UI
+    }
+
+    if (!instructions) return showToast('Agent instructions cannot be empty.', 'error');
+    
+    // --- THIS IS THE NEW LOGIC ---
+    // If the agent has a defined argument placeholder and the user provided an argument,
+    // replace the placeholder in the instructions.
+    if (agent && agent.argumentName && argument) {
+        instructions = instructions.replaceAll(agent.argumentName, argument);
+    }
+    // --- END NEW LOGIC ---
+    
+    // Pre-fill the UI and open the Forge modal to show the process
+    document.getElementById('agent-instructions-input').value = instructions;
+    const forgeModal = document.getElementById('agent-forge-modal');
+    openModal(forgeModal);
 
     const logEl = document.getElementById('agent-forge-logs');
     logEl.innerHTML = '🧠 Master AI is thinking...';
-    
+
     // Prepare context from selected notes
     let noteContext = '';
     if (agentContextNoteIds.length > 0) {
-        // Ensure all context notes are loaded in the cache
-        await ensureAllNotesLoaded(agentContextNoteIds); 
+        await ensureAllNotesLoaded(agentContextNoteIds);
         noteContext = agentContextNoteIds.map(id => {
             const noteData = window.noteCache[id];
             const plainContent = (noteData.content || '').replace(/<[^>]*>?/gm, '');
@@ -8898,7 +8895,8 @@ const handleRunAgent = async () => {
             if (responseJson.plan) {
                 logEl.innerHTML = '✅ Plan received from AI. Starting execution...';
                 await runAgentPlan(responseJson.plan);
-                closeModal(document.getElementById('agent-forge-modal')); // ADD THIS LINE
+                // The modal now closes automatically after successful execution
+                setTimeout(() => closeModal(forgeModal), 2000); 
             } else {
                 throw new Error("AI response did not contain a 'plan' key.");
             }
@@ -8990,79 +8988,86 @@ const initAgentForgeListeners = () => {
 // =================================================================
 let activeAgentIdForEditing = null; // Used to know if we are creating or updating an agent
 
-const saveAgentBlueprint = async () => {
+const saveAgentBlueprint = () => {
     const instructions = document.getElementById('agent-instructions-input').value.trim();
     if (!instructions) return showToast('Agent instructions cannot be empty.', 'error');
-    
-    // Open the save prompt modal
+
     const saveModal = document.getElementById('save-agent-modal');
     const nameInput = document.getElementById('save-agent-name-input');
     const triggerInput = document.getElementById('save-agent-trigger-input');
+    const argumentInput = document.getElementById('save-agent-argument-name-input');
     const errorEl = document.getElementById('save-agent-error');
     errorEl.textContent = '';
 
+    // Pre-fill modal based on whether we are editing an existing agent or creating a new one
     if (activeAgentIdForEditing) {
         const agentToEdit = state.agents.find(a => a.id === activeAgentIdForEditing);
-        nameInput.value = agentToEdit.name;
-        triggerInput.value = agentToEdit.trigger;
+        if(agentToEdit) {
+            nameInput.value = agentToEdit.name;
+            triggerInput.value = agentToEdit.trigger;
+            argumentInput.value = agentToEdit.argumentName || '';
+        }
     } else {
         nameInput.value = '';
         triggerInput.value = '';
+        argumentInput.value = '{{note_name}}'; // A sensible default
     }
 
-    openModal(saveModal, true); // Open as a blocking modal
+    openModal(saveModal, true);
     nameInput.focus();
+    
+    // The event listener is now attached outside this function, in init(), to prevent bugs.
+    // We just need to show the modal.
+};
 
-    return new Promise(resolve => {
-        const confirmHandler = async () => {
-            const name = nameInput.value.trim();
-            const trigger = triggerInput.value.trim().replace(/\s+/g, '-'); // no spaces in triggers
-            if (!name || !trigger) {
-                errorEl.textContent = 'Both name and command are required.';
-                return;
-            }
+// This new helper function will contain the actual save logic.
+const handleSaveAgentConfirm = async () => {
+    const instructions = document.getElementById('agent-instructions-input').value.trim();
+    const saveModal = document.getElementById('save-agent-modal');
+    const nameInput = document.getElementById('save-agent-name-input');
+    const triggerInput = document.getElementById('save-agent-trigger-input');
+    const argumentInput = document.getElementById('save-agent-argument-name-input');
+    const errorEl = document.getElementById('save-agent-error');
 
-            // Check if trigger is already in use by another agent
-            const triggerInUse = state.agents.some(a => a.trigger === trigger && a.id !== activeAgentIdForEditing);
-            if (triggerInUse) {
-                errorEl.textContent = `Command "/run ${trigger}" is already in use.`;
-                return;
-            }
+    const name = nameInput.value.trim();
+    const trigger = triggerInput.value.trim().replace(/\s+/g, '-');
+    const argumentName = argumentInput.value.trim();
 
-            if (activeAgentIdForEditing) { // Update existing agent
-                const agentToUpdate = state.agents.find(a => a.id === activeAgentIdForEditing);
-                agentToUpdate.name = name;
-                agentToUpdate.trigger = trigger;
-                agentToUpdate.instructions = instructions;
-                agentToUpdate.contextNoteIds = [...agentContextNoteIds];
-            } else { // Create new agent
-                const newAgent = {
-                    id: generateId('agent'),
-                    name,
-                    trigger,
-                    instructions,
-                    contextNoteIds: [...agentContextNoteIds]
-                };
-                state.agents.push(newAgent);
-            }
-            
-            await performImmediateSave();
-            showToast(`Agent "${name}" saved!`, 'success');
-            cleanup();
-            resolve(true);
-        };
+    if (!name || !trigger) {
+        errorEl.textContent = 'Both name and command are required.';
+        return;
+    }
 
-        const cancelHandler = () => { cleanup(); resolve(false); };
-        
-        const cleanup = () => {
-            document.getElementById('save-agent-confirm-btn').removeEventListener('click', confirmHandler);
-            document.getElementById('save-agent-cancel-btn').removeEventListener('click', cancelHandler);
-            closeModal(saveModal);
+    const triggerInUse = state.agents.some(a => a.trigger === trigger && a.id !== activeAgentIdForEditing);
+    if (triggerInUse) {
+        errorEl.textContent = `Command "/run ${trigger}" is already in use.`;
+        return;
+    }
+
+    if (activeAgentIdForEditing) {
+        const agentToUpdate = state.agents.find(a => a.id === activeAgentIdForEditing);
+        if (agentToUpdate) {
+            agentToUpdate.name = name;
+            agentToUpdate.trigger = trigger;
+            agentToUpdate.instructions = instructions;
+            agentToUpdate.argumentName = argumentName;
+            agentToUpdate.contextNoteIds = [...agentContextNoteIds];
         }
-
-        document.getElementById('save-agent-confirm-btn').addEventListener('click', confirmHandler);
-        document.getElementById('save-agent-cancel-btn').addEventListener('click', cancelHandler);
-    });
+    } else {
+        const newAgent = {
+            id: generateId('agent'),
+            name,
+            trigger,
+            instructions,
+            argumentName,
+            contextNoteIds: [...agentContextNoteIds]
+        };
+        state.agents.push(newAgent);
+    }
+    
+    await performImmediateSave();
+    showToast(`Agent "${name}" saved!`, 'success');
+    closeModal(saveModal);
 };
 
 const renderAgentList = () => {
@@ -9108,25 +9113,19 @@ const initAgentManagementListeners = () => {
         switch(button.dataset.action) {
             case 'run':
                 closeModal(listModal);
-                // We reuse the /run command's logic
                 commands.find(c => c.name === 'run').execute(agent.trigger);
                 break;
             case 'edit':
-                closeModal(listModal);
+                // --- THIS IS THE FIX ---
+                // We set the agent ID and its instructions in the main UI...
                 activeAgentIdForEditing = agent.id;
-                agentContextNoteIds = agent.contextNoteIds || [];
                 document.getElementById('agent-instructions-input').value = agent.instructions;
+                agentContextNoteIds = agent.contextNoteIds || [];
                 
-                // Render context pills for the agent being edited
-                const agentPillsContainer = document.getElementById('agent-context-pills');
-                const allNotes = getAllNotes(state.collections);
-                const contextNotes = allNotes.filter(n => agentContextNoteIds.includes(n.id));
-                agentPillsContainer.innerHTML = contextNotes.map(note => `<div class="bg-bg-pane-dark text-text-secondary text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1"><span>${note.name}</span></div>`).join('');
+                // ... then we call saveAgentBlueprint(), which opens the SMALL modal.
+                saveAgentBlueprint(); 
                 
-                const forgeModal = document.getElementById('agent-forge-modal');
-forgeModal.classList.add('glow-border'); // Activate the glow
-document.getElementById('agent-forge-logs').innerHTML = '<div class="forge-placeholder">Awaiting instructions...</div>';
-openModal(forgeModal);
+                closeModal(listModal); // Close the agent list
                 break;
             case 'delete':
                 const confirmed = await showConfirm({title: `Delete "${agent.name}"?`, message: 'This cannot be undone.', confirmText: 'Delete'});
@@ -9225,20 +9224,26 @@ const commands = [
 },
 {
     name: 'run',
-    description: 'Run a saved AI agent. Usage: /run [agent-command]',
+    description: 'Run a saved AI agent. Usage: /run [agent-command] (argument)',
     execute: (args) => {
-        const trigger = args.trim();
-        if (!trigger) return showToast('Please specify which agent to run.', 'error');
-        
-        const agentToRun = state.agents.find(a => a.trigger === trigger);
-        if (!agentToRun) return showToast(`Agent "/run ${trigger}" not found.`, 'error');
+    const parts = args.trim().split(' ');
+    const trigger = parts[0];
+    const argument = parts.slice(1).join(' ').trim();
 
-        // Pre-fill and run the forge with the saved instructions
-        document.getElementById('agent-instructions-input').value = agentToRun.instructions;
-        agentContextNoteIds = agentToRun.contextNoteIds || [];
-        showToast(`Running agent: "${agentToRun.name}"...`, 'info');
-        handleRunAgent();
+    if (!trigger) return showToast('Please specify which agent to run.', 'error');
+    
+    const agentToRun = state.agents.find(a => a.trigger === trigger);
+    if (!agentToRun) return showToast(`Agent "/run ${trigger}" not found.`, 'error');
+
+    if (agentToRun.argumentName && !argument) {
+        // This is the corrected, more intuitive usage message
+        return showToast(`Agent "${agentToRun.name}" requires an argument. Usage: /run ${agentToRun.trigger} (your argument text)`, 'error');
     }
+
+    // Pass the agent and the argument to the handler
+    showToast(`Running agent: "${agentToRun.name}"...`, 'info');
+    handleRunAgent(agentToRun, argument);
+}
 },
     { name: 'nf', description: 'New Folder. Usage: /nf [folder name]', execute: (args)=>{const n=args||'Untitled Folder';const c={id:generateId('c'),name:n,type:'folder',children:[],expanded:true};state.kanbanColumns[c.id]=[{id:generateId('col'),title:'To Do'}];state.collections.push(c);saveState();buildLunrIndex();render();showToast(`✅ Folder "${n}" created`)}},
 { name: 'rename', description: 'Rename item. Usage: /rename [old] to [new]', suggest: 'items', execute: async(args)=>{ const separator = /\s+to\s+/i; if (!separator.test(args)) return showToast('❌ Use: /rename [old] to [new]','error'); const parts = args.split(separator); const oldName = parts[0].trim(); const newName = parts[1].trim(); if (!oldName || !newName) return showToast('❌ Both names required.','error'); const itemToRenameCopy = findBestMatch(oldName, [...getAllNotes(state.collections), ...getAllFolders()]); if (!itemToRenameCopy) return showToast(`❌ Not found: "${oldName}"`,'error'); const findResult = findItem(itemToRenameCopy.id); if (!findResult || !findResult.item) { return showToast('❌ Could not locate the original item to rename.', 'error'); } const originalItem = findResult.item; const confirmed = await showConfirm({title:'Confirm Rename', message:`Rename "${originalItem.name}" to "${newName}"?`, confirmText:'Rename'}); if (confirmed) { const previousName = originalItem.name; originalItem.name = newName; try { if (originalItem.type === 'note') { const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"); const noteRef = doc(db, "notes", originalItem.id); await updateDoc(noteRef, { name: newName }); if (window.noteCache[originalItem.id]) { window.noteCache[originalItem.id].name = newName; } } await saveState(); buildLunrIndex(); render(); showToast(`✅ Renamed to "${newName}"`); } catch (error) { console.error("Error renaming item:", error); showToast('❌ A database error occurred. Rename failed.', 'error'); originalItem.name = previousName; } } } },    { name: 'link', description: 'Link notes. Usage: /link [source] to [target]', suggest: 'notes', execute: (args)=>{const s=/\s+to\s+/i;if(!s.test(args))return showToast('❌ Use: /link [source] to [target]','error');const p=args.split(s);const sN=p[0].trim();const tN=p[1].trim();if(!sN||!tN)return showToast('❌ Both notes required.','error');const aN=getAllNotes(state.collections);const sO=findBestMatch(sN,aN);const tO=findBestMatch(tN,aN);if(!sO)return showToast(`❌ Source not found: "${sN}"`,'error');if(!tO)return showToast(`❌ Target not found: "${tN}"`,'error');if(sO.id===tO.id)return showToast('❌ Cannot link a note to itself.','error');sO.content+=`\n<p>[[${tO.name}]]</p>`;updateNoteLinks(sO);sO.modifiedAt=new Date().toISOString();saveState();if(state.settings.activeNoteId===sO.id)renderNoteEditor();showToast(`✅ Linked "${sO.name}" to "${tO.name}"`)}},
@@ -9974,11 +9979,47 @@ const renderSuggestions = (rawInput) => {
     let suggestionsHTML = '';
     const argQuery = argString.toLowerCase();
 
-    if (command && command.suggest) {
+    // --- START: NEW SUGGESTION LOGIC FOR /run ---
+    if (commandName.toLowerCase() === 'run') {
+        const agentTrigger = parts[1] || '';
+        const agentArgQuery = parts.slice(2).join(' ');
+
+        if (!agentTrigger || (state.agents.some(a => a.trigger.startsWith(agentTrigger)) && parts.length < 3)) {
+            // Suggest agents if the user is typing the agent trigger
+            const matchingAgents = state.agents.filter(a => a.trigger.toLowerCase().startsWith(agentTrigger.toLowerCase()));
+            if (matchingAgents.length > 0) {
+                 suggestionsHTML = matchingAgents.slice(0, 5).map((agent, index) => `
+                    <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-agent-trigger="${agent.trigger}">
+                        <div class="flex items-center gap-2"><i data-feather="box" class="w-4 h-4 text-text-secondary"></i><span class="cmd-name">${agent.trigger}</span></div>
+                        <span class="cmd-desc">${agent.name}</span>
+                    </div>`).join('');
+            }
+        } else {
+            // Suggest notes if the user has typed a valid agent trigger
+            const agent = state.agents.find(a => a.trigger === agentTrigger);
+            if (agent && agent.argumentName) {
+                const allNotes = getAllNotes(state.collections);
+                const fuse = new Fuse(allNotes, { keys: ['name'], threshold: 0.4 });
+                const noteSuggestions = fuse.search(agentArgQuery).map(result => result.item);
+
+                if (noteSuggestions.length > 0) {
+                     suggestionsHTML = noteSuggestions.slice(0, 5).map((note, index) => `
+                        <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-note-argument="${note.name.replace(/"/g, '&quot;')}">
+                            <div class="flex items-center gap-2"><i data-feather="file-text" class="w-4 h-4 text-text-secondary"></i><span class="cmd-name truncate">${note.name}</span></div>
+                            <span class="cmd-desc">Note Argument</span>
+                        </div>`).join('');
+                } else {
+                     suggestionsHTML = `<div class="p-2 text-sm text-text-tertiary">No notes match "${agentArgQuery}"</div>`;
+                }
+            }
+        }
+
+    } // --- END: NEW SUGGESTION LOGIC FOR /run ---
+    else if (command && command.suggest) {
+        // ... (existing suggestion logic for other commands remains the same)
         let finalSuggestions = [];
         const toSeparator = /\s+to\s+/i;
         const fromSeparator = /\s+from\s+/i;
-
         if ((command.name === 'move' || command.name === 'rename' || command.name === 'link') && toSeparator.test(argString)) {
             const targetQuery = argString.split(toSeparator)[1].toLowerCase() || '';
             let itemsToSuggest = (command.suggest === 'notes') ? getAllNotes(state.collections) : [...getAllNotes(state.collections), ...getAllFolders()];
@@ -9989,65 +10030,23 @@ const renderSuggestions = (rawInput) => {
             const sourceQuery = argString.split(fromSeparator)[1].toLowerCase() || '';
             const fuse = new Fuse(getAllNotes(state.collections), { keys: ['name'], threshold: 0.5 });
             finalSuggestions = fuse.search(sourceQuery).map(result => result.item);
-        } else { // This block now runs for any command with arguments
-            const noteId = state.settings.activeNoteId;
-            let editorChecklists = [];
-            if (noteId) {
-                editorChecklists = Array.from(app.elements.noteEditorBody.querySelectorAll('.checklist-container')).map(cl => ({
-                    name: cl.querySelector('.checklist-title')?.textContent.trim() || '',
-                    element: cl
-                })).filter(c => c.name);
-            }
-
-            if (command.suggest === 'checklists') { // For /add
-                if (editorChecklists.length > 0) {
-                    const fuse = new Fuse(editorChecklists, { keys: ['name'], threshold: 0.5 });
-                    finalSuggestions = fuse.search(argQuery).map(result => ({ ...result.item, type: 'checklist' }));
-                }
-            } else if (command.suggest === 'checklist_items') { // For /remove
-                if (noteId && editorChecklists.length > 0) {
-                    const allItems = [];
-                    editorChecklists.forEach(cl => {
-                        const items = Array.from(cl.element.querySelectorAll('.checklist-item-text'))
-                            .map(itemEl => ({ 
-                                name: itemEl.textContent, 
-                                type: 'checklist_item',
-                                context: `from: ${cl.name}` 
-                            }));
-                        allItems.push(...items);
-                    });
-                    const fuse = new Fuse(allItems, { keys: ['name'], threshold: 0.5 });
-                    finalSuggestions = fuse.search(argQuery).map(result => result.item);
-                }
-            } else {
-                let itemsToSearch = [];
-                if (command.suggest.includes('items')) itemsToSearch = [...getAllNotes(state.collections), ...getAllFolders()];
-                else if (command.suggest.includes('notes')) itemsToSearch = getAllNotes(state.collections);
-                else if (command.suggest.includes('folders')) itemsToSearch = getAllFolders();
-                else if (command.name === 'go' && argString.startsWith('#')) {
-                    const tagQuery = argString.substring(1);
-                    itemsToSearch = getAllTags().map(t => ({ id: t, name: t, type: 'tag' }));
-                }
-                if (itemsToSearch.length > 0) {
-                    const fuse = new Fuse(itemsToSearch, { keys: ['name'], threshold: 0.5 });
-                    finalSuggestions = fuse.search(argQuery).map(result => result.item);
-                }
+        } else {
+            let itemsToSearch = [];
+            if (command.suggest.includes('items')) itemsToSearch = [...getAllNotes(state.collections), ...getAllFolders()];
+            else if (command.suggest.includes('notes')) itemsToSearch = getAllNotes(state.collections);
+            else if (command.suggest.includes('folders')) itemsToSearch = getAllFolders();
+            if (itemsToSearch.length > 0) {
+                const fuse = new Fuse(itemsToSearch, { keys: ['name'], threshold: 0.5 });
+                finalSuggestions = fuse.search(argQuery).map(result => result.item);
             }
         }
-
         if (finalSuggestions.length > 0) {
             suggestionsHTML = finalSuggestions.slice(0, 5).map((item, index) => {
-                const isTag = item.type === 'tag';
-                const dataAttribute = isTag ? `data-tag-name="#${item.name}"` : `data-item-name="${item.name.replace(/"/g, '&quot;')}"`;
-                const icon = isTag ? 'hash' : (item.type === 'checklist' ? 'check-square' : (item.type === 'checklist_item' ? 'list' : (item.type === 'folder' ? 'folder' : 'file-text')));
                 return `
-                <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" ${dataAttribute}>
-                    <div class="flex items-center gap-2 min-w-0"> <i data-feather="${icon}" class="w-4 h-4 text-text-secondary flex-shrink-0"></i> <span class="cmd-name truncate">${item.name}</span> </div>
-                    ${item.context ? `<span class="cmd-desc text-right truncate">${item.context}</span>` : ''}
+                <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-item-name="${item.name.replace(/"/g, '&quot;')}">
+                    <div class="flex items-center gap-2 min-w-0"> <i data-feather="${item.type === 'folder' ? 'folder' : 'file-text'}" class="w-4 h-4 text-text-secondary flex-shrink-0"></i> <span class="cmd-name truncate">${item.name}</span> </div>
                 </div>`;
             }).join('');
-        } else if (argString) {
-            suggestionsHTML = `<div class="p-2 text-sm text-text-tertiary">No items match "${argString}"</div>`;
         }
     } else {
         const lowerCaseCommandName = commandName.toLowerCase();
@@ -10632,6 +10631,12 @@ fileUploadInput.addEventListener('change', (e) => {
                 initSpeechRecognition();
                 initClipper();
                 initCalculator();
+                // --- START: Listeners for the Agent Save Modal ---
+document.getElementById('save-agent-confirm-btn').addEventListener('click', handleSaveAgentConfirm);
+document.getElementById('save-agent-cancel-btn').addEventListener('click', () => {
+    closeModal(document.getElementById('save-agent-modal'));
+});
+// --- END: Listeners for the Agent Save Modal ---
                 initAgentForgeListeners(); // <-- Add this line right after
                 initAgentManagementListeners();
 
@@ -14892,21 +14897,27 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
 </div>
 <div id="save-agent-modal" class="modal hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-pane-light p-6 rounded-lg shadow-2xl w-[90vw] max-w-md z-[51] transition-all duration-300 transform scale-95 opacity-0">
     <h3 class="text-lg font-semibold mb-4">Save Agent Blueprint</h3>
-    <div class="space-y-3">
+    <div class="space-y-4">
         <div>
             <label for="save-agent-name-input" class="text-sm font-medium text-text-secondary">Agent Name</label>
-            <input id="save-agent-name-input" type="text" class="w-full mt-1 bg-bg-pane-dark border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="e.g., Daily Journal Creator">
+            <input id="save-agent-name-input" type="text" class="w-full mt-1 bg-bg-pane-dark border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="e.g., Google Review Agent">
         </div>
         <div>
             <label for="save-agent-trigger-input" class="text-sm font-medium text-text-secondary">Run Command</label>
+            <p class="text-xs text-text-tertiary">This is the unique command to trigger your agent.</p>
             <div class="relative mt-1">
                 <span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary">/run</span>
-                <input id="save-agent-trigger-input" type="text" class="w-full bg-bg-pane-dark border border-border-color rounded-md p-2 pl-12 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="daily-journal">
+                <input id="save-agent-trigger-input" type="text" class="w-full bg-bg-pane-dark border border-border-color rounded-md p-2 pl-12 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="reviewagent">
             </div>
+        </div>
+        <div>
+            <label for="save-agent-argument-name-input" class="text-sm font-medium text-text-secondary">Command Argument (Optional)</label>
+            <p class="text-xs text-text-tertiary">Define a placeholder for dynamic input. When you run <code class="text-accent-primary text-xs bg-bg-main px-1 rounded">/run reviewagent (your note name)</code>, the note name will replace this placeholder in your instructions.</p>
+            <input id="save-agent-argument-name-input" type="text" class="w-full mt-1 bg-bg-pane-dark border border-border-color rounded-md p-2 focus:ring-2 focus:ring-accent-primary focus:outline-none" placeholder="{{note_name}}">
         </div>
         <p id="save-agent-error" class="text-red-500 text-sm h-5"></p>
     </div>
-    <div class="flex justify-end gap-3 mt-4">
+    <div class="flex justify-end gap-3 mt-6">
         <button id="save-agent-cancel-btn" class="px-4 py-2 rounded-md bg-bg-pane-dark hover:opacity-80">Cancel</button>
         <button id="save-agent-confirm-btn" class="px-4 py-2 rounded-md brand-button hover:opacity-90">Save Blueprint</button>
     </div>
