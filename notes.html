@@ -119,6 +119,51 @@
     opacity: 0;
     transform: scale(0) translateY(2px);
 }
+/* --- START: New Backlinks Section Styles --- */
+.backlink-item {
+    display: block;
+    background-color: var(--bg-pane-dark);
+    border-radius: 0.5rem; /* 8px */
+    padding: 0.75rem 1rem; /* 12px 16px */
+    text-decoration: none;
+    transition: background-color 0.2s ease-in-out;
+}
+.backlink-item:hover {
+    background-color: var(--bg-pane-light);
+}
+
+.backlink-item-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem; /* 8px */
+    font-size: 1rem; /* 16px */
+}
+
+.backlink-item-header .note-name {
+    font-weight: 600; /* bold */
+    color: var(--text-primary);
+}
+
+.backlink-item-header .folder-name {
+    color: var(--text-secondary);
+}
+
+.backlink-item-excerpt {
+    font-size: 0.875rem; /* 14px */
+    color: var(--text-secondary);
+    margin-top: 0.5rem; /* 8px */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.backlink-item-footer {
+    font-size: 0.75rem; /* 12px */
+    color: var(--text-tertiary);
+    margin-top: 0.75rem; /* 12px */
+}
+/* --- END: New Backlinks Section Styles --- */
 #save-indicator.visible {
     /* Become visible and move down slightly for perfect centering */
     opacity: 1;
@@ -1231,9 +1276,9 @@ table.filter-collapsed .toggle-filter-btn > i {
     word-wrap: break-word;
 }
         #notes-list-pane {
-            transition: width 300ms ease-in-out, transform 300ms ease-in-out;
-            overflow: hidden;
-        }
+    transition: transform 300ms ease-in-out, min-width 300ms ease-in-out; /* Changed 'width' to 'min-width' */
+    overflow: hidden;
+}
         #toggle-settings-btn.collapsed .feather-chevron-down {
     transform: rotate(-90deg);
 }
@@ -1364,9 +1409,10 @@ table.filter-collapsed .toggle-filter-btn > i {
             transition: opacity 150ms ease-in-out;
         }
         #notes-list-pane.collapsed {
-            width: 0px !important;
-            border-right-width: 0px;
-        }
+    min-width: 0px !important; /* Changed 'width' to 'min-width' */
+    transform: translateX(-100%); /* Use transform for hiding */
+    border-right-width: 0px;
+}
         #notes-list-pane.collapsed .sidebar-content-wrapper {
             opacity: 0;
             pointer-events: none;
@@ -2360,15 +2406,9 @@ window.functions = getFunctions(app,);
                     <div id="markdown-preview" class="hidden flex-grow text-lg leading-relaxed focus:outline-none p-4 md:p-8 prose"></div>
                     <div id="backlinks-pane" class="hidden p-4 md:px-8 border-t border-border-color">
     <div class="flex justify-between items-center mb-3">
-        <div class="flex items-center gap-2">
+        <button id="toggle-backlinks-btn" class="flex items-center gap-2 text-left w-full">
+            <i data-feather="chevron-down" class="w-4 h-4 transition-transform duration-200 text-text-tertiary"></i>
             <h4 class="font-semibold text-sm uppercase tracking-wider text-text-secondary">Linked Here</h4>
-            <button id="toggle-backlinks-btn" class="p-1 rounded-full hover:bg-bg-pane-dark">
-                <i data-feather="chevron-down" class="w-4 h-4 transition-transform duration-200"></i>
-            </button>
-        </div>
-        <button id="summarize-backlinks-btn" class="flex items-center gap-2 text-sm text-accent-primary hover:opacity-80 transition-opacity" title="Summarize all linked notes with AI">
-            <i data-feather="zap" class="w-4 h-4"></i>
-            <span>AI Summary</span>
         </button>
     </div>
     <div id="backlinks-list" class="space-y-3 transition-all duration-300"></div>
@@ -4414,10 +4454,7 @@ const defaultState = {
     app.containers.tagList.classList.toggle('collapsed', isCollapsed);
 }
             function migrateState(loadedState) {
-    // This function ensures that data loaded from the cloud has all the necessary properties,
-    // preventing errors if the data structure is old or incomplete.
-
-    const migrateNode = (node) => {
+    const migrateNode = (node, parentFolder = null) => {
         if (node.type === 'note') {
             if (typeof node.pinned === 'undefined') node.pinned = false;
             if (!Array.isArray(node.links)) node.links = [];
@@ -4425,47 +4462,47 @@ const defaultState = {
             const now = new Date().toISOString();
             if (typeof node.createdAt === 'undefined') node.createdAt = now;
             if (typeof node.modifiedAt === 'undefined') node.modifiedAt = node.createdAt;
-                    if (typeof node.properties === 'undefined') node.properties = {}; // ADD THIS LINE
-                    if (typeof node.propertiesCollapsed === 'undefined') node.propertiesCollapsed = false; // ADD THIS LINE
+            if (typeof node.properties === 'undefined') node.properties = {};
+            if (typeof node.propertiesCollapsed === 'undefined') node.propertiesCollapsed = false;
 
-
+            // --- THIS IS THE NEW MIGRATION LOGIC ---
+            // If an old note is missing a status, assign it a default one.
+            if (typeof node.status === 'undefined') {
+                if (parentFolder && loadedState.kanbanColumns[parentFolder.id] && loadedState.kanbanColumns[parentFolder.id][0]) {
+                    node.status = loadedState.kanbanColumns[parentFolder.id][0].id;
+                } else {
+                    node.status = null;
+                }
+            }
+            // --- END OF NEW LOGIC ---
         }
         if (node.children) {
-            // Ensure children is an array before trying to loop through it
             if (Array.isArray(node.children)) {
-                node.children.forEach(migrateNode);
+                // Pass the current folder as the parent for its children
+                node.children.forEach(child => migrateNode(child, node));
             } else {
                 node.children = [];
             }
         }
     };
-    if (typeof loadedState.settings.backlinksCollapsed === 'undefined') loadedState.settings.backlinksCollapsed = false; // Add this line
-
 
     if (!loadedState) loadedState = {};
     if (!loadedState.settings) loadedState.settings = {};
-        if (typeof loadedState.settings.chatbotVisible === 'undefined') loadedState.settings.chatbotVisible = true; // ADD THIS LINE
-        if (typeof loadedState.settings.propertiesVisible === 'undefined') loadedState.settings.propertiesVisible = true;
-
-
-
-    // THIS IS THE KEY FIX: Ensure .collections is always an array.
-    if (!Array.isArray(loadedState.collections)) {
-        loadedState.collections = [];
-    }
-
+    if (typeof loadedState.settings.backlinksCollapsed === 'undefined') loadedState.settings.backlinksCollapsed = false;
+    if (typeof loadedState.settings.chatbotVisible === 'undefined') loadedState.settings.chatbotVisible = true;
+    if (typeof loadedState.settings.propertiesVisible === 'undefined') loadedState.settings.propertiesVisible = true;
+    if (!Array.isArray(loadedState.collections)) loadedState.collections = [];
     if (!loadedState.kanbanColumns) loadedState.kanbanColumns = {};
     if (!Array.isArray(loadedState.chatHistory)) loadedState.chatHistory = [];
     if (!Array.isArray(loadedState.templates)) loadedState.templates = [];
 
-    // Now that we've confirmed .collections is an array, we can safely loop through it.
-    loadedState.collections.forEach(migrateNode);
+    // This initial call passes `null` as the parent for top-level items
+    loadedState.collections.forEach(node => migrateNode(node, null));
 
-    // Set default settings if they are missing
     if (typeof loadedState.settings.sidebarCollapsed === 'undefined') loadedState.settings.sidebarCollapsed = false;
     if (typeof loadedState.settings.paneWidth === 'undefined') loadedState.settings.paneWidth = 280;
     if (typeof loadedState.settings.activeTag === 'undefined') loadedState.settings.activeTag = null;
-    if (typeof loadedState.settings.tagsCollapsed === 'undefined') loadedState.settings.tagsCollapsed = false; // Add this line
+    if (typeof loadedState.settings.tagsCollapsed === 'undefined') loadedState.settings.tagsCollapsed = false;
     if (!loadedState.settings.listSortOrder) loadedState.settings.listSortOrder = 'modifiedAt-desc';
     if (!loadedState.settings.editorMode) loadedState.settings.editorMode = 'editor';
 
@@ -4474,14 +4511,8 @@ const defaultState = {
 
             // REPLACE the old loadState function with this one.
 
-// =================================================================
-// START: FINAL REPLACEMENT loadState FUNCTION (WITH MIGRATION)
-// =================================================================
-// =================================================================
-// START: FINAL REPLACEMENT loadState FUNCTION (WITH ALL FIXES)
-// =================================================================
-// =================================================================
-// START: FINAL REPLACEMENT loadState FUNCTION (WITH ALL FIXES)
+
+// START: REPLACEMENT loadState FUNCTION (Lazy Loading)
 // =================================================================
 // notetakeapp.html
 
@@ -4493,12 +4524,24 @@ async function loadState() {
     if (!user) return;
 
     const toastId = showToast('Loading workspace...', 'loading');
-    // We only need the user's settings and folder structure on initial load.
-    const userDocRef = doc(window.db, "users", user.uid, "data", "appState");
-
+    
     try {
-        const { getDoc, collection, writeBatch, doc: createDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+        // CORRECTED: Added getDocs, query, where, and setDoc to the import
+        const { getDoc, getDocs, collection, query, where, setDoc, doc: createDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
 
+        // 1. Initialize an empty note cache
+        window.noteCache = {};
+
+        // 2. Pre-fetch data for all notes shared with the user and populate the cache
+        // This ensures the sidebar can correctly identify shared notes on first render.
+        const sharedNotesQuery = query(collection(db, "notes"), where("sharedWith", "array-contains", user.uid));
+        const sharedNotesSnap = await getDocs(sharedNotesQuery);
+        sharedNotesSnap.forEach(doc => {
+            window.noteCache[doc.id] = doc.data();
+        });
+
+        // 3. Load the user's main state (folder structure, settings, etc.)
+        const userDocRef = createDoc(window.db, "users", user.uid, "data", "appState");
         const userSettingsSnap = await getDoc(userDocRef);
         let settingsAndFolders;
 
@@ -4506,15 +4549,11 @@ async function loadState() {
             settingsAndFolders = userSettingsSnap.data();
         } else {
             console.log("New user detected, creating default state.");
-            // For new users, create the default folder structure but don't create note documents yet.
-            // They will be created when the user first clicks on them.
             settingsAndFolders = JSON.parse(JSON.stringify(defaultState));
             await setDoc(userDocRef, settingsAndFolders);
         }
         
-        // This is the key change: The note cache starts empty!
-        window.noteCache = {};
-        
+        // 4. Migrate the state (this remains unchanged)
         state = migrateState(settingsAndFolders);
 
     } catch (error) {
@@ -4528,6 +4567,9 @@ async function loadState() {
         state.settings.theme = localStorage.getItem('codex-notes-theme') || 'reputify';
     }
 }
+// =================================================================
+// END: REPLACEMENT loadState FUNCTION
+// =================================================================
 // =================================================================
 // END: REPLACEMENT loadState FUNCTION
 // =================================================================
@@ -5219,11 +5261,12 @@ if (themeMeta) {
             
 
             function updateNoteTags(note) {
-                if (!note || typeof note.content !== 'string') return;
-                const plainText = note.content.replace(/<[^>]*>?/gm, '');
-                const matches = plainText.match(/#(\w+)/g) || [];
-                note.tags = [...new Set(matches.map(tag => tag.substring(1)))];
-            }
+    if (!note || typeof note.content !== 'string') return;
+    // This regex now allows letters, numbers, underscores, and hyphens in tags.
+    const plainText = note.content.replace(/<[^>]*>?/gm, ' ');
+    const matches = plainText.match(/#([a-zA-Z0-9_-]+)/g) || [];
+    note.tags = [...new Set(matches.map(tag => tag.substring(1)))];
+}
 
             function updateNoteLinks(note) {
                 if (!note || typeof note.content !== 'string') return;
@@ -5233,56 +5276,62 @@ if (themeMeta) {
             }
 
             function renderMainView() {
-                document.querySelectorAll('.notes-view').forEach(v => v.classList.add('hidden'));
-                    document.body.classList.remove('mobile-editor-active'); // ADD THIS LINE
+    // Set a default title first
+    document.title = 'Reputifly | AI Note Taker';
 
-                document.getElementById('main-header')?.classList.remove('hidden');
+    document.querySelectorAll('.notes-view').forEach(v => v.classList.add('hidden'));
+    document.body.classList.remove('mobile-editor-active');
+    document.getElementById('main-header')?.classList.remove('hidden');
     document.getElementById('mobile-sticky-toolbar')?.classList.add('hidden');
-                    document.getElementById('mobile-sticky-toolbar')?.classList.add('hidden');
 
+    if (isSearchActive) {
+        renderSearchResults(app.search.input.value);
+        return;
+    }
+    
+    const isNoteActive = !!state.settings.activeNoteId;
+    const isTagActive = !!state.settings.activeTag;
+    const activeCollection = findItem(state.settings.activeCollectionId)?.item;
 
-                if (isSearchActive) {
-                    renderSearchResults(app.search.input.value);
-                    return;
-                }
-                
-                const isNoteActive = !!state.settings.activeNoteId;
-                const isTagActive = !!state.settings.activeTag;
-                const activeCollection = findItem(state.settings.activeCollectionId)?.item;
+    // Logic to set the UI header and browser tab title
+    if (isTagActive) {
+        const title = `Tag: #${state.settings.activeTag}`;
+        app.elements.currentViewTitle.textContent = title;
+        document.title = `#${state.settings.activeTag} | Reputifly Notes`;
+    } else if (activeCollection) {
+        app.elements.currentViewTitle.textContent = activeCollection.name;
+        document.title = `${activeCollection.name} | Reputifly Notes`;
+    } else {
+        app.elements.currentViewTitle.textContent = "All Notes";
+    }
+    
+    const showListControls = !isNoteActive && (state.settings.activeView === 'list' || !activeCollection || isTagActive);
 
-                if (isTagActive) {
-                    app.elements.currentViewTitle.textContent = `Tag: #${state.settings.activeTag}`;
-                } else {
-                    app.elements.currentViewTitle.textContent = activeCollection?.name || "All Notes";
-                }
-                
-                const showListControls = !isNoteActive && (state.settings.activeView === 'list' || !activeCollection || isTagActive);
-
-                app.elements.viewSwitcher.style.display = isNoteActive || !activeCollection || isTagActive ? 'none' : 'flex';
-                app.elements.listViewControls.style.display = showListControls ? 'flex' : 'none';
-                
-
-                if (isNoteActive) {
-                    renderNoteEditor();
-                } else if (isTagActive) {
-                    renderListView();
-                } else if (activeCollection) {
-                     document.querySelectorAll('#view-switcher-container .view-btn').forEach(b => b.classList.remove('active'));
-                     document.querySelector(`#view-switcher-container .view-btn[data-view="${state.settings.activeView}"]`)?.classList.add('active');
-                    
-                    if (state.settings.activeView === 'board') {
-                        renderKanbanView();
-                    }else if (state.settings.activeView === 'calendar') { // ADD THIS BLOCK
-    renderCalendarView();
-} else if (state.settings.activeView === 'gallery') { // ADD THIS BLOCK
-    renderGalleryView();
-}else {
-                        renderListView();
-                    }
-                } else {
-                     renderListView();
-                }
-            }
+    app.elements.viewSwitcher.style.display = isNoteActive || !activeCollection || isTagActive ? 'none' : 'flex';
+    app.elements.listViewControls.style.display = showListControls ? 'flex' : 'none';
+    
+    if (isNoteActive) {
+        // This function will override the title again with the specific note name
+        renderNoteEditor();
+    } else if (isTagActive) {
+        renderListView();
+    } else if (activeCollection) {
+         document.querySelectorAll('#view-switcher-container .view-btn').forEach(b => b.classList.remove('active'));
+         document.querySelector(`#view-switcher-container .view-btn[data-view="${state.settings.activeView}"]`)?.classList.add('active');
+        
+        if (state.settings.activeView === 'board') {
+            renderKanbanView();
+        } else if (state.settings.activeView === 'calendar') {
+            renderCalendarView();
+        } else if (state.settings.activeView === 'gallery') {
+            renderGalleryView();
+        } else {
+            renderListView();
+        }
+    } else {
+         renderListView();
+    }
+}
             
             function renderMobileControls() {
     const activeCollection = findItem(state.settings.activeCollectionId)?.item;
@@ -5662,58 +5711,79 @@ function renderDayView(date) {
 }
 // END OF NEW FUNCTION
             function renderKanbanView() {
-                app.views.board.classList.remove('hidden');
-                const collectionId = state.settings.activeCollectionId;
-                const collection = findItem(collectionId)?.item;
+    app.views.board.classList.remove('hidden');
+    const collectionId = state.settings.activeCollectionId;
+    const collection = findItem(collectionId)?.item;
 
-                if (!collection || collection.type !== 'folder') {
-                    app.containers.kanbanBoard.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="trello" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">Board View</h3><p>This view is only available for project folders.</p></div>`;
-                    feather.replace();
-                    return;
-                }
-                
-                const columns = state.kanbanColumns[collectionId] || [];
-                const notesInCollection = collection.children.filter(c => c.type === 'note') || [];
-                
-                const columnsHTML = columns.map(column => {
-                    const notesInColumn = [...notesInCollection]
-                        .filter(note => note.status === column.id)
-                        .sort((a,b) => notesInCollection.indexOf(a) - notesInCollection.indexOf(b));
-                        
-                    const cardsHTML = notesInColumn.map(note => {
-                            const date = formatDateTime(note.modifiedAt);
-                            const pinnedClass = note.pinned ? 'pinned' : '';
-                            return `
-                                <div class="kanban-card p-3 rounded-md shadow-sm border border-border-color mb-3 cursor-pointer hover:shadow-lg transition-all ${pinnedClass}" draggable="true" data-note-id="${note.id}">
-                                    <div class="pointer-events-none flex-grow overflow-hidden">
-                                        <h4 class="font-semibold pointer-events-none truncate">${note.name}</h4>
-                                        <p class="text-sm text-text-secondary mt-1 pointer-events-none truncate-multiline card-content">${note.excerpt || ''}</p>
-                                    </div>
-                                    <div class="text-xs text-text-tertiary mt-2 pointer-events-none flex-shrink-0">Modified: ${date}</div>
-                                </div>
-                            `;
-                        }).join('');
+    if (!collection || collection.type !== 'folder') {
+        app.containers.kanbanBoard.innerHTML = `<div class="text-center p-10 text-text-secondary"><i data-feather="trello" class="w-12 h-12 mx-auto mb-4"></i><h3 class="font-semibold">Board View</h3><p>This view is only available for project folders.</p></div>`;
+        feather.replace();
+        return;
+    }
+    
+    const columns = state.kanbanColumns[collectionId] || [];
+    const notesInCollection = (collection.children || []).filter(c => c.type === 'note');
+    
+    // --- START: KANBAN FIX & MIGRATION ---
+    // This new logic checks every note and assigns it to the first column if its status is missing or invalid.
+    if (columns.length > 0) {
+        let needsSave = false;
+        const firstColumnId = columns[0].id;
+        const validColumnIds = new Set(columns.map(c => c.id));
 
-                    return `
-                        <div class="kanban-column w-[280px] md:w-[300px] flex-shrink-0 bg-bg-pane-dark p-3 rounded-lg" data-column-id="${column.id}">
-                            <div class="column-header flex justify-between items-center font-semibold mb-3 text-text-primary">
-                                <span class="rename-column-btn cursor-pointer flex-grow p-1">${column.title}</span>
-                                <button class="delete-column-btn text-text-tertiary hover:text-red-500 opacity-0 transition-opacity p-1"><i data-feather="x" class="w-4 h-4"></i></button>
-                            </div>
-                            <div class="cards-container min-h-[100px]">${cardsHTML}</div>
-                        </div>
-                    `;
-                }).join('');
-                
-                const addColumnBtnHTML = columns.length < 5 ? `
-                     <div class="w-[280px] md:w-[300px] flex-shrink-0">
-                        <button id="add-column-btn" class="w-full bg-bg-pane-light p-3 rounded-lg text-text-secondary hover:bg-main hover:text-accent-primary transition-colors">
-                            <i data-feather="plus" class="inline-block mr-2"></i>Add Column
-                        </button>
-                    </div>` : '';
-
-                app.containers.kanbanBoard.innerHTML = columnsHTML + addColumnBtnHTML;
+        notesInCollection.forEach(note => {
+            if (!note.status || !validColumnIds.has(note.status)) {
+                note.status = firstColumnId;
+                needsSave = true;
             }
+        });
+
+        // If we fixed any notes, save the changes back to the database.
+        if (needsSave) {
+            console.log("Kanban view is correcting note statuses...");
+            saveState();
+        }
+    }
+    // --- END: KANBAN FIX & MIGRATION ---
+    
+    const columnsHTML = columns.map(column => {
+        const notesInColumn = notesInCollection.filter(note => note.status === column.id);
+            
+        const cardsHTML = notesInColumn.map(note => {
+                const date = formatDateTime(note.modifiedAt);
+                const pinnedClass = note.pinned ? 'pinned' : '';
+                return `
+                    <div class="kanban-card p-3 rounded-md shadow-sm border border-border-color mb-3 cursor-pointer hover:shadow-lg transition-all ${pinnedClass}" draggable="true" data-note-id="${note.id}">
+                        <div class="pointer-events-none flex-grow overflow-hidden">
+                            <h4 class="font-semibold pointer-events-none truncate">${note.name}</h4>
+                            <p class="text-sm text-text-secondary mt-1 pointer-events-none truncate-multiline card-content">${note.excerpt || ''}</p>
+                        </div>
+                        <div class="text-xs text-text-tertiary mt-2 pointer-events-none flex-shrink-0">Modified: ${date}</div>
+                    </div>
+                `;
+            }).join('');
+
+        return `
+            <div class="kanban-column w-[280px] md:w-[300px] flex-shrink-0 bg-bg-pane-dark p-3 rounded-lg" data-column-id="${column.id}">
+                <div class="column-header flex justify-between items-center font-semibold mb-3 text-text-primary">
+                    <span class="rename-column-btn cursor-pointer flex-grow p-1">${column.title}</span>
+                    <button class="delete-column-btn text-text-tertiary hover:text-red-500 opacity-0 transition-opacity p-1"><i data-feather="x" class="w-4 h-4"></i></button>
+                </div>
+                <div class="cards-container min-h-[100px]">${cardsHTML}</div>
+            </div>
+        `;
+    }).join('');
+    
+    const addColumnBtnHTML = columns.length < 5 ? `
+         <div class="w-[280px] md:w-[300px] flex-shrink-0">
+            <button id="add-column-btn" class="w-full bg-bg-pane-light p-3 rounded-lg text-text-secondary hover:bg-main hover:text-accent-primary transition-colors">
+                <i data-feather="plus" class="inline-block mr-2"></i>Add Column
+            </button>
+        </div>` : '';
+
+    app.containers.kanbanBoard.innerHTML = columnsHTML + addColumnBtnHTML;
+    feather.replace();
+}
 
 function renderListView() {
     app.views.list.classList.remove('hidden');
@@ -5990,6 +6060,8 @@ async function renderNoteEditor() {
     }
 
     app.elements.noteEditorTitle.value = noteData.name;
+        document.title = `${noteData.name} | Reputifly Notes`;
+
     app.elements.noteEditorTitle.style.height = 'auto';
     app.elements.noteEditorTitle.style.height = (app.elements.noteEditorTitle.scrollHeight) + 'px';
 
@@ -6007,10 +6079,54 @@ app.elements.noteEditorBody.innerHTML = DOMPurify.sanitize(contentWithLinks);
 function renderBacklinks(noteStub, noteData) {
     const backlinksPane = document.getElementById('backlinks-pane');
     const backlinksList = document.getElementById('backlinks-list');
+
+    // Ensure we have the necessary data to find links
+    if (!noteData || !noteData.name) {
+        backlinksPane.classList.add('hidden');
+        return;
+    }
+
+    const currentNoteName = noteData.name.toLowerCase();
+    const currentNoteId = noteStub.id;
+
+    // Use the complete, cached note data to find backlinks
+    const allCachedNotes = Object.entries(window.noteCache).map(([id, data]) => ({ id, ...data }));
     
-    // We can't search for backlinks until more notes are cached.
-    // For now, this is a simplified approach. A full backlink search would be more complex.
-    backlinksPane.classList.add('hidden');
+    const backlinkingNotes = allCachedNotes.filter(note => 
+        note.id !== currentNoteId && 
+        (note.links || []).some(linkName => linkName.toLowerCase() === currentNoteName)
+    );
+
+    if (backlinkingNotes.length === 0) {
+        backlinksPane.classList.add('hidden');
+        return;
+    }
+
+    backlinksPane.classList.remove('hidden');
+
+    backlinksList.innerHTML = backlinkingNotes.map(note => {
+        // Find the folder name for the backlinking note
+        const findResult = findItem(note.id);
+        const parent = findResult ? findResult.parent : null;
+        const parentName = parent && !Array.isArray(parent) ? parent.name : 'Uncategorized';
+        
+        const modifiedDate = formatDateTime(note.modifiedAt);
+        const excerpt = note.excerpt || 'No additional context.';
+
+        return `
+            <a href="#" class="backlink-item" data-note-id="${note.id}">
+                <div class="backlink-item-header">
+                    <span class="note-name">${note.name}</span>
+                    <span class="text-text-tertiary">|</span>
+                    <span class="folder-name">${parentName}</span>
+                </div>
+                <p class="backlink-item-excerpt">${excerpt}</p>
+                <div class="backlink-item-footer">Modified: ${modifiedDate}</div>
+            </a>
+        `;
+    }).join('');
+
+    renderBacklinksState(); // This function will correctly show/hide the list based on state
 }
 // =================================================================
 // END: REPLACEMENT renderNoteEditor FUNCTION
@@ -6278,29 +6394,28 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
     const user = window.auth.currentUser;
     if (!user) return null;
 
-    const { doc, collection, writeBatch, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+    const { doc, collection, writeBatch, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
 
     let finalParentId = parentId;
     if (finalParentId === undefined) {
         finalParentId = state.settings.activeCollectionId;
     }
 
-    // --- START: NEW EXCERPT LOGIC ---
     const initialContent = template.content || '';
     const plainText = initialContent.replace(/<[^>]*>?/gm, ' ').trim();
     const initialExcerpt = plainText.substring(0, 200);
-    // --- END: NEW EXCERPT LOGIC ---
-
     const now = new Date().toISOString();
+
     const newNoteData = {
         ownerId: user.uid,
         name: template.name || 'Untitled Note',
         content: initialContent,
-        excerpt: initialExcerpt, // ADD THIS
+        excerpt: initialExcerpt,
         properties: template.properties ? JSON.parse(JSON.stringify(template.properties)) : {},
         createdAt: now,
         modifiedAt: now,
         tags: [],
+        links: [],
         sharedWith: []
     };
 
@@ -6317,15 +6432,24 @@ const createNewNote = async (andSwitchToIt = true, template = {}, parentId = und
         finalParentId = null;
     }
 
+    // --- THIS IS THE KANBAN FIX ---
+    // Determine the initial Kanban status for the new note.
+    let initialStatus = null;
+    if (finalParentId && state.kanbanColumns[finalParentId] && state.kanbanColumns[finalParentId].length > 0) {
+        initialStatus = state.kanbanColumns[finalParentId][0].id;
+    }
+
     const newNoteStub = {
         id: noteId,
         type: 'note',
         name: newNoteData.name,
-        excerpt: initialExcerpt, // ADD THIS
-        pinned: false
+        excerpt: initialExcerpt,
+        pinned: false,
+        status: initialStatus // Assign the default status
     };
     targetArray.unshift(newNoteStub);
 
+    // Save both the full note data and the updated folder structure
     const batch = writeBatch(db);
     batch.set(newNoteRef, newNoteData);
     window.noteCache[noteId] = newNoteData;
@@ -8275,10 +8399,21 @@ const renderLinkedNotesModal = (note) => {
     const modalTitle = document.getElementById('linked-notes-title');
     const modalContent = document.getElementById('linked-notes-content');
     modalTitle.innerHTML = `<i data-feather="link" class="w-5 h-5 text-accent-primary"></i> Connections for "${note.name}"`;
+
+    // --- FIX START: Use full note data from the cache ---
+    const allNotes = Object.values(window.noteCache).map(data => ({ id: Object.keys(window.noteCache).find(key => window.noteCache[key] === data), ...data }));
+    const currentNoteData = window.noteCache[note.id];
     
-    const allNotes = getAllNotes(state.collections);
-    const outgoingLinks = (note.links || []).map(linkName => allNotes.find(n => n.name === linkName)).filter(Boolean);
-    const incomingLinks = allNotes.filter(n => n.id !== note.id && (n.links || []).some(linkName => linkName === note.name));
+    if (!currentNoteData) {
+        modalContent.innerHTML = `<p class="text-text-secondary">Note content not loaded yet. Please try again.</p>`;
+        openModal(document.getElementById('linked-notes-modal'));
+        feather.replace();
+        return;
+    }
+
+    const outgoingLinks = (currentNoteData.links || []).map(linkName => allNotes.find(n => n.name.toLowerCase() === linkName.toLowerCase())).filter(Boolean);
+    const incomingLinks = allNotes.filter(n => n.id !== currentNoteData.id && (n.links || []).some(linkName => linkName.toLowerCase() === currentNoteData.name.toLowerCase()));
+    // --- FIX END ---
 
     const createNoteHTML = (n) => {
         const findResult = findItem(n.id);
@@ -8651,36 +8786,27 @@ const commands = [
 
         performImmediateSave(); // Ensure latest content is captured before versioning
 
-        const note = window.noteCache[noteId];
-        if (note) {
+        const noteData = window.noteCache[noteId];
+        if (noteData) {
             const versions = state.versions?.[noteId] || [];
             const savedRegex = /^Saved(\s(\d+))?$/;
-            let maxNum = -1; // -1 means "Saved" hasn't been used, 0 means only "Saved" has been used
+            let maxNum = -1; 
 
             versions.forEach(v => {
                 const match = v.message?.match(savedRegex);
                 if (match) {
-                    if (match[2]) { // If it's "Saved [number]" like "Saved 1"
+                    if (match[2]) {
                         const num = parseInt(match[2], 10);
-                        if (num > maxNum) {
-                            maxNum = num;
-                        }
-                    } else { // If it's just "Saved"
-                        if (maxNum < 0) {
-                           maxNum = 0;
-                        }
+                        if (num > maxNum) maxNum = num;
+                    } else {
+                        if (maxNum < 0) maxNum = 0;
                     }
                 }
             });
 
-            let message;
-            if (maxNum === -1) {
-                message = 'Saved';
-            } else {
-                message = `Saved ${maxNum + 1}`;
-            }
-
-            saveNoteVersion(note.id, note.content, message);
+            const message = (maxNum === -1) ? 'Saved' : `Saved ${maxNum + 1}`;
+            
+            saveNoteVersion(noteId, noteData.content, message);
             saveState();
             showToast(`✅ Checkpoint saved: "${message}"`, 'success');
         }
@@ -9804,7 +9930,8 @@ const handleHeaderAIAction = (action) => {
     const noteId = state.settings.activeNoteId;
     // --- FIX STARTS HERE ---
     // Get the full note object from the cache instead of the sidebar stub.
-    const note = window.noteCache[noteId] ? { id: noteId, ...window.noteCache[noteId] } : null;
+        const note = window.noteCache[noteId] ? { id: noteId, ...window.noteCache[noteId] } : null;
+
     // --- FIX ENDS HERE ---
 
     if (note) {
@@ -9939,12 +10066,18 @@ document.getElementById('save-indicator').addEventListener('click', () => {
                     document.body.style.cursor = 'col-resize';
                     const startX = e.clientX;
                     const startWidth = app.elements.notesListPane.offsetWidth;
-                    const doDrag = (e) => {
-                        let newWidth = startWidth + e.clientX - startX;
-                        newWidth = Math.max(240, Math.min(newWidth, 500)); 
-                        app.elements.notesListPane.style.width = `${newWidth}px`;
-                        app.elements.sidebarToggleBtn.style.left = `${newWidth}px`;
-                    };
+                    let animationFrameId = null;
+const doDrag = (e) => {
+    if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+    }
+    animationFrameId = requestAnimationFrame(() => {
+        let newWidth = startWidth + e.clientX - startX;
+        newWidth = Math.max(240, Math.min(newWidth, 500));
+        app.elements.notesListPane.style.width = `${newWidth}px`;
+        app.elements.sidebarToggleBtn.style.left = `${newWidth}px`;
+    });
+};
                     const stopDrag = () => {
                         document.body.style.cursor = 'default';
                         state.settings.paneWidth = app.elements.notesListPane.offsetWidth;
@@ -10973,6 +11106,7 @@ app.containers.mobileControlsDropdown.addEventListener('click', async (e) => {
     }
 
     // --- FIX STARTS HERE FOR SUMMARIZE/QUIZ BUTTONS ---
+    // --- FIX STARTS HERE FOR SUMMARIZE/QUIZ BUTTONS ---
     const summarizeBtn = e.target.closest('.summarize-btn');
     if (summarizeBtn) {
         e.preventDefault();
@@ -11002,6 +11136,7 @@ app.containers.mobileControlsDropdown.addEventListener('click', async (e) => {
         handleGenerateQuiz(plainContent, note);
         return;
     }
+    // --- FIX ENDS HERE ---
     // --- FIX ENDS HERE ---
 
     const copyBtn = e.target.closest('.copy-code-btn');
@@ -11098,33 +11233,31 @@ performImmediateSave = async () => {
         return;
     }
 
-    // --- START: ADDED EXCERPT LOGIC ---
-    // Generate a 200-character plain text excerpt for search and previews
     const plainText = newContent.replace(/<[^>]*>?/gm, ' ').trim();
     const excerpt = plainText.substring(0, 200);
-    // --- END: ADDED EXCERPT LOGIC ---
 
     const nameChanged = noteStub.name !== newName;
 
-    // Save the excerpt to the note's "stub" in the main state
-    noteStub.name = newName;
-    noteStub.excerpt = excerpt;
-
-    // Save the excerpt to the full note data in the cache
+    // Update the full note data in the cache
     noteContent.name = newName;
     noteContent.content = newContent;
     noteContent.excerpt = excerpt;
     noteContent.modifiedAt = new Date().toISOString();
-
     updateNoteLinks(noteContent);
     updateNoteTags(noteContent);
+
+    // --- THIS IS THE CRUCIAL FIX ---
+    // Sync the tags from the cache to the main state object used for rendering
+    noteStub.tags = noteContent.tags;
+    noteStub.name = newName;
+    noteStub.excerpt = excerpt;
+    // --- END OF FIX ---
 
     if (nameChanged) {
         renderCollectionsList();
     }
 
     try {
-        // This logic now saves the excerpt to the full note document in Firestore
         if (user.uid === noteContent.ownerId) {
             const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
             const noteRef = doc(db, "notes", noteId);
@@ -11132,7 +11265,7 @@ performImmediateSave = async () => {
             await updateDoc(noteRef, {
                 name: newName,
                 content: newContent,
-                excerpt: excerpt, // ADDED
+                excerpt: excerpt,
                 modifiedAt: noteContent.modifiedAt,
                 links: noteContent.links,
                 tags: noteContent.tags
@@ -11145,7 +11278,7 @@ performImmediateSave = async () => {
                 noteId: noteId,
                 newName: newName,
                 newContent: newContent,
-                newExcerpt: excerpt, // ADDED
+                newExcerpt: excerpt,
                 newLinks: noteContent.links,
                 newTags: noteContent.tags,
                 modifiedAt: noteContent.modifiedAt
@@ -11157,6 +11290,7 @@ performImmediateSave = async () => {
         updateSaveIndicator();
 
         scheduleRebuildIndex();
+        renderTagList(); // Re-render the tag list immediately after saving
 
     } catch (error) {
         console.error("Failed to save note:", error);
@@ -11172,17 +11306,16 @@ saveNoteContent = debounce(performImmediateSave, 5000);
 // =================================================================
 // END: REPLACEMENT saveNoteContent FUNCTION
 // =================================================================
-app.elements.noteEditorTitle.addEventListener('input', () => {
-    isNoteDirty = true;
-    updateSaveIndicator();
-    saveNoteContent();
-    updateEditorStats();
-});
+// This is the single, correct 'input' listener for the note editor
 app.elements.noteEditorBody.addEventListener('input', () => {
-    isNoteDirty = true;
-    updateSaveIndicator();
-    saveNoteContent();
-    updateStatsDebounced();
+    if (!isNoteDirty) {
+        isNoteDirty = true;
+        // Show the 'unsaved' dot immediately on the first change
+        updateSaveIndicator();
+    }
+    // Trigger the debounced functions for saving and updating stats
+    saveNoteContent();
+    updateStatsDebounced();
 });
                 app.elements.noteEditorBody.addEventListener('input', () => {
                     saveNoteContent();
@@ -11411,155 +11544,151 @@ app.elements.noteEditorBody.addEventListener('paste', (e) => {
                 });
 
                 app.toolbar.graphBtn.addEventListener('click', () => {
-                    const noteId = state.settings.activeNoteId;
-                    if (!noteId) return;
-                        document.getElementById('sidebar-toggle-btn').style.display = 'none'; // ADD THIS LINE
+    const noteId = state.settings.activeNoteId;
+    if (!noteId) return;
+    document.getElementById('sidebar-toggle-btn').style.display = 'none';
 
+    try {
+        // --- FIX START: Use full note data from the cache ---
+        const allNotes = Object.entries(window.noteCache).map(([id, data]) => ({ id, ...data }));
+        const currentNote = window.noteCache[noteId];
 
-                    try {
-                        const allNotes = getAllNotes(state.collections);
-                        const { item: currentNote } = findItem(noteId);
+        if (!currentNote) {
+            return showToast('❌ Note content not loaded. Use /load or open the note first.', 'error');
+        }
+        // --- FIX END ---
 
-                        const nodes = new vis.DataSet([{ id: currentNote.id, label: currentNote.name, color: getComputedStyle(document.documentElement).getPropertyValue('--accent-primary') }]);
-                        const edges = new vis.DataSet();
+        const nodes = new vis.DataSet([{ id: noteId, label: currentNote.name, color: getComputedStyle(document.documentElement).getPropertyValue('--accent-primary') }]);
+        const edges = new vis.DataSet();
 
-                        // Links from current note
-                        (currentNote.links || []).forEach(linkName => {
-                            const targetNote = allNotes.find(n => n.name.toLowerCase() === linkName.toLowerCase());
-                            if (targetNote && targetNote.id !== currentNote.id) {
-                                if (!nodes.get(targetNote.id)) {
-                                    nodes.add({ id: targetNote.id, label: targetNote.name });
-                                }
-                                edges.add({ from: currentNote.id, to: targetNote.id, arrows: 'to' });
-                            }
-                        });
+        // Links from current note
+        (currentNote.links || []).forEach(linkName => {
+            const targetNote = allNotes.find(n => n.name.toLowerCase() === linkName.toLowerCase());
+            if (targetNote && targetNote.id !== noteId) {
+                if (!nodes.get(targetNote.id)) {
+                    nodes.add({ id: targetNote.id, label: targetNote.name });
+                }
+                edges.add({ from: noteId, to: targetNote.id, arrows: 'to' });
+            }
+        });
 
-                        // Links to current note (backlinks)
-                        allNotes.forEach(note => {
-                            if (note.id !== currentNote.id && (note.links || []).some(link => link.toLowerCase() === currentNote.name.toLowerCase())) {
-                                 if (!nodes.get(note.id)) {
-                                    nodes.add({ id: note.id, label: note.name });
-                                }
-                                edges.add({ from: note.id, to: currentNote.id, arrows: 'to' });
-                            }
-                        });
-                        
-                        const computedStyles = getComputedStyle(document.documentElement);
+        // Links to current note (backlinks)
+        allNotes.forEach(note => {
+            if (note.id !== noteId && (note.links || []).some(link => link.toLowerCase() === currentNote.name.toLowerCase())) {
+                 if (!nodes.get(note.id)) {
+                    nodes.add({ id: note.id, label: note.name });
+                }
+                edges.add({ from: note.id, to: noteId, arrows: 'to' });
+            }
+        });
+        
+        const computedStyles = getComputedStyle(document.documentElement);
 
-                        const options = {
-                            nodes: {
-                                shape: 'box',
-                                color: computedStyles.getPropertyValue('--bg-pane-dark').trim(),
-                                font: { color: computedStyles.getPropertyValue('--text-primary').trim() },
-                                borderWidth: 1,
-                            },
-                            edges: {
-                                color: {
-                                    color: computedStyles.getPropertyValue('--text-tertiary').trim(),
-                                    highlight: computedStyles.getPropertyValue('--accent-primary').trim(),
-                                }
-                            },
-                            physics: {
-                                enabled: true,
-                                solver: 'barnesHut',
-                                barnesHut: {
-                                    gravitationalConstant: -4000,
-                                    centralGravity: 0.1,
-                                    springLength: 150,
-                                }
-                            },
-                            interaction: {
-                                dragNodes: true,
-                                dragView: true,
-                                zoomView: true
-                            }
-                        };
-                        new vis.Network(app.modals.graphContainer, { nodes, edges }, options);
-                        const network = new vis.Network(app.modals.graphContainer, { nodes, edges }, options);
+        const options = {
+            nodes: {
+                shape: 'box',
+                color: computedStyles.getPropertyValue('--bg-pane-dark').trim(),
+                font: { color: computedStyles.getPropertyValue('--text-primary').trim() },
+                borderWidth: 1,
+            },
+            edges: {
+                color: {
+                    color: computedStyles.getPropertyValue('--text-tertiary').trim(),
+                    highlight: computedStyles.getPropertyValue('--accent-primary').trim(),
+                }
+            },
+            physics: {
+                enabled: true,
+                solver: 'barnesHut',
+                barnesHut: {
+                    gravitationalConstant: -4000,
+                    centralGravity: 0.1,
+                    springLength: 150,
+                }
+            },
+            interaction: {
+                dragNodes: true,
+                dragView: true,
+                zoomView: true
+            }
+        };
+        const network = new vis.Network(app.modals.graphContainer, { nodes, edges }, options);
 
-                        // --- START: NEW & IMPROVED INTERACTIVITY CODE ---
-                        network.on('click', function(params) {
-                            if (params.nodes.length > 0) {
-                                const noteId = params.nodes[0];
-                                const noteToOpen = findItem(noteId)?.item;
-                                if (noteToOpen) {
-                                    state.settings.activeNoteId = noteId;
-                                    const { parent } = findItem(noteId);
-                                    state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
-                                    state.settings.activeTag = null;
-                                    saveState();
-                                    render();
-                                    closeModal(app.modals.graph);
-                                }
-                            }
-                        });
+        network.on('click', function(params) {
+            if (params.nodes.length > 0) {
+                const clickedNoteId = params.nodes[0];
+                const noteToOpen = findItem(clickedNoteId)?.item;
+                if (noteToOpen) {
+                    state.settings.activeNoteId = clickedNoteId;
+                    const { parent } = findItem(clickedNoteId);
+                    state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
+                    state.settings.activeTag = null;
+                    saveState();
+                    render();
+                    closeModal(app.modals.graph);
+                }
+            }
+        });
 
-                        const createTooltip = () => {
-                            let tooltip = document.getElementById('note-graph-tooltip');
-                            if (!tooltip) {
-                                tooltip = document.createElement('div');
-                                tooltip.id = 'note-graph-tooltip';
-                                tooltip.style.position = 'absolute';
-                                tooltip.style.visibility = 'hidden';
-                                tooltip.style.backgroundColor = 'var(--bg-pane-dark)';
-                                tooltip.style.border = '1px solid var(--border-color)';
-                                tooltip.style.borderRadius = '8px';
-                                tooltip.style.padding = '12px';
-                                tooltip.style.maxWidth = '300px';
-                                tooltip.style.color = 'var(--text-primary)';
-                                tooltip.style.boxShadow = '0 4px 12px var(--shadow-color)';
-                                tooltip.style.pointerEvents = 'none';
-                                tooltip.style.zIndex = '10000';
-                                tooltip.style.opacity = '0';
-                                tooltip.style.transition = 'opacity 0.2s ease-in-out';
-                                document.body.appendChild(tooltip);
-                            }
-                            return tooltip;
-                        };
-                        
-                        network.on('hoverNode', function(params) {
-                            const noteId = params.node;
-                            const note = findItem(noteId)?.item;
-                            const tooltip = createTooltip();
+        const createTooltip = () => {
+            let tooltip = document.getElementById('note-graph-tooltip');
+            if (!tooltip) {
+                tooltip = document.createElement('div');
+                tooltip.id = 'note-graph-tooltip';
+                tooltip.style.position = 'absolute';
+                tooltip.style.visibility = 'hidden';
+                tooltip.style.backgroundColor = 'var(--bg-pane-dark)';
+                tooltip.style.border = '1px solid var(--border-color)';
+                tooltip.style.borderRadius = '8px';
+                tooltip.style.padding = '12px';
+                tooltip.style.maxWidth = '300px';
+                tooltip.style.color = 'var(--text-primary)';
+                tooltip.style.boxShadow = '0 4px 12px var(--shadow-color)';
+                tooltip.style.pointerEvents = 'none';
+                tooltip.style.zIndex = '10000';
+                tooltip.style.opacity = '0';
+                tooltip.style.transition = 'opacity 0.2s ease-in-out';
+                document.body.appendChild(tooltip);
+            }
+            return tooltip;
+        };
+        
+        network.on('hoverNode', function(params) {
+            const hoveredNoteId = params.node;
+            // --- FIX: Get excerpt from the full note data in the cache ---
+            const noteData = window.noteCache[hoveredNoteId];
+            const tooltip = createTooltip();
 
-                            if (note) {
-                                const excerpt = note.excerpt || 'No content preview...';
+            if (noteData) {
+                const excerpt = noteData.excerpt || 'No content preview...';
 
-                                tooltip.innerHTML = `
-                                    <h4 style="font-weight: 600; margin: 0 0 5px 0;">${note.name}</h4>
-                                    <p style="font-size: 0.875rem; margin: 0; color: var(--text-secondary);">${excerpt || 'This note is empty.'}</p>
-                                `;
+                tooltip.innerHTML = `
+                    <h4 style="font-weight: 600; margin: 0 0 5px 0;">${noteData.name}</h4>
+                    <p style="font-size: 0.875rem; margin: 0; color: var(--text-secondary);">${excerpt}</p>
+                `;
 
-                                tooltip.style.left = `${params.event.pointer.DOM.x + 15}px`;
-                                tooltip.style.top = `${params.event.pointer.DOM.y + 15}px`;
-                                tooltip.style.visibility = 'visible';
-                                tooltip.style.opacity = '1';
-                            }
-                        });
+                tooltip.style.left = `${params.event.pointer.DOM.x + 15}px`;
+                tooltip.style.top = `${params.event.pointer.DOM.y + 15}px`;
+                tooltip.style.visibility = 'visible';
+                tooltip.style.opacity = '1';
+            }
+        });
 
-                        network.on('blurNode', function(params) {
-                            const tooltip = document.getElementById('note-graph-tooltip');
-                            if (tooltip) {
-                                tooltip.style.opacity = '0';
-                                tooltip.style.visibility = 'hidden';
-                            }
-                        });
-                        // --- END: NEW & IMPROVED INTERACTIVITY CODE ---
+        network.on('blurNode', function(params) {
+            const tooltip = document.getElementById('note-graph-tooltip');
+            if (tooltip) {
+                tooltip.style.opacity = '0';
+                tooltip.style.visibility = 'hidden';
+            }
+        });
 
-                        network.on('blurNode', function(params) {
-                            let tooltip = document.getElementById('note-graph-tooltip');
-                            if (tooltip) {
-                                tooltip.style.opacity = '0';
-                            }
-                        });
-                        // --- END: ADD THIS NEW CODE ---
-                        openModal(app.modals.graph);
+        openModal(app.modals.graph);
 
-                    } catch(err) {
-                        console.error("Error creating note graph:", err);
-                        // showToast('Could not create note graph.', 'error');
-                    }
-                });
+    } catch(err) {
+        console.error("Error creating note graph:", err);
+        showToast('Could not create note graph.', 'error');
+    }
+});
                 document.getElementById('header-template-btn').addEventListener('click', () => {
     const note = findItem(state.settings.activeNoteId)?.item;
     if (note) {
