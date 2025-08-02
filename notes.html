@@ -13214,6 +13214,8 @@ const originalButton = originalToolbar.querySelector(selector);
     if (!button) return;
     const action = button.dataset.action;
 
+    // Located inside the app.elements.notesListPane 'click' event listener
+
     if (action === 'export') {
         const toastId = showToast('Preparing export... This may take a moment.', 'loading');
         
@@ -13240,7 +13242,8 @@ const originalButton = originalToolbar.querySelector(selector);
                     if (items[i].type === 'note') {
                         const fullNoteData = window.noteCache[items[i].id];
                         if (fullNoteData) {
-                            items[i] = { ...items[i], ...fullNoteData };
+                            // Merge the full data into the stub, creating a complete note object
+                            Object.assign(items[i], fullNoteData);
                         }
                     } else if (items[i].type === 'folder' && items[i].children) {
                         populateNotes(items[i].children);
@@ -13277,7 +13280,9 @@ const originalButton = originalToolbar.querySelector(selector);
     }
 });
 
-                app.elements.importFileInput.addEventListener('change', async e => {
+                // This replaces the entire 'change' event listener for the import file input
+
+app.elements.importFileInput.addEventListener('change', async e => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -13306,17 +13311,21 @@ const originalButton = originalToolbar.querySelector(selector);
                 return;
             }
 
+            // 1. Extract full note data and create a separate dictionary for it.
             const allImportedNotes = getAllNotes(importedState.collections);
             const fullNoteDataById = {};
             allImportedNotes.forEach(note => {
                 const { content, excerpt, properties, createdAt, modifiedAt, tags, links, sharedWith, ownerId, ...stub } = note;
-                fullNoteDataById[stub.id] = { content, excerpt, properties, createdAt, modifiedAt, tags, links, sharedWith, ownerId, name: stub.name };
+                // Important: Ensure all imported notes are re-assigned to the current user.
+                fullNoteDataById[stub.id] = { content, excerpt, properties, createdAt, modifiedAt, tags, links, sharedWith: [], ownerId: user.uid, name: stub.name };
             });
 
+            // 2. Create the "scrubbed" state object that only contains note stubs, not full content.
             const newStateForStubs = migrateState(importedState);
             const scrubStubs = (items) => {
                 items.forEach(item => {
                     if (item.type === 'note') {
+                        // Keep only the keys that belong in a stub.
                         const stubKeys = ['id', 'type', 'name', 'excerpt', 'pinned', 'status'];
                         Object.keys(item).forEach(key => {
                             if (!stubKeys.includes(key)) delete item[key];
@@ -13328,22 +13337,27 @@ const originalButton = originalToolbar.querySelector(selector);
             };
             scrubStubs(newStateForStubs.collections);
 
+            // 3. Perform a batch write to Firestore for efficiency.
             const { doc, collection, writeBatch, deleteDoc, getDocs, query, where } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
             const batch = writeBatch(db);
 
+            // 3a. Delete all existing notes owned by the user.
             const notesColRef = collection(db, "notes");
             const userNotesQuery = query(notesColRef, where("ownerId", "==", user.uid));
             const existingNotesSnap = await getDocs(userNotesQuery);
             existingNotesSnap.forEach(doc => batch.delete(doc.ref));
 
+            // 3b. Add all imported notes as new documents.
             for (const noteId in fullNoteDataById) {
                 const noteRef = doc(db, "notes", noteId);
                 batch.set(noteRef, fullNoteDataById[noteId]);
             }
             
+            // 3c. Overwrite the main app state with the scrubbed stub data.
             const userDocRef = doc(db, "users", user.uid, "data", "appState");
             batch.set(userDocRef, newStateForStubs);
 
+            // 4. Commit all changes at once.
             await batch.commit();
             
             dismissToast(toastId);
