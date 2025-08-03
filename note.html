@@ -10199,33 +10199,69 @@ document.addEventListener('keydown', (e) => {
     const suggestions = Array.from(commandSuggestionsContainer.querySelectorAll('.command-suggestion-item'));
     const activeSuggestion = suggestions[suggestionIndex];
 
-    const completeSuggestion = (suggestionEl) => {
-        const commandParts = commandInput.value.slice(1).split(' ');
-        const commandSuggestion = suggestionEl.dataset.commandName;
-        const agentTrigger = suggestionEl.dataset.agentTrigger;
-        const noteArgument = suggestionEl.dataset.noteArgument;
-        const placeholderText = suggestionEl.dataset.placeholderText;
-        
-        let completedValue = commandInput.value;
+    // REPLACE THE EXISTING FUNCTION WITH THIS ONE
+const completeSuggestion = (suggestionEl) => {
+    const commandInput = document.getElementById('command-input');
+    const currentInput = commandInput.value.slice(1);
+    const parts = currentInput.split(' ');
+    const commandName = parts[0];
 
-        if (commandSuggestion) {
-            completedValue = `/${commandSuggestion} `;
-        } else if (agentTrigger) {
-            completedValue = `/run ${agentTrigger} `;
-        } else if (noteArgument) {
-            completedValue = `/run ${commandParts[1]} ${noteArgument}`; // Keeps the agent trigger
-        } else if (placeholderText) {
-            const words = commandInput.value.split(' ');
-            words.pop(); // remove the partial {{...}}
-            words.push(placeholderText);
-            completedValue = words.join(' ');
+    const commandSuggestion = suggestionEl.dataset.commandName;
+    const itemSuggestion = suggestionEl.dataset.itemName;
+    const agentTrigger = suggestionEl.dataset.agentTrigger;
+    const noteArgument = suggestionEl.dataset.noteArgument;
+
+    let completedValue = '';
+
+    if (commandSuggestion) {
+        // User is tabbing on a command name (e.g., /mo -> /move )
+        completedValue = `/${commandSuggestion} `;
+    } else if (agentTrigger) {
+        // User is tabbing on an agent trigger for the /run command
+        completedValue = `/run ${agentTrigger} `;
+    } else if (itemSuggestion) {
+        // This is the main logic for multi-argument commands
+        const commandDef = commands.find(c => c.name === commandName);
+        const toSeparator = /\s+to\s+/i;
+        const fromSeparator = /\s+from\s+/i;
+
+        // Wrap names with spaces in quotes for accurate parsing
+        const safeItemSuggestion = itemSuggestion.includes(' ') ? `"${itemSuggestion}"` : itemSuggestion;
+
+        if ((commandDef?.name === 'move' || commandDef?.name === 'link' || commandDef?.name === 'rename') && toSeparator.test(currentInput)) {
+            // Completing the SECOND argument (after "to")
+            const base = currentInput.split(toSeparator)[0];
+            completedValue = `/${base} to ${safeItemSuggestion}`;
+        } else if (commandDef?.name === 'unlink' && fromSeparator.test(currentInput)) {
+            // Completing the SECOND argument (after "from")
+            const base = currentInput.split(fromSeparator)[0];
+            completedValue = `/${base} from ${safeItemSuggestion}`;
+        } else {
+            // Completing the FIRST argument
+            if (commandDef?.name === 'move' || commandDef?.name === 'link' || commandDef?.name === 'rename') {
+                completedValue = `/${commandName} ${safeItemSuggestion} to `;
+            } else if (commandDef?.name === 'unlink') {
+                completedValue = `/${commandName} ${safeItemSuggestion} from `;
+            } else {
+                // For all other single-argument commands (/go, /dn, etc.)
+                completedValue = `/${commandName} ${safeItemSuggestion}`;
+            }
         }
-        
+    } else if (noteArgument) {
+         // This handles the specific case for /run agent [argument]
+         completedValue = `/run ${parts[1]} ${noteArgument}`;
+    }
+
+
+    if (completedValue) {
         commandInput.value = completedValue;
-        renderSuggestions(completedValue);
+        // Move cursor to the end
         const end = commandInput.value.length;
         commandInput.setSelectionRange(end, end);
-    };
+        // Refresh suggestions based on the new input
+        renderSuggestions(commandInput.value);
+    }
+};
 
     if (e.key === 'Tab') {
         e.preventDefault();
