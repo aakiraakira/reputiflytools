@@ -8995,17 +8995,19 @@ const handleRunAgent = async (agent, argument = '') => {
 // This helper is used to load notes that are provided as context to the agent
 const ensureAllNotesLoaded = async (noteIds) => {
     const notesToLoad = noteIds.filter(id => !window.noteCache[id]);
-    if (notesToLoad.length > 0) {
-        try {
-            const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
-            const fetchPromises = notesToLoad.map(id => getDoc(doc(db, "notes", id)).then(snap => {
-                if (snap.exists()) window.noteCache[id] = snap.data();
-            }));
-            await Promise.all(fetchPromises);
-        } catch (error) {
-            console.error("Error loading agent context notes:", error);
-            showToast("Failed to load context notes.", "error");
-        }
+    if (notesToLoad.length === 0) return true; // Early exit if no notes to load
+
+    try {
+        const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+        const fetchPromises = notesToLoad.map(id => getDoc(doc(db, "notes", id)).then(snap => {
+            if (snap.exists()) window.noteCache[id] = snap.data();
+        }));
+        await Promise.all(fetchPromises);
+        return true; // Return true on success
+    } catch (error) {
+        console.error("Error loading agent context notes:", error);
+        showToast("Failed to load context notes.", "error");
+        return false; // Return false on error
     }
 };
 
@@ -12747,7 +12749,7 @@ const handleChatSubmit = async () => {
 
     // This check will now work correctly with the function you added
     if (window.chatbotContextNoteIds.length > 0) {
-        if (!(await ensureAllNotesLoaded())) return; // Stop if notes fail to load
+        if (!(await ensureAllNotesLoaded(window.chatbotContextNoteIds))) return; // Stop if notes fail to load
     }
 
     app.modals.chatbotError.textContent = '';
