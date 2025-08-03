@@ -2473,7 +2473,7 @@ window.functions = getFunctions(app,);
          </div>
      </div>
 </header>
-<input type="file" id="file-upload-input" class="hidden" accept=".csv, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, image/*, .pdf, .txt, .md" />
+<input type="file" id="file-upload-input" class="hidden" accept=".csv, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, image/*, .pdf, .txt, .md, **.zip,application/zip,application/x-zip-compressed**" />
 
            
            <div id="mobile-sticky-toolbar" class="hidden md:hidden sticky top-[65px] z-20 bg-bg-pane-dark p-2 border-b border-border-color">
@@ -4766,6 +4766,7 @@ async function ensureAllNotesLoaded() {
         return false;
     }
 }
+// REPLACE THE ENTIRE 'handleFileUpload' FUNCTION WITH THIS ONE
 const handleFileUpload = async (file) => {
     const user = window.auth.currentUser;
     if (!file || !user) return;
@@ -4776,15 +4777,12 @@ const handleFileUpload = async (file) => {
     ];
     if (spreadsheetTypes.includes(file.type)) {
         handleSpreadsheetUpload(file);
-        return; // Stop further execution
+        return;
     }
 
-    // --- Overall file size limit ---
     const OVERALL_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
-
     let fileToUpload = file;
 
-    // --- Step 1: Perform local compression if the file is an image ---
     if (file.type.startsWith('image/')) {
         const localToast = showToast(`Optimizing ${file.name}...`, 'loading');
         try {
@@ -4799,17 +4797,14 @@ const handleFileUpload = async (file) => {
         } catch (error) {
             dismissToast(localToast);
             console.error('Local compression failed.', error);
-            // If local compression fails, we continue with the original file.
         }
     }
 
-    // --- Step 2: Check the final file size against the 5MB limit ---
     if (fileToUpload.size > OVERALL_MAX_SIZE) {
         showToast(`File is too large (${(fileToUpload.size / 1024 / 1024).toFixed(2)} MB). Max size is 5MB.`, 'error');
         return;
     }
 
-    // --- Step 3: Upload the processed file directly to Firebase Storage ---
     const uploadToastId = showToast(`Uploading ${fileToUpload.name}... 0%`, 'loading');
     try {
         const { getStorage, ref, uploadBytesResumable, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js");
@@ -4832,25 +4827,41 @@ const handleFileUpload = async (file) => {
             );
         });
 
-        // --- Step 4: Insert the final file/image into the editor ---
         dismissToast(uploadToastId);
         showToast('Upload complete!', 'success');
 
         const escapedFileName = fileToUpload.name.replace(/</g, "&lt;").replace(/>/g, "&gt;");
         let fileHTML = '';
 
+        // --- START: NEW AND IMPROVED LOGIC ---
         if (fileToUpload.type.startsWith('image/')) {
             fileHTML = `<p><img src="${downloadURL}" alt="${escapedFileName}" style="max-width: 100%; height: auto; border-radius: 8px;" contenteditable="false" /></p>`;
         } else {
+            // Intelligently choose an icon based on file extension
+            let iconName = 'file'; // Default icon
+            const extension = escapedFileName.split('.').pop().toLowerCase();
+            if (['zip', 'rar', '7z'].includes(extension)) {
+                iconName = 'archive';
+            } else if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(extension)) {
+                iconName = 'file-text';
+            }
+
+            // Create the full attachment widget with a delete button
             fileHTML = `<div class="file-attachment-widget" contenteditable="false">
-                            <i data-feather="file-text" class="w-6 h-6 text-text-secondary flex-shrink-0"></i>
+                            <button class="attachment-delete-btn" title="Remove Attachment">
+                                <i data-feather="x" class="w-4 h-4 pointer-events-none"></i>
+                            </button>
+                            <i data-feather="${iconName}" class="w-6 h-6 text-text-secondary flex-shrink-0"></i>
                             <div class="file-info">
                                 <div class="file-name">${escapedFileName}</div>
                                 <div class="file-size">${formatBytes(fileToUpload.size)}</div>
                             </div>
-                            <a href="${downloadURL}" target="_blank" class="brand-button p-2" download title="Download ${escapedFileName}"><i data-feather="download" class="w-5 h-5"></i></a>
+                            <a href="${downloadURL}" target="_blank" class="download-btn" download title="Download ${escapedFileName}">
+                                <i data-feather="download" class="w-4 h-4"></i> Download
+                            </a>
                         </div>`;
         }
+        // --- END: NEW AND IMPROVED LOGIC ---
 
         app.elements.noteEditorBody.focus();
         document.execCommand('insertHTML', false, fileHTML + "<p><br></p>");
@@ -4874,6 +4885,7 @@ const handleFileUpload = async (file) => {
                 };
             };
             const scheduleRebuildIndex = debounce(buildLunrIndex, 2000);
+            const updateStatsDebounced = debounce(updateEditorStats, 500);
             
             
             
@@ -10664,7 +10676,7 @@ app.elements.toggleTagsBtn.addEventListener('click', () => {
     feather.replace(); // To ensure the icon animation is smooth
 });
 fileUploadInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];y
+    const file = e.target.files[0];
     if (file) {
         handleFileUpload(file);
     }
@@ -12131,21 +12143,62 @@ app.elements.noteEditorBody.addEventListener('input', () => {
                 });
 
                 // REPLACE your entire existing 'noteEditorBody' keydown listener with this one
+// REPLACE THE ENTIRE 'keydown' LISTENER FOR THE EDITOR BODY
 app.elements.noteEditorBody.addEventListener('keydown', (e) => {
     const selection = window.getSelection();
     if (!selection.rangeCount) return;
     const range = selection.getRangeAt(0);
-    let container = range.startContainer;
-    const node = container.nodeType === 3 ? container.parentNode : container;
+    const node = range.startContainer.nodeType === 3 ? range.startContainer.parentNode : range.startContainer;
 
-    // --- START: Generalized Ctrl+Enter Escape Logic ---
+    // --- START: NEW, SIMPLIFIED & RELIABLE LIST LOGIC ---
+
+    // 1. Automatic List Creation on Spacebar
+    if (e.key === ' ') {
+        const block = node.closest('p, div');
+        if (block && block.textContent === '-') {
+            e.preventDefault();
+            document.execCommand('insertUnorderedList');
+            // The command leaves the "-" behind, so we find the new list item and clear it.
+            const li = window.getSelection().anchorNode.parentNode.closest('li');
+            if (li) li.innerHTML = '<br>';
+            return;
+        }
+        if (block && /^\d+\.$/.test(block.textContent)) {
+            e.preventDefault();
+            document.execCommand('insertOrderedList');
+            const li = window.getSelection().anchorNode.parentNode.closest('li');
+            if (li) li.innerHTML = '<br>';
+            return;
+        }
+    }
+
+    // 2. Exit List on Double-Enter
+    if (e.key === 'Enter' && !e.shiftKey) {
+        const li = node.closest('li');
+        if (li && li.textContent.trim() === '') {
+            e.preventDefault();
+            document.execCommand('outdent');
+            return;
+        }
+    }
+
+    // 3. Convert List back to Paragraph on Backspace at the start
+    if (e.key === 'Backspace' && range.startOffset === 0 && selection.isCollapsed) {
+        const li = node.closest('li');
+        if (li) {
+            e.preventDefault();
+            document.execCommand('outdent');
+            return;
+        }
+    }
+    // --- END: NEW, SIMPLIFIED & RELIABLE LIST LOGIC ---
+
+    // --- START: GENERALIZED BLOCK ESCAPE LOGIC (Working as intended) ---
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         let elementToEscape = node.closest('.code-block-wrapper, blockquote, table, .task-list-item');
         if (!elementToEscape) {
             const inlineCode = node.closest('code:not(pre code)');
-            if (inlineCode) {
-                elementToEscape = inlineCode.closest('p, div, li');
-            }
+            if (inlineCode) elementToEscape = inlineCode.closest('p, div, li');
         }
         if (elementToEscape) {
             e.preventDefault();
@@ -12160,13 +12213,9 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
             return;
         }
     }
-    // --- END: Generalized Ctrl+Enter Escape Logic ---
+    // --- END: GENERALIZED BLOCK ESCAPE LOGIC ---
 
-    // --- START: NEW, ROBUST Checklist 'Enter' and 'Backspace' Logic ---
-    
-    // --- END: NEW, ROBUST Checklist 'Enter' and 'Backspace' Logic ---
-
-    // ... (the rest of the keydown logic for blockquotes, code blocks, etc. remains the same)
+    // --- START: EXISTING BLOCKQUOTE & CODE BLOCK LOGIC (Working as intended) ---
     if (e.key === 'Enter' && !e.shiftKey) {
         const currentBlock = node.closest('p, div');
         if (currentBlock) {
@@ -12204,7 +12253,6 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
         if (pre) {
             const codeEl = pre.querySelector('code');
             if (codeEl && selection.isCollapsed) {
-                const range = selection.getRangeAt(0);
                 const textContent = codeEl.textContent || '';
                 if (range.startOffset === textContent.length) {
                     const wrapper = pre.closest('.code-block-wrapper');
@@ -12222,6 +12270,7 @@ app.elements.noteEditorBody.addEventListener('keydown', (e) => {
             }
         }
     }
+    // --- END: EXISTING BLOCKQUOTE & CODE BLOCK LOGIC ---
 });
 
                 // NEW: Enhanced paste event listener
