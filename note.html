@@ -9443,69 +9443,85 @@ const commands = [
     name: 'add',
     suggest: 'checklists',
     description: 'Add to checklist. Usage: /add [checklist name] [item text]',
-    execute: (args) => {
-        const noteId = state.settings.activeNoteId;
-        if (!noteId) {
-            return showToast('❌ Must be in a note to add a checklist item.', 'error');
-        }
-        if (!args) {
-            return showToast('❌ Usage: /add [checklist name] [item text]', 'error');
-        }
-
-        const editorBody = app.elements.noteEditorBody;
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = editorBody.innerHTML;
-
-        const checklists = Array.from(tempDiv.querySelectorAll('.checklist-container'));
-        if (checklists.length === 0) {
-            return showToast('❌ No checklists found in this note.', 'info');
-        }
-
-        let targetChecklist = null;
-        let itemText = '';
-
-        const checklistData = checklists.map(cl => ({
-            element: cl,
-            title: cl.querySelector('.checklist-title')?.textContent.trim() || ''
-        })).sort((a, b) => b.title.length - a.title.length);
-
-        for (const data of checklistData) {
-            if (data.title && args.toLowerCase().startsWith(data.title.toLowerCase())) {
-                targetChecklist = data.element;
-                itemText = args.substring(data.title.length).trim();
-                break;
-            }
-        }
-
-        if (!targetChecklist) {
-            return showToast('❌ Could not find a checklist with that name.', 'error');
-        }
-        if (!itemText) {
-            return showToast('❌ Please provide text for the checklist item.', 'error');
-        }
-
-        const checklistBody = targetChecklist.querySelector('.checklist-body');
-        const newItem = document.createElement('li');
-        newItem.className = 'checklist-item';
-        newItem.dataset.checked = 'false';
-        newItem.innerHTML = `
-            <input type="checkbox" class="checklist-item-checkbox" onclick="return false;">
-            <span class="checklist-item-text" contenteditable="false">${itemText.replace(/</g, "&lt;")}</span>
-        `;
-        checklistBody.appendChild(newItem);
-
-        editorBody.innerHTML = tempDiv.innerHTML;
-
-        const liveChecklistElement = Array.from(editorBody.querySelectorAll('.checklist-container')).find(
-            el => el.querySelector('.checklist-title')?.textContent.trim() === targetChecklist.querySelector('.checklist-title')?.textContent.trim()
-        );
-        if (liveChecklistElement) {
-            updateChecklistProgress(liveChecklistElement);
-        }
-
-        performImmediateSave();
-        showToast(`✅ Added "${itemText}" to checklist.`);
+    // REPLACE THE 'execute' FUNCTION FOR THE 'add' COMMAND WITH THIS CORRECTED VERSION
+execute: (args) => {
+    const noteId = state.settings.activeNoteId;
+    if (!noteId) {
+        return showToast('❌ Must be in a note to add a checklist item.', 'error');
     }
+    if (!args) {
+        return showToast('❌ Usage: /add [checklist name] [item text]', 'error');
+    }
+
+    const editorBody = app.elements.noteEditorBody;
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = editorBody.innerHTML;
+
+    const checklists = Array.from(tempDiv.querySelectorAll('.checklist-container'));
+    if (checklists.length === 0) {
+        return showToast('❌ No checklists found in this note.', 'info');
+    }
+
+    let targetChecklist = null;
+    let itemText = '';
+
+    const checklistData = checklists.map(cl => ({
+        element: cl,
+        title: cl.querySelector('.checklist-title')?.textContent.trim() || ''
+    })).sort((a, b) => b.title.length - a.title.length);
+
+    for (const data of checklistData) {
+        if (!data.title) continue;
+
+        const lowerArgs = args.toLowerCase();
+        const lowerTitle = data.title.toLowerCase();
+        const quotedTitle = `"${lowerTitle}"`;
+
+        // Check 1: Does the argument start with the quoted title?
+        if (lowerArgs.startsWith(quotedTitle)) {
+            targetChecklist = data.element;
+            // --- FIX: Correctly slice the string AFTER the quoted title ---
+            itemText = args.substring(quotedTitle.length).trim();
+            break;
+        }
+
+        // Check 2: Does it start with the non-quoted title (and is followed by a space)?
+        if (lowerArgs.startsWith(lowerTitle) && (args.length === data.title.length || /\s/.test(args[data.title.length]))) {
+            targetChecklist = data.element;
+            itemText = args.substring(data.title.length).trim();
+            break;
+        }
+    }
+
+    if (!targetChecklist) {
+        return showToast('❌ Could not find a checklist with that name.', 'error');
+    }
+    if (!itemText) {
+        return showToast('❌ Please provide text for the checklist item.', 'error');
+    }
+
+    const checklistBody = targetChecklist.querySelector('.checklist-body');
+    const newItem = document.createElement('li');
+    newItem.className = 'checklist-item';
+    newItem.dataset.checked = 'false';
+    newItem.innerHTML = `
+        <input type="checkbox" class="checklist-item-checkbox" onclick="return false;">
+        <span class="checklist-item-text" contenteditable="false">${itemText.replace(/</g, "&lt;")}</span>
+    `;
+    checklistBody.appendChild(newItem);
+
+    editorBody.innerHTML = tempDiv.innerHTML;
+
+    const liveChecklistElement = Array.from(editorBody.querySelectorAll('.checklist-container')).find(
+        el => el.querySelector('.checklist-title')?.textContent.trim() === targetChecklist.querySelector('.checklist-title')?.textContent.trim()
+    );
+    if (liveChecklistElement) {
+        updateChecklistProgress(liveChecklistElement);
+    }
+
+    performImmediateSave();
+    showToast(`✅ Added "${itemText}" to checklist.`);
+}
 },{
     name: 'remove',
     suggest: 'checklist_items',
@@ -10068,6 +10084,7 @@ const openCommandPrompt = () => { if (document.activeElement === app.elements.no
     }if(isCommandPromptOpen)return;isCommandPromptOpen=true;commandPromptContainer.classList.remove('hidden');commandInput.value='/';renderSuggestions('/');commandInput.focus();setTimeout(()=>commandInput.setSelectionRange(commandInput.value.length,commandInput.value.length),0) };
 const closeCommandPrompt = () => { if(!isCommandPromptOpen)return;isCommandPromptOpen=false;commandPromptContainer.classList.add('hidden');commandSuggestionsContainer.classList.add('hidden');suggestionIndex=-1 };
 
+// REPLACE THE EXISTING FUNCTION WITH THIS ONE
 const renderSuggestions = (rawInput) => {
     const input = rawInput.startsWith('/') ? rawInput.slice(1) : rawInput;
     const parts = input.split(' ');
@@ -10078,13 +10095,11 @@ const renderSuggestions = (rawInput) => {
     let suggestionsHTML = '';
     const argQuery = argString.toLowerCase();
 
-    // --- START: NEW SUGGESTION LOGIC FOR /run ---
     if (commandName.toLowerCase() === 'run') {
         const agentTrigger = parts[1] || '';
         const agentArgQuery = parts.slice(2).join(' ');
 
         if (!agentTrigger || (state.agents.some(a => a.trigger.startsWith(agentTrigger)) && parts.length < 3)) {
-            // Suggest agents if the user is typing the agent trigger
             const matchingAgents = state.agents.filter(a => a.trigger.toLowerCase().startsWith(agentTrigger.toLowerCase()));
             if (matchingAgents.length > 0) {
                  suggestionsHTML = matchingAgents.slice(0, 5).map((agent, index) => `
@@ -10094,7 +10109,6 @@ const renderSuggestions = (rawInput) => {
                     </div>`).join('');
             }
         } else {
-            // Suggest notes if the user has typed a valid agent trigger
             const agent = state.agents.find(a => a.trigger === agentTrigger);
             if (agent && agent.argumentName) {
                 const allNotes = getAllNotes(state.collections);
@@ -10113,13 +10127,35 @@ const renderSuggestions = (rawInput) => {
             }
         }
 
-    } // --- END: NEW SUGGESTION LOGIC FOR /run ---
-    else if (command && command.suggest) {
-        // ... (existing suggestion logic for other commands remains the same)
+    } else if (command && command.suggest) {
         let finalSuggestions = [];
         const toSeparator = /\s+to\s+/i;
         const fromSeparator = /\s+from\s+/i;
-        if ((command.name === 'move' || command.name === 'rename' || command.name === 'link') && toSeparator.test(argString)) {
+        
+        // --- START: NEW LOGIC FOR CHECKLIST SUGGESTIONS ---
+        if (command.suggest.includes('checklists')) {
+            const editorBody = app.elements.noteEditorBody;
+            const checklists = Array.from(editorBody.querySelectorAll('.checklist-container')).map(cl => ({
+                name: cl.querySelector('.checklist-title')?.textContent.trim() || 'Untitled Checklist'
+            }));
+            const fuse = new Fuse(checklists, { keys: ['name'], threshold: 0.5 });
+            finalSuggestions = fuse.search(argQuery).map(result => result.item);
+
+        } else if (command.suggest.includes('checklist_items')) {
+            const editorBody = app.elements.noteEditorBody;
+            const allItems = [];
+            editorBody.querySelectorAll('.checklist-container').forEach(cl => {
+                const checklistTitle = cl.querySelector('.checklist-title')?.textContent.trim() || 'Untitled';
+                cl.querySelectorAll('.checklist-item-text').forEach(itemEl => {
+                    allItems.push({ name: itemEl.textContent, context: `in "${checklistTitle}"` });
+                });
+            });
+            const fuse = new Fuse(allItems, { keys: ['name'], threshold: 0.4 });
+            finalSuggestions = fuse.search(argQuery).map(result => result.item);
+        
+        // --- END: NEW LOGIC FOR CHECKLIST SUGGESTIONS ---
+
+        } else if ((command.name === 'move' || command.name === 'rename' || command.name === 'link') && toSeparator.test(argString)) {
             const targetQuery = argString.split(toSeparator)[1].toLowerCase() || '';
             let itemsToSuggest = (command.suggest === 'notes') ? getAllNotes(state.collections) : [...getAllNotes(state.collections), ...getAllFolders()];
             if (command.name === 'move') itemsToSuggest = getAllFolders();
@@ -10141,9 +10177,14 @@ const renderSuggestions = (rawInput) => {
         }
         if (finalSuggestions.length > 0) {
             suggestionsHTML = finalSuggestions.slice(0, 5).map((item, index) => {
+                // --- START: NEW LOGIC FOR DISPLAYING CHECKLIST SUGGESTIONS ---
+                const icon = item.type === 'folder' ? 'folder' : (command.suggest.includes('checklist') ? 'check-square' : 'file-text');
+                const context = item.context ? `<span class="cmd-desc">${item.context}</span>` : '';
+                // --- END: NEW LOGIC FOR DISPLAYING CHECKLIST SUGGESTIONS ---
                 return `
                 <div class="command-suggestion-item ${index === suggestionIndex ? 'active' : ''}" data-item-name="${item.name.replace(/"/g, '&quot;')}">
-                    <div class="flex items-center gap-2 min-w-0"> <i data-feather="${item.type === 'folder' ? 'folder' : 'file-text'}" class="w-4 h-4 text-text-secondary flex-shrink-0"></i> <span class="cmd-name truncate">${item.name}</span> </div>
+                    <div class="flex items-center gap-2 min-w-0"> <i data-feather="${icon}" class="w-4 h-4 text-text-secondary flex-shrink-0"></i> <span class="cmd-name truncate">${item.name}</span> </div>
+                    ${context}
                 </div>`;
             }).join('');
         }
