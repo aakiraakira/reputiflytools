@@ -1941,7 +1941,6 @@ table.filter-collapsed .toggle-filter-btn > i {
              margin-top: 1em;
              margin-bottom: 0.5em;
              padding-bottom: 0.3em;
-             border-bottom: 1px solid var(--border-color);
         }
         #note-editor-body h1, #markdown-preview h1 { font-size: 2.25rem; }
         #note-editor-body h2, #markdown-preview h2 { font-size: 1.875rem; }
@@ -2726,13 +2725,15 @@ window.functions = getFunctions(app,);
         </button>
     </div>
 </div>
-                    <div class="p-4 md:p-8 md:pb-4 flex-shrink-0">
-    <div id="note-properties-container" class="text-sm text-text-tertiary mb-4 py-2"></div>
+                    <div class="w-full max-w-3xl mx-auto">
+    <div class="p-4 md:p-8 md:pb-4 flex-shrink-0">
+        <div id="note-properties-container" class="text-sm text-text-tertiary mb-4 py-2"></div>
 
 
-    <textarea id="note-editor-title" placeholder="Untitled Note" class="text-3xl md:text-4xl font-bold bg-transparent focus:outline-none mb-4 w-full overflow-hidden resize-none" rows="1"></textarea>
+        <textarea id="note-editor-title" placeholder="Untitled Note" class="text-3xl md:text-4xl font-bold bg-transparent focus:outline-none mb-4 w-full overflow-hidden resize-none" rows="1"></textarea>
+    </div>
+    <div id="note-editor-body" contenteditable="true" class="flex-grow text-lg leading-relaxed focus:outline-none px-4 md:px-8 pt-2 md:pt-4 pb-4 md:pb-8" data-placeholder="Start writing or drop an image..."></div>
 </div>
-                    <div id="note-editor-body" contenteditable="true" class="flex-grow text-lg leading-relaxed focus:outline-none px-4 md:px-8 pt-2 md:pt-4 pb-4 md:pb-8" data-placeholder="Start writing or drop an image..."></div>
                     <div id="markdown-preview" class="hidden flex-grow text-lg leading-relaxed focus:outline-none p-4 md:p-8 prose"></div>
                     <div id="backlinks-pane" class="hidden p-4 md:px-8 border-t border-border-color">
     <div class="flex justify-between items-center mb-3">
@@ -4084,8 +4085,10 @@ const researchAgent = async (topic) => {
 const newNoteName = `Research Brief: ${topic}`;
 
 // Convert markdown to HTML, then find and convert [[links]] to clickable <a> tags
+// Convert markdown to HTML, then find and convert [[links]] to clickable <a> tags
 const initialHtml = marked.parse(aiBrief);
-const finalHtmlWithLinks = parseInternalLinks(initialHtml);
+const sanitizedHtml = DOMPurify.sanitize(initialHtml); // ADD THIS LINE TO SANITIZE
+const finalHtmlWithLinks = parseInternalLinks(sanitizedHtml); // Process the CLEAN HTML
 
 const newNote = await createNewNote(true, { name: newNoteName, content: finalHtmlWithLinks }, null);
 
@@ -8915,6 +8918,7 @@ const generateAgentInstructions = async () => {
 };
 const agentActionLibrary = {
     // Add this inside agentActionLibrary in notetakeapp.html
+    // TAKE NOTE THIS IS VERY HIT OR MISS RIGHT NOW IF YOU ARE TRYING TO USE FIND IMAGE, DONT USE IT FOR NOW
 findImage: {
     description: "Finds a high-quality, royalty-free image URL for a given topic. Use this to find relevant images for articles.",
     parameters: { topic: "string" },
@@ -8981,34 +8985,34 @@ fetchWebsiteContent: {
         }
     },
     updateNote: {
-        description: "Updates the content of an existing note. You can append, prepend, or replace the content.",
-        parameters: { noteId: "string", content: "string", mode: "'append' | 'prepend' | 'replace'" },
-        execute: async ({ noteId, content, mode }) => {
-            const noteData = window.noteCache[noteId];
-            if (!noteData) throw new Error(`Note with ID ${noteId} not found in cache. It may need to be loaded first.`);
+    description: "Updates the content of an existing note. You can append, prepend, or replace the content.",
+    parameters: { noteId: "string", content: "string", mode: "'append' | 'prepend' | 'replace'" },
+    execute: async ({ noteId, content, mode }) => {
+        const noteData = window.noteCache[noteId];
+        if (!noteData) throw new Error(`Note with ID ${noteId} not found in cache. It may need to be loaded first.`);
 
-            // Convert provided markdown content to HTML before saving
-            const contentHtml = marked.parse(content || '');
+        // Convert provided markdown content to HTML and SANITIZE it before saving
+        const contentHtml = DOMPurify.sanitize(marked.parse(content || ''));
 
-            switch(mode) {
-                case 'append':
-                    noteData.content += contentHtml;
-                    break;
-                case 'prepend':
-                    noteData.content = contentHtml + noteData.content;
-                    break;
-                case 'replace':
-                    noteData.content = contentHtml;
-                    break;
-                default:
-                    throw new Error(`Invalid mode: ${mode}. Use 'append', 'prepend', or 'replace'.`);
-            }
-            noteData.modifiedAt = new Date().toISOString();
-            
-            await saveSpecificNoteToFirestore(noteId, noteData);
-            return `Note ID ${noteId} content has been updated.`;
+        switch(mode) {
+            case 'append':
+                noteData.content += contentHtml;
+                break;
+            case 'prepend':
+                noteData.content = contentHtml + noteData.content;
+                break;
+            case 'replace':
+                noteData.content = contentHtml;
+                break;
+            default:
+                throw new Error(`Invalid mode: ${mode}. Use 'append', 'prepend', or 'replace'.`);
         }
-    },
+        noteData.modifiedAt = new Date().toISOString();
+
+        await saveSpecificNoteToFirestore(noteId, noteData);
+        return `Note ID ${noteId} content has been updated.`;
+    }
+},
     askUser: {
         description: "Pauses the agent and asks the user for a text input. Returns the user's response.",
         parameters: { prompt: "string" },
