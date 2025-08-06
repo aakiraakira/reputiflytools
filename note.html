@@ -4084,8 +4084,10 @@ const researchAgent = async (topic) => {
 const newNoteName = `Research Brief: ${topic}`;
 
 // Convert markdown to HTML, then find and convert [[links]] to clickable <a> tags
+// Convert markdown to HTML, then find and convert [[links]] to clickable <a> tags
 const initialHtml = marked.parse(aiBrief);
-const finalHtmlWithLinks = parseInternalLinks(initialHtml);
+const sanitizedHtml = DOMPurify.sanitize(initialHtml); // ADD THIS LINE TO SANITIZE
+const finalHtmlWithLinks = parseInternalLinks(sanitizedHtml); // Process the CLEAN HTML
 
 const newNote = await createNewNote(true, { name: newNoteName, content: finalHtmlWithLinks }, null);
 
@@ -8982,34 +8984,34 @@ fetchWebsiteContent: {
         }
     },
     updateNote: {
-        description: "Updates the content of an existing note. You can append, prepend, or replace the content.",
-        parameters: { noteId: "string", content: "string", mode: "'append' | 'prepend' | 'replace'" },
-        execute: async ({ noteId, content, mode }) => {
-            const noteData = window.noteCache[noteId];
-            if (!noteData) throw new Error(`Note with ID ${noteId} not found in cache. It may need to be loaded first.`);
+    description: "Updates the content of an existing note. You can append, prepend, or replace the content.",
+    parameters: { noteId: "string", content: "string", mode: "'append' | 'prepend' | 'replace'" },
+    execute: async ({ noteId, content, mode }) => {
+        const noteData = window.noteCache[noteId];
+        if (!noteData) throw new Error(`Note with ID ${noteId} not found in cache. It may need to be loaded first.`);
 
-            // Convert provided markdown content to HTML before saving
-            const contentHtml = marked.parse(content || '');
+        // Convert provided markdown content to HTML and SANITIZE it before saving
+        const contentHtml = DOMPurify.sanitize(marked.parse(content || ''));
 
-            switch(mode) {
-                case 'append':
-                    noteData.content += contentHtml;
-                    break;
-                case 'prepend':
-                    noteData.content = contentHtml + noteData.content;
-                    break;
-                case 'replace':
-                    noteData.content = contentHtml;
-                    break;
-                default:
-                    throw new Error(`Invalid mode: ${mode}. Use 'append', 'prepend', or 'replace'.`);
-            }
-            noteData.modifiedAt = new Date().toISOString();
-            
-            await saveSpecificNoteToFirestore(noteId, noteData);
-            return `Note ID ${noteId} content has been updated.`;
+        switch(mode) {
+            case 'append':
+                noteData.content += contentHtml;
+                break;
+            case 'prepend':
+                noteData.content = contentHtml + noteData.content;
+                break;
+            case 'replace':
+                noteData.content = contentHtml;
+                break;
+            default:
+                throw new Error(`Invalid mode: ${mode}. Use 'append', 'prepend', or 'replace'.`);
         }
-    },
+        noteData.modifiedAt = new Date().toISOString();
+
+        await saveSpecificNoteToFirestore(noteId, noteData);
+        return `Note ID ${noteId} content has been updated.`;
+    }
+},
     askUser: {
         description: "Pauses the agent and asks the user for a text input. Returns the user's response.",
         parameters: { prompt: "string" },
