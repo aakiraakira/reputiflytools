@@ -2721,6 +2721,8 @@ window.functions = getFunctions(app,);
 <button data-command="textColor" data-value="orange" class="p-1.5 hover:bg-bg-main rounded-full flex-shrink-0 toolbar-color-btn" title="Text Color Orange"><span class="block w-4 h-4 rounded-full color-swatch-indicator" style="background-color: #FB923C;"></span></button>
 <button data-command="textColor" data-value="green" class="p-1.5 hover:bg-bg-main rounded-full flex-shrink-0 toolbar-color-btn" title="Text Color Green"><span class="block w-4 h-4 rounded-full color-swatch-indicator" style="background-color: #4ADE80;"></span></button>
 <button data-command="textColor" data-value="blue" class="p-1.5 hover:bg-bg-main rounded-full flex-shrink-0 toolbar-color-btn" title="Text Color Blue"><span class="block w-4 h-4 rounded-full color-swatch-indicator" style="background-color: #60A5FA;"></span></button>
+<button data-command="textColor" data-value="default" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Default Color"><i data-feather="refresh-cw" class="w-4 h-4"></i></button>
+
 
         <div class="w-px h-5 bg-border-color mx-1 flex-shrink-0"></div>
         <button data-command="formatBlock" data-value="h1" class="p-2 hover:bg-bg-main rounded font-bold text-sm flex-shrink-0">H1</button>
@@ -2971,6 +2973,8 @@ window.functions = getFunctions(app,);
 <button data-command="textColor" data-value="orange" class="p-1.5 hover:bg-bg-main rounded-full flex-shrink-0 toolbar-color-btn" title="Text Color Orange"><span class="block w-4 h-4 rounded-full color-swatch-indicator" style="background-color: #FB923C;"></span></button>
 <button data-command="textColor" data-value="green" class="p-1.5 hover:bg-bg-main rounded-full flex-shrink-0 toolbar-color-btn" title="Text Color Green"><span class="block w-4 h-4 rounded-full color-swatch-indicator" style="background-color: #4ADE80;"></span></button>
 <button data-command="textColor" data-value="blue" class="p-1.5 hover:bg-bg-main rounded-full flex-shrink-0 toolbar-color-btn" title="Text Color Blue"><span class="block w-4 h-4 rounded-full color-swatch-indicator" style="background-color: #60A5FA;"></span></button>
+<button data-command="textColor" data-value="default" class="p-2 hover:bg-bg-main rounded flex-shrink-0" title="Default Color"><i data-feather="refresh-cw" class="w-4 h-4"></i></button>
+
 
         <div class="w-px h-5 bg-border-color mx-1 flex-shrink-0"></div>
         <button data-command="formatBlock" data-value="h1" class="p-2 hover:bg-bg-main rounded font-bold text-sm flex-shrink-0">H1</button>
@@ -7196,8 +7200,45 @@ ${noteContent}`;
         }
     }
 };
+const cleanupFontTags = () => {
+    const editor = app.elements.noteEditorBody;
+    const fontTags = editor.querySelectorAll('font');
+    const hexToNameMap = Object.fromEntries(Object.entries(colorMap).map(([name, hex]) => [hex.toLowerCase(), name]));
 
+    fontTags.forEach(font => {
+        const colorHex = font.getAttribute('color')?.toLowerCase();
+        if (!colorHex) return;
+
+        const colorName = hexToNameMap[colorHex];
+
+        if (colorName) {
+            // If it's one of our special colors, wrap it in our custom <span>
+            const span = document.createElement('span');
+            span.className = `text-color-${colorName}`;
+            span.dataset.textColor = colorName;
+            while (font.firstChild) {
+                span.appendChild(font.firstChild);
+            }
+            font.parentNode.replaceChild(span, font);
+        } else {
+            // If it's ANY OTHER color (including the default theme color), UNWRAP the <font> tag.
+            // This is what removes the color styling.
+            const parent = font.parentNode;
+            while (font.firstChild) {
+                parent.insertBefore(font.firstChild, font);
+            }
+            parent.removeChild(font);
+            parent.normalize(); // Merges adjacent text nodes for a clean DOM
+        }
+    });
+};
             async function init() {
+                const colorMap = {
+    red: '#F87171',
+    orange: '#FB923C',
+    green: '#4ADE80',
+    blue: '#60A5FA' // Note: I used the lighter blue from your toolbar for better visibility
+};
                 // --- START: Header Fade on Typing Logic ---
 
 
@@ -13521,6 +13562,7 @@ const originalButton = originalToolbar.querySelector(selector);
 
     if (originalButton) {
         originalButton.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+         
     }
 });
                 
@@ -13557,75 +13599,25 @@ const originalButton = originalToolbar.querySelector(selector);
                         });
                         return;
                     }
-                    else if (command === 'textColor') { // NEW CODE STARTS HERE - TEXT COLOR
-                        restoreSelectionAndExec(() => {
-                            const selection = window.getSelection();
-                            if (!selection.rangeCount) return;
+                    else if (command === 'textColor') {
+    restoreSelectionAndExec(() => {
+        let colorToApply;
+        if (value === 'default') {
+            // Get the theme's default text color to "remove" the styling
+            colorToApply = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim();
+        } else {
+            // Get the specific color from our map
+            colorToApply = colorMap[value];
+        }
 
-                            const range = selection.getRangeAt(0);
-                            const selectedText = range.toString();
-
-                            if (!selectedText) return;
-
-                            const span = document.createElement('span');
-                            span.setAttribute('data-text-color', value); // Store color for toggling
-
-                            // Check if the selection is already part of a colored span
-                            let parentColoredSpan = range.commonAncestorContainer.parentElement.closest('[data-text-color]');
-
-                            if (value === 'none') {
-                                // If "Clear Color" is selected
-                                if (parentColoredSpan) {
-                                    const content = document.createDocumentFragment();
-                                    while (parentColoredSpan.firstChild) {
-                                        content.appendChild(parentColoredSpan.firstChild);
-                                    }
-                                    parentColoredSpan.parentNode.replaceChild(content, parentColoredSpan);
-                                } else {
-                                    // If no direct parent span, try to clear color from selected text
-                                    const tempDiv = document.createElement('div');
-                                    tempDiv.appendChild(range.extractContents());
-                                    tempDiv.querySelectorAll('span[data-text-color]').forEach(s => {
-                                        const innerContent = document.createDocumentFragment();
-                                        while(s.firstChild) innerContent.appendChild(s.firstChild);
-                                        s.parentNode.replaceChild(innerContent, s);
-                                    });
-                                    range.insertNode(tempDiv);
-                                }
-                            } else {
-                                // Applying a specific color
-                                span.classList.add(`text-color-${value}`);
-
-                                if (parentColoredSpan) {
-                                    // If already colored, check if it's the same color or change it
-                                    if (parentColoredSpan.getAttribute('data-text-color') === value) {
-                                        // Same color, so un-color it
-                                        const content = document.createDocumentFragment();
-                                        while (parentColoredSpan.firstChild) {
-                                            content.appendChild(parentColoredSpan.firstChild);
-                                        }
-                                        parentColoredSpan.parentNode.replaceChild(content, parentColoredSpan);
-                                    } else {
-                                        // Different color, so change the class
-                                        parentColoredSpan.className = ''; // Clear existing classes
-                                        parentColoredSpan.classList.add(`text-color-${value}`);
-                                        parentColoredSpan.setAttribute('data-text-color', value);
-                                    }
-                                } else {
-                                    // No existing color, apply new span
-                                    try {
-                                        range.surroundContents(span);
-                                    } catch (e) {
-                                        // Fallback for partial selections that cannot be surrounded
-                                        const fragment = range.extractContents();
-                                        span.appendChild(fragment);
-                                        range.insertNode(span);
-                                    }
-                                }
-                            }
-                        });
-                        return;
-                    } // NEW CODE ENDS HERE // NEW CODE ENDS HERE
+        if (colorToApply) {
+            document.execCommand('foreColor', false, colorToApply);
+            // This helper function is crucial for cleaning up the HTML
+            cleanupFontTags();
+        }
+    });
+    return;
+}
                     if (command === 'toggleCheckboxes') {
                         restoreSelectionAndExec(() => {
                             const selection = window.getSelection();
