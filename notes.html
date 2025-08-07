@@ -197,7 +197,51 @@
 .brand-button {
     transition: opacity 0.2s, transform 0.2s, box-shadow 0.2s;
 }
+/* --- START: Heading Navigation Pill --- */
+#heading-nav-pill.hidden {
+    display: none;
+}
 
+.heading-nav-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    background-color: var(--text-tertiary);
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+.heading-nav-dot:hover {
+    background-color: var(--text-primary);
+    transform: scale(1.25);
+}
+
+.heading-nav-dot.active {
+    background-color: var(--accent-primary);
+    transform: scale(1.5);
+}
+
+.heading-tooltip-item {
+    display: block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.875rem; /* 14px */
+    color: var(--text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.heading-tooltip-item:hover {
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+}
+
+.heading-tooltip-item.active {
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+/* --- END: Heading Navigation Pill --- */
 /* This makes the button glow and grow slightly on hover */
 .brand-button:hover {
     transform: scale(1.02);
@@ -2770,6 +2814,14 @@ window.functions = getFunctions(app,);
     <div id="note-editor-body" contenteditable="true" class="flex-grow text-lg leading-relaxed focus:outline-none px-4 md:px-8 pt-2 md:pt-4 pb-4 md:pb-8" data-placeholder="Start writing or drop an image..."></div>
 </div>
                     <div id="markdown-preview" class="hidden flex-grow text-lg leading-relaxed focus:outline-none p-4 md:p-8 prose"></div>
+                    <div id="heading-nav-pill" class="hidden fixed top-1/2 -translate-y-1/2 right-4 z-30 group">
+    <div id="heading-nav-dots" class="flex flex-col items-center gap-2 bg-bg-pane-dark/50 backdrop-blur-sm p-1.5 rounded-full border border-border-color transition-opacity duration-200">
+        </div>
+    <div id="heading-nav-tooltip" class="absolute top-1/2 -translate-y-1/2 right-full mr-3 w-max bg-bg-pane-dark p-2 rounded-lg shadow-lg border border-border-color opacity-0 pointer-events-none transition-all duration-200">
+        <div id="heading-nav-tooltip-content" class="flex flex-col gap-1">
+            </div>
+    </div>
+</div>
                     <div id="backlinks-pane" class="hidden p-4 md:px-8 border-t border-border-color">
     <div class="flex justify-between items-center mb-3">
         <button id="toggle-backlinks-btn" class="flex items-center gap-2 text-left w-full">
@@ -4522,6 +4574,12 @@ let activeNoteCleanCopy = ''; // Stores the last saved version of the content
             let hasInitialized = false;
             let isExecutingCommand = false; // ADD THIS LINE
             let activeNoteListener = null; // Unsubscribe function for the real-time listener
+            
+            const headingNavPill = document.getElementById('heading-nav-pill');
+const headingNavDots = document.getElementById('heading-nav-dots');
+const headingNavTooltipContent = document.getElementById('heading-nav-tooltip-content');
+let headingObserver = null;
+let mutationObserver = null;
 window.noteCache = {}; // Global cache for all note contents
 const listenToActiveNote = () => {
     if (activeNoteListener) {
@@ -4846,6 +4904,7 @@ const defaultState = {
         backlinksCollapsed: false,
         chatbotVisible: true,
         propertiesVisible: true,
+        
     },
     templates: [],
     agents: [],    // <-- Add this new line
@@ -5381,6 +5440,142 @@ function getSelectColor(optionName) {
         app.modals.backdrop.addEventListener('click', backdropHandler);
     });
 };
+
+// --- START: Heading Navigation Pill Logic ---
+const updateHeadingNav = () => {
+    if (!state.settings.activeNoteId) {
+        headingNavPill.classList.add('hidden');
+        return;
+    }
+
+    const editor = app.elements.noteEditorBody;
+    const headings = Array.from(editor.querySelectorAll('h1, h2, h3'));
+
+    if (headings.length === 0) {
+        headingNavPill.classList.add('hidden');
+        if (headingObserver) headingObserver.disconnect();
+        return;
+    }
+
+    headingNavPill.classList.remove('hidden');
+    headingNavDots.innerHTML = '';
+    headingNavTooltipContent.innerHTML = '';
+    if (headingObserver) headingObserver.disconnect();
+
+    headings.forEach((heading, index) => {
+        const headingId = `heading-nav-${index}`;
+        heading.id = headingId;
+
+        const dot = document.createElement('a');
+        dot.className = 'heading-nav-dot';
+        dot.dataset.targetId = headingId;
+        headingNavDots.appendChild(dot);
+
+        const tooltipItem = document.createElement('a');
+        tooltipItem.className = 'heading-tooltip-item';
+        tooltipItem.dataset.targetId = headingId;
+        tooltipItem.textContent = heading.textContent.trim();
+        headingNavTooltipContent.appendChild(tooltipItem);
+    });
+
+    setupHeadingObserver(headings);
+};
+
+const scrollToHeading = (headingId) => {
+    const headingElement = document.getElementById(headingId);
+    if (!headingElement) return;
+
+    const scrollContainer = document.getElementById('main-content-area');
+    const header = document.getElementById('main-header');
+    
+    // Calculate the height of the header to offset the scroll
+    const headerHeight = header ? header.offsetHeight : 65;
+    
+    // Calculate the position of the heading relative to the scrollable container
+    const targetOffsetTop = headingElement.offsetTop;
+    
+    // Determine the final scroll position, with a 20px padding for comfort
+    const targetScrollTop = targetOffsetTop - headerHeight - 20;
+
+    // Use the reliable scrollTo method, which does NOT trigger focus/mousedown events
+    scrollContainer.scrollTo({
+        top: Math.max(0, targetScrollTop), // Ensure we don't scroll to a negative position
+        behavior: 'smooth'
+    });
+};
+const setupHeadingObserver = (headings) => {
+    const options = {
+        root: document.getElementById('main-content-area'), // Scrollable container
+        rootMargin: '0px 0px -80% 0px', // Trigger when heading is in the top 20% of the view
+        threshold: 0
+    };
+
+    headingObserver = new IntersectionObserver((entries) => {
+        let topmostVisibleEntry = null;
+        for (const entry of entries) {
+            if (entry.isIntersecting) {
+                if (!topmostVisibleEntry || entry.boundingClientRect.top < topmostVisibleEntry.boundingClientRect.top) {
+                    topmostVisibleEntry = entry;
+                }
+            }
+        }
+
+        document.querySelectorAll('.heading-nav-dot, .heading-tooltip-item').forEach(el => el.classList.remove('active'));
+
+        if (topmostVisibleEntry) {
+            const activeId = topmostVisibleEntry.target.id;
+            document.querySelectorAll(`[data-target-id="${activeId}"]`).forEach(el => el.classList.add('active'));
+        }
+    }, options);
+
+    headings.forEach(heading => headingObserver.observe(heading));
+};
+
+const initHeadingNav = () => {
+    let hideTimeout; // This will manage our timer
+
+    const showTooltip = () => {
+        clearTimeout(hideTimeout);
+        const tooltip = document.getElementById('heading-nav-tooltip');
+        tooltip.classList.remove('opacity-0', 'pointer-events-none');
+    };
+
+    const hideTooltip = () => {
+        hideTimeout = setTimeout(() => {
+            const tooltip = document.getElementById('heading-nav-tooltip');
+            tooltip.classList.add('opacity-0', 'pointer-events-none');
+        }, 200); // A 200ms delay before hiding
+    };
+
+    // Show tooltip when mouse enters the pill
+    headingNavPill.addEventListener('mouseenter', showTooltip);
+    // Start the hide timer when mouse leaves the pill
+    headingNavPill.addEventListener('mouseleave', hideTooltip);
+
+    // Also apply this logic to the tooltip itself
+    const tooltipElement = document.getElementById('heading-nav-tooltip');
+    tooltipElement.addEventListener('mouseenter', showTooltip); // Cancel hiding if mouse enters tooltip
+    tooltipElement.addEventListener('mouseleave', hideTooltip); // Hide when mouse leaves tooltip
+
+    // Click listener for both dots and tooltip items (remains the same)
+    headingNavPill.addEventListener('click', (e) => {
+        const target = e.target.closest('[data-target-id]');
+        if (target) {
+            e.preventDefault();
+            scrollToHeading(target.dataset.targetId);
+        }
+    });
+
+    const debouncedUpdate = debounce(updateHeadingNav, 300);
+
+    mutationObserver = new MutationObserver((mutations) => {
+        debouncedUpdate();
+    });
+
+    const observerConfig = { childList: true, subtree: true, characterData: true };
+    mutationObserver.observe(app.elements.noteEditorBody, observerConfig);
+};
+// --- END: Heading Navigation Pill Logic ---
 // ADD THIS ENTIRE FUNCTION
 const openLinkModal = () => {
     return new Promise((resolve) => {
@@ -11210,6 +11405,20 @@ document.getElementById('table-creator-modal').addEventListener('keydown', (e) =
         document.getElementById('table-create-btn').click();
     }
 });
+// START: Corrected Mobile Header Hiding Logic
+const handleEditorActivation = () => {
+    // This logic should only run on mobile devices when the user intends to edit.
+    if (window.innerWidth < 768) {
+        document.body.classList.add('mobile-editor-active');
+        document.getElementById('main-header')?.classList.add('hidden');
+        document.getElementById('mobile-sticky-toolbar')?.classList.remove('hidden');
+    }
+};
+
+// Use mousedown and touchstart as they indicate direct user interaction.
+app.elements.noteEditorBody.addEventListener('mousedown', handleEditorActivation);
+app.elements.noteEditorBody.addEventListener('touchstart', handleEditorActivation);
+// END: Corrected Mobile Header Hiding Logic
                 // START: Mobile Header Restore Fix
 app.elements.noteEditorBody.addEventListener('blur', () => {
     // On mobile, when the editor loses focus (e.g., keyboard dismissed), restore the main header.
@@ -11221,14 +11430,7 @@ app.elements.noteEditorBody.addEventListener('blur', () => {
 });
 // END: Mobile Header Restore Fix
 // START: Mobile Header Hide on Edit Resume Fix
-app.elements.noteEditorBody.addEventListener('focus', () => {
-    // On mobile, when the editor regains focus, hide the main header and show the toolbar.
-    if (window.innerWidth < 768) {
-        document.body.classList.add('mobile-editor-active');
-        document.getElementById('main-header')?.classList.add('hidden');
-        document.getElementById('mobile-sticky-toolbar')?.classList.remove('hidden');
-    }
-});
+
 // END: Mobile Header Hide on Edit Resume Fix
 hasInitialized = true;
                 
@@ -11369,6 +11571,7 @@ fileUploadInput.addEventListener('change', (e) => {
                 initSpeechRecognition();
                 initClipper();
                 initCalculator();
+                initHeadingNav();
                 // --- START: Listeners for the Agent Save Modal ---
 document.getElementById('save-agent-confirm-btn').addEventListener('click', handleSaveAgentConfirm);
 document.getElementById('save-agent-cancel-btn').addEventListener('click', () => {
