@@ -3086,6 +3086,63 @@ window.functions = getFunctions(app,);
 // ==================================================================
 //  START: UPGRADED FUNCTION BLOCK
 // ==================================================================
+// --- START: NEW CURSOR MANAGEMENT HELPERS ---
+// --- START: NEW MARKDOWN FORMATTING FUNCTION ---
+const handleMarkdownFormatting = () => {
+    const editor = app.elements.noteEditorBody;
+    const originalContent = editor.innerHTML;
+    const selection = window.getSelection();
+    if (!selection.rangeCount) return;
+
+    const range = selection.getRangeAt(0);
+
+    // 1. Insert an invisible "bookmark" span at the cursor's position
+    const cursorMarker = document.createElement('span');
+    cursorMarker.id = 'cursor-marker';
+    range.insertNode(cursorMarker);
+
+    let newContent = editor.innerHTML;
+
+    // Regular expressions for formatting
+    const formats = [
+        { regex: /(?<!\*)\*([^\*\s][^\*]*?)\*(?!\*)/g, replacement: '<strong>$1</strong>' }, // Bold
+        { regex: /(?<!_)_([^_`\s][^_`]*?)_(?!_)/g, replacement: '<em>$1</em>' },          // Italic
+        { regex: /(?<!~)~([^~\s][^~]*?)~(?!~)/g, replacement: '<s>$1</s>' },            // Strikethrough
+        { regex: /(?<!`)`([^`\s][^`]*?)`(?!`)/g, replacement: '<code>$1</code>' }            // Inline Code
+    ];
+
+    formats.forEach(format => {
+        newContent = newContent.replace(format.regex, format.replacement);
+    });
+
+    if (newContent !== originalContent) {
+        // 2. Update the editor's content
+        editor.innerHTML = newContent;
+
+        // 3. Find our bookmark
+        const marker = editor.querySelector('#cursor-marker');
+        if (marker) {
+            // 4. Create a new cursor position right before the bookmark
+            const newRange = document.createRange();
+            newRange.setStartBefore(marker);
+            newRange.collapse(true);
+
+            // 5. Apply the new cursor position
+            selection.removeAllRanges();
+            selection.addRange(newRange);
+
+            // 6. Remove the invisible bookmark
+            marker.parentNode.removeChild(marker);
+        }
+    } else {
+        // If no formatting happened, just remove the marker we added
+        cursorMarker.parentNode.removeChild(cursorMarker);
+    }
+};
+// --- END: NEW MARKDOWN FORMATTING FUNCTION ---
+// --- END: NEW MARKDOWN FORMATTING FUNCTION ---
+// --- END: NEW MARKDOWN FORMATTING FUNCTION ---
+// --- END: NEW CURSOR MANAGEMENT HELPERS ---
 const formatRelativeTime = (isoString) => {
     const date = new Date(isoString);
     const now = new Date();
@@ -12727,15 +12784,20 @@ saveNoteContent = debounce(performImmediateSave, 5000);
 // END: REPLACEMENT saveNoteContent FUNCTION
 // =================================================================
 // This is the single, correct 'input' listener for the note editor
-app.elements.noteEditorBody.addEventListener('input', () => {
-    if (!isNoteDirty) {
-        isNoteDirty = true;
-        // Show the 'unsaved' dot immediately on the first change
-        updateSaveIndicator();
-    }
-    // Trigger the debounced functions for saving and updating stats
-    saveNoteContent();
-    updateStatsDebounced();
+app.elements.noteEditorBody.addEventListener('input', (e) => { // Added 'e' event parameter
+    if (!isNoteDirty) {
+        isNoteDirty = true;
+        updateSaveIndicator();
+    }
+
+    // NEW: Check if the user typed a space or a closing character to trigger formatting
+    if ([' ', '*', '_', '~', '`'].includes(e.data)) {
+        handleMarkdownFormatting();
+    }
+
+    // Trigger the debounced functions for saving and updating stats
+    saveNoteContent();
+    updateStatsDebounced();
 });
                 app.elements.noteEditorBody.addEventListener('input', () => {
                     saveNoteContent();
