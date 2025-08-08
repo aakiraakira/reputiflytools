@@ -217,7 +217,22 @@
 #heading-nav-pill.hidden {
     display: none;
 }
-
+/* --- START: Table Delete Button Style --- */
+.delete-table-btn {
+    padding: 0.25rem; /* 4px */
+    border-radius: 0.25rem; /* 4px */
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    flex-shrink: 0; /* Prevents the button from shrinking */
+    transition: all 0.2s ease;
+}
+.delete-table-btn:hover {
+    background-color: var(--bg-pane-dark);
+    color: #ef4444; /* red-500 */
+}
+/* --- END: Table Delete Button Style --- */
 .heading-nav-dot {
     width: 8px;
     height: 8px;
@@ -3564,7 +3579,7 @@ const handleSpreadsheetUpload = (file) => {
             const cols = headers.length;
 
             let tableHTML = '<table style="width:100%"><thead>';
-            tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="table-header-controls"><div class="table-filter-wrapper"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div><button class="toggle-filter-btn" title="Toggle Filter"><i data-feather="chevrons-up" class="w-4 h-4"></i></button></div></th></tr>`;
+            tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="table-header-controls"><div class="table-filter-wrapper flex-grow"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div><button class="toggle-filter-btn" title="Toggle Filter"><i data-feather="chevrons-up" class="w-4 h-4"></i></button><button class="delete-table-btn" title="Delete Table"><i data-feather="trash-2" class="w-4 h-4"></i></button></div></th></tr>`;
             tableHTML += '<tr>';
             headers.forEach(header => {
                 tableHTML += `<th class="sortable-header" data-sort-dir="none" contenteditable="true">${header}</th>`;
@@ -7072,7 +7087,7 @@ const upgradePastedTables = (html) => {
         if (thead) {
             const filterRow = document.createElement('tr');
             // This is the updated filter row HTML with the toggle button
-            filterRow.innerHTML = `<th colspan="${colCount}" contenteditable="false"><div class="table-header-controls"><div class="table-filter-wrapper"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div><button class="toggle-filter-btn" title="Toggle Filter"><i data-feather="chevrons-up" class="w-4 h-4"></i></button></div></th>`;
+            filterRow.innerHTML = `<th colspan="${colCount}" contenteditable="false"><div class="table-header-controls"><div class="table-filter-wrapper flex-grow"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div><button class="toggle-filter-btn" title="Toggle Filter"><i data-feather="chevrons-up" class="w-4 h-4"></i></button><button class="delete-table-btn" title="Delete Table"><i data-feather="trash-2" class="w-4 h-4"></i></button></div></th>`;
             thead.prepend(filterRow);
         }
     });
@@ -10450,6 +10465,8 @@ execute: (args) => {
         updateChecklistProgress(liveChecklistElement);
     }
 
+    isNoteDirty = true;
+    updateSaveIndicator();
     performImmediateSave();
     showToast(`✅ Added "${itemText}" to checklist.`);
 }
@@ -10536,6 +10553,8 @@ execute: (args) => {
             updateChecklistProgress(liveChecklistElement);
         }
 
+        isNoteDirty = true;
+        updateSaveIndicator();
         performImmediateSave();
         showToast(`✅ Removed "${bestMatch.text}".`);
     }
@@ -10875,7 +10894,7 @@ execute: (args) => {
         }
 
         let tableHTML = '<table style="width:100%"><thead>';
-tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="table-header-controls"><div class="table-filter-wrapper"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div><button class="toggle-filter-btn" title="Toggle Filter"><i data-feather="chevrons-up" class="w-4 h-4"></i></button></div></th></tr>`;
+tableHTML += `<tr><th colspan="${cols}" contenteditable="false"><div class="table-header-controls"><div class="table-filter-wrapper flex-grow"><i data-feather="search" class="filter-icon"></i><input class="table-filter-input" placeholder="Filter table..."/></div><button class="toggle-filter-btn" title="Toggle Filter"><i data-feather="chevrons-up" class="w-4 h-4"></i></button><button class="delete-table-btn" title="Delete Table"><i data-feather="trash-2" class="w-4 h-4"></i></button></div></th></tr>`;
         tableHTML += '<tr>';
         for (let i = 0; i < cols; i++) {
             tableHTML += `<th class="sortable-header" data-sort-dir="none" contenteditable="true">Header ${i + 1}</th>`;
@@ -12734,7 +12753,42 @@ if (action === 'mobile-new-from-template') {
     }
 });
                 
-                app.containers.mainContentArea.addEventListener('click', (e) => {
+                app.containers.mainContentArea.addEventListener('click', async (e) => {
+                    const deleteTableBtn = e.target.closest('.delete-table-btn');
+
+if (deleteTableBtn) {
+
+    e.preventDefault();
+
+    const table = deleteTableBtn.closest('table');
+
+    if (table) {
+
+        const confirmed = await showConfirm({
+
+            title: 'Delete Table',
+
+            message: 'Are you sure you want to permanently delete this table and all its content?',
+
+            confirmText: 'Delete'
+
+        });
+
+        if (confirmed) {
+
+            table.remove();
+
+            performImmediateSave();
+
+            showToast('Table deleted.', 'info');
+
+        }
+
+    }
+
+    return; // Stop further actions
+
+}
     const exitBtn = e.target.closest('.exit-code-btn');
     if (exitBtn) {
         const wrapper = exitBtn.closest('.code-block-wrapper');
@@ -13227,7 +13281,7 @@ app.elements.noteEditorBody.addEventListener('paste', (e) => {
             });
             tableHTML += '</tbody></table><p><br></p>';
             
-            document.execCommand('insertHTML', false, tableHTML);
+            restoreSelectionAndExec(() => document.execCommand('insertHTML', false, tableHTML));
             feather.replace();
             saveNoteContent();
             return; // Exit after handling the spreadsheet paste
@@ -14603,6 +14657,8 @@ const addChecklistItemToModal = (text = '', checked = false) => {
 
 // Function to save changes from the modal back to the editor
 // REPLACE THE ENTIRE saveChecklistFromModal FUNCTION
+// Function to save changes from the modal back to the editor
+// REPLACE THE ENTIRE saveChecklistFromModal FUNCTION
 const saveChecklistFromModal = () => {
     if (!activeChecklistElement) return;
 
@@ -14630,6 +14686,10 @@ const saveChecklistFromModal = () => {
         titleEl.textContent = newTitle;
     }
     updateChecklistProgress(activeChecklistElement);
+    
+    // ADD THESE TWO LINES TO TRIGGER THE SAVE INDICATOR
+    isNoteDirty = true;
+    updateSaveIndicator();
 
     saveNoteContent();
     closeModal(document.getElementById('checklist-edit-modal'));
@@ -15177,6 +15237,8 @@ window.addEventListener('beforeunload', (e) => {
         });
         // START: Interactive Table Logic
 app.elements.noteEditorBody.addEventListener('click', async (e) => {
+    // Add this block inside the noteEditorBody 'click' event listener
+
     const deleteBtn = e.target.closest('.delete-row-btn');
     const duplicateBtn = e.target.closest('.duplicate-row-btn');
     const sortableHeader = e.target.closest('th.sortable-header');
