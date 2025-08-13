@@ -3534,17 +3534,32 @@ tiltObserver.observe(document.documentElement, { subtree: true, childList: true 
     lastY = y;
   }, { passive: true });
 })();
-const openVersionHistoryModal = () => {
+const openVersionHistoryModal = async () => {
     const noteId = state.settings.activeNoteId;
     if (!noteId) return;
 
     const modal = document.getElementById('version-history-modal');
     const listContainer = document.getElementById('version-list-container');
     const searchInput = document.getElementById('version-search-input');
-    const allVersions = state.versions?.[noteId] || [];
+    
+    // Show a loading state while fetching versions from the database.
+    listContainer.innerHTML = `<p class="p-4 text-sm text-center text-text-tertiary">Loading history...</p>`;
+    openModal(modal);
 
-    const formatDateHeader = (isoString) => {
-        const date = new Date(isoString);
+    // Fetch the last 50 versions, ordered by most recent.
+    const { collection, query, orderBy, getDocs, limit } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+    const versionsColRef = collection(db, "notes", noteId, "versions");
+    const versionsQuery = query(versionsColRef, orderBy("savedAt", "desc"), limit(50));
+    
+    const snapshot = await getDocs(versionsQuery);
+    const allVersions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    // The rest of the function will now use `allVersions` fetched from Firestore.
+
+    const formatDateHeader = (timestamp) => {
+    // Gracefully handle the case where a timestamp might not exist yet
+    if (!timestamp) return 'Just Now';
+    const date = timestamp.toDate();
         const today = new Date();
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
@@ -3572,30 +3587,31 @@ const renderVersionList = (filteredVersions) => {
         filteredVersions.forEach(version => {
             const header = formatDateHeader(version.savedAt);
             if (!groupedVersions[header]) groupedVersions[header] = [];
-            const originalIndex = allVersions.indexOf(version);
-            groupedVersions[header].push({ ...version, originalIndex });
+            // We no longer need originalIndex, we'll use the real document ID
+groupedVersions[header].push({ ...version });
         });
 
         let finalHTML = '';
         for (const header in groupedVersions) {
             finalHTML += `<h4 class="version-group-header">${header}</h4>`;
             finalHTML += groupedVersions[header].map(versionData => {
-                const { savedAt, message, content, originalIndex } = versionData;
-                const formattedDate = new Date(savedAt).toLocaleString();
-                const relativeTime = formatRelativeTime(savedAt);
+            
+                const { savedAt, message, content, id: versionDocId } = versionData;
+const formattedDate = savedAt ? savedAt.toDate().toLocaleString() : 'Saving...';
+const relativeTime = savedAt ? formatRelativeTime(savedAt.toDate().toISOString()) : 'Just now';
                 
                 return `
-                <div class="version-item group flex items-center justify-between" data-version-index="${originalIndex}" title="${formattedDate}">
-                    <div class="version-item-content flex-grow cursor-pointer p-2 -m-2">
-                        <div class="version-timestamp">${relativeTime}</div>
-                        <div class="version-fulldate">${formattedDate}</div>
-                        ${message ? `<div class="version-message">${message.replace(/</g, "&lt;")}</div>` : ''}
-                    </div>
-                    <button class="delete-version-btn p-1.5 rounded-full text-text-tertiary hover:text-red-500 hover:bg-bg-pane-dark opacity-0 group-hover:opacity-100 transition-opacity" data-action="delete-version" data-version-index="${originalIndex}" title="Delete this version">
-                        <i data-feather="trash-2" class="w-4 h-4 pointer-events-none"></i>
-                    </button>
-                </div>
-                `;
+<div class="version-item group flex items-center justify-between" data-version-id="${versionDocId}" title="${formattedDate}">
+    <div class="version-item-content flex-grow cursor-pointer p-2 -m-2">
+        <div class="version-timestamp">${relativeTime}</div>
+        <div class="version-fulldate">${formattedDate}</div>
+        ${message ? `<div class="version-message">${message.replace(/</g, "&lt;")}</div>` : ''}
+    </div>
+    <button class="delete-version-btn p-1.5 rounded-full text-text-tertiary hover:text-red-500 hover:bg-bg-pane-dark opacity-0 group-hover:opacity-100 transition-opacity" data-action="delete-version" data-version-id="${versionDocId}" title="Delete this version">
+        <i data-feather="trash-2" class="w-4 h-4 pointer-events-none"></i>
+    </button>
+</div>
+`;
             }).join('');
         }
         
@@ -3631,21 +3647,22 @@ const renderVersionList = (filteredVersions) => {
     feather.replace();
 };
 
-const saveNoteVersion = (noteId, content, message = null) => {
-    if (!state.versions) state.versions = {};
-    if (!state.versions[noteId]) state.versions[noteId] = [];
-
-    const newVersion = {
-        savedAt: new Date().toISOString(),
-        content: content,
-        message: message
-    };
-
-    state.versions[noteId].unshift(newVersion);
-
-    const MAX_VERSIONS = 50; // Increased limit
-    if (state.versions[noteId].length > MAX_VERSIONS) {
-        state.versions[noteId] = state.versions[noteId].slice(0, MAX_VERSIONS);
+const saveNoteVersion = async (noteId, content, message = null) => {
+    // This now saves each version as its own document in a Firestore subcollection.
+    try {
+        const { doc, collection, addDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+        
+        const versionsColRef = collection(db, "notes", noteId, "versions");
+        
+        await addDoc(versionsColRef, {
+            content: content,
+            message: message,
+            savedAt: serverTimestamp() // Use Firestore's reliable timestamp.
+        });
+        
+    } catch (error) {
+        console.error("Failed to save note version to Firestore:", error);
+        showToast("Error saving note version.", 'error');
     }
 };
 
@@ -3733,51 +3750,59 @@ document.getElementById('version-restore-btn').addEventListener('click', async (
     if (restoreBtn.classList.contains('confirm-state')) {
         clearTimeout(restoreConfirmTimeout);
 
-        const versions = state.versions?.[noteId] || [];
-        const selectedIndex = parseInt(activeItem.dataset.versionIndex);
-        const versionToRestore = versions[selectedIndex];
-        const noteData = window.noteCache[noteId]; // FIX: Get current note data from the cache
-
-        if (versionToRestore && noteData) {
-            // 1. (NEW) Create a checkpoint of the current content BEFORE overwriting it.
-            saveNoteVersion(
-                noteId,
-                noteData.content, // The current content being replaced
-                `Automatic checkpoint before restore`
-            );
-
-            // 2. Overwrite the note's content in the cache with the restored version.
-            noteData.content = versionToRestore.content;
-            noteData.modifiedAt = new Date().toISOString();
-            updateNoteLinks(noteData);
-            updateNoteTags(noteData);
-
-            // 3. (NEW) Create a log to show that a restore happened.
-            saveNoteVersion(
-                noteId,
-                noteData.content, // The newly restored content
-                `Restored from version ${formatRelativeTime(versionToRestore.savedAt)}`
-            );
-
-            // 4. Update the UI and save everything.
-            app.elements.noteEditorBody.innerHTML = noteData.content;
-            await performImmediateSave(); // Use immediate save
-            buildLunrIndex();
-
-            closeVersionHistoryModal();
-            showToast('Note restored successfully!', 'success');
+        // --- THIS IS THE FIX ---
+        // Get the unique ID from the selected version item
+        const versionId = activeItem.dataset.versionId;
+        if (!versionId) {
+            showToast('Could not find version ID.', 'error');
+            return;
         }
 
+        try {
+            // Fetch that specific version directly from Firestore
+            const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const versionRef = doc(db, "notes", noteId, "versions", versionId);
+            const versionSnap = await getDoc(versionRef);
+
+            if (versionSnap.exists()) {
+                const versionToRestore = versionSnap.data();
+                const noteData = window.noteCache[noteId];
+
+                // Save a checkpoint of the current state before overwriting
+                saveNoteVersion(noteId, noteData.content, `Automatic checkpoint before restore`);
+
+                // Overwrite the note's content with the restored version
+                noteData.content = versionToRestore.content;
+                noteData.modifiedAt = new Date().toISOString();
+                updateNoteLinks(noteData);
+                updateNoteTags(noteData);
+
+                // Update the UI and save everything to the database
+                app.elements.noteEditorBody.innerHTML = noteData.content;
+                await performImmediateSave();
+                buildLunrIndex();
+
+                closeVersionHistoryModal();
+                showToast('Note restored successfully!', 'success');
+            } else {
+                throw new Error("Version document not found.");
+            }
+        } catch (error) {
+            console.error("Error restoring version:", error);
+            showToast('Failed to restore version.', 'error');
+        }
+        
         restoreBtn.classList.remove('confirm-state');
-        restoreBtn.innerHTML = 'Restore';
+        restoreBtn.textContent = 'Restore';
 
     } else {
+        // This part handles the "Confirm Restore?" state
         restoreBtn.classList.add('confirm-state');
-        restoreBtn.innerHTML = 'Confirm Restore?';
+        restoreBtn.textContent = 'Confirm Restore?';
 
         restoreConfirmTimeout = setTimeout(() => {
             restoreBtn.classList.remove('confirm-state');
-            restoreBtn.innerHTML = 'Restore';
+            restoreBtn.textContent = 'Restore';
         }, 3000);
     }
 });
@@ -5201,26 +5226,25 @@ const defaultState = {
 };
 
             async function saveState() {
-                // Get the current user from Firebase Auth
-                const user = window.auth.currentUser;
+    const user = window.auth.currentUser;
+    if (!user) return;
 
-                // If no user is logged in, do nothing.
-                if (!user) return;
+    try {
+        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+        const userDocRef = doc(window.db, "users", user.uid, "data", "appState");
 
-                try {
-                    // Create a reference to a specific document in Firestore.
-                    // The path is /users/{the_user's_ID}/data/appState
-                    // This ensures every user has their own private data document.
-                    const userDocRef = doc(window.db, "users", user.uid, "data", "appState");
+        // Create a clean copy of the state for saving.
+        // We DELETE the 'versions' property because it's now stored elsewhere.
+        const stateToSave = { ...state };
+        delete stateToSave.versions;
 
-                    // Save the entire state object to that document.
-                    await setDoc(userDocRef, state);
+        await setDoc(userDocRef, stateToSave);
 
-                } catch (error) {
-                    console.error("Failed to save state to Firestore:", error);
-                    showToast("Error saving data to the cloud.", 'error');
-                }
-            }
+    } catch (error) {
+        console.error("Failed to save app state to Firestore:", error);
+        showToast("Error saving workspace to the cloud.", 'error');
+    }
+}
             function renderTagsState() {
     const isCollapsed = state.settings.tagsCollapsed;
     app.elements.toggleTagsBtn.classList.toggle('collapsed', isCollapsed);
@@ -5515,7 +5539,77 @@ const handleFileUpload = async (file) => {
 };
             
             
+const saveSpecificNoteToFirestore = async (noteId, noteData) => {
+    const user = window.auth.currentUser;
+    if (!user) throw new Error("User not authenticated.");
 
+    try {
+        if (user.uid === noteData.ownerId) {
+            const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const noteRef = doc(db, "notes", noteId);
+            await updateDoc(noteRef, noteData);
+        } else {
+            const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
+            const updateNote = httpsCallable(window.functions, 'updateNoteAsCollaborator');
+            await updateNote({
+                noteId: noteId,
+                newName: noteData.name,
+                newContent: noteData.content,
+                newExcerpt: noteData.excerpt,
+                newLinks: noteData.links,
+                newTags: noteData.tags,
+                modifiedAt: noteData.modifiedAt
+            });
+        }
+        return true;
+    } catch (error) {
+        console.error(`Failed to save note ${noteId} specifically:`, error);
+        throw new Error(`Database error while saving note ${noteId}.`);
+    }
+};
+const migrateVersionsToFirestore = async () => {
+    // Check if migration has already been done or is not needed.
+    if (state.settings.versionsMigrated || !state.versions || Object.keys(state.versions).length === 0) {
+        return;
+    }
+
+    const toastId = showToast('🚀 Upgrading your data structure...', 'loading');
+    try {
+        const { doc, collection, writeBatch } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+        const batch = writeBatch(db);
+
+        // Loop through each note that has old version data.
+        for (const noteId in state.versions) {
+            const versionsArray = state.versions[noteId];
+            if (Array.isArray(versionsArray)) {
+                // For each version in the array, create a new document in the subcollection.
+                versionsArray.forEach(version => {
+                    const newVersionRef = doc(collection(db, "notes", noteId, "versions"));
+                    batch.set(newVersionRef, {
+                        content: version.content,
+                        message: version.message,
+                        savedAt: new Date(version.savedAt) // Ensure it's a proper timestamp
+                    });
+                });
+            }
+        }
+
+        // After setting up all the writes, commit them at once.
+        await batch.commit();
+
+        // Mark the migration as complete and save the main state.
+        state.settings.versionsMigrated = true;
+        delete state.versions; // The old version data is no longer needed in the main state.
+        await saveState();
+
+        dismissToast(toastId);
+        showToast('✅ Data upgrade complete!', 'success');
+    } catch (error) {
+        dismissToast(toastId);
+        console.error("Version migration failed:", error);
+        showToast("❌ Could not upgrade version history data.", "error");
+    }
+};
             const debounce = (func, delay) => {
                 let timeout;
                 return (...args) => {
@@ -12080,6 +12174,7 @@ fileUploadInput.addEventListener('change', (e) => {
 });
                 document.getElementById('header-share-btn').addEventListener('click', () => handleShareNote());
                 await loadState();
+                await migrateVersionsToFirestore(); // This will run the one-time data migration if needed.
                 buildLunrIndex();
                 setupSharedNoteListener();
                 setupInvitationListener();
@@ -13448,7 +13543,7 @@ const saveSpecificNoteToFirestore = async (noteId, noteData) => {
 // =================================================================
 performImmediateSave = async () => {
     const noteId = state.settings.activeNoteId;
-    if (!noteId) return;
+    if (!noteId || !isNoteDirty) return; // Only save if there are changes
 
     const user = window.auth.currentUser;
     if (!user) return;
@@ -13457,19 +13552,14 @@ performImmediateSave = async () => {
     const noteContent = window.noteCache[noteId];
     if (!noteStub || !noteContent) return;
 
+    // --- Prepare the data to be saved ---
     const newName = app.elements.noteEditorTitle.value;
     const newContent = app.elements.noteEditorBody.innerHTML;
-
-    if (noteContent.name === newName && activeNoteCleanCopy === newContent) {
-        return;
-    }
-
     const plainText = newContent.replace(/<[^>]*>?/gm, ' ').trim();
     const excerpt = plainText.substring(0, 200);
-
     const nameChanged = noteStub.name !== newName;
 
-    // Update the full note data in the cache
+    // Update the local cache first
     noteContent.name = newName;
     noteContent.content = newContent;
     noteContent.excerpt = excerpt;
@@ -13477,52 +13567,27 @@ performImmediateSave = async () => {
     updateNoteLinks(noteContent);
     updateNoteTags(noteContent);
 
-    // --- THIS IS THE CRUCIAL FIX ---
-    // Sync the tags from the cache to the main state object used for rendering
-    noteStub.tags = noteContent.tags;
+    // Sync changes to the sidebar data
     noteStub.name = newName;
     noteStub.excerpt = excerpt;
-    // --- END OF FIX ---
-
-    if (nameChanged) {
-        renderCollectionsList();
-    }
+    noteStub.tags = noteContent.tags;
 
     try {
-        if (user.uid === noteContent.ownerId) {
-            const { doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
-            const noteRef = doc(db, "notes", noteId);
+        // --- THIS IS THE KEY CHANGE ---
+        // We now call the dedicated function to save ONLY the note content.
+        await saveSpecificNoteToFirestore(noteId, noteContent);
 
-            await updateDoc(noteRef, {
-                name: newName,
-                content: newContent,
-                excerpt: excerpt,
-                modifiedAt: noteContent.modifiedAt,
-                links: noteContent.links,
-                tags: noteContent.tags
-            });
-        } else {
-            const { httpsCallable } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js");
-            const updateNote = httpsCallable(window.functions, 'updateNoteAsCollaborator');
-            
-            await updateNote({
-                noteId: noteId,
-                newName: newName,
-                newContent: newContent,
-                newExcerpt: excerpt,
-                newLinks: noteContent.links,
-                newTags: noteContent.tags,
-                modifiedAt: noteContent.modifiedAt
-            });
-        }
-        
         activeNoteCleanCopy = newContent;
         isNoteDirty = false;
         updateSaveIndicator();
-
         scheduleRebuildIndex();
-        renderTagList(); // Re-render the tag list immediately after saving
-
+        renderTagList();
+        
+        // If the name changed, we also need to save the main state file (which holds the hierarchy)
+        if (nameChanged) {
+            await saveState(); 
+            renderCollectionsList();
+        }
     } catch (error) {
         console.error("Failed to save note:", error);
         showToast("Error saving note. " + (error.message || ''), 'error');
