@@ -3671,43 +3671,49 @@ document.getElementById('version-history-close-btn').addEventListener('click', c
 // Located inside the init() function
 // Located inside the init() function
 document.getElementById('version-sidebar').addEventListener('click', async (e) => {
-    // Handle Delete Action
+    const noteId = state.settings.activeNoteId;
+    if (!noteId) return;
+
+    // --- NEW: LOGIC TO DELETE A VERSION ---
     const deleteBtn = e.target.closest('.delete-version-btn');
     if (deleteBtn) {
-        e.stopPropagation(); // Prevent item selection from firing
+        e.stopPropagation(); // Stop the click from also selecting the item
+        const versionId = deleteBtn.dataset.versionId;
+        if (!versionId) return;
 
-        const versionIndex = parseInt(deleteBtn.dataset.versionIndex, 10);
-        const noteId = state.settings.activeNoteId;
-        const versions = state.versions?.[noteId] || [];
-        const versionToDelete = versions[versionIndex];
-
-        if (!versionToDelete) return;
-
-        // Directly delete without confirmation
-        state.versions[noteId].splice(versionIndex, 1);
-        await saveState();
-        openVersionHistoryModal(); // Refresh the modal to show the updated list
-        showToast('Version deleted successfully.', 'success');
-        
-        return; // Stop after handling delete
+        try {
+            const { doc, deleteDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const versionRef = doc(db, "notes", noteId, "versions", versionId);
+            await deleteDoc(versionRef);
+            openVersionHistoryModal(); // Refresh the modal to show the updated list
+            showToast('Version deleted successfully.', 'success');
+        } catch (error) {
+            console.error("Failed to delete version:", error);
+            showToast('Could not delete version.', 'error');
+        }
+        return; // Action complete
     }
 
-    // Handle Item Selection Action
-    const versionItemContent = e.target.closest('.version-item-content');
-    if (versionItemContent) {
-        const versionItem = versionItemContent.closest('.version-item');
-        if (!versionItem || versionItem.classList.contains('active')) return;
-
+    // --- NEW: LOGIC TO VIEW A VERSION ---
+    const versionItem = e.target.closest('.version-item');
+    if (versionItem && !versionItem.classList.contains('active')) {
         document.querySelectorAll('#version-sidebar .version-item.active').forEach(el => el.classList.remove('active'));
         versionItem.classList.add('active');
 
-        const noteId = state.settings.activeNoteId;
-        const versions = state.versions?.[noteId] || [];
-        const selectedIndex = parseInt(versionItem.dataset.versionIndex);
-        const selectedVersion = versions[selectedIndex];
+        const versionId = versionItem.dataset.versionId;
+        if (!versionId) return;
 
-        if (selectedVersion) {
-            displayVersionDiff(selectedVersion.content);
+        try {
+            const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const versionRef = doc(db, "notes", noteId, "versions", versionId);
+            const versionSnap = await getDoc(versionRef);
+
+            if (versionSnap.exists()) {
+                displayVersionDiff(versionSnap.data().content);
+            }
+        } catch (error) {
+            console.error("Failed to display version:", error);
+            showToast('Could not load selected version.', 'error');
         }
     }
 });
@@ -3778,9 +3784,16 @@ document.getElementById('version-restore-btn').addEventListener('click', async (
                 updateNoteTags(noteData);
 
                 // Update the UI and save everything to the database
-                app.elements.noteEditorBody.innerHTML = noteData.content;
-                await performImmediateSave();
-                buildLunrIndex();
+                // Update the UI and save everything to the database
+app.elements.noteEditorBody.innerHTML = noteData.content;
+
+// --- THIS IS THE FIX ---
+// Mark the note as "dirty" so that performImmediateSave knows it needs to save the new content
+isNoteDirty = true;
+// --- END OF FIX ---
+
+await performImmediateSave();
+buildLunrIndex();
 
                 closeVersionHistoryModal();
                 showToast('Note restored successfully!', 'success');
@@ -7946,19 +7959,25 @@ app.containers.mobileControlsDropdown.addEventListener('click', async (e) => {
 let isSavingManual = false; // Add a flag to prevent spamming
 document.addEventListener('keydown', (e) => {
     // Check for Ctrl+S or Cmd+S
-    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault(); 
-        if (state.settings.activeNoteId && !isSavingManual) {
-            isSavingManual = true; // Set the flag to true
-            performImmediateSave(); 
+    // Check for Ctrl+S or Cmd+S
+if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    if (state.settings.activeNoteId && !isSavingManual) {
+        isSavingManual = true;
+
+        // Save and then reset the "dirty" state
+        performImmediateSave().then(() => {
+            activeNoteCleanCopy = app.elements.noteEditorBody.innerHTML;
+            isNoteDirty = false;
+            updateSaveIndicator();
             showToast('✅ Saved', 'success');
-            
-            // Set a 1-second cooldown. Solves the fast-edit scenario.
-            setTimeout(() => {
-                isSavingManual = false; 
-            }, 1000); 
-        }
+        });
+
+        setTimeout(() => {
+            isSavingManual = false;
+        }, 1000);
     }
+}
 });
 // --- END: Throttled Ctrl+S Manual Save Logic (1-Second Cooldown) ---
 // --- END: Throttled Ctrl+S Manual Save Logic ---
