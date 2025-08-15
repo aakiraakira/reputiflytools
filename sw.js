@@ -15,7 +15,7 @@
 // --- 1. Configuration ---
 
 // IMPORTANT: Increment this version number every time you update the service worker file.
-const CACHE_NAME = 'reputifly-notes-cache-v92';
+const CACHE_NAME = 'reputifly-notes-cache-v93';
 
 // A comprehensive list of all files that make up the application's "shell".
 const APP_SHELL_URLS = [
@@ -132,6 +132,7 @@ self.addEventListener('fetch', event => {
     // is to just let them go to the network.
     event.respondWith(fetch(event.request));
 });
+
 
 
 
