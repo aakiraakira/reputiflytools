@@ -9511,16 +9511,34 @@ const deleteTemplate = async (templateId) => {
 const saveAsTemplate = async (noteStub) => {
     if (!noteStub) return showToast('❌ No note selected.', 'error');
 
-    // FIX: Get the full note data, including content, from the cache.
-    const noteData = window.noteCache[noteStub.id];
+    // --- START: FIX ---
+    // This block now fetches note content from the database if it's not already loaded.
+    let noteData = window.noteCache[noteStub.id];
     if (!noteData) {
-        return showToast('❌ Could not load note content to create template.', 'error');
+        try {
+            const {
+                doc,
+                getDoc
+            } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+            const noteRef = doc(db, "notes", noteStub.id);
+            const noteSnap = await getDoc(noteRef);
+            if (noteSnap.exists()) {
+                noteData = noteSnap.data();
+                window.noteCache[noteStub.id] = noteData; // Add the loaded note to the cache
+            } else {
+                return showToast('❌ Note data not found in the database.', 'error');
+            }
+        } catch (error) {
+            console.error("Error fetching note to create template:", error);
+            return showToast('❌ Failed to load note content from the database.', 'error');
+        }
     }
+    // --- END: FIX ---
 
     const templateName = await showPrompt({
         title: 'Save as Template',
         message: 'Enter a name for this template:',
-        initialValue: noteStub.name // Use the name from the note stub
+        initialValue: noteStub.name
     });
 
     if (templateName) {
@@ -9532,7 +9550,6 @@ const saveAsTemplate = async (noteStub) => {
         const newTemplate = {
             id: generateId('template'),
             name: templateName,
-            // FIX: Use the content and properties from the full noteData object.
             content: noteData.content,
             properties: JSON.parse(JSON.stringify(noteData.properties || {}))
         };
@@ -14863,52 +14880,76 @@ const originalButton = originalToolbar.querySelector(selector);
             }
 
         case 'duplicate':
-            {
-                if (!targetItem) return;
+    {
+        if (!targetItem) return;
 
-                const {
-                    doc,
-                    collection,
-                    writeBatch
-                } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
-                const batch = writeBatch(db);
+        const {
+            doc,
+            collection,
+            writeBatch,
+            getDoc
+        } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+        const batch = writeBatch(db);
 
-                const duplicateRecursive = (item) => {
-                    const newItemStub = JSON.parse(JSON.stringify(item));
-                    const newId = generateId(item.type[0]);
-                    newItemStub.id = newId;
-                    newItemStub.name = `${item.name} (copy)`;
+        // --- START: FIX ---
+        // This function is now async to allow fetching note data from the database.
+        const duplicateRecursive = async (item) => {
+            const newItemStub = JSON.parse(JSON.stringify(item));
+            const newId = generateId(item.type[0]);
+            newItemStub.id = newId;
+            newItemStub.name = `${item.name} (copy)`;
 
-                    if (item.type === 'note') {
-                        const sourceNoteData = window.noteCache[item.id];
-                        if (sourceNoteData) {
-                            const newNoteData = { ...sourceNoteData,
-                                name: newItemStub.name
-                            };
-                            const newNoteRef = doc(db, "notes", newId);
-                            batch.set(newNoteRef, newNoteData);
-                        }
-                    } else if (item.type === 'folder') {
-                        if (state.kanbanColumns[item.id]) {
-                            state.kanbanColumns[newId] = JSON.parse(JSON.stringify(state.kanbanColumns[item.id]));
-                        }
-                        if (item.children) {
-                            newItemStub.children = item.children.map(duplicateRecursive);
-                        }
+            if (item.type === 'note') {
+                let sourceNoteData = window.noteCache[item.id];
+                if (!sourceNoteData) {
+                    // Fetch the note's content if it's not already loaded.
+                    const noteRef = doc(db, "notes", item.id);
+                    const noteSnap = await getDoc(noteRef);
+                    if (noteSnap.exists()) {
+                        sourceNoteData = noteSnap.data();
+                    } else {
+                        // If the note somehow doesn't exist in the DB, create an empty duplicate.
+                        sourceNoteData = {
+                            content: '',
+                            properties: {}
+                        };
                     }
-                    return newItemStub;
+                }
+
+                const now = new Date().toISOString();
+                const newNoteData = {
+                    ...sourceNoteData,
+                    name: newItemStub.name,
+                    createdAt: now,
+                    modifiedAt: now,
+                    sharedWith: [] // Duplicates are not shared by default
                 };
+                const newNoteRef = doc(db, "notes", newId);
+                batch.set(newNoteRef, newNoteData);
 
-                const newItem = duplicateRecursive(targetItem);
-                parentArray.splice(findResult.index + 1, 0, newItem);
-
-                await batch.commit();
-                saveState();
-                buildLunrIndex();
-                render();
-                showToast(`Duplicated "${targetItem.name}"`);
-                break;
+            } else if (item.type === 'folder') {
+                if (state.kanbanColumns[item.id]) {
+                    state.kanbanColumns[newId] = JSON.parse(JSON.stringify(state.kanbanColumns[item.id]));
+                }
+                if (item.children) {
+                    // This now correctly handles duplicating folders with notes inside.
+                    newItemStub.children = await Promise.all(item.children.map(child => duplicateRecursive(child)));
+                }
             }
+            return newItemStub;
+        };
+        // --- END: FIX ---
+
+        const newItem = await duplicateRecursive(targetItem); // Await the result
+        parentArray.splice(findResult.index + 1, 0, newItem);
+
+        await batch.commit();
+        saveState();
+        buildLunrIndex();
+        render();
+        showToast(`Duplicated "${targetItem.name}"`);
+        break;
+    }
     }
 });
                 
