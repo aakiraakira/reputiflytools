@@ -15,7 +15,7 @@
 // --- 1. Configuration ---
 
 // IMPORTANT: Increment this version number every time you update the service worker file.
-const CACHE_NAME = 'reputifly-notes-cache-v101';
+const CACHE_NAME = 'reputifly-notes-cache-v120';
 
 // A comprehensive list of all files that make up the application's "shell".
 const APP_SHELL_URLS = [
@@ -23,13 +23,7 @@ const APP_SHELL_URLS = [
     '/',
     '/note',
     '/note.html', // The main HTML file is the most important fallback
-    '/notes.html'
-    '/notes'
     '/manifest.json',
-    '/app.js',
-  '/app.module.js',
-  '/preload.js',
-
 
     // Icons from your manifest
     '/icon-192.png',
@@ -138,8 +132,6 @@ self.addEventListener('fetch', event => {
     // is to just let them go to the network.
     event.respondWith(fetch(event.request));
 });
-
-
 
 
 
