@@ -9,6 +9,19 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+    // Define the callback function in the global scope right here in the <head>.
+    // This ensures it exists before the Google Maps script loads and tries to call it.
+    function initializeGoogleMaps() {
+        // This function will wait for the main app object to be ready.
+        if (window.reviewApp) {
+            window.reviewApp.mapsApiLoaded();
+        } else {
+            // If the app isn't ready, wait a moment and try again.
+            setTimeout(initializeGoogleMaps, 100);
+        }
+    }
+</script>
     <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBXdjRQZJd9ySH5mxql4tlXCEVpDH9GGbI&libraries=places&callback=initializeGoogleMaps"></script>
     <style>
         /* Base styling for the page, using the Inter font */
@@ -92,11 +105,7 @@
     <script>
         // Create a global function that the Google Maps script will call directly.
         // This is the most reliable way to know the API is ready.
-        function initializeGoogleMaps() {
-            if (window.reviewApp) {
-                window.reviewApp.mapsApiLoaded();
-            }
-        }
+        
 
         document.addEventListener('DOMContentLoaded', () => {
             // Main application object
@@ -284,7 +293,7 @@
                     if (place.reviews && place.reviews.length > 0) {
                         const positiveReviews = place.reviews.filter(r => r.rating >= 4).map(r => r.text);
                         ownerState.selectedPlace.reviews = positiveReviews;
-                        ownerState.promptGenerator.input = positiveReviews.join('\n\n---\n\n');
+                        ownerState.promptGenerator.input = positiveReviews.join('\n\n');
                     } else {
                         ownerState.selectedPlace.reviews = [];
                         ownerState.promptGenerator.input = 'No recent positive reviews found. You can paste your own points manually.';
@@ -361,17 +370,22 @@
                 },
                 
                 // --- RENDERING ---
-                render() {
-                    const { initialView, clientView, ownerView, adminView } = this.elements;
-                    initialView.classList.toggle('hidden', this.state.currentView !== 'initial');
-                    clientView.classList.toggle('hidden', this.state.currentView !== 'client');
-                    ownerView.classList.toggle('hidden', this.state.currentView !== 'owner');
-                    adminView.classList.toggle('hidden', this.state.currentView !== 'admin');
+                // --- RENDERING ---
+render() {
+    const { initialView, clientView, ownerView, adminView } = this.elements;
+    initialView.classList.toggle('hidden', this.state.currentView !== 'initial');
+    clientView.classList.toggle('hidden', this.state.currentView !== 'client');
+    ownerView.classList.toggle('hidden', this.state.currentView !== 'owner');
+    adminView.classList.toggle('hidden', this.state.currentView !== 'admin');
 
-                    if (this.state.currentView === 'client') this.renderClientView();
-                    if (this.state.currentView === 'owner') this.renderOwnerView();
-                    if (this.state.currentView === 'admin') this.renderAdminView();
-                },
+    if (this.state.currentView === 'client') this.renderClientView();
+    if (this.state.currentView === 'owner') this.renderOwnerView();
+    if (this.state.currentView === 'admin') this.renderAdminView();
+
+    // Re-initialize Google Maps Autocomplete after any re-render.
+    // This ensures the search functionality works after resets or state changes.
+    setTimeout(() => this.initializeMapsForCurrentView(), 0);
+},
                 
                 renderOwnerView() {
                     const { activeTab } = this.state.ownerState;
@@ -989,15 +1003,58 @@
                 },
 
                 generateOwnerPrompt() {
-                    const { selectedPlace, promptGenerator } = this.state.ownerState;
-                    
-                    let context = `Key Positive Points from Customers:\n${promptGenerator.input.trim()}`;
-                    
-                    const promptText = `CONTEXT:\n${context}\n\nTASK:\nBased on the context and key points above, craft 50 positive, detailed, and highly realistic Google reviews. Strictly follow all requirements below:\n\nREQUIREMENTS:\n1.  **Natural Language:** Reviews must sound like they were written by 50 different, real people. Vary tone, style, emotion (grateful, excited, relaxed), and sentence structure extensively. Mix short, snappy sentences with longer, more descriptive ones.\n\n2.  **Randomized Lengths & Order:** Do not follow any pattern. Some reviews should be very short (5-10 words), some medium (2-4 sentences), and a few long and detailed (5-8+ sentences). The order of lengths must be completely random.\n\n3.  **Company Name Usage (Strict):** Mention the specific company name, "${selectedPlace.name}", in only a small, random subset of the reviews (e.g., 5 out of 50). For all other reviews, use general terms like "this place," "the team," "the service," "they," or just describe the experience.\n\n4.  **Keyword Integration:** Subtly weave in keywords from the business context (like business type, location hints, or specific services mentioned in the points) into a few reviews where it feels natural. Do not force them in.\n\n5.  **Authenticity & Realism:** To enhance credibility, a couple of reviews can mention a minor, neutral point before giving praise (e.g., "It was a bit busy, but the service was still excellent" or "I had to wait a few minutes, but it was so worth it.").\n\n6.  **Varied Writing Voice & Demographics:** Write from different perspectives. Hint at different customer types (e.g., "brought my family," "perfect for a quick work lunch," "came here on a date night"). Use different capitalization styles (some proper, some all-lowercase, some with mobile auto-capitalization). Use emojis (like 😊, 👍, ⭐) very sparingly—maybe in 1 of every 10 reviews.\n\n7.  **Time References:** Casually include a soft time reference in about 3-5 reviews (e.g., "visited last week," "came here yesterday morning").\n\n8.  **Formatting:** Separate each review with a new line. DO NOT number the reviews.`;
-                    promptGenerator.output = promptText;
-                    this.render();
-                    this.showNotification("Master prompt generated!");
-                },
+    const { selectedPlace, promptGenerator } = this.state.ownerState;
+
+    this.showPromptModal(
+        'Enter Company Name for AI',
+        'e.g., "MB Karaoke" (leave blank to omit)',
+        (naturalCompanyName) => {
+            const companyName = naturalCompanyName.trim();
+            let companyNameInstruction = '';
+
+            if (companyName) {
+                companyNameInstruction = `4.  **Company Name Usage:** Mention the specific company name, "${companyName}", in only a small, random subset of reviews (e.g., 5-7 out of 50). For all other reviews, use general terms like "this place," "the team," "the staff," or describe the experience without naming the business.`;
+            } else {
+                companyNameInstruction = `4.  **Company Name Usage:** Do NOT mention any specific company name. Use general terms like "this place," "the team," "the service," or "they."`;
+            }
+
+            const promptText = `You are an expert copywriter specializing in creating authentic, human-like user-generated content.
+
+TASK:
+Based on the CONTEXT below, craft 50 highly realistic, positive Google reviews. Each review must feel like a snapshot of a real person's genuine experience.
+
+CONTEXT / KEYWORDS:
+${promptGenerator.input.trim()}
+
+CRITICAL REQUIREMENTS:
+
+1.  **FORMATTING (ABSOLUTE FIRST PRIORITY):**
+    - Your response MUST consist ONLY of the reviews.
+    - DO NOT include ANY introductory or concluding text (e.g., "Here are your reviews...").
+    - Separate each individual review with a double newline (two enters).
+    - DO NOT number the reviews or use any separators like "----".
+
+2.  **NARRATIVE & DETAIL (HIGHEST QUALITY PRIORITY):**
+    - Avoid generic praise like "Great service" or "Good product."
+    - Instead, TELL A STORY. A significant portion of reviews must describe a specific situation, outcome, or feeling.
+    - Invent plausible, specific details to make reviews credible. Examples: mention a staff member by a common name ("Sarah was so helpful"), a small detail ("loved the comfortable waiting area," "the installation was surprisingly quiet"), or the end result ("the new system completely changed our family movie nights").
+
+3.  **NATURAL & VARIED LANGUAGE:**
+    - Write from 50 completely different perspectives and voices. Vary tone, emotion, sentence structure, and length extensively.
+    - AVOID repetitive sentence starters (e.g., "The staff was...", "I liked how...").
+    - Mimic real-world typing: use different capitalization (some proper, some all-lowercase), varied punctuation, and use emojis (like 😊, 👍, ⭐, 🎉) very sparingly.
+
+${companyNameInstruction}
+
+5.  **AUTHENTICITY:**
+    - To enhance realism, a few reviews can mention a minor, neutral point before giving strong praise. Examples: "The booking process was a bit confusing at first, but the experience itself was flawless," or "It's a bit pricey, but you absolutely get what you pay for. Worth every penny."`;
+
+            promptGenerator.output = promptText;
+            this.render();
+            this.showNotification("Upgraded master prompt generated!");
+        }
+    );
+},
 
                 async craftAiReviews() {
                     const { geminiApiKey, geminiModel, promptGenerator } = this.state.ownerState;
@@ -1025,7 +1082,17 @@
                         const data = await response.json();
                         const aiReviews = data.candidates[0]?.content?.parts[0]?.text || '';
                         
-                        this.state.ownerState.bulkText = aiReviews.trim();
+                        // Clean the AI response to remove any introductory text.
+const reviewsArray = aiReviews.trim().split(/\n\s*\n/); // Split by one or more newlines
+const firstReviewIndex = reviewsArray.findIndex(line => 
+    line.length > 25 && // It's probably not a title
+    !line.toLowerCase().startsWith('here are') && 
+    !line.toLowerCase().startsWith('sure, here') &&
+    !line.toLowerCase().startsWith('absolutely')
+);
+const cleanedReviews = firstReviewIndex !== -1 ? reviewsArray.slice(firstReviewIndex).join('\n\n') : aiReviews.trim();
+
+this.state.ownerState.bulkText = cleanedReviews;
                         this.state.ownerState.activeTab = 'submitter';
                         this.showNotification("AI reviews generated successfully! Now process them.", "success");
                         
