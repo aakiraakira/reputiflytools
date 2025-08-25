@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trustpilot Review Management Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Base styling for the page, using the Inter font */
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #0F0520; 
+            color: #f0f0f0;
+        }
+        /* Custom scrollbar for a better look in dark mode */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+
+        .polished-container {
+            background: rgba(180, 124, 253, 0.08);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(180, 124, 253, 0.15);
+            border-radius: 1rem;
+            transition: all 0.3s ease-in-out;
+            animation: fadeIn 0.5s ease-out forwards;
+        }
+        .polished-container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        .button-gradient {
+            background-image: linear-gradient(to right, #B47CFD, #FF7FC2);
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        .button-gradient:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+            opacity: 0.95;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0; transform: translateY(20px); }
+            10%, 90% { opacity: 1; transform: translateY(0); }
+        }
+        .notification-toast { animation: fadeInOut 4s ease-in-out forwards; }
+        button:disabled, input:disabled, textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+        .hidden { display: none; }
+        .sticky-header {
+            position: sticky;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 50;
+            background-color: #0F0520;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #34D399; /* teal-400 */
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="text-gray-200 min-h-screen">
+
+    <div id="app" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-40">
+        <div id="initial-view">
+            <header class="text-center py-12">
+                <h1 class="text-4xl sm:text-5xl font-bold text-white">Trustpilot Review Portal</h1>
+                <p class="text-gray-400 mt-2">Please select your portal to continue.</p>
+            </header>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+                <div id="owner-portal-btn" class="view-button text-center p-8 polished-container cursor-pointer">
+                    <h2 class="text-3xl font-bold text-[#B47CFD]">Owner Portal</h2>
+                    <p class="mt-2 text-gray-400">Generate and format Trustpilot reviews.</p>
+                </div>
+                <div id="admin-portal-btn" class="view-button text-center p-8 polished-container cursor-pointer">
+                    <h2 class="text-3xl font-bold text-teal-400">Admin Dashboard</h2>
+                    <p class="mt-2 text-gray-400">Manage companies and submitted reviews.</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="owner-view" class="hidden"></div>
+        <div id="admin-view" class="hidden"></div>
+    </div>
+    
+    <div id="login-modal-container"></div>
+    <div id="generic-modal-container"></div>
+    <div id="notification" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-white py-3 px-5 rounded-lg shadow-xl z-[10001]"></div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const app = {
+                // --- STATE ---
+                state: {
+                    currentView: 'initial',
+                    isOwnerLoggedIn: false,
+                    isAdminLoggedIn: false,
+                    data: { companies: [] },
+                    activeCompanyId: localStorage.getItem('activeCompanyTab') || null,
+                    ownerState: {
+                        activeTab: 'submitter',
+                        geminiApiKey: localStorage.getItem('geminiApiKey') || '',
+                        isAiGenerating: false,
+                        companyInfo: {
+                            name: '',
+                            trustpilotLink: '',
+                            exampleReviews: ''
+                        },
+                        reviews: [], // Will be [{title: '', text: ''}, ...]
+                        bulkText: '',
+                        promptGenerator: { output: '' }
+                    }
+                },
+                // --- DOM ELEMENTS ---
+                elements: {
+                    app: document.getElementById('app'),
+                    initialView: document.getElementById('initial-view'),
+                    ownerView: document.getElementById('owner-view'),
+                    adminView: document.getElementById('admin-view'),
+                    loginModalContainer: document.getElementById('login-modal-container'),
+                    genericModalContainer: document.getElementById('generic-modal-container'),
+                    notification: document.getElementById('notification'),
+                },
+                // --- INITIALIZATION ---
+                init() {
+                    this.loadData();
+                    this.attachInitialListeners();
+                    this.render();
+                },
+                // --- DATA PERSISTENCE ---
+                loadData() {
+                    const savedData = localStorage.getItem('trustpilotDashboardData');
+                    if (savedData) { 
+                        try {
+                            this.state.data = JSON.parse(savedData); 
+                            if (!this.state.data.companies) this.state.data.companies = []; 
+                        } catch(e) {
+                            this.state.data = { companies: [] };
+                        }
+                    }
+                    const activeTab = localStorage.getItem('activeCompanyTab');
+                    if (activeTab && this.state.data.companies.find(c => c.id === activeTab)) { 
+                        this.state.activeCompanyId = activeTab; 
+                    } else if (this.state.data.companies.length > 0) { 
+                        this.state.activeCompanyId = this.state.data.companies[0].id; 
+                    }
+                },
+                saveData() {
+                    localStorage.setItem('trustpilotDashboardData', JSON.stringify(this.state.data));
+                    this.showNotification("Admin data saved!");
+                },
+                // --- VIEW MANAGEMENT ---
+                switchView(view) {
+                    const isLoggedIn = (view === 'owner' && this.state.isOwnerLoggedIn) || (view === 'admin' && this.state.isAdminLoggedIn);
+
+                    if (!isLoggedIn && view !== 'initial') {
+                        this.showLoginModal(view);
+                        return;
+                    }
+
+                    this.state.currentView = view;
+                    if (view === 'initial') { 
+                        this.state.isOwnerLoggedIn = false;
+                        this.state.isAdminLoggedIn = false;
+                    }
+                    if (view === 'owner' && !this.state.ownerState.geminiApiKey) {
+                        this.showApiKeyModal();
+                    }
+                    this.render();
+                },
+                // --- RENDERING ---
+                render() {
+                    const { initialView, ownerView, adminView } = this.elements;
+                    initialView.classList.toggle('hidden', this.state.currentView !== 'initial');
+                    ownerView.classList.toggle('hidden', this.state.currentView !== 'owner');
+                    adminView.classList.toggle('hidden', this.state.currentView !== 'admin');
+
+                    if (this.state.currentView === 'owner') this.renderOwnerView();
+                    if (this.state.currentView === 'admin') this.renderAdminView();
+                },
+                renderOwnerView() {
+                    const { activeTab } = this.state.ownerState;
+                    this.elements.ownerView.innerHTML = `
+                        <div class="sticky-header">
+                            <div class="grid grid-cols-3 items-center py-3">
+                                <div><button class="back-to-initial-btn text-gray-400 hover:text-white transition-colors text-sm">← Logout & Return</button></div>
+                                <div class="flex justify-center"><h2 class="text-xl font-bold">Owner Portal</h2></div>
+                                <div class="flex justify-end"><button id="settings-btn" class="text-gray-400 hover:text-white transition-colors">⚙️ Settings</button></div>
+                            </div>
+                            <div>
+                                <nav class="-mb-px flex gap-6 overflow-x-auto sm:justify-center no-scrollbar" aria-label="Tabs">
+                                    <button data-tab="submitter" class="owner-tab-btn ${activeTab === 'submitter' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">Review Submitter</button>
+                                    <button data-tab="promptGenerator" class="owner-tab-btn ${activeTab === 'promptGenerator' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">AI Prompt & Generation</button>
+                                </nav>
+                            </div>
+                        </div>
+                        <div class="pt-8">
+                            <div id="owner-submitter-view" class="${activeTab !== 'submitter' ? 'hidden' : ''}">${this.renderOwnerSubmitterView()}</div>
+                            <div id="owner-prompt-generator-view" class="${activeTab !== 'promptGenerator' ? 'hidden' : ''}">${this.renderOwnerPromptGeneratorView()}</div>
+                        </div>`;
+                },
+                renderOwnerSubmitterView() {
+                    const { companyInfo, reviews, bulkText } = this.state.ownerState;
+                    const areReviewsProcessed = reviews.length > 0;
+                    return `
+                        <div class="p-6 polished-container">
+                             <h2 class="text-xl font-semibold text-white mb-4">Step 1: Company Info</h2>
+                             <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-1">Company Name</label>
+                                    <input type="text" id="owner-company-name" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" placeholder="e.g., Acme Corporation" value="${companyInfo.name || ''}">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-1">Trustpilot Link</label>
+                                    <input type="text" id="owner-trustpilot-link" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" placeholder="https://www.trustpilot.com/review/company.com" value="${companyInfo.trustpilotLink || ''}">
+                                </div>
+                             </div>
+                        </div>
+                        <div class="mt-8 p-6 polished-container ${areReviewsProcessed ? 'hidden' : ''}">
+                            <h2 class="text-xl font-semibold text-white mb-4">Step 2: Paste or Generate Reviews</h2>
+                            <p class="text-sm text-gray-400 mb-3">Paste reviews below, or use the "AI Prompt & Generation" tab to create them. Each review must have a title and body.</p>
+                            <textarea id="owner-bulk-textarea" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg h-60 resize-y" placeholder="Format:\nTitle: My awesome experience\nBody: The service was fantastic...\n\n---\n\nTitle: Another great review\nBody: I really enjoyed...">${bulkText}</textarea>
+                            <button id="process-bulk-reviews-btn" class="mt-4 w-full button-gradient text-white font-bold py-3 px-4 rounded-lg">Process Reviews</button>
+                        </div>
+                        <div class="mt-8 ${!areReviewsProcessed ? 'hidden' : ''}">
+                            <div class="mb-6 flex flex-wrap justify-between items-center gap-4">
+                                <h2 class="text-xl font-semibold text-white">Step 3: Manage Reviews (${reviews.length})</h2>
+                                <div class="flex items-center gap-3">
+                                    <button id="reset-owner-reviews-btn" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg">Start Over</button>
+                                    <button class="download-owner-file-btn button-gradient text-white font-bold py-2 px-4 rounded-lg" ${reviews.length === 0 ? 'disabled' : ''}>Download File</button>
+                                </div>
+                            </div>
+                            <div id="owner-reviews-container">${this.renderReviewCards()}</div>
+                        </div>`;
+                },
+                renderOwnerPromptGeneratorView() {
+                    const { output } = this.state.ownerState.promptGenerator;
+                    const { geminiApiKey, isAiGenerating, companyInfo } = this.state.ownerState;
+                    return `<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            <div class="p-6 polished-container">
+                                <h2 class="text-xl font-semibold text-white mb-4">1. Review Points & Keywords (Context)</h2>
+                                <p class="text-sm text-gray-400 mb-3">Paste some example reviews or keywords here to give the AI context about the company.</p>
+                                <textarea id="prompt-context-input" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg h-80 resize-y">${companyInfo.exampleReviews}</textarea>
+                            </div>
+                            <div class="relative p-6 polished-container">
+                                <button id="copy-prompt-btn" class="absolute top-4 right-4 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition-colors" ${!output ? 'disabled' : ''} title="Copy prompt">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg>
+                                </button>
+                                <h2 class="text-xl font-semibold text-white mb-4">2. Generate Master Prompt</h2>
+                                <p class="text-sm text-gray-400 mb-3">Click to create a detailed prompt for the AI based on your context.</p>
+                                <button id="generate-prompt-btn" class="w-full button-gradient text-white font-bold py-3 px-4 rounded-lg">Generate Master Prompt</button>
+                                <div class="mt-4">
+                                    <pre id="prompt-generator-output" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg whitespace-pre-wrap overflow-y-auto h-80">${output || 'Your master prompt will appear here...'}</pre>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-8 p-6 polished-container">
+                             <h2 class="text-xl font-semibold text-white mb-4">3. Craft Reviews with Gemini AI</h2>
+                             <button id="craft-ai-reviews-btn" class="w-full flex items-center justify-center button-gradient text-white font-bold py-3 px-4 rounded-lg" ${!output || !geminiApiKey || isAiGenerating ? 'disabled' : ''}>
+                                 ${isAiGenerating ? '<div class="spinner"></div><span class="ml-3">Generating...</span>' : 'Craft Reviews with AI'}
+                             </button>
+                             ${!geminiApiKey ? '<p class="text-yellow-400 text-sm mt-3">Missing Gemini API Key. Please add it in the <button id="settings-btn-inline" class="underline hover:text-yellow-200">Settings</button>.</p>' : ''}
+                        </div>`;
+                },
+                renderReviewCards() {
+                    const { reviews } = this.state.ownerState;
+                    if (reviews.length === 0) {
+                        return '<p class="text-gray-400 text-center py-4">No reviews processed yet. Paste reviews in the box above and click "Process Reviews".</p>';
+                    }
+                    return reviews.map((review, index) => `
+                        <div class="p-6 rounded-xl mb-6 border border-gray-700 bg-gray-800/50">
+                            <div class="flex justify-between items-start mb-4">
+                                <span class="text-2xl font-bold text-teal-400">#${index + 1}</span>
+                                <button data-index="${index}" class="remove-review-btn text-gray-500 hover:text-red-500 font-bold text-2xl">×</button>
+                            </div>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="font-semibold text-gray-300 mb-2 block">Review Title</label>
+                                    <input type="text" data-index="${index}" class="title-input w-full p-3 bg-gray-900 border border-gray-600 rounded-lg" value="${review.title}">
+                                </div>
+                                <div>
+                                    <label class="font-semibold text-gray-300 mb-2 block">Review Body</label>
+                                    <textarea data-index="${index}" class="content-input w-full p-3 bg-gray-900 border border-gray-600 rounded-lg h-32 resize-y">${review.text}</textarea>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                },
+                renderAdminView() {
+                    this.elements.adminView.innerHTML = `
+                        <div class="sticky-header">
+                            <div class="grid grid-cols-3 items-center py-3">
+                                <div><button class="back-to-initial-btn text-gray-400 hover:text-white transition-colors text-sm">← Logout & Return</button></div>
+                                <div class="flex justify-center"><h2 class="text-xl font-bold">Admin Dashboard</h2></div>
+                                <div></div>
+                            </div>
+                        </div>
+                        <div class="pt-8">
+                            <div class="p-6 polished-container">
+                                 <h2 class="text-xl font-semibold text-white mb-4">Manage Companies</h2>
+                                 <div class="flex flex-col sm:flex-row gap-4">
+                                     <input type="text" id="new-company-name" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg" placeholder="New company name...">
+                                     <button id="add-company-btn" class="button-gradient text-white font-bold py-2 px-6 rounded-lg whitespace-nowrap">Add Company</button>
+                                 </div>
+                            </div>
+                            <main id="admin-main-content" class="mt-8">
+                                ${this.renderAdminMainContent()}
+                            </main>
+                        </div>
+                    `;
+                },
+                renderAdminMainContent() {
+                    const companies = this.state.data.companies;
+                    if (companies.length === 0) return `<div class="text-center py-16 px-6 polished-container"><h3 class="text-xl font-semibold text-white">No Companies Added</h3><p class="text-gray-400 mt-2">Please add a company to begin.</p></div>`;
+                    
+                    const company = companies.find(c => c.id === this.state.activeCompanyId);
+                    
+                    return `
+                        <div class="border-b border-gray-600 mb-6">
+                            <nav class="-mb-px flex gap-4 overflow-x-auto no-scrollbar" aria-label="Tabs">
+                                ${companies.map(c => `
+                                    <button data-id="${c.id}" class="company-tab-btn group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${this.state.activeCompanyId === c.id ? 'border-[#B47CFD] text-[#B47CFD]' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}">
+                                        ${c.name}
+                                    </button>
+                                `).join('')}
+                            </nav>
+                        </div>
+                        ${company ? this.renderAdminCompanyDetails(company) : `<div class="text-center py-16 px-6 polished-container"><p class="text-gray-400 mt-2">Select a company tab to view its details.</p></div>`}
+                    `;
+                },
+                renderAdminCompanyDetails(company) {
+                    const totalReviews = company.reviews?.length || 0;
+                    const doneReviews = company.reviews?.filter(r => r.status === 'done').length || 0;
+                    const progress = totalReviews > 0 ? (doneReviews / totalReviews) * 100 : 0;
+                    const undoneReviews = company.reviews?.filter(r => r.status !== 'done') || [];
+
+                    return `
+                        <div class="p-6 polished-container mb-8">
+                            <div class="flex flex-wrap justify-between items-start gap-4 mb-4">
+                                <div class="flex-1 min-w-[250px]">
+                                  <h2 class="text-2xl font-bold text-white">${company.name}</h2>
+                                  <p class="text-sm text-gray-400 mt-2">Trustpilot Link: 
+                                    <a href="${company.link}" target="_blank" class="text-indigo-400 hover:underline break-all">${company.link || 'Not set'}</a>
+                                  </p>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <button data-id="${company.id}" class="copy-latest-undone-btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg" ${undoneReviews.length === 0 ? 'disabled' : ''}>Copy Latest</button>
+                                    <label class="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-center">
+                                        Upload File <input type="file" data-id="${company.id}" class="upload-admin-file hidden" accept=".json">
+                                    </label>
+                                    <button data-id="${company.id}" class="download-admin-file-btn bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Download</button>
+                                    <button data-id="${company.id}" class="remove-company-btn bg-red-800 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Delete</button>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between mb-1">
+                                    <span class="text-base font-medium text-indigo-400">Completion</span>
+                                    <span class="text-sm font-medium text-indigo-400">${doneReviews} / ${totalReviews} (${Math.round(progress)}%)</span>
+                                </div>
+                                <div class="w-full bg-gray-700 rounded-full h-2.5"> <div class="bg-indigo-600 h-2.5 rounded-full" style="width: ${progress}%"></div> </div>
+                            </div>
+                        </div>
+                        <div id="admin-reviews-container">
+                            ${company.reviews && company.reviews.length > 0 ? company.reviews.map((review, index) => this.getAdminReviewHtml(company, review, index)).join('') : `<div class="text-center py-16 px-6 polished-container"><p class="text-gray-400">No reviews submitted for this company yet. Upload a file.</p></div>`}
+                        </div>
+                    `;
+                },
+                getAdminReviewHtml(company, review, index) {
+                    const isDone = review.status === 'done';
+                    return `
+                        <div class="relative p-6 rounded-xl mb-6 shadow-lg border ${isDone ? 'border-green-500 opacity-60' : 'border-gray-700'} bg-gray-800/50">
+                            ${isDone ? '<span class="absolute top-3 right-3 bg-green-600 text-white text-xs font-bold px-2 py-1 rounded-full">DONE</span>' : ''}
+                            <div class="flex justify-between items-start mb-4"> <span class="text-2xl font-bold text-indigo-400">#${index + 1}</span> </div>
+                            <div class="space-y-4">
+                                <div>
+                                    <p class="font-semibold text-gray-300">Title:</p>
+                                    <p class="p-2 bg-gray-900 border border-gray-600 rounded-lg">${review.title}</p>
+                                </div>
+                                <div>
+                                    <p class="font-semibold text-gray-300">Body:</p>
+                                    <p class="p-2 bg-gray-900 border border-gray-600 rounded-lg whitespace-pre-wrap">${review.text}</p>
+                                </div>
+                            </div>
+                             <div class="mt-6 pt-4 border-t border-gray-700 flex flex-wrap gap-3">
+                                 ${isDone ? `<button data-index="${index}" class="undo-review-btn flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg">Undo</button>` : `<button data-index="${index}" class="copy-btn flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg">Copy & Mark Done</button>`}
+                            </div>
+                        </div>`;
+                },
+                // --- EVENT LISTENERS & HANDLERS ---
+                attachInitialListeners() {
+                    document.getElementById('owner-portal-btn').addEventListener('click', () => this.switchView('owner'));
+                    document.getElementById('admin-portal-btn').addEventListener('click', () => this.switchView('admin'));
+                    this.elements.app.addEventListener('click', e => { 
+                        if (e.target.closest('.back-to-initial-btn')) this.switchView('initial');
+                        if (this.state.currentView === 'owner') this.handleOwnerClick(e);
+                        if (this.state.currentView === 'admin') this.handleAdminClick(e);
+                    });
+                    this.elements.app.addEventListener('input', e => {
+                        if (this.state.currentView === 'owner') this.handleOwnerInput(e);
+                    });
+                    this.elements.app.addEventListener('change', e => {
+                        if (this.state.currentView === 'admin') this.handleAdminChange(e);
+                    });
+                },
+                handleOwnerClick(e) {
+                    const target = e.target;
+                    
+                    if (target.closest('.owner-tab-btn')) {
+                        this.state.ownerState.activeTab = target.closest('.owner-tab-btn').dataset.tab;
+                        this.render();
+                    }
+                    if (target.closest('#settings-btn') || target.closest('#settings-btn-inline')) this.showApiKeyModal();
+                    if (target.id === 'process-bulk-reviews-btn') this.processBulkTrustpilotReviews();
+                    if (target.id === 'reset-owner-reviews-btn') { 
+                        this.state.ownerState.reviews = []; 
+                        this.state.ownerState.bulkText = ''; 
+                        this.render(); 
+                    }
+                    if (target.id === 'generate-prompt-btn') this.generateTrustpilotPrompt();
+                    if (target.id === 'copy-prompt-btn') this.copyToClipboard(this.state.ownerState.promptGenerator.output, "Prompt copied!");
+                    if (target.id === 'craft-ai-reviews-btn') this.craftTrustpilotReviews();
+                    if (target.closest('.remove-review-btn')) {
+                        this.state.ownerState.reviews.splice(target.closest('.remove-review-btn').dataset.index, 1);
+                        this.render();
+                    }
+                    if (target.closest('.download-owner-file-btn')) {
+                        this.showPromptModal('Enter a filename', `e.g., ${this.state.ownerState.companyInfo.name || 'company'}_reviews`, (filename) => {
+                            if (!filename) { this.showNotification('Download cancelled.', 'error'); return; }
+                            const data = { 
+                                link: this.state.ownerState.companyInfo.trustpilotLink, 
+                                reviews: this.state.ownerState.reviews 
+                            };
+                            const dataBlob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                            const url = URL.createObjectURL(dataBlob);
+                            const a = document.createElement('a');
+                            a.href = url; a.download = `${filename.replace(/\s+/g, '_')}.json`;
+                            document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                            this.showNotification('File downloaded!');
+                        });
+                    }
+                },
+                handleAdminClick(e) {
+                    const target = e.target;
+                    
+                    if(target.id === 'add-company-btn') {
+                        const nameInput = document.getElementById('new-company-name');
+                        if (nameInput.value.trim()) {
+                            const newCompany = { id: `comp_${Date.now()}`, name: nameInput.value.trim(), link: '', reviews: [] };
+                            this.state.data.companies.push(newCompany);
+                            this.state.activeCompanyId = newCompany.id;
+                            this.saveData(); 
+                            this.render(); 
+                            nameInput.value = '';
+                        }
+                    }
+                    if(target.closest('.company-tab-btn')) { 
+                        this.state.activeCompanyId = target.closest('.company-tab-btn').dataset.id; 
+                        localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
+                        this.render(); 
+                    }
+                    if(target.closest('.remove-company-btn')) {
+                        const id = target.closest('.remove-company-btn').dataset.id;
+                        this.showConfirmModal('Delete Company?', 'This cannot be undone.', () => {
+                            this.state.data.companies = this.state.data.companies.filter(c => c.id !== id);
+                            if (this.state.activeCompanyId === id) {
+                                this.state.activeCompanyId = this.state.data.companies[0]?.id || null;
+                                localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
+                            }
+                            this.saveData(); this.render();
+                        });
+                    }
+                    
+                    const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
+                    if(!company) return;
+
+                    if (target.closest('.copy-latest-undone-btn')) {
+                        const latestUndone = company.reviews.map((r, i) => ({...r, originalIndex: i})).reverse().find(r => r.status !== 'done');
+                        if (latestUndone) {
+                            this.copyToClipboard(`Title: ${latestUndone.title}\nBody: ${latestUndone.text}`, 'Latest review copied!');
+                            company.reviews[latestUndone.originalIndex].status = 'done';
+                            this.saveData(); this.render();
+                        } else { this.showNotification('No new reviews to copy.'); }
+                        return;
+                    }
+                     if (target.closest('.download-admin-file-btn')) {
+                        const companyToDownload = this.state.data.companies.find(c => c.id === target.dataset.id);
+                        const dataBlob = new Blob([JSON.stringify(companyToDownload, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(dataBlob);
+                        const a = document.createElement('a');
+                        a.href = url; a.download = `data_${companyToDownload.name.replace(/\s+/g, '_')}.json`;
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                        return;
+                    }
+
+                    const reviewIndex = e.target.closest('[data-index]')?.dataset.index;
+                    if (!reviewIndex) return;
+                    const review = company.reviews[reviewIndex];
+
+                    if (target.closest('.copy-btn')) {
+                        this.copyToClipboard(`Title: ${review.title}\nBody: ${review.text}`, 'Review copied!');
+                        review.status = 'done';
+                        this.saveData(); this.render();
+                    }
+                    if (target.closest('.undo-review-btn')) {
+                        review.status = 'undone';
+                        this.saveData(); this.render();
+                    }
+                },
+                handleAdminChange(e) {
+                    const file = e.target.files[0];
+                    const companyId = e.target.dataset.id;
+                    if (file && companyId) {
+                         const reader = new FileReader();
+                         reader.onload = (event) => {
+                             try {
+                                 const uploaded = JSON.parse(event.target.result);
+                                 if (uploaded.link && Array.isArray(uploaded.reviews)) {
+                                     const company = this.state.data.companies.find(c => c.id === companyId);
+                                     if(company) {
+                                         company.link = uploaded.link;
+                                         const existingReviewTexts = new Set((company.reviews || []).map(r => r.title + r.text));
+                                         const newReviews = uploaded.reviews
+                                             .filter(r => r.text && r.title && !existingReviewTexts.has(r.title + r.text))
+                                             .map(r => ({...r, status: 'undone'}));
+
+                                         company.reviews = [...(company.reviews || []), ...newReviews];
+                                         this.saveData(); 
+                                         this.render();
+                                         this.showNotification(`${newReviews.length} new review(s) imported for ${company.name}.`);
+                                     }
+                                 } else { this.showNotification('Invalid file format. Must contain "link" and "reviews" array.', 'error'); }
+                             } catch (err) { 
+                                this.showNotification('Error reading file. Make sure it is a valid JSON file.', 'error'); 
+                             } 
+                             finally { e.target.value = ''; }
+                         };
+                         reader.readAsText(file);
+                    }
+                },
+                handleOwnerInput(e) {
+                    if (this.state.currentView !== 'owner') return;
+                    const target = e.target;
+
+                    if (target.id === 'owner-company-name') this.state.ownerState.companyInfo.name = target.value;
+                    if (target.id === 'owner-trustpilot-link') this.state.ownerState.companyInfo.trustpilotLink = target.value;
+                    if (target.id === 'owner-bulk-textarea') this.state.ownerState.bulkText = target.value;
+                    if (target.id === 'prompt-context-input') this.state.ownerState.companyInfo.exampleReviews = target.value;
+                    if (target.classList.contains('title-input')) {
+                        this.state.ownerState.reviews[target.dataset.index].title = target.value;
+                    }
+                    if (target.classList.contains('content-input')) {
+                        this.state.ownerState.reviews[target.dataset.index].text = target.value;
+                    }
+                },
+                processBulkTrustpilotReviews() {
+                    const { bulkText } = this.state.ownerState;
+                    const reviewBlocks = bulkText.trim().split(/---\s*/);
+                    const parsedReviews = [];
+
+                    for (const block of reviewBlocks) {
+                        if (block.trim() === '') continue;
+                        const titleMatch = block.match(/Title:(.*)/i);
+                        const bodyMatch = block.match(/Body:(.*)/is);
+
+                        if (titleMatch && bodyMatch) {
+                            parsedReviews.push({
+                                title: titleMatch[1].trim(),
+                                text: bodyMatch[1].trim()
+                            });
+                        }
+                    }
+
+                    if (parsedReviews.length === 0) { 
+                        this.showNotification("No valid reviews found. Check format: Title: ... Body: ...", "error"); 
+                        return; 
+                    }
+                    this.state.ownerState.reviews = parsedReviews;
+                    this.showNotification(`${parsedReviews.length} reviews processed.`, "success");
+                    this.render();
+                },
+                generateTrustpilotPrompt() {
+                    const { companyInfo } = this.state.ownerState;
+                    const companyName = companyInfo.name.trim();
+                    const context = companyInfo.exampleReviews.trim();
+
+                    let companyNameInstruction = `4.  **Company Name Usage:** Do NOT mention any specific company name. Use general terms like "this place," "the team," "the service," or "they."`;
+                    if (companyName) {
+                        companyNameInstruction = `4.  **Company Name Usage:** Mention the specific company name, "${companyName}", in only a small, random subset of reviews (e.g., 5-7 out of 50). For all other reviews, use general terms like "this place," "the team," or "the staff."`;
+                    }
+
+                    const promptText = `You are an expert copywriter specializing in creating authentic, human-like user-generated content for Trustpilot.
+
+TASK:
+Based on the CONTEXT below, craft 50 highly realistic, positive Trustpilot reviews.
+
+CONTEXT / KEYWORDS:
+${context || "General positive customer service and product quality."}
+
+CRITICAL REQUIREMENTS:
+
+1.  **FORMATTING (ABSOLUTE FIRST PRIORITY):**
+    - Your entire response MUST consist ONLY of the reviews.
+    - DO NOT include ANY introductory or concluding text (e.g., "Here are your reviews...").
+    - Each review MUST have a "Title:" and a "Body:".
+    - Separate each complete review (Title + Body) with three dashes "---".
+    - Example of a single review block:
+      Title: Absolutely fantastic service!
+      Body: I was so impressed with the speed and quality. The team went above and beyond to help me out.
+      ---
+
+2.  **NARRATIVE & DETAIL (HIGHEST QUALITY PRIORITY):**
+    - Avoid generic praise. Instead, TELL A STORY. A significant portion of reviews must describe a specific situation, outcome, or feeling.
+    - Invent plausible, specific details to make reviews credible (e.g., mention a common name "Sarah was helpful", a small detail "loved the easy-to-navigate website", or the end result "my issue was solved in under 5 minutes").
+
+3.  **NATURAL & VARIED LANGUAGE:**
+    - Write from 50 completely different perspectives. Vary tone, emotion, sentence structure, and length.
+    - AVOID repetitive sentence starters.
+    - Mimic real-world typing: use different capitalization, varied punctuation, and use emojis (like 😊, 👍, ⭐) very sparingly.
+
+${companyNameInstruction}
+
+5.  **AUTHENTICITY:**
+    - To enhance realism, a few reviews can mention a minor, neutral point before giving strong praise. Example: "It took a little while to get a response, but once I did, the support was excellent."`;
+
+                    this.state.ownerState.promptGenerator.output = promptText;
+                    this.render();
+                    this.showNotification("Trustpilot master prompt generated!");
+                },
+                async craftTrustpilotReviews() {
+                    const { geminiApiKey, promptGenerator } = this.state.ownerState;
+                    if (!geminiApiKey) { this.showNotification("Gemini API key is not set.", 'error'); return; }
+                    if (!promptGenerator.output) { this.showNotification("Please generate a master prompt first.", 'error'); return; }
+
+                    this.state.ownerState.isAiGenerating = true;
+                    this.render();
+
+                    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+
+                    try {
+                        const response = await fetch(API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ contents: [{ parts: [{ text: promptGenerator.output }] }] })
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+                        }
+
+                        const data = await response.json();
+                        const aiReviews = data.candidates[0]?.content?.parts[0]?.text || '';
+                        
+                        this.state.ownerState.bulkText = aiReviews.trim();
+                        this.state.ownerState.activeTab = 'submitter';
+                        this.showNotification("AI reviews generated! Now process them.", "success");
+                        
+                    } catch (error) {
+                        this.showNotification(`AI generation failed: ${error.message}`, 'error');
+                    } finally {
+                        this.state.ownerState.isAiGenerating = false;
+                        this.render();
+                    }
+                },
+                // --- UTILITIES & MODALS ---
+                showLoginModal(type) {
+                    const titles = { owner: 'Owner Login', admin: 'Admin Login' };
+                    const credentials = { owner: {u: 'owner', p: 'owner'}, admin: {u: 'admin', p: 'admin'} };
+                    const colors = { owner: 'teal', admin: 'indigo' };
+                    const title = titles[type]; const correctUser = credentials[type].u; const correctPass = credentials[type].p; const color = colors[type];
+                    this.elements.loginModalContainer.innerHTML = `
+                        <div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000]">
+                            <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm border border-gray-700">
+                                <h2 class="text-2xl font-bold text-white mb-6">${title}</h2>
+                                <form id="login-form">
+                                    <div class="mb-4"><label for="username" class="block text-gray-300 mb-2">Username</label><input type="text" id="username" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg focus:ring-2 focus:ring-${color}-500"></div>
+                                    <div class="mb-6"><label for="password" class="block text-gray-300 mb-2">Password</label><input type="password" id="password" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg focus:ring-2 focus:ring-${color}-500"></div>
+                                    <p id="login-error" class="text-red-400 text-sm mb-4 hidden">Invalid credentials.</p>
+                                    <div class="flex items-center justify-between">
+                                        <button type="button" class="cancel-login-btn text-gray-400 hover:text-white">Cancel</button>
+                                        <button type="submit" class="text-white font-bold py-2 px-6 rounded-lg bg-${color}-600 hover:bg-${color}-700">Login</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>`;
+                    const form = this.elements.loginModalContainer.querySelector('#login-form');
+                    form.querySelector('#username').focus();
+                    form.onsubmit = (e) => {
+                        e.preventDefault();
+                        const user = form.querySelector('#username').value;
+                        const pass = form.querySelector('#password').value;
+                        if (user === correctUser && pass === correctPass) {
+                            if (type === 'owner') this.state.isOwnerLoggedIn = true;
+                            if (type === 'admin') this.state.isAdminLoggedIn = true;
+                            this.elements.loginModalContainer.innerHTML = '';
+                            this.switchView(type);
+                        } else { form.querySelector('#login-error').classList.remove('hidden'); }
+                    };
+                    this.elements.loginModalContainer.querySelector('.cancel-login-btn').onclick = () => { this.elements.loginModalContainer.innerHTML = ''; };
+                },
+                showApiKeyModal() {
+                    const currentKey = this.state.ownerState.geminiApiKey;
+                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><form id="api-key-form" class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">Gemini API Key</h2><p class="text-gray-400 mb-4">Please enter your Gemini API key to enable AI features. Your key is saved locally in your browser.</p><input type="password" id="modal-api-key-input" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg mb-6" placeholder="Enter your API key..." value="${currentKey}"><div class="flex justify-end gap-4"><button type="button" id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button type="submit" class="button-gradient text-white font-bold py-2 px-6 rounded-lg">Save Key</button></div></form></div>`;
+                    const input = document.getElementById('modal-api-key-input');
+                    input.focus();
+                    document.getElementById('modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
+                    document.getElementById('api-key-form').onsubmit = (e) => {
+                        e.preventDefault();
+                        const newKey = input.value.trim();
+                        if (newKey) {
+                            this.state.ownerState.geminiApiKey = newKey;
+                            localStorage.setItem('geminiApiKey', newKey);
+                            this.showNotification('API Key saved successfully!');
+                            this.elements.genericModalContainer.innerHTML = '';
+                            this.render();
+                        } else {
+                            this.showNotification('API Key cannot be empty.', 'error');
+                        }
+                    };
+                },
+                showConfirmModal(title, message, onConfirm) {
+                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">${title}</h2><p class="text-gray-300 mb-6">${message}</p><div class="flex justify-end gap-4"><button id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button id="modal-confirm" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg">Confirm</button></div></div></div>`;
+                    document.getElementById('modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
+                    document.getElementById('modal-confirm').onclick = () => { onConfirm(); this.elements.genericModalContainer.innerHTML = ''; };
+                },
+                showPromptModal(title, placeholder, onSubmit) {
+                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><form id="prompt-form" class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">${title}</h2><input type="text" id="modal-input" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg mb-6" placeholder="${placeholder}"><div class="flex justify-end gap-4"><button type="button" id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button type="submit" class="button-gradient text-white font-bold py-2 px-6 rounded-lg">Submit</button></div></form></div>`;
+                    const input = document.getElementById('modal-input');
+                    input.focus();
+                    document.getElementById('modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
+                    document.getElementById('prompt-form').onsubmit = (e) => { e.preventDefault(); onSubmit(input.value); this.elements.genericModalContainer.innerHTML = ''; };
+                },
+                copyToClipboard(text, message = "Copied to clipboard!") {
+                    if (!navigator.clipboard) { 
+                        const textArea = document.createElement("textarea");
+                        textArea.value = text;
+                        document.body.appendChild(textArea);
+                        textArea.focus();
+                        textArea.select();
+                        try { document.execCommand('copy'); this.showNotification(message); } 
+                        catch (err) { this.showNotification("Failed to copy.", 'error'); }
+                        document.body.removeChild(textArea);
+                        return;
+                    }
+                    navigator.clipboard.writeText(text).then(() => { this.showNotification(message); }, () => { this.showNotification("Failed to copy.", 'error'); });
+                },
+                showNotification(message, type = 'success') {
+                    const el = this.elements.notification;
+                    el.textContent = message;
+                    el.className = `notification-toast fixed bottom-5 right-5 text-white py-3 px-5 rounded-lg shadow-xl z-[10001] ${type === 'info' ? 'bg-blue-600' : type === 'success' ? 'bg-green-600' : 'bg-red-600'}`;
+                    el.classList.remove('hidden');
+                    el.style.animation = 'none';
+                    el.offsetHeight; /* trigger reflow */
+                    el.style.animation = null; 
+                    setTimeout(() => el.classList.add('hidden'), 3900);
+                }
+            };
+            
+            app.init();
+        });
+    </script>
+</body>
+</html>
