@@ -108,6 +108,39 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        /* New styles for the model switcher */
+        .model-switcher {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            position: relative;
+            background-color: rgba(0,0,0,0.2);
+            border-radius: 0.5rem;
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 0.25rem;
+        }
+        .model-switcher-bg {
+            position: absolute;
+            top: 0.25rem;
+            height: calc(100% - 0.5rem);
+            width: calc(50% - 0.25rem);
+            background-image: linear-gradient(to right, #B47CFD, #c58ef8);
+            border-radius: 0.375rem;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 10px rgba(180, 124, 253, 0.3);
+        }
+        .model-switcher-bg.quality {
+            transform: translateX(100%);
+        }
+        .model-switcher-btn {
+            position: relative;
+            z-index: 1;
+            padding: 0.5rem;
+            text-align: center;
+            font-weight: 500;
+            color: #f0f0f0;
+            cursor: pointer;
+            transition: color 0.3s ease;
+        }
     </style>
 </head>
 <body class="text-gray-200 min-h-screen">
@@ -163,6 +196,7 @@
                     ownerState: {
                         activeTab: 'automatic',
                         geminiApiKey: localStorage.getItem('geminiApiKey') || '',
+                        geminiModel: 'flash-lite', // Default to flash-lite
                         isAiGenerating: false,
                         selectedPlace: {},
                         reviews: [],
@@ -186,7 +220,7 @@
                 // --- INITIALIZATION ---
                 init() {
                     window.reviewApp = this; 
-                    this.resetOwnerState(false); // Initialize with default structure, don't render
+                    this.resetOwnerState(false);
                     this.loadData();
                     this.attachInitialListeners();
                     this.render();
@@ -311,22 +345,22 @@
                                 <div>
                                     <nav class="-mb-px flex gap-6 overflow-x-auto sm:justify-center no-scrollbar" aria-label="Tabs">
                                         <button data-tab="automatic" class="owner-tab-btn ${activeTab === 'automatic' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">⭐ Automatic AI Mode</button>
-                                        <button data-tab="submitter" class="owner-tab-btn ${activeTab === 'submitter' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">Review Submitter</button>
                                         <button data-tab="sheetGenerator" class="owner-tab-btn ${activeTab === 'sheetGenerator' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">Sheet Row Generator</button>
+                                        <button data-tab="submitter" class="owner-tab-btn ${activeTab === 'submitter' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">Review Submitter</button>
                                     </nav>
                                 </div>
                             </div>
                         </div>
                         <div class="pt-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
                             <div id="owner-automatic-view" class="${activeTab !== 'automatic' ? 'hidden' : ''}">${this.renderOwnerAutomaticView()}</div>
-                            <div id="owner-submitter-view" class="${activeTab !== 'submitter' ? 'hidden' : ''}">${this.renderOwnerSubmitterView()}</div>
                             <div id="owner-sheet-generator-view" class="${activeTab !== 'sheetGenerator' ? 'hidden' : ''}">${this.renderOwnerSheetGeneratorView()}</div>
+                            <div id="owner-submitter-view" class="${activeTab !== 'submitter' ? 'hidden' : ''}">${this.renderOwnerSubmitterView()}</div>
                         </div>
                     `;
                 },
 
                 renderOwnerAutomaticView() {
-                    const { isAiGenerating, selectedPlace, geminiApiKey, manualCompanyName } = this.state.ownerState;
+                    const { isAiGenerating, selectedPlace, geminiApiKey, manualCompanyName, geminiModel } = this.state.ownerState;
                     
                     if (isAiGenerating) {
                         return `
@@ -350,6 +384,14 @@
                                     <label for="automatic-manual-company-name" class="block text-sm font-medium text-gray-300 mb-2">Company Name (Optional)</label>
                                     <input type="text" id="automatic-manual-company-name" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" placeholder="e.g., Mike's Pizza" value="${manualCompanyName}">
                                     <p class="text-xs text-gray-500 mt-1">If you provide a name, the AI will use it. If not, it will infer one from the search result.</p>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Select AI Model</label>
+                                    <div class="model-switcher">
+                                        <div class="model-switcher-bg ${geminiModel === 'flash' ? 'quality' : ''}"></div>
+                                        <div class="model-switcher-btn" data-model="flash-lite">Quick</div>
+                                        <div class="model-switcher-btn" data-model="flash">Quality</div>
+                                    </div>
                                 </div>
                                 <div>
                                     <label for="automatic-link-input" class="block text-sm font-medium text-gray-300 mb-2">Search for Business</label>
@@ -392,8 +434,9 @@
                 },
 
                 renderOwnerSheetGeneratorView() {
-                    const { selectedPlace, sheetRow } = this.state.ownerState;
+                    const { selectedPlace, sheetRow, manualCompanyName } = this.state.ownerState;
                     const isPlaceSelected = !!selectedPlace.placeId;
+                    const companyNameForSheet = manualCompanyName.trim() || selectedPlace.name || '';
 
                     if (!isPlaceSelected) {
                         return `<div class="max-w-2xl mx-auto text-center p-8 polished-container">
@@ -406,7 +449,7 @@
                                 <h2 class="text-2xl font-bold text-white text-center mb-2">Google Sheet Row Generator</h2>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-300 mb-1">Company Name</label>
-                                    <input type="text" value="${selectedPlace.name}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" readonly>
+                                    <input type="text" value="${companyNameForSheet}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" readonly>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-300 mb-1">Starting Review Count</label>
@@ -418,7 +461,7 @@
                                 </div>
                                 <div>
                                     <label for="sheet-daily-reviews" class="block text-sm font-medium text-gray-300 mb-1">Daily Reviews</label>
-                                    <input type="number" id="sheet-daily-reviews" value="${sheetRow.dailyReviews || ''}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg">
+                                    <input type="number" id="sheet-daily-reviews" value="${sheetRow.dailyReviews || '5'}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg">
                                 </div>
                                 <div>
                                     <label for="sheet-reviews-ordered" class="block text-sm font-medium text-gray-300 mb-1">Reviews Ordered</label>
@@ -468,6 +511,11 @@
                 handleGenericClick(e) {
                     const target = e.target;
                     
+                    if (target.closest('.model-switcher-btn')) {
+                        this.state.ownerState.geminiModel = target.closest('.model-switcher-btn').dataset.model;
+                        this.render();
+                        return;
+                    }
                     if (target.closest('.owner-tab-btn')) { this.handleOwnerTabClick(target.closest('.owner-tab-btn').dataset.tab); return; }
                     if (target.closest('.back-to-initial-btn')) { this.switchView('initial'); }
                     if (target.closest('#settings-btn') || target.closest('#settings-btn-inline')) { this.showApiKeyModal(); return; }
@@ -505,7 +553,7 @@
                 
                 // --- CORE LOGIC & WORKFLOWS ---
                 async runAutomaticAiGeneration(place) {
-                    const { geminiApiKey, manualCompanyName } = this.state.ownerState;
+                    const { geminiApiKey, manualCompanyName, geminiModel } = this.state.ownerState;
                     if (!geminiApiKey) {
                         this.showNotification("Cannot start automatic mode: Missing Gemini API Key.", 'error');
                         this.state.ownerState.activeTab = 'automatic';
@@ -523,7 +571,7 @@
                         const contextReviews = this.state.ownerState.promptGenerator.input;
                         const prompt = this.generateAutomaticPrompt(contextReviews, shortName);
                         
-                        const model = 'gemini-2.5-flash-lite';
+                        const model = geminiModel === 'flash-lite' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash-preview-05-20';
                         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
 
                         const response = await fetch(API_URL, {
@@ -548,7 +596,7 @@
                         this.processBulkReviews();
                         this.showNotification("AI Generation Complete! File downloaded.", "success");
                         this.triggerAutomaticDownload(shortName);
-                        this.state.ownerState.activeTab = 'sheetGenerator'; // Switch to the new tab
+                        this.state.ownerState.activeTab = 'sheetGenerator';
 
                     } catch (error) {
                         this.showNotification(`Automatic AI generation failed: ${error.message}`, 'error');
@@ -578,17 +626,18 @@
                 },
 
                 generateAndCopySheetRow() {
-                    const { selectedPlace } = this.state.ownerState;
-                    const daily = parseInt(document.getElementById('sheet-daily-reviews').value, 10) || 0;
+                    const { selectedPlace, manualCompanyName } = this.state.ownerState;
+                    const companyNameForSheet = manualCompanyName.trim() || selectedPlace.name || '';
+                    const daily = parseInt(document.getElementById('sheet-daily-reviews').value, 10) || 5;
                     const ordered = parseInt(document.getElementById('sheet-reviews-ordered').value, 10) || 0;
                     const done = 0;
                     const startingCount = selectedPlace.startingCount;
                     const endingCount = startingCount + ordered;
                     const reviewsLeft = ordered - done;
-                    const output = `${selectedPlace.name}\t${daily}\t${done}\t${ordered}\t${startingCount}\t${endingCount}\t\t${reviewsLeft}`;
+                    const output = `${companyNameForSheet}\t${daily}\t${done}\t${ordered}\t${startingCount}\t${endingCount}\t\t${reviewsLeft}`;
                     
                     this.state.ownerState.sheetRow.output = output;
-                    this.render(); // Re-render to show the output in the <pre> tag
+                    this.render();
                     this.copyToClipboard(output, 'Sheet row copied!');
                 },
 
@@ -648,14 +697,14 @@ ${companyNameInstruction}
                 // --- UTILITIES & MODALS ---
                 resetOwnerState(shouldRender = true) {
                     this.state.ownerState = {
-                        ...this.state.ownerState, // Keep API key
+                        ...this.state.ownerState, // Keep API key and model selection
                         activeTab: 'automatic',
                         isAiGenerating: false,
                         selectedPlace: { name: '', reviewLink: '', startingCount: 0, placeId: '', details: null },
                         reviews: [],
                         bulkText: '',
                         promptGenerator: { input: '', output: '' },
-                        sheetRow: { dailyReviews: '', reviewsOrdered: '', output: '' },
+                        sheetRow: { dailyReviews: '5', reviewsOrdered: '', output: '' },
                         manualCompanyName: ''
                     };
                     if (shouldRender) {
