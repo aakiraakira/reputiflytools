@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review Management Dashboard</title>
+    <link rel="icon" type="image/png" href="https://media.licdn.com/dms/image/D560BAQEScnUkJITXAg/company-logo_200_200/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+    // Define the callback function in the global scope right here in the <head>.
+    // This ensures it exists before the Google Maps script loads and tries to call it.
+    function initializeGoogleMaps() {
+        // This function will wait for the main app object to be ready.
+        if (window.reviewApp) {
+            window.reviewApp.mapsApiLoaded();
+        } else {
+            // If the app isn't ready, wait a moment and try again.
+            setTimeout(initializeGoogleMaps, 100);
+        }
+    }
+    </script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBXdjRQZJd9ySH5mxql4tlXCEVpDH9GGbI&libraries=places&callback=initializeGoogleMaps"></script>
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #0F0520; 
+            color: #f0f0f0;
+        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .file-input-button, .view-button { cursor: pointer; }
+        .review-item, .polished-container {
+            background: rgba(180, 124, 253, 0.08);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(180, 124, 253, 0.15);
+            border-radius: 1rem;
+            transition: all 0.3s ease-in-out;
+            animation: fadeIn 0.5s ease-out forwards;
+        }
+        .review-item:hover, .polished-container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        .button-gradient {
+            background-image: linear-gradient(to right, #B47CFD, #FF7FC2);
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        .button-gradient:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+            opacity: 0.95;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0; transform: translateY(20px); }
+            10%, 90% { opacity: 1; transform: translateY(0); }
+        }
+        .notification-toast { animation: fadeInOut 4s ease-in-out forwards; }
+        button:disabled, input:disabled, textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+        .pac-container { 
+            background-color: #1a0e35;
+            border: 1px solid rgba(180, 124, 253, 0.2); 
+            border-radius: 0.75rem; 
+            color: #e0e0e0;
+            z-index: 10000 !important; 
+            font-family: 'Inter', sans-serif; 
+        }
+        .pac-item { padding: 0.75rem; cursor: pointer; border-top: 1px solid rgba(180, 124, 253, 0.15); }
+        .pac-item:first-child { border-top: none; }
+        .pac-item:hover { background-color: rgba(180, 124, 253, 0.1); }
+        .pac-item-query { font-weight: 600; color: #ffffff; }
+        #app textarea, #app pre {
+            font-family: 'Inter', sans-serif !important;
+            color: #e0e0e0; 
+        }
+        .hidden { display: none; }
+        .sticky-header {
+            position: sticky;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 50;
+            background-color: #0F0520;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+        .pac-target-input { padding: 0.75rem; width: 100%; }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #34D399;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="text-gray-200 min-h-screen">
+
+    <div id="app" class="pb-40">
+        <!-- Initial View (Portal Selection) -->
+        <div id="initial-view" class="hidden">
+             <header class="text-center mb-12 pt-16">
+                <h1 class="text-4xl sm:text-5xl font-bold text-white">Review Management Portal</h1>
+                <p class="text-gray-400 mt-2">Please select your portal to continue.</p>
+            </header>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto px-4">
+                <div id="client-portal-btn" class="view-button text-center p-8 polished-container transition-all duration-300">
+                    <h2 class="text-3xl font-bold text-[#B47CFD]">Client Area</h2>
+                    <p class="mt-2 text-gray-400">Submit new reviews for a business.</p>
+                </div>
+                <div id="owner-portal-btn" class="view-button text-center p-8 polished-container transition-all duration-300">
+                    <h2 class="text-3xl font-bold text-teal-400">Owner Portal</h2>
+                    <p class="mt-2 text-gray-400">Bulk submit and generate content.</p>
+                </div>
+                <div id="admin-portal-btn" class="view-button text-center p-8 polished-container transition-all duration-300">
+                    <h2 class="text-3xl font-bold text-indigo-400">Admin Dashboard</h2>
+                    <p class="mt-2 text-gray-400">Manage companies and submitted reviews.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Views for Client, Owner, Admin -->
+        <div id="client-view" class="hidden"></div>
+        <div id="owner-view" class="hidden"></div>
+        <div id="admin-view" class="hidden"></div>
+    </div>
+    
+    <!-- Modals and Notifications -->
+    <div id="login-modal-container"></div>
+    <div id="generic-modal-container"></div>
+    <div id="notification" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-white py-3 px-5 rounded-lg shadow-xl z-[10001]"></div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const app = {
+                // --- STATE ---
+                state: {
+                    currentView: 'owner',
+                    isClientLoggedIn: false, 
+                    isOwnerLoggedIn: true,
+                    isAdminLoggedIn: false,
+                    mapsInitialized: false,
+                    placesService: null,
+                    data: { companies: [] },
+                    activeCompanyId: localStorage.getItem('activeCompanyTab') || null,
+                    clientState: { link: '', reviews: [] },
+                    ownerState: {
+                        activeTab: 'automatic',
+                        geminiApiKey: localStorage.getItem('geminiApiKey') || '',
+                        isAiGenerating: false,
+                        selectedPlace: {},
+                        reviews: [],
+                        bulkText: '',
+                        promptGenerator: {}, 
+                        sheetRow: {},
+                        manualCompanyName: ''
+                    }
+                },
+                // --- DOM ELEMENTS ---
+                elements: {
+                    app: document.getElementById('app'),
+                    initialView: document.getElementById('initial-view'),
+                    clientView: document.getElementById('client-view'),
+                    ownerView: document.getElementById('owner-view'),
+                    adminView: document.getElementById('admin-view'),
+                    loginModalContainer: document.getElementById('login-modal-container'),
+                    genericModalContainer: document.getElementById('generic-modal-container'),
+                    notification: document.getElementById('notification'),
+                },
+                // --- INITIALIZATION ---
+                init() {
+                    window.reviewApp = this; 
+                    this.resetOwnerState(false); // Initialize with default structure, don't render
+                    this.loadData();
+                    this.attachInitialListeners();
+                    this.render();
+                    setTimeout(() => this.initializeMapsForCurrentView(), 0);
+                },
+                
+                mapsApiLoaded() {
+                    this.state.mapsInitialized = true;
+                    this.initializeMapsForCurrentView();
+                },
+
+                initializeMapsForCurrentView() {
+                     if (!this.state.mapsInitialized) return;
+                    const view = this.state.currentView;
+                    if (view === 'owner') this.initializeOwnerViewMaps();
+                },
+
+                // --- GOOGLE MAPS & PLACES INTEGRATION ---
+                initializeOwnerViewMaps() {
+                    this.initAutocomplete('owner-link-input', this.handleOwnerPlaceSelection.bind(this));
+                    this.initAutocomplete('automatic-link-input', this.handleOwnerPlaceSelection.bind(this));
+                },
+                
+                initAutocomplete(inputId, callback) {
+                    if (!this.state.mapsInitialized) return;
+                    const input = document.getElementById(inputId);
+                    if (!input || input.dataset.acAttached) return;
+
+                    const autocompleteOptions = {
+                        fields: ["place_id", "name", "reviews", "user_ratings_total", "url", "types", "website", "formatted_address"],
+                        types: ["establishment"]
+                    };
+                    const autocomplete = new google.maps.places.Autocomplete(input, autocompleteOptions);
+                    input.dataset.acAttached = 'true';
+
+                    autocomplete.addListener('place_changed', () => {
+                        const place = autocomplete.getPlace();
+                        callback(place);
+                    });
+                },
+                
+                handleOwnerPlaceSelection(place) {
+                    if (!place || !place.place_id) {
+                        this.showNotification("Could not retrieve company details. Please try again.", "error");
+                        return;
+                    }
+
+                    const { ownerState } = this.state;
+                    ownerState.selectedPlace.name = place.name || '';
+                    ownerState.selectedPlace.placeId = place.place_id;
+                    ownerState.selectedPlace.reviewLink = `https://search.google.com/local/writereview?placeid=${place.place_id}`;
+                    ownerState.selectedPlace.startingCount = place.user_ratings_total || 0;
+                    ownerState.selectedPlace.details = {
+                        types: place.types || [],
+                        address: place.formatted_address || '',
+                        website: place.website || ''
+                    };
+                    
+                    if (place.reviews && place.reviews.length > 0) {
+                        const positiveReviews = place.reviews.filter(r => r.rating >= 4).map(r => r.text);
+                        ownerState.promptGenerator.input = positiveReviews.join('\n\n');
+                    } else {
+                        ownerState.promptGenerator.input = 'No recent positive reviews found. You can paste your own points manually.';
+                    }
+                    
+                    this.showNotification(`Selected: ${place.name}`, "success");
+
+                    if (this.state.ownerState.activeTab === 'automatic') {
+                        this.runAutomaticAiGeneration(place);
+                    } else {
+                        this.render();
+                    }
+                },
+
+                // --- DATA PERSISTENCE ---
+                loadData() {
+                    const savedData = localStorage.getItem('reviewDashboardData');
+                    if (savedData) { 
+                        try {
+                            this.state.data = JSON.parse(savedData); 
+                            if (!this.state.data.companies) this.state.data.companies = []; 
+                        } catch(e) {
+                            this.state.data = { companies: [] };
+                        }
+                    }
+                },
+                saveData() {
+                    localStorage.setItem('reviewDashboardData', JSON.stringify(this.state.data));
+                    this.showNotification("Admin data saved!");
+                },
+
+                // --- VIEW MANAGEMENT ---
+                switchView(view) {
+                    this.state.currentView = view;
+                    this.render();
+                    setTimeout(() => this.initializeMapsForCurrentView(), 0);
+                },
+                
+                // --- RENDERING ---
+                render() {
+                    const { initialView, clientView, ownerView, adminView } = this.elements;
+                    initialView.classList.toggle('hidden', this.state.currentView !== 'initial');
+                    clientView.classList.toggle('hidden', this.state.currentView !== 'client');
+                    ownerView.classList.toggle('hidden', this.state.currentView !== 'owner');
+                    adminView.classList.toggle('hidden', this.state.currentView !== 'admin');
+
+                    if (this.state.currentView === 'owner') this.renderOwnerView();
+                    
+                    setTimeout(() => this.initializeMapsForCurrentView(), 0);
+                },
+                
+                renderOwnerView() {
+                    const { activeTab } = this.state.ownerState;
+                    this.elements.ownerView.innerHTML = `
+                        <div class="sticky-header">
+                            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                                <div class="grid grid-cols-3 items-center py-3">
+                                    <div><button class="back-to-initial-btn text-gray-400 hover:text-white transition-colors text-sm">← Logout & Return</button></div>
+                                    <div class="flex justify-center"><img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" alt="Reputifly Logo" class="h-9 sm:h-10"></div>
+                                    <div class="flex justify-end"><button id="settings-btn" class="text-gray-400 hover:text-white transition-colors">⚙️ Settings</button></div>
+                                </div>
+                                <div>
+                                    <nav class="-mb-px flex gap-6 overflow-x-auto sm:justify-center no-scrollbar" aria-label="Tabs">
+                                        <button data-tab="automatic" class="owner-tab-btn ${activeTab === 'automatic' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">⭐ Automatic AI Mode</button>
+                                        <button data-tab="submitter" class="owner-tab-btn ${activeTab === 'submitter' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">Review Submitter</button>
+                                        <button data-tab="sheetGenerator" class="owner-tab-btn ${activeTab === 'sheetGenerator' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">Sheet Row Generator</button>
+                                    </nav>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="pt-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+                            <div id="owner-automatic-view" class="${activeTab !== 'automatic' ? 'hidden' : ''}">${this.renderOwnerAutomaticView()}</div>
+                            <div id="owner-submitter-view" class="${activeTab !== 'submitter' ? 'hidden' : ''}">${this.renderOwnerSubmitterView()}</div>
+                            <div id="owner-sheet-generator-view" class="${activeTab !== 'sheetGenerator' ? 'hidden' : ''}">${this.renderOwnerSheetGeneratorView()}</div>
+                        </div>
+                    `;
+                },
+
+                renderOwnerAutomaticView() {
+                    const { isAiGenerating, selectedPlace, geminiApiKey, manualCompanyName } = this.state.ownerState;
+                    
+                    if (isAiGenerating) {
+                        return `
+                        <div class="max-w-2xl mx-auto text-center p-8 polished-container">
+                            <h2 class="text-2xl font-bold text-white mb-4">Generating Reviews Automatically...</h2>
+                            <p class="text-gray-400 mb-6">The AI is crafting 50 unique reviews for <strong class="text-white">${selectedPlace.name}</strong>. This may take up to a minute. Please wait.</p>
+                            <div class="flex justify-center">
+                                <div class="spinner"></div>
+                            </div>
+                        </div>`;
+                    }
+
+                    return `
+                        <div class="max-w-2xl mx-auto">
+                            <div class="p-8 polished-container space-y-6">
+                                <div>
+                                    <h2 class="text-2xl font-bold text-white text-center mb-2">Automatic AI Review Generation</h2>
+                                    <p class="text-center text-gray-400">Enter a preferred short name (optional), then search for the business.</p>
+                                </div>
+                                <div>
+                                    <label for="automatic-manual-company-name" class="block text-sm font-medium text-gray-300 mb-2">Company Name (Optional)</label>
+                                    <input type="text" id="automatic-manual-company-name" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" placeholder="e.g., Mike's Pizza" value="${manualCompanyName}">
+                                    <p class="text-xs text-gray-500 mt-1">If you provide a name, the AI will use it. If not, it will infer one from the search result.</p>
+                                </div>
+                                <div>
+                                    <label for="automatic-link-input" class="block text-sm font-medium text-gray-300 mb-2">Search for Business</label>
+                                    <input type="text" id="automatic-link-input" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" placeholder="Search for a business on Google...">
+                                </div>
+                                ${!geminiApiKey ? '<p class="text-yellow-400 text-sm mt-2 text-center">Missing Gemini API Key. Please add it in the <button id="settings-btn-inline" class="underline hover:text-yellow-200">Settings</button> to enable this feature.</p>' : ''}
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                renderOwnerSubmitterView() {
+                    const { selectedPlace, reviews, bulkText } = this.state.ownerState;
+                    const isPlaceSelected = !!selectedPlace.placeId;
+                    const areReviewsProcessed = reviews.length > 0;
+                    return `
+                        <div id="owner-link-section" class="p-6 polished-container">
+                             <h2 class="text-xl font-semibold text-white mb-4">Step 1: Find Business</h2>
+                             <div class="flex flex-col sm:flex-row gap-3">
+                                 <input type="text" id="owner-link-input" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" placeholder="Search with Google..." value="${selectedPlace.name || ''}">
+                             </div>
+                             ${isPlaceSelected && selectedPlace.reviewLink ? `<p class="text-sm text-green-400 mt-2">Review Link: <a href="${selectedPlace.reviewLink}" target="_blank" class="underline">${selectedPlace.reviewLink}</a></p>` : ''}
+                        </div>
+                        <div id="owner-bulk-section" class="mt-8 p-6 polished-container ${!isPlaceSelected || areReviewsProcessed ? 'hidden' : ''}">
+                            <h2 class="text-xl font-semibold text-white mb-4">Step 2: Paste Reviews</h2>
+                            <p class="text-sm text-gray-400 mb-3">Paste reviews here to process them manually.</p>
+                            <textarea id="owner-bulk-textarea" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg h-60 resize-y" placeholder="Paste reviews here, one per line...">${bulkText}</textarea>
+                            <button id="process-bulk-reviews-btn" class="mt-4 w-full button-gradient text-white font-bold py-3 px-4 rounded-lg">Process Reviews</button>
+                        </div>
+                        <div id="owner-reviews-section" class="mt-8 ${!isPlaceSelected || !areReviewsProcessed ? 'hidden' : ''}">
+                            <div class="mb-6 flex flex-wrap justify-between items-center gap-4">
+                                <h2 class="text-xl font-semibold text-white">Step 3: Manage Reviews (${reviews.length})</h2>
+                                <div class="flex items-center gap-3">
+                                    <button id="reset-owner-reviews-btn" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg">Start Over</button>
+                                    <button class="download-owner-file-btn button-gradient text-white font-bold py-2 px-4 rounded-lg" ${reviews.length === 0 ? 'disabled' : ''}>Download File</button>
+                                </div>
+                            </div>
+                            <div id="owner-reviews-container">${this.renderReviewCards('owner')}</div>
+                        </div>`;
+                },
+
+                renderOwnerSheetGeneratorView() {
+                    const { selectedPlace, sheetRow } = this.state.ownerState;
+                    const isPlaceSelected = !!selectedPlace.placeId;
+
+                    if (!isPlaceSelected) {
+                        return `<div class="max-w-2xl mx-auto text-center p-8 polished-container">
+                                    <h2 class="text-xl font-bold text-white mb-2">Sheet Row Generator</h2>
+                                    <p class="text-gray-400">Please select a business in the "Automatic AI Mode" or "Review Submitter" tab first to use this tool.</p>
+                                </div>`;
+                    }
+
+                    return `<div class="max-w-2xl mx-auto p-8 polished-container space-y-4">
+                                <h2 class="text-2xl font-bold text-white text-center mb-2">Google Sheet Row Generator</h2>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-1">Company Name</label>
+                                    <input type="text" value="${selectedPlace.name}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" readonly>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-1">Starting Review Count</label>
+                                    <input type="text" value="${selectedPlace.startingCount}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" readonly>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-1">Reviews Done</label>
+                                    <input type="text" value="0" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" readonly>
+                                </div>
+                                <div>
+                                    <label for="sheet-daily-reviews" class="block text-sm font-medium text-gray-300 mb-1">Daily Reviews</label>
+                                    <input type="number" id="sheet-daily-reviews" value="${sheetRow.dailyReviews || ''}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg">
+                                </div>
+                                <div>
+                                    <label for="sheet-reviews-ordered" class="block text-sm font-medium text-gray-300 mb-1">Reviews Ordered</label>
+                                    <input type="number" id="sheet-reviews-ordered" value="${sheetRow.reviewsOrdered || ''}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg">
+                                </div>
+                                <button id="generate-sheet-row-btn" class="w-full font-bold py-3 px-4 rounded-lg text-white button-gradient">Generate & Copy Row</button>
+                                <div class="relative">
+                                    <pre id="sheet-output" class="w-full p-3 pr-12 bg-black/20 border border-white/10 rounded-lg whitespace-pre-wrap overflow-x-auto min-h-[6rem]">${sheetRow.output || 'Sheet row will appear here...'}</pre>
+                                    <button id="copy-sheet-row-btn" class="absolute top-3 right-3 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition-colors" title="Copy row">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg>
+                                    </button>
+                                </div>
+                            </div>`;
+                },
+                
+                renderReviewCards(viewType) {
+                    const state = viewType === 'owner' ? this.state.ownerState : this.state.clientState;
+                    const { reviews } = state;
+
+                    if (reviews.length === 0) {
+                        return '<p class="text-gray-400 text-center py-4">No reviews processed yet.</p>';
+                    }
+
+                    return reviews.map((review, index) => `
+                        <div class="review-item p-6 mb-6">
+                            <div class="flex justify-between items-start mb-4">
+                                <span class="text-2xl font-bold text-[#B47CFD]">#${index + 1}</span>
+                                <button data-view="${viewType}" data-index="${index}" class="remove-review-btn text-gray-500 hover:text-red-500 font-bold text-2xl">×</button>
+                            </div>
+                            <textarea data-view="${viewType}" data-index="${index}" class="content-input w-full p-3 bg-black/20 border border-white/10 rounded-lg h-24 resize-y">${review.text}</textarea>
+                        </div>
+                    `).join('');
+                },
+
+                // --- EVENT LISTENERS & HANDLERS ---
+                attachInitialListeners() {
+                    this.elements.app.addEventListener('click', e => this.handleGenericClick(e));
+                    this.elements.app.addEventListener('input', e => this.handleGenericInput(e));
+                },
+                
+                handleOwnerTabClick(tab) {
+                    this.state.ownerState.activeTab = tab;
+                    this.render();
+                    setTimeout(() => this.initializeOwnerViewMaps(), 0);
+                },
+
+                handleGenericClick(e) {
+                    const target = e.target;
+                    
+                    if (target.closest('.owner-tab-btn')) { this.handleOwnerTabClick(target.closest('.owner-tab-btn').dataset.tab); return; }
+                    if (target.closest('.back-to-initial-btn')) { this.switchView('initial'); }
+                    if (target.closest('#settings-btn') || target.closest('#settings-btn-inline')) { this.showApiKeyModal(); return; }
+                    if (target.closest('#process-bulk-reviews-btn')) this.processBulkReviews();
+                    if (target.closest('#reset-owner-reviews-btn')) { this.resetOwnerState(); }
+                    if (target.closest('#generate-sheet-row-btn')) { this.generateAndCopySheetRow(); }
+                    if (target.closest('#copy-sheet-row-btn')) { 
+                        const output = document.getElementById('sheet-output').textContent;
+                        if(output && output !== 'Sheet row will appear here...') {
+                            this.copyToClipboard(output, 'Sheet row copied!');
+                        } else { this.showNotification('Generate a row first to copy it.', 'error'); }
+                    }
+                    if (target.closest('.remove-review-btn')) {
+                        const viewType = target.closest('.remove-review-btn').dataset.view;
+                        this.state[`${viewType}State`].reviews.splice(target.closest('.remove-review-btn').dataset.index, 1);
+                        this.render();
+                    }
+                    if (target.closest('.download-owner-file-btn')) {
+                        const shortName = this.inferShortCompanyName(this.state.ownerState.selectedPlace.name);
+                        this.triggerAutomaticDownload(shortName);
+                    }
+                },
+
+                handleGenericInput(e) {
+                    const target = e.target;
+                    if (target.id === 'owner-bulk-textarea') this.state.ownerState.bulkText = target.value;
+                    if (target.id === 'automatic-manual-company-name') this.state.ownerState.manualCompanyName = target.value;
+                    if (target.id === 'sheet-daily-reviews') this.state.ownerState.sheetRow.dailyReviews = target.value;
+                    if (target.id === 'sheet-reviews-ordered') this.state.ownerState.sheetRow.reviewsOrdered = target.value;
+                    const viewType = target.dataset.view;
+                    if(viewType && target.classList.contains('content-input')) {
+                        this.state[`${viewType}State`].reviews[target.dataset.index].text = target.value;
+                    }
+                },
+                
+                // --- CORE LOGIC & WORKFLOWS ---
+                async runAutomaticAiGeneration(place) {
+                    const { geminiApiKey, manualCompanyName } = this.state.ownerState;
+                    if (!geminiApiKey) {
+                        this.showNotification("Cannot start automatic mode: Missing Gemini API Key.", 'error');
+                        this.state.ownerState.activeTab = 'automatic';
+                        this.render();
+                        return;
+                    }
+
+                    this.state.ownerState.isAiGenerating = true;
+                    this.render();
+
+                    try {
+                        const shortName = manualCompanyName.trim() || this.inferShortCompanyName(place.name);
+                        this.showNotification(`Using name: "${shortName}"`, 'info');
+
+                        const contextReviews = this.state.ownerState.promptGenerator.input;
+                        const prompt = this.generateAutomaticPrompt(contextReviews, shortName);
+                        
+                        const model = 'gemini-2.5-flash-lite';
+                        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+
+                        const response = await fetch(API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+                        }
+
+                        const data = await response.json();
+                        
+                        if (!data.candidates || !data.candidates[0]?.content?.parts[0]?.text) {
+                            throw new Error("Invalid response structure from AI. Please try again.");
+                        }
+                        const aiReviewsText = data.candidates[0].content.parts[0].text;
+                        
+                        this.state.ownerState.bulkText = this.cleanAiResponse(aiReviewsText);
+                        this.processBulkReviews();
+                        this.showNotification("AI Generation Complete! File downloaded.", "success");
+                        this.triggerAutomaticDownload(shortName);
+                        this.state.ownerState.activeTab = 'sheetGenerator'; // Switch to the new tab
+
+                    } catch (error) {
+                        this.showNotification(`Automatic AI generation failed: ${error.message}`, 'error');
+                        this.state.ownerState.activeTab = 'automatic';
+                    } finally {
+                        this.state.ownerState.isAiGenerating = false;
+                        this.render();
+                    }
+                },
+
+                triggerAutomaticDownload(filename) {
+                    if (!filename) {
+                        this.showNotification('Could not determine filename for download.', 'error');
+                        return;
+                    }
+                    const data = { link: this.state.ownerState.selectedPlace.reviewLink, reviews: this.state.ownerState.reviews.map(r => ({text: r.text, requiresImage: false})) };
+                    const dataBlob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(dataBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${filename.replace(/\s+/g, '_')}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    this.showNotification(`File '${a.download}' downloaded!`);
+                },
+
+                generateAndCopySheetRow() {
+                    const { selectedPlace } = this.state.ownerState;
+                    const daily = parseInt(document.getElementById('sheet-daily-reviews').value, 10) || 0;
+                    const ordered = parseInt(document.getElementById('sheet-reviews-ordered').value, 10) || 0;
+                    const done = 0;
+                    const startingCount = selectedPlace.startingCount;
+                    const endingCount = startingCount + ordered;
+                    const reviewsLeft = ordered - done;
+                    const output = `${selectedPlace.name}\t${daily}\t${done}\t${ordered}\t${startingCount}\t${endingCount}\t\t${reviewsLeft}`;
+                    
+                    this.state.ownerState.sheetRow.output = output;
+                    this.render(); // Re-render to show the output in the <pre> tag
+                    this.copyToClipboard(output, 'Sheet row copied!');
+                },
+
+                inferShortCompanyName(fullName) {
+                    if (!fullName) return '';
+                    let name = fullName.replace(/\b(LLC|Inc|Corp|Ltd|Co|Pte)\b/gi, '').trim();
+                    const parts = name.split(/[-|–—:]/);
+                    let primaryName = parts[0].trim();
+                    if (primaryName.length > 25) {
+                        const locationKeywords = [' in ', ' at ', ' of '];
+                        for (const keyword of locationKeywords) {
+                            if (primaryName.toLowerCase().includes(keyword)) {
+                                primaryName = primaryName.substring(0, primaryName.toLowerCase().indexOf(keyword));
+                                break;
+                            }
+                        }
+                    }
+                    return primaryName.trim();
+                },
+
+                generateAutomaticPrompt(context, companyName) {
+                    let companyNameInstruction = companyName 
+                        ? `4.  **Company Name Usage:** Mention the specific company name, "${companyName}", in only a small, random subset of reviews (e.g., 5-7 out of 50). For all other reviews, use general terms like "this place," "the team," "the staff," or describe the experience without naming the business.`
+                        : `4.  **Company Name Usage:** Do NOT mention any specific company name. Use general terms like "this place," "the team," "the service," or "they."`;
+
+                    return `You are an expert copywriter specializing in creating authentic, human-like user-generated content.
+TASK: Based on the CONTEXT below, craft 50 highly realistic, positive Google reviews. Each review must feel like a snapshot of a real person's genuine experience.
+CONTEXT / KEYWORDS:
+${context.trim()}
+CRITICAL REQUIREMENTS:
+1.  **FORMATTING (ABSOLUTE FIRST PRIORITY):** Your response MUST consist ONLY of the reviews. DO NOT include ANY introductory or concluding text. Separate each individual review with a double newline. DO NOT number the reviews or use any separators like "----".
+2.  **NARRATIVE & DETAIL (HIGHEST QUALITY PRIORITY):** Avoid generic praise. Instead, TELL A STORY. A significant portion of reviews must describe a specific situation, outcome, or feeling. Invent plausible, specific details to make reviews credible.
+3.  **NATURAL & VARIED LANGUAGE:** Write from 50 completely different perspectives and voices. Vary tone, emotion, sentence structure, and length extensively. AVOID repetitive sentence starters. Mimic real-world typing: use different capitalization, varied punctuation, and use emojis (like 😊, 👍, ⭐, 🎉) very sparingly.
+${companyNameInstruction}
+5.  **AUTHENTICITY:** To enhance realism, a few reviews can mention a minor, neutral point before giving strong praise.`;
+                },
+
+                cleanAiResponse(aiText) {
+                    const reviewsArray = aiText.trim().split(/\n\s*\n/);
+                    const firstReviewIndex = reviewsArray.findIndex(line => line.length > 25 && !/^\s*here are|sure, here|absolutely/i.test(line));
+                    return firstReviewIndex !== -1 ? reviewsArray.slice(firstReviewIndex).join('\n\n') : aiText.trim();
+                },
+
+                processBulkReviews() {
+                    const { bulkText } = this.state.ownerState;
+                    const lines = bulkText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+                    const uniqueLines = [...new Set(lines)];
+                    if (uniqueLines.length === 0) { 
+                        this.showNotification("No reviews found to process.", "error"); 
+                        return; 
+                    }
+                    this.state.ownerState.reviews = uniqueLines.map(line => ({ text: line }));
+                    this.showNotification(`${uniqueLines.length} unique reviews processed.`, "success");
+                    this.render();
+                },
+
+                // --- UTILITIES & MODALS ---
+                resetOwnerState(shouldRender = true) {
+                    this.state.ownerState = {
+                        ...this.state.ownerState, // Keep API key
+                        activeTab: 'automatic',
+                        isAiGenerating: false,
+                        selectedPlace: { name: '', reviewLink: '', startingCount: 0, placeId: '', details: null },
+                        reviews: [],
+                        bulkText: '',
+                        promptGenerator: { input: '', output: '' },
+                        sheetRow: { dailyReviews: '', reviewsOrdered: '', output: '' },
+                        manualCompanyName: ''
+                    };
+                    if (shouldRender) {
+                        this.render();
+                    }
+                },
+                
+                showApiKeyModal() {
+                    const currentKey = this.state.ownerState.geminiApiKey;
+                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><form id="api-key-form" class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">Gemini API Key</h2><p class="text-gray-400 mb-4">Please enter your Gemini API key to enable AI features. Your key is saved locally in your browser.</p><input type="password" id="modal-api-key-input" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg mb-6" placeholder="Enter your API key..." value="${currentKey}"><div class="flex justify-end gap-4"><button type="button" id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button type="submit" class="button-gradient text-white font-bold py-2 px-6 rounded-lg">Save Key</button></div></form></div>`;
+                    const input = document.getElementById('modal-api-key-input');
+                    input.focus();
+                    document.getElementById('modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
+                    document.getElementById('api-key-form').onsubmit = (e) => {
+                        e.preventDefault();
+                        const newKey = input.value.trim();
+                        if (newKey) {
+                            this.state.ownerState.geminiApiKey = newKey;
+                            localStorage.setItem('geminiApiKey', newKey);
+                            this.showNotification('API Key saved successfully!');
+                            this.elements.genericModalContainer.innerHTML = '';
+                            this.render();
+                        } else {
+                            this.showNotification('API Key cannot be empty.', 'error');
+                        }
+                    };
+                },
+                
+                copyToClipboard(text, message = "Copied to clipboard!") {
+                    if (!navigator.clipboard) { 
+                        const textArea = document.createElement("textarea");
+                        textArea.value = text;
+                        document.body.appendChild(textArea);
+                        textArea.focus();
+                        textArea.select();
+                        try { document.execCommand('copy'); this.showNotification(message); } 
+                        catch (err) { this.showNotification("Failed to copy.", 'error'); }
+                        document.body.removeChild(textArea);
+                        return;
+                    }
+                    navigator.clipboard.writeText(text).then(() => { this.showNotification(message); }, () => { this.showNotification("Failed to copy.", 'error'); });
+                },
+                showNotification(message, type = 'success') {
+                    const el = this.elements.notification;
+                    el.textContent = message;
+                    el.className = `notification-toast fixed bottom-5 right-5 text-white py-3 px-5 rounded-lg shadow-xl z-[10001] ${type === 'info' ? 'bg-blue-600' : type === 'success' ? 'bg-green-600' : 'bg-red-600'}`;
+                    el.classList.remove('hidden');
+                    el.style.animation = 'none';
+                    el.offsetHeight; /* trigger reflow */
+                    el.style.animation = null; 
+                    setTimeout(() => el.classList.add('hidden'), 3900);
+                }
+            };
+            
+            app.init();
+        });
+    </script>
+</body>
+</html>
