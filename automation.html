@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Automated Review Software - Reputifly</title>
+    <title>Automated Review Generation - Reputifly</title>
     <link rel="icon" type="image/png" href="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -11,7 +11,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script>
         // Define the callback function in the global scope right here in the <head>.
-        // This ensures it exists before the Google Maps script loads and tries to call it.
         function initializeGoogleMaps() {
             // This function will wait for the main app object to be ready.
             if (window.reviewApp) {
@@ -76,17 +75,6 @@
             position: relative;
             overflow: hidden;
         }
-        pre, #sheet-output {
-    font-family: 'Inter', sans-serif !important;
-    font-size: 0.875rem; /* optional, matches textarea sizing */
-    line-height: 1.5;
-    white-space: pre-wrap; /* already used, ensures wrapping */
-}
-/* Force Inter font for <pre> output */
-pre, #sheet-output {
-    font-family: 'Inter', sans-serif !important;
-}
-
 
         /* Aurora Glow Effect on Hover */
         .polished-container::after, .review-item::after {
@@ -163,7 +151,7 @@ pre, #sheet-output {
             from { opacity: 0; transform: translateY(-15px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        .fade-in-down { animation: fadeInDown 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+        .fade-in-down { animation: fadeInDown 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
 
         /* Notification Toast - TOP CENTER */
         #notification-container {
@@ -228,18 +216,20 @@ pre, #sheet-output {
             backdrop-filter: blur(12px);
             border-bottom: 1px solid var(--border-color);
         }
-        .spinner {
-            border: 4px solid rgba(255, 255, 255, 0.2);
-            border-radius: 50%;
-            border-top: 4px solid var(--accent-primary);
-            width: 32px;
-            height: 32px;
-            animation: spin 1s linear infinite;
+        
+        /* Glowing Progress Bar */
+        .progress-bar-glow {
+            background-image: linear-gradient(to right, var(--accent-primary), var(--accent-secondary), var(--accent-primary));
+            background-size: 200% 200%;
+            box-shadow: 0 0 10px var(--accent-primary), 0 0 15px var(--accent-secondary);
+            animation: glowing-progress 3s linear infinite;
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        @keyframes glowing-progress {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
         }
+
         /* Model Switcher */
         .model-switcher {
             display: grid;
@@ -276,10 +266,7 @@ pre, #sheet-output {
 </head>
 <body class="min-h-screen">
 
-    <div id="app" class="pb-40">
-        <!-- Views will be rendered here by JS -->
-        <div id="owner-view"></div>
-    </div>
+    <div id="app" class="pb-40"></div>
 
     <!-- Modals and Notifications -->
     <div id="generic-modal-container"></div>
@@ -290,16 +277,15 @@ pre, #sheet-output {
             const app = {
                 // --- STATE ---
                 state: {
-                    currentView: 'owner',
                     mapsInitialized: false,
-                    placesService: null,
                     ownerState: {
                         activeTab: 'automatic',
                         geminiApiKey: localStorage.getItem('geminiApiKey') || '',
-                        geminiModel: 'flash-lite', // 'flash-lite' or 'flash'
+                        geminiModel: 'flash-lite',
                         isAiGenerating: false,
                         aiProgress: 0,
                         aiLogs: [],
+                        aiProgressInterval: null,
                         selectedPlace: {},
                         reviews: [],
                         bulkText: '',
@@ -309,19 +295,14 @@ pre, #sheet-output {
                     }
                 },
                 // --- DOM ELEMENTS ---
-                elements: {
-                    app: document.getElementById('app'),
-                    ownerView: document.getElementById('owner-view'),
-                    genericModalContainer: document.getElementById('generic-modal-container'),
-                    notificationContainer: document.getElementById('notification-container'),
-                },
+                elements: {},
                 // --- INITIALIZATION ---
                 init() {
                     window.reviewApp = this;
                     this.resetOwnerState(false);
+                    this.renderAppShell();
                     this.attachInitialListeners();
-                    this.render();
-                    // Delay map initialization slightly to ensure view is rendered
+                    this.updateView();
                     setTimeout(() => this.initializeMapsForCurrentView(), 100);
                 },
 
@@ -332,7 +313,7 @@ pre, #sheet-output {
 
                 initializeMapsForCurrentView() {
                     if (!this.state.mapsInitialized) return;
-                    if (this.state.currentView === 'owner') this.initializeOwnerViewMaps();
+                    this.initializeOwnerViewMaps();
                 },
 
                 // --- GOOGLE MAPS & PLACES INTEGRATION ---
@@ -342,7 +323,6 @@ pre, #sheet-output {
                 },
 
                 initAutocomplete(inputId, callback) {
-                    if (!this.state.mapsInitialized) return;
                     const input = document.getElementById(inputId);
                     if (!input || input.dataset.acAttached) return;
 
@@ -388,18 +368,14 @@ pre, #sheet-output {
                     if (this.state.ownerState.activeTab === 'automatic') {
                         this.runAutomaticAiGeneration(place);
                     } else {
-                        this.render();
+                        this.updateView();
                     }
                 },
 
                 // --- RENDERING ---
-                render() {
-                    if (this.state.currentView === 'owner') this.renderOwnerView();
-                },
-
-                renderOwnerView() {
-                    const { activeTab } = this.state.ownerState;
-                    this.elements.ownerView.innerHTML = `
+                renderAppShell() {
+                    const appEl = document.getElementById('app');
+                    appEl.innerHTML = `
                         <div class="sticky-header">
                             <div class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
                                 <div class="flex items-center justify-between py-4">
@@ -408,42 +384,61 @@ pre, #sheet-output {
                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                                     </button>
                                 </div>
-                                <nav class="-mb-px flex gap-6 overflow-x-auto sm:justify-center no-scrollbar" aria-label="Tabs">
-                                    <button data-tab="automatic" class="owner-tab-btn ${activeTab === 'automatic' ? 'border-purple-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">⭐ Automatic AI</button>
-                                    <button data-tab="sheetGenerator" class="owner-tab-btn ${activeTab === 'sheetGenerator' ? 'border-purple-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">📊 Sheet Generator</button>
-                                    <button data-tab="submitter" class="owner-tab-btn ${activeTab === 'submitter' ? 'border-purple-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">✍️ Manual Submitter</button>
+                                <nav id="main-tabs" class="-mb-px flex gap-6 overflow-x-auto sm:justify-center no-scrollbar" aria-label="Tabs">
                                 </nav>
                             </div>
                         </div>
-                        <div class="pt-10 px-4 sm:px-6 lg:px-8 max-w-screen-2xl mx-auto">
-                            <div id="owner-automatic-view" class="${activeTab !== 'automatic' ? 'hidden' : ''} fade-in-down">${this.renderOwnerAutomaticView()}</div>
-                            <div id="owner-sheet-generator-view" class="${activeTab !== 'sheetGenerator' ? 'hidden' : ''} fade-in-down">${this.renderOwnerSheetGeneratorView()}</div>
-                            <div id="owner-submitter-view" class="${activeTab !== 'submitter' ? 'hidden' : ''} fade-in-down">${this.renderOwnerSubmitterView()}</div>
+                        <div id="view-container" class="pt-10 px-4 sm:px-6 lg:px-8 max-w-screen-2xl mx-auto">
                         </div>
                     `;
-                    // Re-initialize maps after render
-                    setTimeout(() => this.initializeOwnerViewMaps(), 0);
+                    this.elements.notificationContainer = document.getElementById('notification-container');
                 },
 
-                renderOwnerAutomaticView() {
-                    const { isAiGenerating, selectedPlace, geminiApiKey, manualCompanyName, geminiModel, aiProgress, aiLogs } = this.state.ownerState;
+                updateView() {
+                    const { activeTab, isAiGenerating } = this.state.ownerState;
+                    
+                    // Update Tabs
+                    const tabsContainer = document.getElementById('main-tabs');
+                    tabsContainer.innerHTML = `
+                        <button data-tab="automatic" class="owner-tab-btn ${activeTab === 'automatic' ? 'border-purple-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">⭐ Automatic AI</button>
+                        <button data-tab="sheetGenerator" class="owner-tab-btn ${activeTab === 'sheetGenerator' ? 'border-purple-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">📊 Sheet Generator</button>
+                        <button data-tab="submitter" class="owner-tab-btn ${activeTab === 'submitter' ? 'border-purple-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">✍️ Manual Submitter</button>
+                    `;
 
+                    // Update Content
+                    const viewContainer = document.getElementById('view-container');
+                    let content = '';
                     if (isAiGenerating) {
-                        return `
+                        content = this.renderAIGenerationView();
+                    } else {
+                        switch (activeTab) {
+                            case 'automatic': content = this.renderOwnerAutomaticView(); break;
+                            case 'sheetGenerator': content = this.renderOwnerSheetGeneratorView(); break;
+                            case 'submitter': content = this.renderOwnerSubmitterView(); break;
+                        }
+                    }
+                    viewContainer.innerHTML = `<div class="fade-in-down">${content}</div>`;
+                    
+                    setTimeout(() => this.initializeMapsForCurrentView(), 0);
+                },
+                
+                renderAIGenerationView() {
+                    const { selectedPlace, aiProgress, aiLogs } = this.state.ownerState;
+                    return `
                         <div class="max-w-5xl mx-auto text-center p-8 polished-container">
                             <h2 class="text-3xl font-bold text-white mb-4">Generating Reviews...</h2>
                             <p class="text-gray-400 mb-6">The AI is crafting 50 unique reviews for <strong class="text-purple-400">${selectedPlace.name}</strong>. Please wait.</p>
-                            
-                            <div class="w-full bg-gray-700 rounded-full h-2.5 my-4">
-                                <div class="bg-gradient-to-r from-purple-500 to-pink-500 h-2.5 rounded-full transition-all duration-500" style="width: ${aiProgress}%"></div>
+                            <div class="w-full bg-gray-700 rounded-full h-2.5 my-4 shadow-inner">
+                                <div class="progress-bar-glow h-2.5 rounded-full transition-all duration-500 ease-linear" style="width: ${aiProgress}%"></div>
                             </div>
-
                             <div id="ai-logs" class="mt-4 text-left text-xs text-gray-400 bg-black/20 p-4 rounded-lg h-40 overflow-y-auto no-scrollbar">
-                                ${aiLogs.map(log => `<p class="fade-in-down">${log}</p>`).join('')}
+                                ${aiLogs.map(log => `<p>${log}</p>`).join('')}
                             </div>
                         </div>`;
-                    }
+                },
 
+                renderOwnerAutomaticView() {
+                    const { geminiApiKey, manualCompanyName, geminiModel } = this.state.ownerState;
                     return `
                         <div class="max-w-5xl mx-auto">
                             <div class="p-8 polished-container space-y-6">
@@ -561,7 +556,7 @@ pre, #sheet-output {
                 },
 
                 renderReviewCards(viewType) {
-                    const { reviews } = this.state[`${viewType}State`];
+                    const { reviews } = this.state.ownerState;
                     if (reviews.length === 0) return '<p class="text-gray-400 text-center py-4">No reviews processed yet.</p>';
                     return reviews.map((review, index) => `
                         <div class="review-item p-5 mb-4">
@@ -576,13 +571,14 @@ pre, #sheet-output {
 
                 // --- EVENT LISTENERS & HANDLERS ---
                 attachInitialListeners() {
-                    this.elements.app.addEventListener('click', e => this.handleGenericClick(e));
-                    this.elements.app.addEventListener('input', e => this.handleGenericInput(e));
+                    const appEl = document.getElementById('app');
+                    appEl.addEventListener('click', e => this.handleGenericClick(e));
+                    appEl.addEventListener('input', e => this.handleGenericInput(e));
                 },
 
                 handleOwnerTabClick(tab) {
                     this.state.ownerState.activeTab = tab;
-                    this.render();
+                    this.updateView();
                     if (tab === 'sheetGenerator') {
                         setTimeout(() => {
                             const input = document.getElementById('sheet-reviews-ordered');
@@ -597,7 +593,7 @@ pre, #sheet-output {
 
                     if (target.matches('[data-model]')) {
                         this.state.ownerState.geminiModel = target.dataset.model;
-                        this.render();
+                        this.updateView();
                     } else if (target.matches('.owner-tab-btn')) {
                         this.handleOwnerTabClick(target.dataset.tab);
                     } else if (target.matches('#settings-btn, #settings-btn-inline')) {
@@ -614,9 +610,8 @@ pre, #sheet-output {
                             this.copyToClipboard(output, 'Sheet row copied!');
                         } else { this.showNotification('Generate a row first to copy it.', 'error'); }
                     } else if (target.matches('.remove-review-btn')) {
-                        const viewType = target.dataset.view;
-                        this.state[`${viewType}State`].reviews.splice(target.dataset.index, 1);
-                        this.render();
+                        this.state.ownerState.reviews.splice(target.dataset.index, 1);
+                        this.updateView();
                     } else if (target.matches('.download-owner-file-btn')) {
                         const shortName = this.inferShortCompanyName(this.state.ownerState.selectedPlace.name);
                         this.triggerAutomaticDownload(shortName);
@@ -631,57 +626,76 @@ pre, #sheet-output {
                     else if (id === 'automatic-manual-company-name') this.state.ownerState.manualCompanyName = value;
                     else if (id === 'sheet-daily-reviews') this.state.ownerState.sheetRow.dailyReviews = value;
                     else if (id === 'sheet-reviews-ordered') this.state.ownerState.sheetRow.reviewsOrdered = value;
-                    else if (dataset.view && target.classList.contains('content-input')) {
-                        this.state[`${dataset.view}State`].reviews[dataset.index].text = value;
+                    else if (target.classList.contains('content-input')) {
+                        this.state.ownerState.reviews[dataset.index].text = value;
                     }
                 },
 
                 // --- CORE LOGIC & WORKFLOWS ---
-                updateAiProgress(message, percent) {
-                    this.state.ownerState.aiLogs.push(`[${new Date().toLocaleTimeString()}] ${message}`);
-                    this.state.ownerState.aiProgress = percent;
-                    this.render();
-                    // Auto-scroll logs
+                updateAiProgress(message, percent, type = 'info') {
+                    const time = `[${new Date().toLocaleTimeString()}]`;
+                    let colorClass = 'text-gray-400';
+                    if (type === 'success') colorClass = 'text-green-400';
+                    if (type === 'error') colorClass = 'text-red-400';
+                    
+                    const coloredMessage = message.replace(/"(.*?)"/g, `<span class="text-purple-400">"$1"</span>`)
+                                                  .replace(/(\d+%)/g, `<span class="text-pink-400">$1</span>`);
+
+                    this.state.ownerState.aiLogs.push(`<span class="${colorClass}">${time}</span> ${coloredMessage}`);
+                    
                     const logContainer = document.getElementById('ai-logs');
                     if (logContainer) {
+                        logContainer.innerHTML = this.state.ownerState.aiLogs.map(log => `<p>${log}</p>`).join('');
                         logContainer.scrollTop = logContainer.scrollHeight;
                     }
+                },
+
+                startSmoothProgress(targetPercent) {
+                    clearInterval(this.state.ownerState.aiProgressInterval);
+                    this.state.ownerState.aiProgressInterval = setInterval(() => {
+                        const currentProgress = this.state.ownerState.aiProgress;
+                        if (currentProgress < targetPercent) {
+                            this.state.ownerState.aiProgress += 1;
+                            const progressBar = document.querySelector('#view-container .progress-bar-glow');
+                            if(progressBar) progressBar.style.width = `${this.state.ownerState.aiProgress}%`;
+                        } else {
+                            clearInterval(this.state.ownerState.aiProgressInterval);
+                        }
+                    }, 20); // Adjust interval for speed
                 },
 
                 async runAutomaticAiGeneration(place) {
                     const { geminiApiKey, manualCompanyName, geminiModel } = this.state.ownerState;
                     if (!geminiApiKey) {
                         this.showNotification("Cannot start: Missing Gemini API Key.", 'error');
-                        this.state.ownerState.activeTab = 'automatic';
-                        this.render();
                         return;
                     }
 
                     this.state.ownerState.isAiGenerating = true;
                     this.state.ownerState.aiLogs = [];
                     this.state.ownerState.aiProgress = 0;
-                    this.render();
+                    this.updateView();
 
                     try {
-                        await new Promise(res => setTimeout(res, 100));
-                        this.updateAiProgress("Initializing generation...", 5);
+                        this.updateAiProgress("Initializing generation...", 0);
+                        this.startSmoothProgress(5);
                         
                         const shortName = manualCompanyName.trim() || this.inferShortCompanyName(place.name);
-                        
                         await new Promise(res => setTimeout(res, 500));
                         this.updateAiProgress(`Using company name: "${shortName}"`, 15);
+                        this.startSmoothProgress(15);
 
                         const contextReviews = this.state.ownerState.promptGenerator.input;
                         const prompt = this.generateAutomaticPrompt(contextReviews, shortName);
-                        
                         await new Promise(res => setTimeout(res, 500));
                         this.updateAiProgress("Generated prompt for AI.", 25);
+                        this.startSmoothProgress(25);
 
                         const model = geminiModel === 'flash-lite' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash-preview-05-20';
                         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
-
                         await new Promise(res => setTimeout(res, 500));
-                        this.updateAiProgress(`Sending request to ${model}...`, 40);
+                        this.updateAiProgress(`Sending request to "${model}"...`, 40);
+                        this.startSmoothProgress(40);
 
                         const response = await fetch(API_URL, {
                             method: 'POST',
@@ -690,6 +704,7 @@ pre, #sheet-output {
                         });
                         
                         this.updateAiProgress("Waiting for AI response...", 60);
+                        this.startSmoothProgress(60);
 
                         if (!response.ok) {
                             const errorData = await response.json();
@@ -697,9 +712,9 @@ pre, #sheet-output {
                         }
 
                         const data = await response.json();
-                        
                         await new Promise(res => setTimeout(res, 500));
-                        this.updateAiProgress("Response received. Processing reviews...", 75);
+                        this.updateAiProgress("Response received. Processing reviews...", 75, 'success');
+                        this.startSmoothProgress(75);
                         
                         if (!data.candidates || !data.candidates[0]?.content?.parts[0]?.text) {
                             throw new Error("Invalid response structure from AI. Please try again.");
@@ -707,32 +722,32 @@ pre, #sheet-output {
                         const aiReviewsText = data.candidates[0].content.parts[0].text;
                         
                         this.state.ownerState.bulkText = this.cleanAiResponse(aiReviewsText);
-                        this.processBulkReviews();
+                        this.processBulkReviews(false);
                         
                         await new Promise(res => setTimeout(res, 500));
                         this.updateAiProgress("Downloading generated file...", 90);
+                        this.startSmoothProgress(90);
                         
                         this.triggerAutomaticDownload(shortName);
                         
                         await new Promise(res => setTimeout(res, 500));
-                        this.updateAiProgress("Generation complete!", 100);
+                        this.updateAiProgress("Generation complete!", 100, 'success');
+                        this.startSmoothProgress(100);
                         
                         this.showNotification("AI Generation Complete! File downloaded.", "success");
                         
                         setTimeout(() => {
                             this.state.ownerState.isAiGenerating = false;
-                            this.state.ownerState.activeTab = 'sheetGenerator';
-                            this.render();
+                            this.handleOwnerTabClick('sheetGenerator');
                         }, 1500);
 
-
                     } catch (error) {
-                        this.updateAiProgress(`Error: ${error.message}`, 100);
+                        clearInterval(this.state.ownerState.aiProgressInterval);
+                        this.updateAiProgress(`Error: ${error.message}`, this.state.ownerState.aiProgress, 'error');
                         this.showNotification(`AI generation failed: ${error.message}`, 'error');
                         setTimeout(() => {
                             this.state.ownerState.isAiGenerating = false;
-                            this.state.ownerState.activeTab = 'automatic';
-                            this.render();
+                            this.handleOwnerTabClick('automatic');
                         }, 2000);
                     }
                 },
@@ -766,7 +781,7 @@ pre, #sheet-output {
                     const output = `${companyNameForSheet}\t${daily}\t${done}\t${ordered}\t${startingCount}\t${endingCount}\t\t${reviewsLeft}`;
 
                     this.state.ownerState.sheetRow.output = output;
-                    this.render();
+                    this.updateView();
                     this.copyToClipboard(output, 'Sheet row copied!');
                 },
 
@@ -810,7 +825,7 @@ ${companyNameInstruction}
                     return firstReviewIndex !== -1 ? reviewsArray.slice(firstReviewIndex).join('\n\n') : aiText.trim();
                 },
 
-                processBulkReviews() {
+                processBulkReviews(shouldRender = true) {
                     const { bulkText } = this.state.ownerState;
                     const lines = bulkText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
                     const uniqueLines = [...new Set(lines)];
@@ -820,14 +835,13 @@ ${companyNameInstruction}
                     }
                     this.state.ownerState.reviews = uniqueLines.map(line => ({ text: line }));
                     this.showNotification(`${uniqueLines.length} unique reviews processed.`, "success");
-                    this.render();
+                    if (shouldRender) this.updateView();
                 },
 
                 // --- UTILITIES & MODALS ---
                 resetOwnerState(shouldRender = true) {
                     this.state.ownerState = {
                         ...this.state.ownerState,
-                        // Keep activeTab, API key and model selection
                         isAiGenerating: false,
                         selectedPlace: { name: '', reviewLink: '', startingCount: 0, placeId: '', details: null },
                         reviews: [],
@@ -836,12 +850,13 @@ ${companyNameInstruction}
                         sheetRow: { dailyReviews: '5', reviewsOrdered: '', output: '' },
                         manualCompanyName: ''
                     };
-                    if (shouldRender) this.render();
+                    if (shouldRender) this.updateView();
                 },
 
                 showApiKeyModal() {
                     const currentKey = this.state.ownerState.geminiApiKey;
-                    this.elements.genericModalContainer.innerHTML = `
+                    const modalContainer = document.getElementById('generic-modal-container');
+                    modalContainer.innerHTML = `
                         <div class="fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-[10000] p-4 fade-in-down">
                             <form id="api-key-form" class="polished-container p-8 w-full max-w-md">
                                 <h2 class="text-2xl font-bold text-white mb-4">Gemini API Key</h2>
@@ -856,7 +871,7 @@ ${companyNameInstruction}
                     const form = document.getElementById('api-key-form');
                     const input = document.getElementById('modal-api-key-input');
                     input.focus();
-                    document.getElementById('modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
+                    document.getElementById('modal-cancel').onclick = () => modalContainer.innerHTML = '';
                     form.onsubmit = (e) => {
                         e.preventDefault();
                         const newKey = input.value.trim();
@@ -864,8 +879,8 @@ ${companyNameInstruction}
                             this.state.ownerState.geminiApiKey = newKey;
                             localStorage.setItem('geminiApiKey', newKey);
                             this.showNotification('API Key saved successfully!');
-                            this.elements.genericModalContainer.innerHTML = '';
-                            this.render();
+                            modalContainer.innerHTML = '';
+                            this.updateView();
                         } else {
                             this.showNotification('API Key cannot be empty.', 'error');
                         }
