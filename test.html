@@ -108,6 +108,39 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        /* New styles for the model switcher */
+        .model-switcher {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            position: relative;
+            background-color: rgba(0,0,0,0.2);
+            border-radius: 0.5rem;
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 0.25rem;
+        }
+        .model-switcher-bg {
+            position: absolute;
+            top: 0.25rem;
+            height: calc(100% - 0.5rem);
+            width: calc(50% - 0.25rem);
+            background-image: linear-gradient(to right, #B47CFD, #c58ef8);
+            border-radius: 0.375rem;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 10px rgba(180, 124, 253, 0.3);
+        }
+        .model-switcher-bg.quality {
+            transform: translateX(100%);
+        }
+        .model-switcher-btn {
+            position: relative;
+            z-index: 1;
+            padding: 0.5rem;
+            text-align: center;
+            font-weight: 500;
+            color: #f0f0f0;
+            cursor: pointer;
+            transition: color 0.3s ease;
+        }
     </style>
 </head>
 <body class="text-gray-200 min-h-screen">
@@ -163,6 +196,7 @@
                     ownerState: {
                         activeTab: 'automatic',
                         geminiApiKey: localStorage.getItem('geminiApiKey') || '',
+                        geminiModel: 'flash-lite', // Default to flash-lite
                         isAiGenerating: false,
                         selectedPlace: {},
                         reviews: [],
@@ -186,7 +220,7 @@
                 // --- INITIALIZATION ---
                 init() {
                     window.reviewApp = this; 
-                    this.resetOwnerState(false); // Initialize with default structure, don't render
+                    this.resetOwnerState(false);
                     this.loadData();
                     this.attachInitialListeners();
                     this.render();
@@ -249,7 +283,7 @@
                         const positiveReviews = place.reviews.filter(r => r.rating >= 4).map(r => r.text);
                         ownerState.promptGenerator.input = positiveReviews.join('\n\n');
                     } else {
-                        ownerState.promptGenerator.input = 'No recent positive reviews found. You can paste your own points manually.';
+                        ownerState.promptGenerator.input = 'No recent positive reviews found.';
                     }
                     
                     this.showNotification(`Selected: ${place.name}`, "success");
@@ -311,6 +345,7 @@
                                 <div>
                                     <nav class="-mb-px flex gap-6 overflow-x-auto sm:justify-center no-scrollbar" aria-label="Tabs">
                                         <button data-tab="automatic" class="owner-tab-btn ${activeTab === 'automatic' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">⭐ Automatic AI Mode</button>
+                                        <button data-tab="sheetGenerator" class="owner-tab-btn ${activeTab === 'sheetGenerator' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">Sheet Row Generator</button>
                                         <button data-tab="submitter" class="owner-tab-btn ${activeTab === 'submitter' ? 'border-[#FF7FC2] text-white' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all">Review Submitter</button>
                                     </nav>
                                 </div>
@@ -318,13 +353,14 @@
                         </div>
                         <div class="pt-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
                             <div id="owner-automatic-view" class="${activeTab !== 'automatic' ? 'hidden' : ''}">${this.renderOwnerAutomaticView()}</div>
+                            <div id="owner-sheet-generator-view" class="${activeTab !== 'sheetGenerator' ? 'hidden' : ''}">${this.renderOwnerSheetGeneratorView()}</div>
                             <div id="owner-submitter-view" class="${activeTab !== 'submitter' ? 'hidden' : ''}">${this.renderOwnerSubmitterView()}</div>
                         </div>
                     `;
                 },
 
                 renderOwnerAutomaticView() {
-                    const { isAiGenerating, selectedPlace, geminiApiKey, manualCompanyName } = this.state.ownerState;
+                    const { isAiGenerating, selectedPlace, geminiApiKey, manualCompanyName, geminiModel } = this.state.ownerState;
                     
                     if (isAiGenerating) {
                         return `
@@ -348,6 +384,14 @@
                                     <label for="automatic-manual-company-name" class="block text-sm font-medium text-gray-300 mb-2">Company Name (Optional)</label>
                                     <input type="text" id="automatic-manual-company-name" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" placeholder="e.g., Mike's Pizza" value="${manualCompanyName}">
                                     <p class="text-xs text-gray-500 mt-1">If you provide a name, the AI will use it. If not, it will infer one from the search result.</p>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Select AI Model</label>
+                                    <div class="model-switcher">
+                                        <div class="model-switcher-bg ${geminiModel === 'flash' ? 'quality' : ''}"></div>
+                                        <div class="model-switcher-btn" data-model="flash-lite">Quick</div>
+                                        <div class="model-switcher-btn" data-model="flash">Quality</div>
+                                    </div>
                                 </div>
                                 <div>
                                     <label for="automatic-link-input" class="block text-sm font-medium text-gray-300 mb-2">Search for Business</label>
@@ -388,12 +432,56 @@
                             <div id="owner-reviews-container">${this.renderReviewCards('owner')}</div>
                         </div>`;
                 },
+
+                renderOwnerSheetGeneratorView() {
+                    const { selectedPlace, sheetRow, manualCompanyName } = this.state.ownerState;
+                    const isPlaceSelected = !!selectedPlace.placeId;
+                    const companyNameForSheet = manualCompanyName.trim() || selectedPlace.name || '';
+
+                    if (!isPlaceSelected) {
+                        return `<div class="max-w-2xl mx-auto text-center p-8 polished-container">
+                                    <h2 class="text-xl font-bold text-white mb-2">Sheet Row Generator</h2>
+                                    <p class="text-gray-400">Please select a business in the "Automatic AI Mode" or "Review Submitter" tab first to use this tool.</p>
+                                </div>`;
+                    }
+
+                    return `<div class="max-w-2xl mx-auto p-8 polished-container space-y-4">
+                                <h2 class="text-2xl font-bold text-white text-center mb-2">Google Sheet Row Generator</h2>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-1">Company Name</label>
+                                    <input type="text" value="${companyNameForSheet}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" readonly>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-1">Starting Review Count</label>
+                                    <input type="text" value="${selectedPlace.startingCount}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" readonly>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-1">Reviews Done</label>
+                                    <input type="text" value="0" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" readonly>
+                                </div>
+                                <div>
+                                    <label for="sheet-daily-reviews" class="block text-sm font-medium text-gray-300 mb-1">Daily Reviews</label>
+                                    <input type="number" id="sheet-daily-reviews" value="${sheetRow.dailyReviews || '5'}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg">
+                                </div>
+                                <div>
+                                    <label for="sheet-reviews-ordered" class="block text-sm font-medium text-gray-300 mb-1">Reviews Ordered</label>
+                                    <input type="number" id="sheet-reviews-ordered" value="${sheetRow.reviewsOrdered || ''}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg">
+                                </div>
+                                <button id="generate-sheet-row-btn" class="w-full font-bold py-3 px-4 rounded-lg text-white button-gradient">Generate & Copy Row</button>
+                                <div class="relative">
+                                    <pre id="sheet-output" class="w-full p-3 pr-12 bg-black/20 border border-white/10 rounded-lg whitespace-pre-wrap overflow-x-auto min-h-[6rem]">${sheetRow.output || 'Sheet row will appear here...'}</pre>
+                                    <button id="copy-sheet-row-btn" class="absolute top-3 right-3 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition-colors" title="Copy row">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg>
+                                    </button>
+                                </div>
+                            </div>`;
+                },
                 
                 renderReviewCards(viewType) {
-                    const state = viewType === 'owner' ? this.state.ownerState : this.state.clientState;
+                    const state = viewType === 'owner' ? this.state.ownerState : {};
                     const { reviews } = state;
 
-                    if (reviews.length === 0) {
+                    if (!reviews || reviews.length === 0) {
                         return '<p class="text-gray-400 text-center py-4">No reviews processed yet.</p>';
                     }
 
@@ -423,11 +511,23 @@
                 handleGenericClick(e) {
                     const target = e.target;
                     
+                    if (target.closest('.model-switcher-btn')) {
+                        this.state.ownerState.geminiModel = target.closest('.model-switcher-btn').dataset.model;
+                        this.render();
+                        return;
+                    }
                     if (target.closest('.owner-tab-btn')) { this.handleOwnerTabClick(target.closest('.owner-tab-btn').dataset.tab); return; }
                     if (target.closest('.back-to-initial-btn')) { this.switchView('initial'); }
                     if (target.closest('#settings-btn') || target.closest('#settings-btn-inline')) { this.showApiKeyModal(); return; }
                     if (target.closest('#process-bulk-reviews-btn')) this.processBulkReviews();
                     if (target.closest('#reset-owner-reviews-btn')) { this.resetOwnerState(); }
+                    if (target.closest('#generate-sheet-row-btn')) { this.generateAndCopySheetRow(); }
+                    if (target.closest('#copy-sheet-row-btn')) { 
+                        const output = document.getElementById('sheet-output').textContent;
+                        if(output && output !== 'Sheet row will appear here...') {
+                            this.copyToClipboard(output, 'Sheet row copied!');
+                        } else { this.showNotification('Generate a row first to copy it.', 'error'); }
+                    }
                     if (target.closest('.remove-review-btn')) {
                         const viewType = target.closest('.remove-review-btn').dataset.view;
                         this.state[`${viewType}State`].reviews.splice(target.closest('.remove-review-btn').dataset.index, 1);
@@ -435,7 +535,7 @@
                     }
                     if (target.closest('.download-owner-file-btn')) {
                         const shortName = this.inferShortCompanyName(this.state.ownerState.selectedPlace.name);
-                        this.triggerAutomaticDownloadAndModal(shortName, false); // false = don't show modal again
+                        this.triggerAutomaticDownload(shortName);
                     }
                 },
 
@@ -443,6 +543,8 @@
                     const target = e.target;
                     if (target.id === 'owner-bulk-textarea') this.state.ownerState.bulkText = target.value;
                     if (target.id === 'automatic-manual-company-name') this.state.ownerState.manualCompanyName = target.value;
+                    if (target.id === 'sheet-daily-reviews') this.state.ownerState.sheetRow.dailyReviews = target.value;
+                    if (target.id === 'sheet-reviews-ordered') this.state.ownerState.sheetRow.reviewsOrdered = target.value;
                     const viewType = target.dataset.view;
                     if(viewType && target.classList.contains('content-input')) {
                         this.state[`${viewType}State`].reviews[target.dataset.index].text = target.value;
@@ -451,7 +553,7 @@
                 
                 // --- CORE LOGIC & WORKFLOWS ---
                 async runAutomaticAiGeneration(place) {
-                    const { geminiApiKey, manualCompanyName } = this.state.ownerState;
+                    const { geminiApiKey, manualCompanyName, geminiModel } = this.state.ownerState;
                     if (!geminiApiKey) {
                         this.showNotification("Cannot start automatic mode: Missing Gemini API Key.", 'error');
                         this.state.ownerState.activeTab = 'automatic';
@@ -469,8 +571,7 @@
                         const contextReviews = this.state.ownerState.promptGenerator.input;
                         const prompt = this.generateAutomaticPrompt(contextReviews, shortName);
                         
-                        const model = 'gemini-2.5-flash-lite';
-
+                        const model = geminiModel === 'flash-lite' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash-preview-05-20';
                         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
 
                         const response = await fetch(API_URL, {
@@ -493,8 +594,9 @@
                         
                         this.state.ownerState.bulkText = this.cleanAiResponse(aiReviewsText);
                         this.processBulkReviews();
-                        this.showNotification("AI Generation Complete!", "success");
-                        this.triggerAutomaticDownloadAndModal(shortName, true); // true = show modal
+                        this.showNotification("AI Generation Complete! File downloaded.", "success");
+                        this.triggerAutomaticDownload(shortName);
+                        this.state.ownerState.activeTab = 'sheetGenerator';
 
                     } catch (error) {
                         this.showNotification(`Automatic AI generation failed: ${error.message}`, 'error');
@@ -505,7 +607,7 @@
                     }
                 },
 
-                triggerAutomaticDownloadAndModal(filename, showModal) {
+                triggerAutomaticDownload(filename) {
                     if (!filename) {
                         this.showNotification('Could not determine filename for download.', 'error');
                         return;
@@ -521,10 +623,22 @@
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                     this.showNotification(`File '${a.download}' downloaded!`);
+                },
 
-                    if (showModal) {
-                        this.showSheetRowModal();
-                    }
+                generateAndCopySheetRow() {
+                    const { selectedPlace, manualCompanyName } = this.state.ownerState;
+                    const companyNameForSheet = manualCompanyName.trim() || selectedPlace.name || '';
+                    const daily = parseInt(document.getElementById('sheet-daily-reviews').value, 10) || 5;
+                    const ordered = parseInt(document.getElementById('sheet-reviews-ordered').value, 10) || 0;
+                    const done = 0;
+                    const startingCount = selectedPlace.startingCount;
+                    const endingCount = startingCount + ordered;
+                    const reviewsLeft = ordered - done;
+                    const output = `${companyNameForSheet}\t${daily}\t${done}\t${ordered}\t${startingCount}\t${endingCount}\t\t${reviewsLeft}`;
+                    
+                    this.state.ownerState.sheetRow.output = output;
+                    this.render();
+                    this.copyToClipboard(output, 'Sheet row copied!');
                 },
 
                 inferShortCompanyName(fullName) {
@@ -583,14 +697,14 @@ ${companyNameInstruction}
                 // --- UTILITIES & MODALS ---
                 resetOwnerState(shouldRender = true) {
                     this.state.ownerState = {
-                        ...this.state.ownerState, // Keep API key
+                        ...this.state.ownerState, // Keep API key and model selection
                         activeTab: 'automatic',
                         isAiGenerating: false,
                         selectedPlace: { name: '', reviewLink: '', startingCount: 0, placeId: '', details: null },
                         reviews: [],
                         bulkText: '',
                         promptGenerator: { input: '', output: '' },
-                        sheetRow: { dailyReviews: '', reviewsOrdered: '', output: '' },
+                        sheetRow: { dailyReviews: '5', reviewsOrdered: '', output: '' },
                         manualCompanyName: ''
                     };
                     if (shouldRender) {
@@ -598,62 +712,6 @@ ${companyNameInstruction}
                     }
                 },
                 
-                showSheetRowModal() {
-                    const { selectedPlace, sheetRow } = this.state.ownerState;
-                    const content = `
-                        <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-1">Company Name</label>
-                            <input type="text" value="${selectedPlace.name}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" readonly>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-1">Starting Review Count</label>
-                            <input type="text" value="${selectedPlace.startingCount}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" readonly>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-1">Reviews Done</label>
-                            <input type="text" value="0" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg" readonly>
-                        </div>
-                        <div>
-                            <label for="modal-daily-reviews" class="block text-sm font-medium text-gray-300 mb-1">Daily Reviews</label>
-                            <input type="number" id="modal-daily-reviews" value="${sheetRow.dailyReviews || ''}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg">
-                        </div>
-                        <div>
-                            <label for="modal-reviews-ordered" class="block text-sm font-medium text-gray-300 mb-1">Reviews Ordered</label>
-                            <input type="number" id="modal-reviews-ordered" value="${sheetRow.reviewsOrdered || ''}" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg">
-                        </div>
-                        <button id="modal-generate-sheet-row-btn" class="w-full font-bold py-3 px-4 rounded-lg text-white button-gradient">Generate & Copy Row</button>
-                        <div class="relative">
-                            <pre id="modal-sheet-output" class="w-full p-3 pr-12 bg-black/20 border border-white/10 rounded-lg whitespace-pre-wrap overflow-x-auto min-h-[6rem]">${sheetRow.output || 'Sheet row will appear here...'}</pre>
-                            <button id="modal-copy-sheet-row-btn" class="absolute top-3 right-3 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition-colors" title="Copy row">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg>
-                            </button>
-                        </div>
-                    `;
-                    this.showInfoModal('Google Sheet Row Generator', content, true); // true for large modal
-
-                    // Add event listeners specific to this modal
-                    const generateAndCopy = () => {
-                        const daily = parseInt(document.getElementById('modal-daily-reviews').value, 10) || 0;
-                        const ordered = parseInt(document.getElementById('modal-reviews-ordered').value, 10) || 0;
-                        const done = 0;
-                        const startingCount = selectedPlace.startingCount;
-                        const endingCount = startingCount + ordered;
-                        const reviewsLeft = ordered - done;
-                        const output = `${selectedPlace.name}\t${daily}\t${done}\t${ordered}\t${startingCount}\t${endingCount}\t\t${reviewsLeft}`;
-                        document.getElementById('modal-sheet-output').textContent = output;
-                        this.copyToClipboard(output, 'Sheet row copied!');
-                    };
-
-                    document.getElementById('modal-generate-sheet-row-btn').onclick = generateAndCopy;
-                    document.getElementById('modal-copy-sheet-row-btn').onclick = () => {
-                        const output = document.getElementById('modal-sheet-output').textContent;
-                        if(output && output !== 'Sheet row will appear here...') {
-                            this.copyToClipboard(output, 'Sheet row copied!');
-                        } else {
-                            this.showNotification('Generate a row first to copy it.', 'error');
-                        }
-                    };
-                },
                 showApiKeyModal() {
                     const currentKey = this.state.ownerState.geminiApiKey;
                      this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><form id="api-key-form" class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">Gemini API Key</h2><p class="text-gray-400 mb-4">Please enter your Gemini API key to enable AI features. Your key is saved locally in your browser.</p><input type="password" id="modal-api-key-input" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg mb-6" placeholder="Enter your API key..." value="${currentKey}"><div class="flex justify-end gap-4"><button type="button" id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button type="submit" class="button-gradient text-white font-bold py-2 px-6 rounded-lg">Save Key</button></div></form></div>`;
@@ -674,24 +732,7 @@ ${companyNameInstruction}
                         }
                     };
                 },
-                showPromptModal(title, placeholder, onSubmit) {
-                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><form id="prompt-form" class="polished-container p-8 shadow-2xl w-full max-w-md"><h2 class="text-2xl font-bold text-white mb-4">${title}</h2><input type="text" id="modal-input" class="w-full p-3 bg-black/20 border border-white/10 rounded-lg mb-6" placeholder="${placeholder}"><div class="flex justify-end gap-4"><button type="button" id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button type="submit" class="button-gradient text-white font-bold py-2 px-6 rounded-lg">Submit</button></div></form></div>`;
-                    const input = document.getElementById('modal-input');
-                    input.focus();
-                    document.getElementById('modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
-                    document.getElementById('prompt-form').onsubmit = (e) => { e.preventDefault(); onSubmit(input.value); this.elements.genericModalContainer.innerHTML = ''; };
-                },
-                showInfoModal(title, content, isLarge = false) {
-                    const maxWidthClass = isLarge ? 'max-w-2xl' : 'max-w-lg';
-                    this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full ${maxWidthClass} border border-gray-700 max-h-[90vh] flex flex-col"><h2 class="text-2xl font-bold text-white mb-4 flex-shrink-0">${title}</h2><div class="text-gray-300 mb-6 space-y-4 overflow-y-auto flex-grow">${content}</div><div class="flex justify-end gap-4 flex-shrink-0 pt-4 border-t border-gray-700"><button id="modal-reset-and-close" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg">Start New</button><button id="modal-close" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Close</button></div></div></div>`;
-                    
-                    const closeModal = () => this.elements.genericModalContainer.innerHTML = '';
-                    document.getElementById('modal-close').onclick = closeModal;
-                    document.getElementById('modal-reset-and-close').onclick = () => {
-                        this.resetOwnerState();
-                        closeModal();
-                    };
-                },
+                
                 copyToClipboard(text, message = "Copied to clipboard!") {
                     if (!navigator.clipboard) { 
                         const textArea = document.createElement("textarea");
