@@ -67,14 +67,19 @@
 
         /* Main Container & Card Styles */
         .polished-container, .review-item {
-            background: rgba(17, 7, 44, 0.6);
-            backdrop-filter: blur(10px);
-            border: 1px solid var(--border-color);
-            border-radius: 1rem;
-            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-            position: relative;
-            overflow: hidden;
-        }
+    background: rgba(17, 7, 44, 0.6);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    /* Limit transitions to visual-only to avoid any reflow jank */
+    transition: border-color 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+                box-shadow 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+                background-color 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+                transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    position: relative;
+    overflow: hidden;
+}
+
 
         /* Aurora Glow Effect on Hover */
         .polished-container::after, .review-item::after {
@@ -151,7 +156,8 @@
             from { opacity: 0; transform: translateY(-15px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        .fade-in-down { animation: fadeInDown 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+        /* Disable screen fade for view swaps; keeps modals free to animate if you add a different class */
+.fade-in-down { animation: none !important; }
 
         /* Notification Toast - TOP CENTER */
         #notification-container {
@@ -417,7 +423,7 @@
                             case 'submitter': content = this.renderOwnerSubmitterView(); break;
                         }
                     }
-                    viewContainer.innerHTML = `<div class="fade-in-down">${content}</div>`;
+                    viewContainer.innerHTML = content;
                     
                     setTimeout(() => this.initializeMapsForCurrentView(), 0);
                 },
@@ -564,7 +570,7 @@
                                 <span class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-500">#${index + 1}</span>
                                 <button data-view="${viewType}" data-index="${index}" class="remove-review-btn text-gray-500 hover:text-red-500 font-bold text-2xl leading-none p-1">&times;</button>
                             </div>
-                            <textarea data-view="${viewType}" data-index="${index}" class="content-input p-3 h-24 resize-y no-scrollbar">${review.text}</textarea>
+                            <textarea data-view="${viewType}" data-index="${index}" class="content-input p-3 min-h-[120px] resize-y no-scrollbar">${review.text}</textarea>
                         </div>
                     `).join('');
                 },
@@ -691,7 +697,7 @@
                         this.updateAiProgress("Generated prompt for AI.", 25);
                         this.startSmoothProgress(25);
 
-                        const model = geminiModel === 'flash-lite' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash-preview-05-20';
+                        const model = geminiModel === 'flash-lite' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash';
                         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
                         await new Promise(res => setTimeout(res, 500));
                         this.updateAiProgress(`Sending request to "${model}"...`, 40);
@@ -803,21 +809,73 @@
                 },
 
                 generateAutomaticPrompt(context, companyName) {
-                    let companyNameInstruction = companyName
-                        ? `4.  **Company Name Usage:** Mention the specific company name, "${companyName}", in only a small, random subset of reviews (e.g., 5-7 out of 50). For all other reviews, use general terms like "this place," "the team," "the staff," or describe the experience without naming the business.`
-                        : `4.  **Company Name Usage:** Do NOT mention any specific company name. Use general terms like "this place," "the team," "the service," or "they."`;
+    const isQuality = this.state.ownerState.geminiModel === 'flash';
 
-                    return `You are an expert copywriter specializing in creating authentic, human-like user-generated content.
+    // Optional locality (used only if it reads naturally)
+    const details   = this.state.ownerState?.selectedPlace?.details || {};
+    const address   = (details && details.address ? details.address : '').trim();
+    const parts     = address.split(',').map(s => s.trim()).filter(Boolean);
+    const cityLabel = parts.length >= 2 ? parts[parts.length - 2] : (parts[0] || '');
+
+    // Build soft SEO hints from ONLY your inputs (companyName + context). No preset categories.
+    const seedText = (`${companyName || ''} ${context || ''}`).toLowerCase();
+    const tokens = (seedText.match(/[a-z][a-z\-]+/g) || []).filter(w => w.length > 2);
+    const stop = new Set([
+        'the','and','for','with','this','that','from','your','you','our','their','are','was','were','will','very','more',
+        'most','much','many','about','after','before','just','out','over','under','near','in','on','to','of','at','by','it',
+        'its','they','them','as','is','be','been','being','a','an','or','but','if','than','then','my','we','us','me','he',
+        'she','his','her','him','hers','theirs','mine','yours','also'
+    ]);
+    const filtered = tokens.filter(w => !stop.has(w));
+
+    // Top unigrams
+    const freq = Object.create(null);
+    for (const w of filtered) freq[w] = (freq[w] || 0) + 1;
+    const topWords = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0, 8).map(([w]) => w);
+
+    // Top bigrams (to catch phrase-y hints like "digital lock", "math tuition")
+    const bigrams = [];
+    for (let i = 0; i < filtered.length - 1; i++) {
+        const a = filtered[i], b = filtered[i+1];
+        if (!stop.has(a) && !stop.has(b)) bigrams.push(`${a} ${b}`);
+    }
+    const topBigrams = [...new Set(bigrams)].slice(0, 6);
+
+    // Compact hint set. Model is told to ignore if unnatural.
+    const seeds = [...new Set([...topBigrams, ...topWords])];
+    const keywordPool = [...new Set(
+        seeds.flatMap(k => cityLabel ? [`${k} in ${cityLabel}`, `${cityLabel} ${k}`, k] : [k])
+    )].slice(0, 12);
+
+    const companyNameInstruction = companyName
+        ? `4.  **Company Name Usage:** Mention "${companyName}" in only a small, random subset of reviews (≈5–7 of 50). In all others, keep it generic ("this place", "the team", "the staff").`
+        : `4.  **Company Name Usage:** Do NOT include any specific company name; use general references ("this place", "the team", "the service").`;
+
+    let prompt = `You are an expert copywriter specializing in creating authentic, human-like user-generated content.
 TASK: Based on the CONTEXT below, craft 50 highly realistic, positive Google reviews. Each review must feel like a snapshot of a real person's genuine experience.
 CONTEXT / KEYWORDS:
-${context.trim()}
+${(context || '').trim()}
 CRITICAL REQUIREMENTS:
-1.  **FORMATTING (ABSOLUTE FIRST PRIORITY):** Your response MUST consist ONLY of the reviews. DO NOT include ANY introductory or concluding text. Separate each individual review with a double newline. DO NOT number the reviews or use any separators like "----".
-2.  **NARRATIVE & DETAIL (HIGHEST QUALITY PRIORITY):** Avoid generic praise. Instead, TELL A STORY. A significant portion of reviews must describe a specific situation, outcome, or feeling. Invent plausible, specific details to make reviews credible.
-3.  **NATURAL & VARIED LANGUAGE:** Write from 50 completely different perspectives and voices. Vary tone, emotion, sentence structure, and length extensively. AVOID repetitive sentence starters. Mimic real-world typing: use different capitalization, varied punctuation, and use emojis (like 😊, 👍, ⭐, 🎉) very sparingly.
+1.  **FORMATTING (ABSOLUTE FIRST PRIORITY):** Your output MUST be ONLY the reviews. No intro/outro. Separate each review with ONE blank line (double newline). Do NOT number them and do NOT add separators like "----".
+2.  **NARRATIVE & DETAIL:** Avoid generic praise. Tell a mini-story: a situation, what happened, and the outcome/feeling. Include plausible, specific details; keep them truthful to the CONTEXT.
+3.  **NATURAL VARIETY:** 50 different voices. Vary tone, sentence length, punctuation, and formality. Use emojis very sparingly and only when they feel natural.
 ${companyNameInstruction}
-5.  **AUTHENTICITY:** To enhance realism, a few reviews can mention a minor, neutral point before giving strong praise.`;
-                },
+5.  **AUTHENTICITY GUARDRAILS:** Do not invent staff names or private info unless they appear in CONTEXT. No unrealistic claims, no incentives, no insider/employee perspective.`;
+
+    if (isQuality) {
+        const keywordList = keywordPool.join('; ');
+        prompt += `
+
+QUALITY MODE — ADD THE FOLLOWING:
+6.  **LENGTH & STRUCTURE:** Aim for 2–6 sentences per review (~50–140 words). Include a small minority of short reviews (1–2 sentences) for realism (~10%).
+7.  **SEO CURATION (NATURAL, INFERRED):** First infer the business type and core offerings ONLY from the CONTEXT and/or company name. When it feels natural (not forced), weave in ONE subtle phrase related to those offerings. The following hints may help but can be ignored entirely if off-category: [${keywordList}]. Mention locality (e.g., "${cityLabel}") only if it reads naturally, and never more than once per review.
+8.  **SPECIFICITY:** Include concrete moments (what you asked for, what you received, timing/turnaround, how staff handled a request, how the result helped you).
+9.  **DIVERSITY OF INTENT:** Mix first visit, repeat visit, urgent need, comparison after a bad prior experience, special occasion, family use, after-work stop, etc.
+10. **READABILITY OVER KEYWORDS:** Never keyword-stuff. If a hint sounds awkward, drop it. Human voice > SEO.`;
+    }
+
+    return prompt;
+},
 
                 cleanAiResponse(aiText) {
                     const reviewsArray = aiText.trim().split(/\n\s*\n/);
@@ -826,17 +884,39 @@ ${companyNameInstruction}
                 },
 
                 processBulkReviews(shouldRender = true) {
-                    const { bulkText } = this.state.ownerState;
-                    const lines = bulkText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-                    const uniqueLines = [...new Set(lines)];
-                    if (uniqueLines.length === 0) {
-                        this.showNotification("No reviews found to process.", "error");
-                        return;
-                    }
-                    this.state.ownerState.reviews = uniqueLines.map(line => ({ text: line }));
-                    this.showNotification(`${uniqueLines.length} unique reviews processed.`, "success");
-                    if (shouldRender) this.updateView();
-                },
+    const { bulkText } = this.state.ownerState;
+    const normalized = (bulkText || '').replace(/\r\n/g, '\n').trim();
+    if (!normalized) {
+        this.showNotification("No reviews found to process.", "error");
+        return;
+    }
+
+    // Prefer paragraph split (blank lines). Fallback to per-line if no blank lines.
+    const blocks = (/\n\s*\n/.test(normalized) ? normalized.split(/\n\s*\n/g) : normalized.split(/\n/g))
+        .map(b => b.trim())
+        .filter(b => b.length > 0);
+
+    // Soft de-duplication (ignore whitespace/case)
+    const seen = new Set();
+    const unique = [];
+    for (const b of blocks) {
+        const key = b.replace(/\s+/g, ' ').toLowerCase();
+        if (!seen.has(key)) {
+            seen.add(key);
+            unique.push(b);
+        }
+    }
+
+    if (!unique.length) {
+        this.showNotification("No reviews found to process.", "error");
+        return;
+    }
+
+    this.state.ownerState.reviews = unique.map(text => ({ text }));
+    this.showNotification(`${unique.length} unique ${unique.length === 1 ? 'review' : 'reviews'} processed.`, "success");
+    if (shouldRender) this.updateView();
+},
+
 
                 // --- UTILITIES & MODALS ---
                 resetOwnerState(shouldRender = true) {
