@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Automated Review Generation - Reputifly</title>
-    <link rel="icon" type="image/png" href="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug">
+    <link rel="icon" type="image/png" href="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -151,7 +151,7 @@
             from { opacity: 0; transform: translateY(-15px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        .fade-in-down { animation: fadeInDown 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+        .fade-in-down { animation: fadeInDown 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
 
         /* Notification Toast - TOP CENTER */
         #notification-container {
@@ -216,18 +216,20 @@
             backdrop-filter: blur(12px);
             border-bottom: 1px solid var(--border-color);
         }
-        .spinner {
-            border: 4px solid rgba(255, 255, 255, 0.2);
-            border-radius: 50%;
-            border-top: 4px solid var(--accent-primary);
-            width: 32px;
-            height: 32px;
-            animation: spin 1s linear infinite;
+        
+        /* Glowing Progress Bar */
+        .progress-bar-glow {
+            background-image: linear-gradient(to right, var(--accent-primary), var(--accent-secondary), var(--accent-primary));
+            background-size: 200% 200%;
+            box-shadow: 0 0 10px var(--accent-primary), 0 0 15px var(--accent-secondary);
+            animation: glowing-progress 3s linear infinite;
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        @keyframes glowing-progress {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
         }
+
         /* Model Switcher */
         .model-switcher {
             display: grid;
@@ -283,6 +285,7 @@
                         isAiGenerating: false,
                         aiProgress: 0,
                         aiLogs: [],
+                        aiProgressInterval: null,
                         selectedPlace: {},
                         reviews: [],
                         bulkText: '',
@@ -425,8 +428,8 @@
                         <div class="max-w-5xl mx-auto text-center p-8 polished-container">
                             <h2 class="text-3xl font-bold text-white mb-4">Generating Reviews...</h2>
                             <p class="text-gray-400 mb-6">The AI is crafting 50 unique reviews for <strong class="text-purple-400">${selectedPlace.name}</strong>. Please wait.</p>
-                            <div class="w-full bg-gray-700 rounded-full h-2.5 my-4">
-                                <div class="bg-gradient-to-r from-purple-500 to-pink-500 h-2.5 rounded-full transition-all duration-500" style="width: ${aiProgress}%"></div>
+                            <div class="w-full bg-gray-700 rounded-full h-2.5 my-4 shadow-inner">
+                                <div class="progress-bar-glow h-2.5 rounded-full transition-all duration-500 ease-linear" style="width: ${aiProgress}%"></div>
                             </div>
                             <div id="ai-logs" class="mt-4 text-left text-xs text-gray-400 bg-black/20 p-4 rounded-lg h-40 overflow-y-auto no-scrollbar">
                                 ${aiLogs.map(log => `<p>${log}</p>`).join('')}
@@ -561,7 +564,7 @@
                                 <span class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-500">#${index + 1}</span>
                                 <button data-view="${viewType}" data-index="${index}" class="remove-review-btn text-gray-500 hover:text-red-500 font-bold text-2xl leading-none p-1">&times;</button>
                             </div>
-                            <textarea data-view="${viewType}" data-index="${index}" class="content-input p-3 h-24 resize-y no-scrollbar">${review.text}</textarea>
+                            <textarea data-view="${viewType}" data-index="${index}" class="content-input p-3 min-h-[120px] resize-y no-scrollbar">${review.text}</textarea>
                         </div>
                     `).join('');
                 },
@@ -639,18 +642,26 @@
                                                   .replace(/(\d+%)/g, `<span class="text-pink-400">$1</span>`);
 
                     this.state.ownerState.aiLogs.push(`<span class="${colorClass}">${time}</span> ${coloredMessage}`);
-                    this.state.ownerState.aiProgress = percent;
                     
                     const logContainer = document.getElementById('ai-logs');
-                    const progressBar = document.querySelector('#view-container .bg-gradient-to-r');
-
                     if (logContainer) {
                         logContainer.innerHTML = this.state.ownerState.aiLogs.map(log => `<p>${log}</p>`).join('');
                         logContainer.scrollTop = logContainer.scrollHeight;
                     }
-                    if(progressBar) {
-                        progressBar.style.width = `${percent}%`;
-                    }
+                },
+
+                startSmoothProgress(targetPercent) {
+                    clearInterval(this.state.ownerState.aiProgressInterval);
+                    this.state.ownerState.aiProgressInterval = setInterval(() => {
+                        const currentProgress = this.state.ownerState.aiProgress;
+                        if (currentProgress < targetPercent) {
+                            this.state.ownerState.aiProgress += 1;
+                            const progressBar = document.querySelector('#view-container .progress-bar-glow');
+                            if(progressBar) progressBar.style.width = `${this.state.ownerState.aiProgress}%`;
+                        } else {
+                            clearInterval(this.state.ownerState.aiProgressInterval);
+                        }
+                    }, 20); // Adjust interval for speed
                 },
 
                 async runAutomaticAiGeneration(place) {
@@ -666,25 +677,25 @@
                     this.updateView();
 
                     try {
-                        await new Promise(res => setTimeout(res, 100));
-                        this.updateAiProgress("Initializing generation...", 5);
+                        this.updateAiProgress("Initializing generation...", 0);
+                        this.startSmoothProgress(5);
                         
                         const shortName = manualCompanyName.trim() || this.inferShortCompanyName(place.name);
-                        
                         await new Promise(res => setTimeout(res, 500));
                         this.updateAiProgress(`Using company name: "${shortName}"`, 15);
+                        this.startSmoothProgress(15);
 
                         const contextReviews = this.state.ownerState.promptGenerator.input;
                         const prompt = this.generateAutomaticPrompt(contextReviews, shortName);
-                        
                         await new Promise(res => setTimeout(res, 500));
                         this.updateAiProgress("Generated prompt for AI.", 25);
+                        this.startSmoothProgress(25);
 
                         const model = geminiModel === 'flash-lite' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash-preview-05-20';
                         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
-
                         await new Promise(res => setTimeout(res, 500));
                         this.updateAiProgress(`Sending request to "${model}"...`, 40);
+                        this.startSmoothProgress(40);
 
                         const response = await fetch(API_URL, {
                             method: 'POST',
@@ -692,7 +703,8 @@
                             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                         });
                         
-                        this.updateAiProgress("Waiting for AI response... (60%)", 60);
+                        this.updateAiProgress("Waiting for AI response...", 60);
+                        this.startSmoothProgress(60);
 
                         if (!response.ok) {
                             const errorData = await response.json();
@@ -700,9 +712,9 @@
                         }
 
                         const data = await response.json();
-                        
                         await new Promise(res => setTimeout(res, 500));
                         this.updateAiProgress("Response received. Processing reviews...", 75, 'success');
+                        this.startSmoothProgress(75);
                         
                         if (!data.candidates || !data.candidates[0]?.content?.parts[0]?.text) {
                             throw new Error("Invalid response structure from AI. Please try again.");
@@ -710,15 +722,17 @@
                         const aiReviewsText = data.candidates[0].content.parts[0].text;
                         
                         this.state.ownerState.bulkText = this.cleanAiResponse(aiReviewsText);
-                        this.processBulkReviews(false); // Process without re-rendering
+                        this.processBulkReviews(false);
                         
                         await new Promise(res => setTimeout(res, 500));
                         this.updateAiProgress("Downloading generated file...", 90);
+                        this.startSmoothProgress(90);
                         
                         this.triggerAutomaticDownload(shortName);
                         
                         await new Promise(res => setTimeout(res, 500));
-                        this.updateAiProgress("Generation complete! (100%)", 100, 'success');
+                        this.updateAiProgress("Generation complete!", 100, 'success');
+                        this.startSmoothProgress(100);
                         
                         this.showNotification("AI Generation Complete! File downloaded.", "success");
                         
@@ -727,9 +741,9 @@
                             this.handleOwnerTabClick('sheetGenerator');
                         }, 1500);
 
-
                     } catch (error) {
-                        this.updateAiProgress(`Error: ${error.message}`, 100, 'error');
+                        clearInterval(this.state.ownerState.aiProgressInterval);
+                        this.updateAiProgress(`Error: ${error.message}`, this.state.ownerState.aiProgress, 'error');
                         this.showNotification(`AI generation failed: ${error.message}`, 'error');
                         setTimeout(() => {
                             this.state.ownerState.isAiGenerating = false;
@@ -789,21 +803,73 @@
                 },
 
                 generateAutomaticPrompt(context, companyName) {
-                    let companyNameInstruction = companyName
-                        ? `4.  **Company Name Usage:** Mention the specific company name, "${companyName}", in only a small, random subset of reviews (e.g., 5-7 out of 50). For all other reviews, use general terms like "this place," "the team," "the staff," or describe the experience without naming the business.`
-                        : `4.  **Company Name Usage:** Do NOT mention any specific company name. Use general terms like "this place," "the team," "the service," or "they."`;
+    const isQuality = this.state.ownerState.geminiModel === 'flash';
 
-                    return `You are an expert copywriter specializing in creating authentic, human-like user-generated content.
+    // Optional locality (used only if it reads naturally)
+    const details   = this.state.ownerState?.selectedPlace?.details || {};
+    const address   = (details && details.address ? details.address : '').trim();
+    const parts     = address.split(',').map(s => s.trim()).filter(Boolean);
+    const cityLabel = parts.length >= 2 ? parts[parts.length - 2] : (parts[0] || '');
+
+    // Build soft SEO hints from ONLY your inputs (companyName + context). No preset categories.
+    const seedText = (`${companyName || ''} ${context || ''}`).toLowerCase();
+    const tokens = (seedText.match(/[a-z][a-z\-]+/g) || []).filter(w => w.length > 2);
+    const stop = new Set([
+        'the','and','for','with','this','that','from','your','you','our','their','are','was','were','will','very','more',
+        'most','much','many','about','after','before','just','out','over','under','near','in','on','to','of','at','by','it',
+        'its','they','them','as','is','be','been','being','a','an','or','but','if','than','then','my','we','us','me','he',
+        'she','his','her','him','hers','theirs','mine','yours','also'
+    ]);
+    const filtered = tokens.filter(w => !stop.has(w));
+
+    // Top unigrams
+    const freq = Object.create(null);
+    for (const w of filtered) freq[w] = (freq[w] || 0) + 1;
+    const topWords = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0, 8).map(([w]) => w);
+
+    // Top bigrams (to catch phrase-y hints like "digital lock", "math tuition")
+    const bigrams = [];
+    for (let i = 0; i < filtered.length - 1; i++) {
+        const a = filtered[i], b = filtered[i+1];
+        if (!stop.has(a) && !stop.has(b)) bigrams.push(`${a} ${b}`);
+    }
+    const topBigrams = [...new Set(bigrams)].slice(0, 6);
+
+    // Compact hint set. Model is told to ignore if unnatural.
+    const seeds = [...new Set([...topBigrams, ...topWords])];
+    const keywordPool = [...new Set(
+        seeds.flatMap(k => cityLabel ? [`${k} in ${cityLabel}`, `${cityLabel} ${k}`, k] : [k])
+    )].slice(0, 12);
+
+    const companyNameInstruction = companyName
+        ? `4.  **Company Name Usage:** Mention "${companyName}" in only a small, random subset of reviews (≈5–7 of 50). In all others, keep it generic ("this place", "the team", "the staff").`
+        : `4.  **Company Name Usage:** Do NOT include any specific company name; use general references ("this place", "the team", "the service").`;
+
+    let prompt = `You are an expert copywriter specializing in creating authentic, human-like user-generated content.
 TASK: Based on the CONTEXT below, craft 50 highly realistic, positive Google reviews. Each review must feel like a snapshot of a real person's genuine experience.
 CONTEXT / KEYWORDS:
-${context.trim()}
+${(context || '').trim()}
 CRITICAL REQUIREMENTS:
-1.  **FORMATTING (ABSOLUTE FIRST PRIORITY):** Your response MUST consist ONLY of the reviews. DO NOT include ANY introductory or concluding text. Separate each individual review with a double newline. DO NOT number the reviews or use any separators like "----".
-2.  **NARRATIVE & DETAIL (HIGHEST QUALITY PRIORITY):** Avoid generic praise. Instead, TELL A STORY. A significant portion of reviews must describe a specific situation, outcome, or feeling. Invent plausible, specific details to make reviews credible.
-3.  **NATURAL & VARIED LANGUAGE:** Write from 50 completely different perspectives and voices. Vary tone, emotion, sentence structure, and length extensively. AVOID repetitive sentence starters. Mimic real-world typing: use different capitalization, varied punctuation, and use emojis (like 😊, 👍, ⭐, 🎉) very sparingly.
+1.  **FORMATTING (ABSOLUTE FIRST PRIORITY):** Your output MUST be ONLY the reviews. No intro/outro. Separate each review with ONE blank line (double newline). Do NOT number them and do NOT add separators like "----".
+2.  **NARRATIVE & DETAIL:** Avoid generic praise. Tell a mini-story: a situation, what happened, and the outcome/feeling. Include plausible, specific details; keep them truthful to the CONTEXT.
+3.  **NATURAL VARIETY:** 50 different voices. Vary tone, sentence length, punctuation, and formality. Use emojis very sparingly and only when they feel natural.
 ${companyNameInstruction}
-5.  **AUTHENTICITY:** To enhance realism, a few reviews can mention a minor, neutral point before giving strong praise.`;
-                },
+5.  **AUTHENTICITY GUARDRAILS:** Do not invent staff names or private info unless they appear in CONTEXT. No unrealistic claims, no incentives, no insider/employee perspective.`;
+
+    if (isQuality) {
+        const keywordList = keywordPool.join('; ');
+        prompt += `
+
+QUALITY MODE — ADD THE FOLLOWING:
+6.  **LENGTH & STRUCTURE:** Aim for 2–6 sentences per review (~50–140 words). Include a small minority of short reviews (1–2 sentences) for realism (~10%).
+7.  **SEO CURATION (NATURAL, INFERRED):** First infer the business type and core offerings ONLY from the CONTEXT and/or company name. When it feels natural (not forced), weave in ONE subtle phrase related to those offerings. The following hints may help but can be ignored entirely if off-category: [${keywordList}]. Mention locality (e.g., "${cityLabel}") only if it reads naturally, and never more than once per review.
+8.  **SPECIFICITY:** Include concrete moments (what you asked for, what you received, timing/turnaround, how staff handled a request, how the result helped you).
+9.  **DIVERSITY OF INTENT:** Mix first visit, repeat visit, urgent need, comparison after a bad prior experience, special occasion, family use, after-work stop, etc.
+10. **READABILITY OVER KEYWORDS:** Never keyword-stuff. If a hint sounds awkward, drop it. Human voice > SEO.`;
+    }
+
+    return prompt;
+},
 
                 cleanAiResponse(aiText) {
                     const reviewsArray = aiText.trim().split(/\n\s*\n/);
@@ -812,17 +878,39 @@ ${companyNameInstruction}
                 },
 
                 processBulkReviews(shouldRender = true) {
-                    const { bulkText } = this.state.ownerState;
-                    const lines = bulkText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-                    const uniqueLines = [...new Set(lines)];
-                    if (uniqueLines.length === 0) {
-                        this.showNotification("No reviews found to process.", "error");
-                        return;
-                    }
-                    this.state.ownerState.reviews = uniqueLines.map(line => ({ text: line }));
-                    this.showNotification(`${uniqueLines.length} unique reviews processed.`, "success");
-                    if (shouldRender) this.updateView();
-                },
+    const { bulkText } = this.state.ownerState;
+    const normalized = (bulkText || '').replace(/\r\n/g, '\n').trim();
+    if (!normalized) {
+        this.showNotification("No reviews found to process.", "error");
+        return;
+    }
+
+    // Prefer paragraph split (blank lines). Fallback to per-line if no blank lines.
+    const blocks = (/\n\s*\n/.test(normalized) ? normalized.split(/\n\s*\n/g) : normalized.split(/\n/g))
+        .map(b => b.trim())
+        .filter(b => b.length > 0);
+
+    // Soft de-duplication (ignore whitespace/case)
+    const seen = new Set();
+    const unique = [];
+    for (const b of blocks) {
+        const key = b.replace(/\s+/g, ' ').toLowerCase();
+        if (!seen.has(key)) {
+            seen.add(key);
+            unique.push(b);
+        }
+    }
+
+    if (!unique.length) {
+        this.showNotification("No reviews found to process.", "error");
+        return;
+    }
+
+    this.state.ownerState.reviews = unique.map(text => ({ text }));
+    this.showNotification(`${unique.length} unique ${unique.length === 1 ? 'review' : 'reviews'} processed.`, "success");
+    if (shouldRender) this.updateView();
+},
+
 
                 // --- UTILITIES & MODALS ---
                 resetOwnerState(shouldRender = true) {
