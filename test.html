@@ -67,14 +67,19 @@
 
         /* Main Container & Card Styles */
         .polished-container, .review-item {
-            background: rgba(17, 7, 44, 0.6);
-            backdrop-filter: blur(10px);
-            border: 1px solid var(--border-color);
-            border-radius: 1rem;
-            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-            position: relative;
-            overflow: hidden;
-        }
+    background: rgba(17, 7, 44, 0.6);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    /* Limit transitions to visual-only to avoid any reflow jank */
+    transition: border-color 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+                box-shadow 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+                background-color 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+                transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    position: relative;
+    overflow: hidden;
+}
+
 
         /* Aurora Glow Effect on Hover */
         .polished-container::after, .review-item::after {
@@ -151,7 +156,8 @@
             from { opacity: 0; transform: translateY(-15px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        .fade-in-down { animation: fadeInDown 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+        /* Disable screen fade for view swaps; keeps modals free to animate if you add a different class */
+.fade-in-down { animation: none !important; }
 
         /* Notification Toast - TOP CENTER */
         #notification-container {
@@ -357,11 +363,14 @@
                     };
 
                     if (place.reviews && place.reviews.length > 0) {
-                        const positiveReviews = place.reviews.filter(r => r.rating >= 4).map(r => r.text);
-                        ownerState.promptGenerator.input = positiveReviews.join('\n\n');
-                    } else {
-                        ownerState.promptGenerator.input = 'No recent positive reviews found. You can paste your own points manually.';
-                    }
+    const positiveReviews = place.reviews
+        .filter(r => r.rating >= 4)
+        .map(r => this.sanitizeText(r.text));
+    ownerState.promptGenerator.input = positiveReviews.join('\n\n');
+} else {
+    ownerState.promptGenerator.input = 'No recent positive reviews found. You can paste your own points manually.';
+}
+
 
                     this.showNotification(`Selected: ${place.name}`, "success");
 
@@ -417,7 +426,7 @@
                             case 'submitter': content = this.renderOwnerSubmitterView(); break;
                         }
                     }
-                    viewContainer.innerHTML = `<div class="fade-in-down">${content}</div>`;
+                    viewContainer.innerHTML = content;
                     
                     setTimeout(() => this.initializeMapsForCurrentView(), 0);
                 },
@@ -691,7 +700,7 @@
                         this.updateAiProgress("Generated prompt for AI.", 25);
                         this.startSmoothProgress(25);
 
-                        const model = geminiModel === 'flash-lite' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash-preview-05-20';
+                        const model = geminiModel === 'flash-lite' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash';
                         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
                         await new Promise(res => setTimeout(res, 500));
                         this.updateAiProgress(`Sending request to "${model}"...`, 40);
@@ -811,7 +820,7 @@
     const parts     = address.split(',').map(s => s.trim()).filter(Boolean);
     const cityLabel = parts.length >= 2 ? parts[parts.length - 2] : (parts[0] || '');
 
-    // Build soft SEO hints from ONLY your inputs (companyName + context). No preset categories.
+    // Build soft SEO hints ONLY from your inputs (no preset categories)
     const seedText = (`${companyName || ''} ${context || ''}`).toLowerCase();
     const tokens = (seedText.match(/[a-z][a-z\-]+/g) || []).filter(w => w.length > 2);
     const stop = new Set([
@@ -822,12 +831,12 @@
     ]);
     const filtered = tokens.filter(w => !stop.has(w));
 
-    // Top unigrams
+    // top unigrams
     const freq = Object.create(null);
     for (const w of filtered) freq[w] = (freq[w] || 0) + 1;
     const topWords = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0, 8).map(([w]) => w);
 
-    // Top bigrams (to catch phrase-y hints like "digital lock", "math tuition")
+    // top bigrams (captures phrase-y hints like "digital lock", "math tuition")
     const bigrams = [];
     for (let i = 0; i < filtered.length - 1; i++) {
         const a = filtered[i], b = filtered[i+1];
@@ -835,7 +844,7 @@
     }
     const topBigrams = [...new Set(bigrams)].slice(0, 6);
 
-    // Compact hint set. Model is told to ignore if unnatural.
+    // compact hint set; the model is told to ignore if unnatural
     const seeds = [...new Set([...topBigrams, ...topWords])];
     const keywordPool = [...new Set(
         seeds.flatMap(k => cityLabel ? [`${k} in ${cityLabel}`, `${cityLabel} ${k}`, k] : [k])
@@ -845,37 +854,130 @@
         ? `4.  **Company Name Usage:** Mention "${companyName}" in only a small, random subset of reviews (≈5–7 of 50). In all others, keep it generic ("this place", "the team", "the staff").`
         : `4.  **Company Name Usage:** Do NOT include any specific company name; use general references ("this place", "the team", "the service").`;
 
-    let prompt = `You are an expert copywriter specializing in creating authentic, human-like user-generated content.
+    // ---------- Base prompt (Quick & Quality share this core) ----------
+    let prompt = `You are an expert copywriter specializing in authentic, human-like user-generated content.
 TASK: Based on the CONTEXT below, craft 50 highly realistic, positive Google reviews. Each review must feel like a snapshot of a real person's genuine experience.
 CONTEXT / KEYWORDS:
 ${(context || '').trim()}
 CRITICAL REQUIREMENTS:
-1.  **FORMATTING (ABSOLUTE FIRST PRIORITY):** Your output MUST be ONLY the reviews. No intro/outro. Separate each review with ONE blank line (double newline). Do NOT number them and do NOT add separators like "----".
-2.  **NARRATIVE & DETAIL:** Avoid generic praise. Tell a mini-story: a situation, what happened, and the outcome/feeling. Include plausible, specific details; keep them truthful to the CONTEXT.
-3.  **NATURAL VARIETY:** 50 different voices. Vary tone, sentence length, punctuation, and formality. Use emojis very sparingly and only when they feel natural.
+1.  **FORMATTING (ABSOLUTE FIRST PRIORITY):** Output ONLY the reviews. No intro/outro. Separate each review with ONE blank line (double newline). Do NOT number or bullet them.
+2.  **NARRATIVE & DETAIL:** Avoid generic praise. Tell a mini-story: a situation, what happened, and the result/feeling. Use plausible, specific details consistent with the CONTEXT.
+3.  **NATURAL VARIETY:** 50 different voices. Vary tone, sentence length, punctuation, and formality. Use emojis sparingly and only when natural.
 ${companyNameInstruction}
-5.  **AUTHENTICITY GUARDRAILS:** Do not invent staff names or private info unless they appear in CONTEXT. No unrealistic claims, no incentives, no insider/employee perspective.`;
+5.  **AUTHENTICITY & PRIVACY:** Do not invent personal data. No staff names unless present in CONTEXT. No unrealistic claims, no incentives, no insider/employee perspective.
+6.  **PLAIN TEXT ONLY:** No markdown (e.g., **bold**, *italics*, __underscores__, ~~strike~~, backticks), no hashtags, no full addresses, no unit/suite numbers (e.g., "#02-3539"), no phone numbers, no emails, no URLs.`;
 
+    // ---------- PERFECT QUALITY MODE ----------
     if (isQuality) {
         const keywordList = keywordPool.join('; ');
+
         prompt += `
 
-QUALITY MODE — ADD THE FOLLOWING:
-6.  **LENGTH & STRUCTURE:** Aim for 2–6 sentences per review (~50–140 words). Include a small minority of short reviews (1–2 sentences) for realism (~10%).
-7.  **SEO CURATION (NATURAL, INFERRED):** First infer the business type and core offerings ONLY from the CONTEXT and/or company name. When it feels natural (not forced), weave in ONE subtle phrase related to those offerings. The following hints may help but can be ignored entirely if off-category: [${keywordList}]. Mention locality (e.g., "${cityLabel}") only if it reads naturally, and never more than once per review.
-8.  **SPECIFICITY:** Include concrete moments (what you asked for, what you received, timing/turnaround, how staff handled a request, how the result helped you).
-9.  **DIVERSITY OF INTENT:** Mix first visit, repeat visit, urgent need, comparison after a bad prior experience, special occasion, family use, after-work stop, etc.
-10. **READABILITY OVER KEYWORDS:** Never keyword-stuff. If a hint sounds awkward, drop it. Human voice > SEO.`;
+QUALITY MODE — PERFECT VARIETY & NON-REPETITION
+
+A) OUTPUT CONTROL
+- Produce EXACTLY 50 reviews, each as one paragraph, separated by ONE blank line, no numbering/bullets.
+
+B) RANDOMIZED STRUCTURE (NO BLOCK PATTERNS)
+- For each review, RANDOMLY choose ONE structure from the catalog below.
+- Do NOT use any structure more than 6 times total and NEVER more than 2 times in a row.
+- Shuffle structures across the 50 outputs; avoid visible blocks (e.g., 1–10 same structure).
+
+VARIETY CATALOG (pick 1 per review)
+1) Problem → Solution → Outcome
+2) Before/After transformation
+3) First-time anxiety → reassurance after visit
+4) Small hiccup handled gracefully → overall positive
+5) Feature spotlight (one clear feature/benefit only)
+6) Speed/turnaround focus (booking, response, delivery)
+7) Value/price clarity (what you paid vs. benefit you got)
+8) Atmosphere/ambience, comfort, cleanliness
+9) Communication & follow-up (messages, calls, clarity)
+10) Comparison to previous provider (no naming competitors)
+11) Family/kids-friendly or elderly-friendly perspective
+12) Accessibility/convenience (hours, parking/transport—not full addresses)
+13) Repeat customer/loyalty angle (why you keep returning)
+14) Special occasion / urgent need scenario
+15) Technical/quality geek-out (one specific, accurate detail only)
+16) Staff helpfulness without names (use roles like "front desk", "technician")
+17) Expectations vs. reality (pleasant surprise)
+18) Out-of-the-way but worth it (no addresses)
+19) Booking/payment smoothness
+20) Post-service follow-through (after-sales, check-ins)
+
+C) SENTENCE & RHYTHM DIVERSITY
+- Each review: 2–6 sentences total (~50–140 words).
+- Vary rhythm: mix a short punchy sentence with longer ones; use occasional compound/complex sentences.
+- Rotate openers. Avoid repeating the same 3-word start more than once across all 50 (e.g., not many “I was” / “We were”).
+
+D) SEO CURATION (SUBTLE, NATURAL)
+- First infer the business type & offerings ONLY from CONTEXT/company name.
+- Optionally weave ONE soft phrase per review if natural; ignore if awkward. Helpful hints (optional): [${keywordList}]
+- Mention locality like "${cityLabel}" at most once in some reviews (not all).
+
+E) SPECIFICITY WITHOUT PII
+- Include concrete moments (what you asked for, what you received, how staff handled a request, timing/turnaround, how the result helped).
+- No addresses, unit numbers, phone, email, or URLs. If present in CONTEXT, ignore it.
+
+F) PERSONA & INTENT ROTATION
+- Rotate personas: solo, couple, parent, busy professional, student, elderly caretaker, hobbyist, first-timer, repeat customer.
+- Rotate intents: urgent fix, regular maintenance/class, upgrade, gift, trial, evaluation after a prior bad experience (without naming).
+
+G) PHRASE & LEXICAL LIMITS (ANTI-REPETITION)
+- Hard limits across all 50: "highly recommend" ≤ 2; "top-notch" ≤ 1; "worth every penny" = 0; "amazing service" ≤ 2; "great experience" ≤ 2.
+- Prefer synonyms and paraphrases; avoid echoing the same adjective twice in the same review.
+
+H) QUALITY & READABILITY
+- Prefer clarity over buzzwords. No keyword stuffing. Human voice > SEO.
+
+I) FINAL SELF-CHECK (MANDATORY)
+- Before returning, scan all 50: if any two reviews share the same opening 5 words, rewrite one.
+- If any sentence is duplicated verbatim across reviews, rewrite one.
+- If more than 2 reviews in a row use the same structure, rewrite to a different structure.
+- Ensure plain text only (no markdown/hashtags/addresses/units/contacts).`;
     }
 
     return prompt;
 },
 
+sanitizeText(text) {
+    if (!text) return '';
+    let t = String(text);
+
+    // Remove markdown (**bold**, *italics*, __underline__, ~~strike~~, `code`)
+    t = t.replace(/\*\*(.*?)\*\*/g, '$1')
+         .replace(/__(.*?)__/g, '$1')
+         .replace(/\*(.*?)\*/g, '$1')
+         .replace(/~~(.*?)~~/g, '$1')
+         .replace(/`{1,3}([^`]+)`{1,3}/g, '$1');
+
+    // Remove hashtags & unit/suite numbers (e.g., #02-3539, #123, #B1-23)
+    t = t.replace(/#\s?[A-Za-z]?\d{1,5}(?:-[A-Za-z0-9]{1,5})?\b/g, '');
+
+    // Remove "Unit/Suite/Level/Lvl/Blk/Block 02-3539" forms
+    t = t.replace(/\b(?:unit|suite|level|lvl|blk|block)\s*[A-Za-z]?\d{1,5}(?:-[A-Za-z0-9]{1,5})?\b/gi, '');
+
+    // Remove SG postal line (e.g., Singapore 123456)
+    t = t.replace(/\bS(?:ingapore)?\s*\d{6}\b/gi, '');
+
+    // Strip URLs, emails, phone numbers
+    t = t.replace(/\b(?:https?:\/\/|www\.)\S+\b/gi, '')
+         .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '')
+         .replace(/\b\+?\d[\d\-\s]{6,}\b/g, '');
+
+    // Collapse extra spaces and fix punctuation spacing
+    t = t.replace(/\s*([.,!?:;])\s*/g, '$1 ').replace(/\s{2,}/g, ' ').trim();
+    return t;
+},
+
+
                 cleanAiResponse(aiText) {
-                    const reviewsArray = aiText.trim().split(/\n\s*\n/);
-                    const firstReviewIndex = reviewsArray.findIndex(line => line.length > 25 && !/^\s*here are|sure, here|absolutely/i.test(line));
-                    return firstReviewIndex !== -1 ? reviewsArray.slice(firstReviewIndex).join('\n\n') : aiText.trim();
-                },
+    const reviewsArray = aiText.trim().split(/\n\s*\n/);
+    const firstReviewIndex = reviewsArray.findIndex(line => line.length > 25 && !/^\s*here are|sure, here|absolutely/i.test(line));
+    const text = firstReviewIndex !== -1 ? reviewsArray.slice(firstReviewIndex).join('\n\n') : aiText.trim();
+    return this.sanitizeText(text);
+},
+
 
                 processBulkReviews(shouldRender = true) {
     const { bulkText } = this.state.ownerState;
@@ -906,7 +1008,7 @@ QUALITY MODE — ADD THE FOLLOWING:
         return;
     }
 
-    this.state.ownerState.reviews = unique.map(text => ({ text }));
+    this.state.ownerState.reviews = unique.map(text => ({ text: this.sanitizeText(text) }));
     this.showNotification(`${unique.length} unique ${unique.length === 1 ? 'review' : 'reviews'} processed.`, "success");
     if (shouldRender) this.updateView();
 },
