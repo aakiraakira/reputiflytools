@@ -1812,6 +1812,7 @@ table.filter-collapsed .toggle-filter-btn > i {
         
         /* --- UI Polish & Animations --- */
         /* --- START: Folder Peek-on-Hover Feature --- */
+            /* --- START: Folder Peek-on-Hover Feature (FIXED) --- */
             .collection-children {
                 max-height: 0;
                 opacity: 0;
@@ -1819,28 +1820,29 @@ table.filter-collapsed .toggle-filter-btn > i {
                 /* This is the animation for the standard CLICK to expand/collapse */
                 transition: max-height 0.3s ease-in-out, opacity 0.2s ease-in-out;
                 will-change: max-height, opacity;
-                /* This padding aligns the nested items correctly */
                 padding-left: 16px; 
             }
 
-            /* This class is added by JavaScript when a folder is CLICKED open */
+            /* This is the "CLICKED OPEN" state. */
             .collection-children.expanded {
                 max-height: 1000px; /* A large value for full expansion */
                 opacity: 1;
                 overflow: visible; /* Allows the list to be its full height */
             }
 
-            /* * This is the "Peek" hover effect.
-             * It triggers when you hover the folder's wrapper,
-             * but *only* if the folder is NOT already clicked open.
-             */
-            .collection-item-wrapper:hover > .collection-children:not(.expanded) {
+            /* * This is the "PEEK" hover effect.
+             * It will ONLY apply if the wrapper is hovered
+             * AND its child list does NOT have the .expanded class.
+             * This fixes the bug.
+            */
+            #collections-list-container:not(.hover-locked) .collection-item-wrapper:hover > .collection-children:not(.expanded) {
                 max-height: 300px;  /* A fixed height for "peeking" */
                 opacity: 1;
                 overflow-y: auto;   /* Allows scrolling if the peek window is too small */
                 /* This is a smoother, slightly delayed animation for the peek */
                 transition: max-height 0.4s ease-out, opacity 0.3s ease-out 0.1s; 
             }
+            /* --- END: Folder Peek-on-Hover Feature (FIXED) --- */
             /* --- END: Folder Peek-on-Hover Feature --- */
 #note-editor-body {
     overflow-wrap: break-word;
@@ -1849,7 +1851,18 @@ table.filter-collapsed .toggle-filter-btn > i {
     letter-spacing: -0.015em;
     padding-bottom: 50vh; /* Adds scroll-past-the-end space */
 }
+/* --- START: Editor Typing Polish --- */
+        /* Change the blinking cursor color to your brand's accent */
+        #note-editor-body {
+            caret-color: var(--accent-primary);
+        }
 
+        /* Change the text highlight color */
+        ::selection {
+            background-color: var(--accent-primary);
+            color: var(--bg-main); /* Makes text readable on the highlight */
+        }
+        /* --- END: Editor Typing Polish --- */
 #note-editor-body p, #public-note-content p {
     margin-top: 0.5em; /* Reduced from 0.75em for more subtle spacing */
 }
@@ -2147,6 +2160,7 @@ body.sidebar-collapsed #editor-pane {
         .collection-item .chevron { transition: transform 0.15s ease; }
         .collection-item.open > .chevron { transform: rotate(90deg); }
         .collection-item-wrapper.drop-target-folder { background-color: rgba(230, 57, 127, 0.1); border: 1px dashed var(--accent-primary); }
+        
         .file-attachment-widget {
     display: flex;
     align-items: center;
@@ -12898,37 +12912,53 @@ if (button) {
                 // REPLACE the existing event listener with this one
 // REPLACE the existing event listener with this one
 app.containers.collectionsList.addEventListener('click', async (e) => {
-    // First, check if the new plus button was clicked
-    const addBtn = e.target.closest('.add-note-btn');
-    if (addBtn) {
-        e.preventDefault();
-        e.stopPropagation(); // This stops the click from also navigating to the note/folder
+                    // First, check if the new plus button was clicked
+                    const addBtn = e.target.closest('.add-note-btn');
+                    if (addBtn) {
+                        e.preventDefault();
+                        e.stopPropagation(); // This stops the click from also navigating to the note/folder
 
-        const parentId = addBtn.dataset.parentId === 'null' ? null : addBtn.dataset.parentId;
-        createNewNote(true, '', parentId); 
-        return; // Action is done, so we stop here
-    }
+                        const parentId = addBtn.dataset.parentId === 'null' ? null : addBtn.dataset.parentId;
+                        createNewNote(true, '', parentId);
+                        return; // Action is done, so we stop here
+                    }
 
-    // If the plus button wasn't clicked, run the original navigation logic
-    const itemLink = e.target.closest('.collection-item-link');
-    if (!itemLink) return;
+                    // If the plus button wasn't clicked, run the original navigation logic
+                    const itemLink = e.target.closest('.collection-item-link');
+                    if (!itemLink) return;
 
-    e.preventDefault();
+                    e.preventDefault();
 
-    const wrapper = itemLink.closest('.collection-item-wrapper');
-    const id = wrapper.dataset.id;
-    const { item } = findItem(id);
+                    const wrapper = itemLink.closest('.collection-item-wrapper');
+                    const id = wrapper.dataset.id;
+                    const { item } = findItem(id);
 
-    state.settings.activeTag = null; // Deactivate tag filter
+                    state.settings.activeTag = null; // Deactivate tag filter
+                    
+                    let wasJustClosed = false; // <-- ADD THIS FLAG
 
-    if (item.type === 'folder') {
-        if (window.innerWidth < 768) {
-            state.settings.activeView = 'list';
-        }
-        state.settings.activeCollectionId = id;
-        state.settings.activeNoteId = null;
-        item.expanded = !item.expanded;
-    } else if (item.type === 'note') {
+                    if (item.type === 'folder') {
+                        if (window.innerWidth < 768) {
+                            state.settings.activeView = 'list';
+                        }
+                        state.settings.activeCollectionId = id;
+                        state.settings.activeNoteId = null;
+
+                        // --- START: NEW HOVER-LOCK LOGIC ---
+                        // If the folder was expanded (and is now being closed)
+                        if (item.expanded) {
+                            // Apply the lock to the main container
+                            app.containers.collectionsList.classList.add('hover-locked');
+                            // Remove the lock after 1 second
+                            setTimeout(() => {
+                                app.containers.collectionsList.classList.remove('hover-locked');
+                            }, 1000); 
+                        }
+                        // --- END: NEW HOVER-LOCK LOGIC ---
+
+                        item.expanded = !item.expanded;
+
+                    } else if (item.type === 'note') {
         // ---💾 THIS IS THE FIX ---
         // It now works because the function is async
         if (isNoteDirty && state.settings.activeNoteId !== id) {
@@ -12937,10 +12967,19 @@ app.containers.collectionsList.addEventListener('click', async (e) => {
         // ---💾 END OF FIX ---
 
         state.settings.activeNoteId = id;
-        const result = findItem(id);
-        const parent = result.parent;
-        state.settings.activeCollectionId = (Array.isArray(parent)) ? null : parent.id;
-        if (window.innerWidth < 768) {
+                const result = findItem(id);
+                const parent = result.parent;
+                const parentId = (Array.isArray(parent)) ? null : parent.id; // <-- MODIFIED
+                state.settings.activeCollectionId = parentId;
+
+                // --- START: NEW FOLDER EXPAND LOGIC ---
+                // If the parent is a folder and it's currently closed, expand it.
+                if (parent && !Array.isArray(parent) && !parent.expanded) {
+                    parent.expanded = true;
+                }
+                // --- END: NEW FOLDER EXPAND LOGIC ---
+
+                if (window.innerWidth < 768) {
             toggleMobileSidebar(false);
         }
     }
@@ -12964,6 +13003,7 @@ app.containers.collectionsList.addEventListener('click', async (e) => {
                     state.settings.activeCollectionId = null;
                     saveState();
                     render();
+                   
                 });
 
                 let draggedItemId = null;
