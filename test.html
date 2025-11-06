@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard (Minimalist)</title>
+    <title>Admin Dashboard (Portable)</title>
     <link rel="icon" type="image/png" href="https://www.google.com/s2/favicons?domain=google.com&sz=128">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -52,42 +52,35 @@
         }
 
         /* Simple toggle switch */
-        .toggle-switch {
-            position: relative;
-            display: inline-block;
-            width: 44px;
-            height: 24px;
-        }
+        .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; }
         .toggle-switch input { opacity: 0; width: 0; height: 0; }
-        .toggle-slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background-color: #4b5563; /* gray-600 */
-            transition: .4s;
-            border-radius: 24px;
-        }
-        .toggle-slider:before {
-            position: absolute;
-            content: "";
-            height: 16px; width: 16px;
-            left: 4px; bottom: 4px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-        input:checked + .toggle-slider { background-color: #4f46e5; /* indigo-600 */ }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #4b5563; transition: .4s; border-radius: 24px; }
+        .toggle-slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .toggle-slider { background-color: #4f46e5; }
         input:checked + .toggle-slider:before { transform: translateX(20px); }
 
         /* Full-screen modal for management */
-        .manage-modal {
+        .manage-modal { position: fixed; inset: 0; background-color: #111827; z-index: 50; padding: 1.5rem; overflow-y: auto; }
+        
+        /* [NEW] Sticky Copy Button (FAB) */
+        .sticky-fab {
             position: fixed;
-            inset: 0;
-            background-color: #111827; /* body bg */
-            z-index: 50;
-            padding: 1.5rem;
-            overflow-y: auto;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            z-index: 40;
+            width: 3.5rem; /* 56px */
+            height: 3.5rem; /* 56px */
+            border-radius: 9999px; /* full */
+            background-color: #14B8A6; /* teal-500 */
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
         }
+        .sticky-fab:hover { background-color: #0D9488; /* teal-600 */ }
+        .sticky-fab:disabled { background-color: #4b5563; /* gray-600 */ }
     </style>
 </head>
 <body class="text-gray-200">
@@ -95,6 +88,8 @@
     <div id="app" class="container mx-auto max-w-7xl">
         <div id="admin-view"></div>
     </div>
+    
+    <div id="sticky-fab-container"></div>
     
     <div id="generic-modal-container"></div>
     <div id="notification" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-white py-3 px-5 rounded-lg shadow-xl z-[10001]"></div>
@@ -110,14 +105,15 @@
                     data: { companies: [] },
                     activeCompanyId: localStorage.getItem('activeCompanyTab') || null,
                     adminState: {
-                        showCompleted: false, // OFF by default
-                        isManageModalOpen: false // Modal is closed by default
+                        showCompleted: false,
+                        isManageModalOpen: false
                     }
                 },
                 // --- DOM ELEMENTS ---
                 elements: {
                     app: document.getElementById('app'),
                     adminView: document.getElementById('admin-view'),
+                    stickyFabContainer: document.getElementById('sticky-fab-container'),
                     genericModalContainer: document.getElementById('generic-modal-container'),
                     notification: document.getElementById('notification'),
                 },
@@ -141,7 +137,6 @@
 
                 initializeMapsForCurrentView() {
                      if (!this.state.mapsInitialized) return;
-                     // Only init maps if the manage modal is open
                      if (this.state.currentView === 'admin' && this.state.adminState.isManageModalOpen) {
                         this.initializeAdminViewMaps();
                      }
@@ -151,7 +146,6 @@
                 initializeAdminViewMaps() {
                      const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
                      if(company) {
-                        // We target the input ID *inside the modal*
                         this.initAutocomplete(`admin-link-input-modal-${company.id}`, (place) => this.handleAdminPlaceSelection(place, company.id));
                      }
                 },
@@ -160,15 +154,10 @@
                     if (!this.state.mapsInitialized) return;
                     const input = document.getElementById(inputId);
                     if (!input || input.dataset.acAttached) return;
-
                     const autocompleteOptions = { fields: ["place_id", "name", "url"], types: ["establishment"] };
                     const autocomplete = new google.maps.places.Autocomplete(input, autocompleteOptions);
                     input.dataset.acAttached = 'true'; 
-
-                    autocomplete.addListener('place_changed', () => {
-                        const place = autocomplete.getPlace();
-                        callback(place);
-                    });
+                    autocomplete.addListener('place_changed', () => callback(autocomplete.getPlace()));
                 },
                 
                 handleAdminPlaceSelection(place, companyId) {
@@ -178,7 +167,7 @@
                         company.reviewLink = `https://search.google.com/local/writereview?placeid=${place.place_id}`;
                         company.name = place.name;
                         this.saveData();
-                        this.render(); // Re-render the whole app (modal included)
+                        this.render();
                         this.showNotification(`Updated link for ${place.name}`);
                     }
                 },
@@ -208,19 +197,18 @@
 
                 // --- VIEW MANAGEMENT ---
                 render() {
-                    this.renderAdminView(); // Renders the main page
+                    this.renderAdminView(); // Renders the main page content
+                    this.renderStickyFab();  // Renders the floating button
+                    
                     if (this.state.adminState.isManageModalOpen) {
                         this.renderManageModal(); // Renders the modal on top
                     } else {
                         this.elements.genericModalContainer.innerHTML = ''; // Clear modal
                     }
-                    // Defer map init until *after* modal is rendered
                     setTimeout(() => this.initializeMapsForCurrentView(), 0);
                 },
                 
                 // --- ADMIN VIEW RENDERING ---
-                
-                // [NEW] Renders the sticky header and the main content area
                 renderAdminView() {
                     const companies = this.state.data.companies;
                     const company = companies.find(c => c.id === this.state.activeCompanyId);
@@ -248,6 +236,23 @@
                         </main>
                     `;
                 },
+                
+                // [NEW] Renders the floating action button
+                renderStickyFab() {
+                    const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
+                    const hasUndoneReviews = company && (company.reviews || []).some(r => r.status !== 'done');
+                    
+                    if (hasUndoneReviews && !this.state.adminState.isManageModalOpen) {
+                        this.elements.stickyFabContainer.innerHTML = `
+                            <button id="sticky-copy-btn" class="sticky-fab" title="Copy Next Review">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                            </button>`;
+                    } else {
+                        this.elements.stickyFabContainer.innerHTML = ''; // Hide button
+                    }
+                },
 
                 renderAdminEmptyState() {
                     return `<div class="text-center py-16 px-6 bg-gray-800 rounded-lg">
@@ -256,8 +261,6 @@
                             </div>`;
                 },
                 
-                // [NEW] Renders *only* the content for the selected company
-                // All management UI is removed.
                 renderAdminCompanyDetails(company) {
                     const totalReviews = company.reviews?.length || 0;
                     const doneReviews = company.reviews?.filter(r => r.status === 'done').length || 0;
@@ -298,7 +301,7 @@
                     `;
                 },
 
-                // [NEW] Renders the "Manage" modal
+                // [NEW] Renders the "Manage" modal with new State import/export
                 renderManageModal() {
                     const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
                     
@@ -307,6 +310,18 @@
                             <div class="flex justify-between items-center mb-6">
                                 <h2 class="text-3xl font-bold text-white">Manage</h2>
                                 <button id="modal-close-btn" class="text-3xl text-gray-400 hover:text-white p-2">&times;</button>
+                            </div>
+
+                            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 mb-8">
+                                <h3 class="text-xl font-semibold text-white mb-4">Global Data</h3>
+                                <p class="text-sm text-gray-400 mb-4">Save or load the entire application state (all companies) to pass to another admin.</p>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <label class="file-input-button w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-center">
+                                        Import Full State
+                                        <input type="file" id="import-state-file" class="hidden" accept=".json">
+                                    </label>
+                                    <button id="export-full-state-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Export Full State</button>
+                                </div>
                             </div>
 
                             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 mb-8">
@@ -320,7 +335,6 @@
                             ${company ? `
                             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
                                 <h3 class="text-xl font-semibold text-white mb-4">Manage: ${company.name}</h3>
-                                
                                 <div class="space-y-4">
                                     <div>
                                         <label class="text-sm font-medium text-gray-300 mb-2 block">Find / Update Review Link</label>
@@ -329,11 +343,11 @@
                                     </div>
                                     
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-gray-700">
-                                        <label class="file-input-button w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-center">
-                                            Upload File
+                                        <label class="file-input-button w-full bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg text-center">
+                                            Import Reviews to "${company.name}"
                                             <input type="file" data-id="${company.id}" class="upload-admin-file hidden" accept=".json">
                                         </label>
-                                        <button data-id="${company.id}" class="download-admin-file-btn w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Download Data</button>
+                                        <button data-id="${company.id}" class="download-admin-file-btn w-full bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Export "${company.name}" Data</button>
                                     </div>
 
                                     <div class="pt-4 border-t border-gray-700">
@@ -345,13 +359,11 @@
                     `;
                 },
 
-                // [ENHANCED] Review card with de-emphasized secondary buttons
                 getAdminReviewHtml(company, review, index) {
                     const isDone = review.status === 'done';
                     const hasImages = review.requiresImage && review.imageDataUrls && review.imageDataUrls.length > 0;
                     return `
                         <div class="review-item relative bg-gray-800 p-6 rounded-xl mb-6 shadow-lg border ${isDone ? 'border-green-800' : 'border-gray-700'} ${isDone && this.state.adminState.showCompleted ? 'opacity-60' : ''}">
-                            
                             <div class="flex justify-between items-center mb-4">
                                 <span class="text-2xl font-bold text-indigo-400">#${index + 1}</span>
                                 ${isDone 
@@ -359,7 +371,6 @@
                                     : `<button data-index="${index}" class="copy-btn flex-1 sm:flex-none sm:max-w-xs bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg">Copy for Telegram</button>`
                                 }
                             </div>
-
                             <div class="grid grid-cols-1 ${hasImages ? 'md:grid-cols-2' : ''} gap-6">
                                 <div class="space-y-2">
                                     <p class="font-semibold text-gray-300">Review Content:</p>
@@ -367,7 +378,6 @@
                                 </div>
                                 ${hasImages ? `<div> <p class="font-semibold text-gray-300 mb-2">Submitted Images:</p> <div class="grid grid-cols-2 sm:grid-cols-3 gap-2"> ${review.imageDataUrls.map((url, imgIndex) => `<img src="${url}" data-review-index="${index}" data-image-index="${imgIndex}" class="admin-image-preview w-full h-24 object-cover rounded-lg cursor-pointer hover:opacity-80 transition-opacity">`).join('')} </div> </div>` : ''}
                             </div>
-                             
                              <div class="mt-6 pt-4 border-t border-gray-700 flex flex-wrap gap-3">
                                  ${isDone ? `<button data-index="${index}" class="undo-review-btn text-yellow-400 hover:text-white font-medium text-sm py-2 px-4 rounded-lg hover:bg-gray-700 transition-colors">Undo</button>` : ''}
                                  ${hasImages ? `<button data-index="${index}" class="save-image-btn text-gray-400 hover:text-white font-medium text-sm py-2 px-4 rounded-lg hover:bg-gray-700 transition-colors">Save All Images</button>` : ''}
@@ -379,11 +389,30 @@
                 attachListeners() {
                     this.elements.app.addEventListener('click', e => this.handleAdminClick(e));
                     this.elements.app.addEventListener('change', e => this.handleAdminChange(e));
+                    // [NEW] Listener for the FAB container
+                    this.elements.stickyFabContainer.addEventListener('click', e => this.handleAdminClick(e));
                 },
                 
                 handleAdminClick(e) {
                     const target = e.target;
                     
+                    // --- [NEW] Sticky FAB Click ---
+                    if (target.closest('#sticky-copy-btn')) {
+                        const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
+                        if (!company) return;
+                        
+                        const latestUndone = company.reviews.map((r, i) => ({...r, originalIndex: i})).find(r => r.status !== 'done');
+                        if (latestUndone) {
+                            this.copyToClipboard(`Click: ${company.reviewLink}\n\n\`${latestUndone.text}\``, 'Next review copied!');
+                            company.reviews[latestUndone.originalIndex].status = 'done';
+                            this.saveData(); 
+                            this.render();
+                        } else {
+                            this.showNotification('No undone reviews for this company.');
+                        }
+                        return;
+                    }
+
                     // --- Modal & Header Clicks ---
                     if (target.closest('#manage-btn')) {
                         this.state.adminState.isManageModalOpen = true;
@@ -417,7 +446,7 @@
                                     this.state.activeCompanyId = this.state.data.companies[0]?.id || null;
                                     localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
                                 }
-                                this.state.adminState.isManageModalOpen = false; // Close modal on delete
+                                this.state.adminState.isManageModalOpen = false;
                                 this.saveData(); 
                                 this.render();
                             });
@@ -429,6 +458,24 @@
                             const a = document.createElement('a');
                             a.href = url; a.download = `data_${companyToDownload.name.replace(/\s+/g, '_')}.json`;
                             document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                            return;
+                        }
+                        // [NEW] Export Full State
+                        if (target.closest('#export-full-state-btn')) {
+                            const fullState = JSON.stringify(this.state.data, null, 2);
+                            const dataBlob = new Blob([fullState], { type: 'application/json' });
+                            const url = URL.createObjectURL(dataBlob);
+                            const a = document.createElement('a');
+                            const date = new Date().toISOString().split('T')[0];
+                            a.href = url;
+                            a.download = `review_dashboard_state_${date}.json`;
+                            document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                            this.showNotification('Full state exported!');
+                            return;
+                        }
+                        // [NEW] Import Full State (trigger)
+                        if (target.closest('#import-full-state-btn')) {
+                            document.getElementById('import-state-file').click();
                             return;
                         }
                     }
@@ -471,16 +518,48 @@
                     if (target.id === 'company-select') {
                         this.state.activeCompanyId = target.value;
                         localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
-                        this.render(); // Re-render main content
+                        this.render();
                         return;
                     }
-
                     if (target.id === 'show-completed-toggle') {
                         this.state.adminState.showCompleted = target.checked;
-                        this.render(); // Re-render to apply filter
+                        this.render();
+                        return;
+                    }
+                    
+                    // [NEW] Handle Full State Import
+                    if (target.id === 'import-state-file') {
+                        const file = e.target.files[0];
+                        if (file) {
+                            this.showConfirmModal('Overwrite All Data?', 'This will replace your entire local data with the contents of this file. This cannot be undone.', () => {
+                                const reader = new FileReader();
+                                reader.onload = (event) => {
+                                    try {
+                                        const newState = JSON.parse(event.target.result);
+                                        if (newState && Array.isArray(newState.companies)) {
+                                            this.state.data = newState;
+                                            this.state.activeCompanyId = newState.companies[0]?.id || null;
+                                            this.saveData();
+                                            this.state.adminState.isManageModalOpen = false;
+                                            this.render();
+                                            this.showNotification('Full state imported successfully!');
+                                        } else {
+                                            this.showNotification('Invalid state file. Must be a valid export.', 'error');
+                                        }
+                                    } catch (err) {
+                                        this.showNotification('Error reading file. Not valid JSON.', 'error');
+                                    }
+                                    e.target.value = ''; // Clear input
+                                };
+                                reader.readAsText(file);
+                            }, () => {
+                                e.target.value = ''; // Clear input if cancelled
+                            });
+                        }
                         return;
                     }
 
+                    // Handle "Import Reviews to Company"
                     if (target.classList.contains('upload-admin-file')) {
                         const file = e.target.files[0];
                         const companyId = e.target.dataset.id;
@@ -505,7 +584,7 @@
                                          }
                                      } else { this.showNotification('Invalid file format. Must contain "link" and "reviews" array.', 'error'); }
                                  } catch (err) { 
-                                    this.showNotification('Error reading file. Make sure it is a valid JSON file.', 'error'); 
+                                    this.showNotification('Error reading file. Not valid JSON.', 'error'); 
                                  } 
                                  finally { e.target.value = ''; }
                              };
@@ -515,14 +594,13 @@
                 },
 
                 // --- UTILITIES & MODALS ---
-                showConfirmModal(title, message, onConfirm) {
-                    // This modal will render inside the #generic-modal-container, on top of the manage modal
+                showConfirmModal(title, message, onConfirm, onCancel = () => {}) {
                     const modal = document.createElement('div');
                     modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100] p-4';
                     modal.innerHTML = `<div class="bg-gray-900 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">${title}</h2><p class="text-gray-300 mb-6">${message}</p><div class="flex justify-end gap-4"><button id="modal-cancel-confirm" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button id="modal-confirm-action" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg">Confirm</button></div></div>`;
                     this.elements.genericModalContainer.appendChild(modal);
                     
-                    document.getElementById('modal-cancel-confirm').onclick = () => modal.remove();
+                    document.getElementById('modal-cancel-confirm').onclick = () => { onCancel(); modal.remove(); };
                     document.getElementById('modal-confirm-action').onclick = () => { onConfirm(); modal.remove(); };
                 },
                 showImageModal(src) {
