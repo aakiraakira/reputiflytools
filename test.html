@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard (Polished)</title>
+    <title>Admin Dashboard (Pro)</title>
     <link rel="icon" type="image/png" href="https://www.google.com/s2/favicons?domain=google.com&sz=128">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,7 +20,6 @@
     </script>
     <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBXdjRQZJd9ySH5mxql4tlXCEVpDH9GGbI&libraries=places&callback=initializeGoogleMaps"></script>
     <style>
-        /* --- AURORA THEME CSS --- */
         :root {
             --bg-primary: #020010;
             --bg-secondary: #11072C;
@@ -69,16 +68,13 @@
             backdrop-filter: blur(10px);
             border: 1px solid var(--border-color);
             border-radius: 1rem;
-            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            transition: border-color 0.3s ease;
             position: relative;
             overflow: hidden;
         }
-
-        /* [FIXED] Removed the laggy ::after glow effect */
         
         .polished-container:hover, .review-item:hover {
             border-color: rgba(168, 85, 247, 0.5);
-            /* [FIXED] Removed laggy box-shadow */
         }
 
         /* Button Styles */
@@ -131,18 +127,6 @@
             background-color: #1a0c3d;
         }
 
-        /* Custom style for the <select> */
-        select.company-select {
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
-            background-position: right 1rem center;
-            background-repeat: no-repeat;
-            background-size: 1.25em 1.25em;
-            padding-right: 2.5rem;
-        }
-
         /* Notification Toast - TOP CENTER */
         #notification-container {
             position: fixed;
@@ -193,7 +177,8 @@
         .pac-item { padding: 0.75rem; cursor: pointer; border-top: 1px solid var(--border-color); }
         .pac-item:first-child { border-top: none; }
         .pac-item:hover { background-color: rgba(168, 85, 247, 0.1); }
-        .pac-item-query { font-weight: 600; color: white; }
+        
+        /* Sticky Header */
         .sticky-header {
             position: sticky;
             top: 0;
@@ -205,6 +190,40 @@
             border-bottom: 1px solid var(--border-color);
         }
         
+        /* [NEW] Horizontal Company Scroller */
+        .company-scroller {
+            display: flex;
+            overflow-x: auto;
+            padding-bottom: 1rem; /* Space for scrollbar */
+            -ms-overflow-style: none; /* IE */
+            scrollbar-width: none; /* Firefox */
+        }
+        .company-scroller::-webkit-scrollbar { display: none; } /* Chrome/Safari */
+        
+        .company-pill {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-right: 0.75rem;
+            font-weight: 500;
+        }
+        .company-pill:hover {
+            background-color: #1a0c3d;
+            color: var(--text-primary);
+        }
+        .company-pill.active {
+            background-image: linear-gradient(to right, var(--accent-primary), var(--accent-secondary));
+            color: white;
+            border-color: transparent;
+            font-weight: 600;
+        }
+
+
         /* Glowing Progress Bar */
         .progress-bar-glow {
             background-image: linear-gradient(to right, var(--accent-primary), var(--accent-secondary), var(--accent-primary));
@@ -227,8 +246,30 @@
         input:checked + .toggle-slider:before { transform: translateX(20px); }
 
         /* Full-screen modal for management */
-        .manage-modal { position: fixed; inset: 0; background-color: var(--bg-primary); z-index: 100; padding: 1rem; overflow-y: auto; }
+        .manage-portal { position: fixed; inset: 0; background-color: var(--bg-primary); z-index: 100; padding: 1rem; overflow-y: auto; }
         
+        /* [NEW] Tabs for Manage Portal */
+        .modal-tab-nav {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 1.5rem;
+        }
+        .modal-tab-btn {
+            padding: 0.75rem 1rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .modal-tab-btn:hover {
+            color: var(--text-primary);
+        }
+        .modal-tab-btn.active {
+            color: var(--accent-primary);
+            border-bottom-color: var(--accent-primary);
+        }
+
         /* Utility */
         .hidden { display: none; }
     </style>
@@ -254,7 +295,8 @@
                     activeCompanyId: localStorage.getItem('activeCompanyTab') || null,
                     adminState: {
                         showCompleted: false,
-                        isManageModalOpen: false
+                        isManagePortalOpen: false, // Renamed
+                        managePortalTab: 'manage' // 'global', 'add', 'manage'
                     }
                 },
                 // --- DOM ELEMENTS ---
@@ -284,7 +326,7 @@
 
                 initializeMapsForCurrentView() {
                      if (!this.state.mapsInitialized) return;
-                     if (this.state.currentView === 'admin' && this.state.adminState.isManageModalOpen) {
+                     if (this.state.currentView === 'admin' && this.state.adminState.isManagePortalOpen) {
                         this.initializeAdminViewMaps();
                      }
                 },
@@ -346,8 +388,8 @@
                 render() {
                     this.renderAdminView(); // Renders the main page content
                     
-                    if (this.state.adminState.isManageModalOpen) {
-                        this.renderManageModal(); // Renders the modal on top
+                    if (this.state.adminState.isManagePortalOpen) {
+                        this.renderManagePortal(); // Renders the modal on top
                     } else {
                         this.elements.genericModalContainer.innerHTML = ''; 
                     }
@@ -355,6 +397,7 @@
                 },
                 
                 // --- ADMIN VIEW RENDERING ---
+                // [NEW] Renders horizontal scroller for companies
                 renderAdminView() {
                     const companies = this.state.data.companies;
                     const company = companies.find(c => c.id === this.state.activeCompanyId);
@@ -368,13 +411,16 @@
                                 </button>
                             </div>
                             
-                            <label for="company-select" class="sr-only">Select Company</label>
-                            <select id="company-select" class="company-select" ${companies.length === 0 ? 'disabled' : ''}>
+                            <div class="company-scroller">
                                 ${companies.length > 0
-                                    ? companies.map(c => `<option value="${c.id}" ${this.state.activeCompanyId === c.id ? 'selected' : ''}>${c.name}</option>`).join('')
-                                    : '<option>No companies added</option>'
+                                    ? companies.map(c => `
+                                        <button data-id="${c.id}" class="company-pill ${c.id === this.state.activeCompanyId ? 'active' : ''}">
+                                            ${c.name}
+                                        </button>
+                                    `).join('')
+                                    : `<span class="text-[var(--text-secondary)] italic">No companies added. Click ⚙️ to start.</span>`
                                 }
-                            </select>
+                            </div>
                         </div>
                         
                         <main id="admin-main-content" class="p-4 sm:p-6 lg:p-8">
@@ -390,7 +436,7 @@
                             </div>`;
                 },
                 
-                // [FIXED] Removed the .polished-container "pill" from here
+                // [FIXED] Removed the outer .polished-container
                 renderAdminCompanyDetails(company) {
                     const totalReviews = company.reviews?.length || 0;
                     const doneReviews = company.reviews?.filter(r => r.status === 'done').length || 0;
@@ -402,7 +448,7 @@
                         });
 
                     return `
-                        <div class="mb-8 p-6 polished-container">
+                        <div class="polished-container p-6 mb-8">
                             <div>
                                 <div class="flex justify-between mb-1">
                                     <span class="text-base font-medium text-[var(--accent-primary)]">Completion</span>
@@ -431,59 +477,78 @@
                     `;
                 },
 
-                renderManageModal() {
+                // [NEW] Renders the "Manage" portal with 3 tabs
+                renderManagePortal() {
                     const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
+                    const { managePortalTab } = this.state.adminState;
                     
                     this.elements.genericModalContainer.innerHTML = `
-                        <div class="manage-modal p-4 sm:p-6 lg:p-8">
-                            <div class="flex justify-between items-center mb-6">
-                                <h2 class="text-3xl font-bold text-white">Manage</h2>
+                        <div class="manage-portal p-4 sm:p-6 lg:p-8">
+                            <div class="flex justify-between items-center mb-4">
+                                <h2 class="text-3xl font-bold text-white">Settings</h2>
                                 <button id="modal-close-btn" class="text-4xl text-[var(--text-secondary)] hover:text-white p-2">&times;</button>
                             </div>
 
-                            <div class="polished-container p-6 mb-8">
-                                <h3 class="text-xl font-semibold text-white mb-4">Global Data</h3>
-                                <p class="text-sm text-[var(--text-secondary)] mb-4">Save or load the entire application state (all companies) to pass to another admin.</p>
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <label class="file-input-button button-gradient w-full text-center">
-                                        Import Full State
-                                        <input type="file" id="import-state-file" class="hidden" accept=".json">
-                                    </label>
-                                    <button id="export-full-state-btn" class="w-full button-gradient">Export Full State</button>
+                            <nav class="modal-tab-nav">
+                                <button data-tab="manage" class="modal-tab-btn ${managePortalTab === 'manage' ? 'active' : ''}">Manage Company</button>
+                                <button data-tab="add" class="modal-tab-btn ${managePortalTab === 'add' ? 'active' : ''}">Add Company</button>
+                                <button data-tab="global" class="modal-tab-btn ${managePortalTab === 'global' ? 'active' : ''}">Global Data</button>
+                            </nav>
+
+                            <div id="modal-tab-content">
+                                <div class="${managePortalTab === 'global' ? '' : 'hidden'}">
+                                    <div class="polished-container p-6">
+                                        <h3 class="text-xl font-semibold text-white mb-4">Global Data</h3>
+                                        <p class="text-sm text-[var(--text-secondary)] mb-4">Save or load the entire application state (all companies) to pass to another admin.</p>
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            <label class="file-input-button button-gradient w-full text-center">
+                                                Import Full State
+                                                <input type="file" id="import-state-file" class="hidden" accept=".json">
+                                            </label>
+                                            <button id="export-full-state-btn" class="w-full button-gradient">Export Full State</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="${managePortalTab === 'add' ? '' : 'hidden'}">
+                                    <div class="polished-container p-6">
+                                        <h3 class="text-xl font-semibold text-white mb-4">Add New Company</h3>
+                                        <p class="text-sm text-[var(--text-secondary)] mb-4">After adding, you will be taken to the "Manage Company" tab to upload reviews.</p>
+                                        <div class="flex flex-col sm:flex-row gap-4">
+                                            <input type="text" id="new-company-name" placeholder="New company name...">
+                                            <button id="add-company-btn" class="button-gradient whitespace-nowrap">Add Company</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="${managePortalTab === 'manage' ? '' : 'hidden'}">
+                                    ${company ? `
+                                    <div class="polished-container p-6">
+                                        <h3 class="text-xl font-semibold text-white mb-4">Manage: ${company.name}</h3>
+                                        <div class="space-y-4">
+                                            <div>
+                                                <label class="text-sm font-medium text-[var(--text-secondary)] mb-2 block">Find / Update Review Link</label>
+                                                <input type="text" id="admin-link-input-modal-${company.id}" placeholder="Search for company..." value="${company.name}">
+                                                ${company.reviewLink ? `<a href="${company.reviewLink}" target="_blank" class="text-sm text-[var(--accent-primary)] hover:underline break-all block mt-2">${company.reviewLink}</a>` : `<p class="text-sm text-yellow-400 mt-2">No review link set yet.</p>`}
+                                            </div>
+                                            
+                                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-[var(--border-color)]">
+                                                <label class="file-input-button button-secondary w-full text-center">
+                                                    Import Reviews to "${company.name}"
+                                                    <input type="file" data-id="${company.id}" class="upload-admin-file hidden" accept=".json">
+                                                </label>
+                                                <button data-id="${company.id}" class="download-admin-file-btn w-full button-secondary">Export "${company.name}" Data</button>
+                                            </div>
+
+                                            <div class="pt-4 border-t border-[var(--border-color)]">
+                                                <button data-id="${company.id}" class="remove-company-btn w-full button-gradient">Delete This Company</button>
+                                            </div>
+                                        </div>
+                                    </div>` 
+                                    : `<div class="polished-container p-6 text-center"><p class="text-[var(--text-secondary)]">No company selected. Add a company first.</p></div>`
+                                    }
                                 </div>
                             </div>
-
-                            <div class="polished-container p-6 mb-8">
-                                <h3 class="text-xl font-semibold text-white mb-4">Add New Company</h3>
-                                <div class="flex flex-col sm:flex-row gap-4">
-                                    <input type="text" id="new-company-name" placeholder="New company name...">
-                                    <button id="add-company-btn" class="button-gradient whitespace-nowrap">Add Company</button>
-                                </div>
-                            </div>
-
-                            ${company ? `
-                            <div class="polished-container p-6">
-                                <h3 class="text-xl font-semibold text-white mb-4">Manage: ${company.name}</h3>
-                                <div class="space-y-4">
-                                    <div>
-                                        <label class="text-sm font-medium text-[var(--text-secondary)] mb-2 block">Find / Update Review Link</label>
-                                        <input type="text" id="admin-link-input-modal-${company.id}" placeholder="Search for company..." value="${company.name}">
-                                        ${company.reviewLink ? `<a href="${company.reviewLink}" target="_blank" class="text-sm text-[var(--accent-primary)] hover:underline break-all block mt-2">${company.reviewLink}</a>` : `<p class="text-sm text-yellow-400 mt-2">No review link set yet.</p>`}
-                                    </div>
-                                    
-                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-[var(--border-color)]">
-                                        <label class="file-input-button button-secondary w-full text-center">
-                                            Import Reviews to "${company.name}"
-                                            <input type="file" data-id="${company.id}" class="upload-admin-file hidden" accept=".json">
-                                        </label>
-                                        <button data-id="${company.id}" class="download-admin-file-btn w-full button-secondary">Export "${company.name}" Data</button>
-                                    </div>
-
-                                    <div class="pt-4 border-t border-[var(--border-color)]">
-                                        <button data-id="${company.id}" class="remove-company-btn w-full button-gradient">Delete This Company</button>
-                                    </div>
-                                </div>
-                            </div>` : ''}
                         </div>
                     `;
                 },
@@ -531,29 +596,42 @@
                     
                     // --- Modal & Header Clicks ---
                     if (target.closest('#manage-btn')) {
-                        this.state.adminState.isManageModalOpen = true;
+                        this.state.adminState.isManagePortalOpen = true;
                         this.render();
                         return;
                     }
                     if (target.closest('#modal-close-btn')) {
-                        this.state.adminState.isManageModalOpen = false;
+                        this.state.adminState.isManagePortalOpen = false;
                         this.render();
                         return;
                     }
 
                     // --- Clicks *Inside* the Modal ---
-                    if (this.state.adminState.isManageModalOpen) {
+                    if (this.state.adminState.isManagePortalOpen) {
+                        
+                        // Handle Modal Tab Clicks
+                        if (target.closest('.modal-tab-btn')) {
+                            this.state.adminState.managePortalTab = target.closest('.modal-tab-btn').dataset.tab;
+                            this.render();
+                            return;
+                        }
+
+                        // Handle "Add Company"
                         if(target.closest('#add-company-btn')) {
                             const nameInput = document.getElementById('new-company-name');
                             if (nameInput.value.trim()) {
                                 const newCompany = { id: `comp_${Date.now()}`, name: nameInput.value.trim(), reviewLink: '', reviews: [] };
                                 this.state.data.companies.push(newCompany);
+                                // [NEW] Switch active state and tab
                                 this.state.activeCompanyId = newCompany.id;
+                                this.state.adminState.managePortalTab = 'manage';
                                 this.saveData(); 
                                 this.render();
                             }
                             return; 
                         }
+                        
+                        // Handle "Remove Company"
                         if(target.closest('.remove-company-btn')) {
                             const id = target.closest('.remove-company-btn').dataset.id;
                             this.showConfirmModal('Delete Company?', 'This cannot be undone.', () => {
@@ -562,12 +640,14 @@
                                     this.state.activeCompanyId = this.state.data.companies[0]?.id || null;
                                     localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
                                 }
-                                this.state.adminState.isManageModalOpen = false;
+                                this.state.adminState.isManagePortalOpen = false;
                                 this.saveData(); 
                                 this.render();
                             });
                             return; 
                         }
+                        
+                        // Handle "Download Company Data"
                         if (target.closest('.download-admin-file-btn')) {
                             const companyToDownload = this.state.data.companies.find(c => c.id === target.dataset.id);
                             const dataBlob = new Blob([JSON.stringify(companyToDownload, null, 2)], { type: 'application/json' });
@@ -577,6 +657,8 @@
                             document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
                             return; 
                         }
+                        
+                        // Handle "Export Full State"
                         if (target.closest('#export-full-state-btn')) {
                             const fullState = JSON.stringify(this.state.data, null, 2);
                             const dataBlob = new Blob([fullState], { type: 'application/json' });
@@ -589,10 +671,20 @@
                             this.showNotification('Full state exported!');
                             return;
                         }
+
+                        // Stop processing if any modal click was handled
+                        return;
                     }
 
                     // --- Main Content Clicks (ignored if modal is open) ---
-                    if (this.state.adminState.isManageModalOpen) return;
+                    
+                    // [NEW] Handle Horizontal Company Pill Clicks
+                    if (target.closest('.company-pill')) {
+                        this.state.activeCompanyId = target.closest('.company-pill').dataset.id;
+                        localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
+                        this.render();
+                        return;
+                    }
 
                     const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
                     if(!company) return;
@@ -605,7 +697,8 @@
                     if (target.closest('.copy-btn')) {
                         this.copyToClipboard(`Click: ${company.reviewLink}\n\n\`${review.text}\``, 'Review copied!');
                         review.status = 'done';
-                        this.saveData(); this.render();
+                        this.saveData(); // Save data
+                        this.render(); // Re-render. This will filter out the "done" review.
                     }
                     if (target.closest('.undo-review-btn')) {
                         review.status = 'undone';
@@ -628,18 +721,14 @@
                 handleAdminChange(e) {
                     const target = e.target;
                     
-                    if (target.id === 'company-select') {
-                        this.state.activeCompanyId = target.value;
-                        localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
-                        this.render();
-                        return;
-                    }
+                    // Main page toggles
                     if (target.id === 'show-completed-toggle') {
                         this.state.adminState.showCompleted = target.checked;
                         this.render();
                         return;
                     }
                     
+                    // Modal file inputs
                     if (target.id === 'import-state-file') {
                         const file = e.target.files[0];
                         if (file) {
@@ -652,7 +741,7 @@
                                             this.state.data = newState;
                                             this.state.activeCompanyId = newState.companies[0]?.id || null;
                                             this.saveData();
-                                            this.state.adminState.isManageModalOpen = false;
+                                            this.state.adminState.isManagePortalOpen = false;
                                             this.render();
                                             this.showNotification('Full state imported successfully!', 'success');
                                         } else {
@@ -704,9 +793,10 @@
                 },
 
                 // --- UTILITIES & MODALS ---
+                // [FIXED] Corrected typo: ()_ => to () =>
                 showConfirmModal(title, message, onConfirm, onCancel = () => {}) {
                     const modal = document.createElement('div');
-                    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[110] p-4'; // Higher z-index
+                    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[110] p-4';
                     modal.innerHTML = `<div class="polished-container p-8 w-full max-w-md">
                                            <h2 class="text-2xl font-bold text-white mb-4">${title}</h2>
                                            <p class="text-[var(--text-secondary)] mb-6">${message}</p>
@@ -718,7 +808,7 @@
                     this.elements.genericModalContainer.appendChild(modal);
                     
                     modal.querySelector('#modal-cancel-confirm').onclick = () => { onCancel(); modal.remove(); };
-                    modal.querySelector('#modal-confirm-action').onclick = ()_ => { onConfirm(); modal.remove(); };
+                    modal.querySelector('#modal-confirm-action').onclick = () => { onConfirm(); modal.remove(); };
                 },
                 showImageModal(src) {
                      const modal = document.createElement('div');
