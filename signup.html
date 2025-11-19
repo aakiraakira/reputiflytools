@@ -37,6 +37,8 @@
             overflow-x: hidden;
             margin: 0;
             -webkit-tap-highlight-color: transparent;
+            /* STRICT ZOOM PREVENTION */
+            touch-action: pan-x pan-y; 
         }
 
         /* Custom Scrollbar */
@@ -454,7 +456,7 @@
                         </div>
                     </div>
 
-                    <div id="cmd-menu" class="absolute top-[80px] left-4 md:left-10 bg-[#1E1E2E] border border-white/10 rounded-lg shadow-2xl w-56 md:w-64 overflow-hidden opacity-0 transition-all duration-200 transform scale-95 pointer-events-none z-20">
+                    <div id="cmd-menu" class="absolute top-[110px] left-4 md:left-10 bg-[#1E1E2E] border border-white/10 rounded-lg shadow-2xl w-56 md:w-64 overflow-hidden opacity-0 transition-all duration-200 transform scale-95 pointer-events-none z-30">
                         <div class="px-3 py-2 text-xs font-bold text-gray-500 uppercase bg-black/20">AI Commands</div>
                         <div class="px-4 py-2 hover:bg-accent-primary/20 cursor-pointer text-xs md:text-sm text-white flex items-center gap-2 transition-colors">
                             <i data-feather="edit-3" class="w-4 h-4 text-blue-400"></i> Summarize
@@ -690,6 +692,14 @@
     <script>
         feather.replace();
 
+        // --- ZOOM PREVENTION LOGIC ---
+        document.addEventListener('gesturestart', function(e) {
+            e.preventDefault();
+        });
+        document.addEventListener('dblclick', function(e) {
+            e.preventDefault();
+        }, { passive: false });
+
         // --- 1. Mobile Menu Toggle ---
         function toggleMobileMenu() {
             const menu = document.getElementById('mobile-menu');
@@ -817,7 +827,12 @@
             document.querySelectorAll('.forge-tab').forEach(t => t.classList.remove('active'));
             document.getElementById(`tab-${mode}`).classList.add('active');
             
-            // 2. Auto Run Immediately
+            // 2. RESET UI IMMEDIATELY to prevent ghost text
+            consoleEl.innerHTML = '<div class="text-gray-600 italic">// Waiting for input...</div>';
+            previewEl.innerHTML = `<div class="text-center text-gray-500" id="preview-placeholder"><i data-feather="cpu" class="w-8 h-8 mx-auto mb-2 opacity-50"></i><p class="text-xs">Agent Output will appear here...</p></div><div id="processing-vis" class="hidden absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-4 backdrop-blur-sm rounded-b-xl"><div class="flex gap-6"><div id="vis-icon-web" class="w-16 h-16 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center hidden border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.3)]"><i data-feather="globe" class="w-8 h-8 vis-icon-pulse"></i></div><div id="vis-icon-brain" class="w-16 h-16 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center hidden border border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.3)]"><i data-feather="cpu" class="w-8 h-8 vis-icon-pulse"></i></div><div id="vis-icon-write" class="w-16 h-16 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center hidden border border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.3)]"><i data-feather="edit-3" class="w-8 h-8 vis-icon-pulse"></i></div></div><span class="text-xs font-mono text-accent-primary animate-pulse tracking-widest" id="process-text">INITIALIZING...</span></div>`;
+            feather.replace();
+
+            // 3. Auto Run
             startForgeDemo(); 
         }
 
@@ -831,28 +846,14 @@
             const processingVis = document.getElementById('processing-vis');
             const processText = document.getElementById('process-text');
             const placeholder = document.getElementById('preview-placeholder');
-            const icons = {
-                web: document.getElementById('vis-icon-web'),
-                brain: document.getElementById('vis-icon-brain'),
-                write: document.getElementById('vis-icon-write')
-            };
-
+            
             // Reset UI State
             statusEl.textContent = 'AGENT_RUNNING';
             statusEl.classList.add('text-accent-secondary', 'animate-pulse');
             consoleEl.innerHTML = ''; // Clear console
             if(placeholder) placeholder.classList.add('hidden');
             processingVis.classList.remove('hidden');
-            previewEl.innerHTML = `<div id="processing-vis" class="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-4 backdrop-blur-sm rounded-b-xl">
-                                    <div class="flex gap-6">
-                                        <div id="vis-icon-web" class="w-16 h-16 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center hidden border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.3)]"><i data-feather="globe" class="w-8 h-8 vis-icon-pulse"></i></div>
-                                        <div id="vis-icon-brain" class="w-16 h-16 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center hidden border border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.3)]"><i data-feather="cpu" class="w-8 h-8 vis-icon-pulse"></i></div>
-                                        <div id="vis-icon-write" class="w-16 h-16 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center hidden border border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.3)]"><i data-feather="edit-3" class="w-8 h-8 vis-icon-pulse"></i></div>
-                                    </div>
-                                    <span class="text-xs font-mono text-accent-primary animate-pulse tracking-widest" id="process-text">INITIALIZING...</span>
-                                </div>`;
-             feather.replace();
-
+            
             const scenarios = {
                 business: [
                     { text: "Connecting to Search API...", action: "SCANNING WEB", icon: 'web' },
@@ -890,7 +891,7 @@
                     if(currentIcons[step.icon]) currentIcons[step.icon].classList.remove('hidden');
                 }
 
-                await new Promise(r => setTimeout(r, 800)); // Speed up slightly for "instant" feel
+                await new Promise(r => setTimeout(r, 800)); 
                 if(runId !== forgeRunId) return;
 
                 const line = document.createElement('div');
@@ -904,18 +905,24 @@
 
             if (currentMode === 'business') {
                 previewEl.innerHTML = `
-                    <div class="w-full h-full bg-white text-black p-4 md:p-6 rounded-lg overflow-y-auto text-left font-sans animate-fade-in-up-smooth agent-result-card">
+                    <div class="w-full h-full bg-[#1E1E2E] border border-blue-500/30 p-4 md:p-6 rounded-lg shadow-xl overflow-y-auto text-left font-sans animate-fade-in-up-smooth flex flex-col">
                         <div class="flex justify-between items-center mb-4">
-                            <h2 class="text-lg md:text-xl font-bold text-white">Strategy Report</h2>
-                            <span class="bg-green-100 text-green-800 text-[10px] px-2 py-1 rounded-full font-bold">FINAL DRAFT</span>
+                            <h2 class="text-lg md:text-xl font-bold text-white flex items-center gap-2">
+                                <i data-feather="pie-chart" class="w-4 h-4 text-blue-400"></i> Strategy Report
+                            </h2>
+                            <span class="bg-blue-500/20 text-blue-300 text-[10px] px-2 py-1 rounded-full font-bold uppercase tracking-wider">Final Draft</span>
                         </div>
-                        <p class="text-xs md:text-sm text-gray-300 mb-4">Based on competitive analysis...</p>
-                        <div class="space-y-2">
-                            <div class="h-2 bg-gray-600 rounded w-3/4"></div>
-                            <div class="h-2 bg-gray-600 rounded w-full"></div>
-                            <div class="h-2 bg-gray-600 rounded w-5/6"></div>
+                        <p class="text-xs md:text-sm text-gray-400 mb-4 leading-relaxed">
+                            Competitor analysis indicates a market shift towards AI-driven solutions...
+                        </p>
+                        <div class="space-y-3 flex-grow">
+                            <div class="h-2 bg-white/10 rounded w-3/4"></div>
+                            <div class="h-2 bg-white/10 rounded w-full"></div>
+                            <div class="h-2 bg-white/10 rounded w-5/6"></div>
                         </div>
-                        <button class="w-full bg-accent-primary text-white py-2 rounded mt-6 text-xs md:text-sm font-bold hover:opacity-90 transition-opacity">Export PDF</button>
+                        <button class="w-full bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/50 py-2 rounded mt-4 text-xs md:text-sm font-bold transition-all flex items-center justify-center gap-2">
+                            <i data-feather="download" class="w-3 h-3"></i> Export PDF
+                        </button>
                     </div>`;
             } else {
                 previewEl.innerHTML = `
@@ -1203,8 +1210,8 @@
                 cursor.classList.add('clicking');
                 item2.querySelector('div').innerHTML = '<i data-feather="check" class="w-3 h-3 text-green-400"></i>';
                 item2.classList.add('opacity-50');
-                // Update progress bar logic (simulating 2/3 complete)
-                progress.style.width = "66%"; 
+                // Update progress bar logic (simulating 1/3 complete - 33%)
+                progress.style.width = "33%"; 
                 
                 feather.replace();
                 await new Promise(r => setTimeout(r, 300));
