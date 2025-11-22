@@ -61,9 +61,20 @@
     <style type="text/tailwindcss">
         /* --- SHARED VIEW TWEAKS --- */
 @media (max-width: 768px) {
-    /* Hide the device switching toolbar on mobile phones */
+    /* Hide device toolbar (Existing) */
     #code-preview-fullscreen-modal .device-toolbar {
         display: none !important;
+    }
+
+    /* PERFORMANCE FIX: Remove heavy blur effects on widgets for mobile */
+    .html-playground-widget, 
+    .html-playground-header, 
+    .btn-liquid {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        /* Use solid colors instead of glass to keep it looking good but fast */
+        background-color: #1E1E2E !important; 
+        box-shadow: none !important;
     }
 }
         /* --- FROSTED LIQUID COMMAND BAR (High Opacity Fix) --- */
@@ -5164,6 +5175,7 @@ const handlePublicNoteView = async (noteId) => {
             // Delegated Click Listener for Sorting and Code Copying
             noteContentDiv.addEventListener('click', (e) => {
                 // MODIFIED: Clicking the placeholder now triggers Fullscreen Mode directly
+                // MODIFIED: Optimized Fullscreen Trigger with Isolation
                 const playgroundPlaceholder = e.target.closest('.playground-placeholder');
                 if (playgroundPlaceholder) {
                     e.preventDefault();
@@ -5176,21 +5188,29 @@ const handlePublicNoteView = async (noteId) => {
                         const modal = document.getElementById('code-preview-fullscreen-modal');
                         const iframe = document.getElementById('code-fullscreen-frame');
                         
-                        // Default to Desktop mode
+                        // 1. ISOLATION FIX: Reset iframe completely to prevent CSS/JS bleeding from previous runs
+                        iframe.src = 'about:blank';
+                        
+                        // 2. SECURITY FIX: Add strict sandbox to prevent styling leaks or popups
+                        iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals allow-same-origin');
+
+                        // Default to Desktop
                         const container = document.getElementById('fullscreen-device-container');
                         if(container) container.setAttribute('data-device', 'desktop');
                         
-                        // Reset toolbar buttons
+                        // Reset Toolbar
                         const btns = modal.querySelectorAll('.device-btn');
-                        if(btns.length > 0) {
-                            btns.forEach(b => b.classList.remove('active'));
-                            modal.querySelector('.device-btn[onclick*="desktop"]')?.classList.add('active');
-                        }
+                        btns.forEach(b => b.classList.remove('active'));
+                        modal.querySelector('.device-btn[onclick*="desktop"]')?.classList.add('active');
 
-                        // Inject code
+                        // 3. Inject Code via Blob (Faster & Cleaner than srcdoc on mobile)
                         const blob = new Blob([decodedCode], { type: 'text/html' });
                         const url = URL.createObjectURL(blob);
-                        iframe.src = url;
+                        
+                        // Short delay to ensure the "about:blank" reset finished
+                        setTimeout(() => {
+                            iframe.src = url;
+                        }, 50);
                         
                         // Show Modal
                         modal.classList.remove('hidden');
@@ -13326,6 +13346,7 @@ const headerSummarizeBtn = document.getElementById('header-summarize-btn');
 const headerQuizBtn = document.getElementById('header-quiz-btn');
 
 const handleHeaderAIAction = (action) => {
+    
     const noteId = state.settings.activeNoteId;
     // --- FIX STARTS HERE ---
     // Get the full note object from the cache instead of the sidebar stub.
