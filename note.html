@@ -1912,6 +1912,7 @@
 
 /* 3. Device Toolbar (Shared) */
 .liquid-toolbar {
+    pointer-events: auto; /* <--- ADD THIS LINE */
     background: rgba(255, 255, 255, 0.05);
     backdrop-filter: blur(16px);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -4947,6 +4948,41 @@ const runPlaygroundWidget = (widget) => {
     previewArea.innerHTML = `<iframe src="${url}" style="width:100%; height:100%; border:none;"></iframe>`;
 };
 const handlePublicNoteView = async (noteId) => {
+    // --- START: Fix for Public View Modal Interactions ---
+    // Ensure the global function is available immediately
+    if (!window.setDeviceMode) {
+        window.setDeviceMode = (btn, mode, context) => {
+            const toolbar = btn.closest('.device-toolbar'); 
+            if (toolbar) toolbar.querySelectorAll('.device-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const containerId = context === 'editor' ? 'editor-device-container' : 'fullscreen-device-container';
+            const container = document.getElementById(containerId);
+            if (container) container.setAttribute('data-device', mode);
+        };
+    }
+
+    // Fix CSS Pointer Events for the toolbar in the modal
+    const fullscreenModal = document.getElementById('code-preview-fullscreen-modal');
+    if (fullscreenModal) {
+        const toolbar = fullscreenModal.querySelector('.device-toolbar');
+        if (toolbar) toolbar.style.pointerEvents = 'auto';
+        
+        // Re-attach Close Button Logic
+        const closeBtn = document.getElementById('code-preview-close-btn');
+        if (closeBtn) {
+            const newCloseBtn = closeBtn.cloneNode(true);
+            closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+            newCloseBtn.addEventListener('click', () => {
+                fullscreenModal.classList.add('opacity-0');
+                setTimeout(() => {
+                    fullscreenModal.classList.add('hidden');
+                    const iframe = document.getElementById('code-fullscreen-frame');
+                    if(iframe) iframe.src = ''; 
+                }, 300);
+            });
+        }
+    }
+    // --- END: Fix for Public View Modal Interactions ---
     // --- START: Fix for Public View Modal Interactions ---
             const modal = document.getElementById('code-preview-fullscreen-modal');
             
@@ -8676,9 +8712,11 @@ const cleanupFontTags = () => {
     
     // 1. Make setDeviceMode globally accessible
     // Make setDeviceMode globally accessible
+    // 1. Make setDeviceMode globally accessible
     window.setDeviceMode = (btn, mode, context) => {
         // 1. Update Button State (Visuals)
-        const toolbar = btn.closest('.device-toolbar') || btn.parentElement; // Fallback if class missing
+        // Handle both direct clicks and simulated clicks
+        const toolbar = btn.closest('.device-toolbar'); 
         if (toolbar) {
             toolbar.querySelectorAll('.device-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
@@ -8692,7 +8730,7 @@ const cleanupFontTags = () => {
             containerId = 'fullscreen-device-container';
         }
 
-        // 3. Apply Data Attribute
+        // 3. Apply Data Attribute to resize the container
         const container = document.getElementById(containerId);
         if (container) {
             container.setAttribute('data-device', mode);
