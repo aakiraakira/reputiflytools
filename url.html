@@ -190,7 +190,7 @@
             transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
             max-height: 0; opacity: 0; overflow: hidden;
         }
-        #settingsPanel.open { max-height: 500px; opacity: 1; }
+        #settingsPanel.open { max-height: 600px; opacity: 1; }
 
         /* --- ANIMATIONS --- */
         .animate-enter { animation: slideUpFade 0.3s ease-out forwards; opacity: 0; transform: translateY(10px); }
@@ -322,7 +322,7 @@
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             
                             <div class="flex items-center justify-between p-4 rounded-xl border border-white/5 bg-white/5">
                                 <div class="flex flex-col">
@@ -349,11 +349,22 @@
                             <div class="flex items-center justify-between p-4 rounded-xl border border-white/5 bg-white/5">
                                 <div class="flex flex-col">
                                     <span class="font-bold text-sm text-gray-200">Download Format</span>
-                                    <span class="text-[10px] text-gray-500">Zip vs Individual</span>
+                                    <span class="text-[10px] text-gray-500">Zip vs Individual Files</span>
                                 </div>
                                 <div class="flex bg-black/40 rounded-lg p-1 border border-white/5">
                                     <button onclick="setDownloadMode('images')" id="btnDlImages" class="px-3 py-1 text-xs rounded font-bold transition-all bg-white/20 text-white">IMG</button>
                                     <button onclick="setDownloadMode('zip')" id="btnDlZip" class="px-3 py-1 text-xs rounded font-bold text-gray-500 hover:text-white transition-all">ZIP</button>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center justify-between p-4 rounded-xl border border-white/5 bg-white/5">
+                                <div class="flex flex-col">
+                                    <span class="font-bold text-sm text-gray-200">Download Scope</span>
+                                    <span class="text-[10px] text-gray-500">Smart ignores raw uploads</span>
+                                </div>
+                                <div class="flex bg-black/40 rounded-lg p-1 border border-white/5">
+                                    <button onclick="setDlScope('smart')" id="btnDlScopeSmart" class="px-3 py-1 text-xs rounded font-bold transition-all bg-white/20 text-white">SMART</button>
+                                    <button onclick="setDlScope('all')" id="btnDlScopeAll" class="px-3 py-1 text-xs rounded font-bold text-gray-500 hover:text-white transition-all">ALL</button>
                                 </div>
                             </div>
 
@@ -399,7 +410,7 @@
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
 
-                <button onclick="downloadItems()" id="downloadBtn" class="hidden w-9 h-9 rounded-full hover:bg-blue-500/20 text-gray-400 hover:text-blue-400 transition-colors flex items-center justify-center" title="Download">
+                <button onclick="initiateMainDownload()" id="downloadBtn" class="hidden w-9 h-9 rounded-full hover:bg-blue-500/20 text-gray-400 hover:text-blue-400 transition-colors flex items-center justify-center" title="Download">
                     <i class="fa-solid fa-download" id="dlIcon"></i>
                 </button>
                 
@@ -463,9 +474,9 @@
             baseUrl: localStorage.getItem('wp_gen_base_url') || '',
             sanitize: localStorage.getItem('wp_gen_sanitize') === 'true',
             bulkPrefix: localStorage.getItem('wp_gen_bulk') || '',
-            // DEFAULT TO OFF IF NOT SET
             convertAll: localStorage.getItem('wp_gen_convert_all') === 'true', 
             downloadMode: localStorage.getItem('wp_gen_dl_mode') || 'images', // 'images' or 'zip'
+            dlScope: localStorage.getItem('wp_gen_dl_scope') || 'smart', // 'smart' or 'all'
             settingsOpen: false
         };
         
@@ -484,8 +495,12 @@
         const convertAllToggle = document.getElementById('convertAllToggle');
         const settingsPanel = document.getElementById('settingsPanel');
         const settingsBtn = document.getElementById('settingsBtn');
+        // DL Format Buttons
         const btnDlImages = document.getElementById('btnDlImages');
         const btnDlZip = document.getElementById('btnDlZip');
+        // DL Scope Buttons
+        const btnDlScopeSmart = document.getElementById('btnDlScopeSmart');
+        const btnDlScopeAll = document.getElementById('btnDlScopeAll');
         
         const quickPeekOverlay = document.getElementById('quickPeekOverlay');
         const quickPeekImg = document.getElementById('quickPeekImg');
@@ -499,8 +514,9 @@
         sanitizeToggle.checked = appState.sanitize;
         convertAllToggle.checked = appState.convertAll;
         bulkRenameInput.value = appState.bulkPrefix;
-        updateDownloadModeUI();
         
+        updateDownloadModeUI();
+        updateDlScopeUI();
         updateDatePreview();
         
         // Initialize Drag and Drop
@@ -541,12 +557,11 @@
             render();
         });
 
-        // UPDATED: Convert All Listener now triggers reprocessing
         convertAllToggle.addEventListener('change', (e) => {
             appState.convertAll = e.target.checked;
             localStorage.setItem('wp_gen_convert_all', appState.convertAll);
             updateDownloadButtonVisibility();
-            reprocessAllItems(); // Trigger live update
+            reprocessAllItems(); 
         });
 
         fileInput.addEventListener('change', (e) => handleFiles(e.target.files, false));
@@ -577,6 +592,22 @@
                 btnDlImages.className = "px-3 py-1 text-xs rounded font-bold transition-all bg-white/20 text-white";
                 btnDlZip.className = "px-3 py-1 text-xs rounded font-bold text-gray-500 hover:text-white transition-all";
                 dlIcon.className = "fa-solid fa-download";
+            }
+        }
+
+        function setDlScope(scope) {
+            appState.dlScope = scope;
+            localStorage.setItem('wp_gen_dl_scope', scope);
+            updateDlScopeUI();
+        }
+
+        function updateDlScopeUI() {
+            if (appState.dlScope === 'all') {
+                btnDlScopeAll.className = "px-3 py-1 text-xs rounded font-bold transition-all bg-white/20 text-white";
+                btnDlScopeSmart.className = "px-3 py-1 text-xs rounded font-bold text-gray-500 hover:text-white transition-all";
+            } else {
+                btnDlScopeSmart.className = "px-3 py-1 text-xs rounded font-bold transition-all bg-white/20 text-white";
+                btnDlScopeAll.className = "px-3 py-1 text-xs rounded font-bold text-gray-500 hover:text-white transition-all";
             }
         }
 
@@ -620,7 +651,6 @@
             });
         }
 
-        // NEW: Function to reprocess existing list when toggle changes
         async function reprocessAllItems() {
             if(items.length === 0) return;
             
@@ -630,10 +660,8 @@
             for (let item of items) {
                 if (item.type !== 'image') continue;
 
-                // Case 1: Toggle ON - Convert to WebP (if not already WebP)
                 if (appState.convertAll) {
                     if (item.fileObject.type !== 'image/webp') {
-                        // We use originalFileObject to convert
                         const webpBlob = await convertToWebP(item.originalFileObject);
                         const nameParts = item.originalName.split('.');
                         nameParts.pop();
@@ -645,9 +673,7 @@
                         changesMade = true;
                     }
                 } 
-                // Case 2: Toggle OFF - Revert to Original (if original wasn't WebP)
                 else {
-                    // Only revert if current is WebP AND original is NOT WebP
                     if (item.fileObject.type === 'image/webp' && item.originalFileObject.type !== 'image/webp' && !item.isPasted) {
                         item.fileObject = item.originalFileObject;
                         item.filename = item.originalName;
@@ -672,7 +698,6 @@
 
             let filesToProcess = [];
 
-            // 1. Process Zips first
             for (const file of rawFiles) {
                 if (file.type === "application/zip" || file.name.endsWith('.zip')) {
                     showToast("Extracting Zip...", true);
@@ -687,7 +712,6 @@
                         
                         for (const entry of zipFiles) {
                             const blob = await entry.async("blob");
-                            // Convert to File object
                             const extractedFile = new File([blob], entry.name.split('/').pop(), { type: blob.type });
                             filesToProcess.push(extractedFile);
                         }
@@ -700,16 +724,12 @@
                 }
             }
 
-            // 2. Process Files
             const processedItems = [];
             for (const file of filesToProcess) {
                 let finalFile = file;
                 let isConverted = false;
-
-                // Save reference to original file immediately for reverting logic
                 const originalFile = file; 
 
-                // If Convert All is on, and it's an image (and not already webp or pasted which is already webp)
                 if (appState.convertAll && file.type.startsWith('image/') && file.type !== 'image/webp' && !isPasted) {
                    const webpBlob = await convertToWebP(file);
                    const nameParts = file.name.split('.');
@@ -723,15 +743,14 @@
                 const newItem = {
                     id: Date.now() + Math.random(),
                     type: 'image',
-                    originalName: finalFile.name === originalFile.name ? originalFile.name : finalFile.name, // Initial name
+                    originalName: finalFile.name === originalFile.name ? originalFile.name : finalFile.name,
                     filename: finalFile.name,
                     preview: previewUrl,
                     fileObject: finalFile,
-                    originalFileObject: originalFile, // STORED: The base form
-                    isPasted: isPasted || isConverted // Mark as 'generated' if converted
+                    originalFileObject: originalFile,
+                    isPasted: isPasted || isConverted
                 };
                 
-                // Fix: if we converted, make sure originalName tracks the source (e.g. .png)
                 if(isConverted) {
                     newItem.originalName = originalFile.name;
                 }
@@ -855,23 +874,62 @@
             if (item) item.content = value;
         }
 
-        async function downloadItems() {
-            let targets = [];
-            // If Convert All is TRUE: Download All Images
-            // If Convert All is FALSE: Download All Images (Originals)
-            // The logic here is simplified: Just download what is in fileObject
-            targets = items.filter(i => i.type === 'image');
+        // ====================================================
+        // DOWNLOAD LOGIC (NO POPUP - USES SETTINGS)
+        // ====================================================
 
+        function initiateMainDownload() {
+            let targets = items.filter(i => i.type === 'image');
             if(targets.length === 0) {
-                showToast("No downloadable items found.");
+                showToast("No images to download");
                 return;
             }
 
+            // Apply Download Scope Logic (Smart vs All)
+            if (appState.dlScope === 'smart') {
+                const beforeCount = targets.length;
+                // Smart Filter: Keep item if Pasted OR Converted
+                // We assume standard file uploads that were NOT converted are redundant
+                targets = targets.filter(item => {
+                    const isPasted = item.isPasted;
+                    const isConverted = item.fileObject.type !== item.originalFileObject.type;
+                    return isPasted || isConverted;
+                });
+                const afterCount = targets.length;
+                
+                if(afterCount === 0) {
+                    showToast("Smart Mode: No modified files to download.");
+                    return;
+                }
+                if (beforeCount > afterCount) {
+                    showToast(`Smart Mode: Skipped ${beforeCount - afterCount} unmodified files...`);
+                }
+            } else {
+                // 'all' mode: pass everything
+            }
+
+            executeDownload(targets);
+        }
+
+        async function executeDownload(fileList) {
             if (appState.downloadMode === 'zip') {
-                showToast(`Zipping ${targets.length} files...`, true);
+                showToast(`Zipping ${fileList.length} files...`, true);
                 const zip = new JSZip();
-                targets.forEach(item => {
-                    zip.file(item.filename, item.fileObject);
+                
+                // Collision handling for ZIP
+                const usedNames = {};
+                
+                fileList.forEach(item => {
+                    let name = item.filename;
+                    if (usedNames[name]) {
+                        usedNames[name]++;
+                        const parts = name.split('.');
+                        const ext = parts.pop();
+                        name = `${parts.join('.')}(${usedNames[name]}).${ext}`;
+                    } else {
+                        usedNames[name] = 0;
+                    }
+                    zip.file(name, item.fileObject);
                 });
                 
                 try {
@@ -889,9 +947,9 @@
 
             } else {
                 // Individual Downloads
-                showToast(`Downloading ${targets.length} files...`);
+                showToast(`Downloading ${fileList.length} files...`);
                 let downloadCount = 0;
-                targets.forEach((item, index) => {
+                fileList.forEach((item, index) => {
                     setTimeout(() => {
                         const link = document.createElement('a');
                         link.href = URL.createObjectURL(item.fileObject);
