@@ -463,7 +463,8 @@
             baseUrl: localStorage.getItem('wp_gen_base_url') || '',
             sanitize: localStorage.getItem('wp_gen_sanitize') === 'true',
             bulkPrefix: localStorage.getItem('wp_gen_bulk') || '',
-            convertAll: localStorage.getItem('wp_gen_convert_all') === 'true',
+            // DEFAULT TO OFF IF NOT SET
+            convertAll: localStorage.getItem('wp_gen_convert_all') === 'true', 
             downloadMode: localStorage.getItem('wp_gen_dl_mode') || 'images', // 'images' or 'zip'
             settingsOpen: false
         };
@@ -540,10 +541,12 @@
             render();
         });
 
+        // UPDATED: Convert All Listener now triggers reprocessing
         convertAllToggle.addEventListener('change', (e) => {
             appState.convertAll = e.target.checked;
             localStorage.setItem('wp_gen_convert_all', appState.convertAll);
             updateDownloadButtonVisibility();
+            reprocessAllItems(); // Trigger live update
         });
 
         fileInput.addEventListener('change', (e) => handleFiles(e.target.files, false));
@@ -617,6 +620,52 @@
             });
         }
 
+        // NEW: Function to reprocess existing list when toggle changes
+        async function reprocessAllItems() {
+            if(items.length === 0) return;
+            
+            showToast("Updating image formats...", true);
+            let changesMade = false;
+
+            for (let item of items) {
+                if (item.type !== 'image') continue;
+
+                // Case 1: Toggle ON - Convert to WebP (if not already WebP)
+                if (appState.convertAll) {
+                    if (item.fileObject.type !== 'image/webp') {
+                        // We use originalFileObject to convert
+                        const webpBlob = await convertToWebP(item.originalFileObject);
+                        const nameParts = item.originalName.split('.');
+                        nameParts.pop();
+                        const newName = nameParts.join('.') + ".webp";
+                        
+                        item.fileObject = new File([webpBlob], newName, { type: 'image/webp' });
+                        item.filename = newName;
+                        item.preview = URL.createObjectURL(item.fileObject);
+                        changesMade = true;
+                    }
+                } 
+                // Case 2: Toggle OFF - Revert to Original (if original wasn't WebP)
+                else {
+                    // Only revert if current is WebP AND original is NOT WebP
+                    if (item.fileObject.type === 'image/webp' && item.originalFileObject.type !== 'image/webp' && !item.isPasted) {
+                        item.fileObject = item.originalFileObject;
+                        item.filename = item.originalName;
+                        item.preview = URL.createObjectURL(item.fileObject);
+                        changesMade = true;
+                    }
+                }
+            }
+
+            if(changesMade) {
+                if(bulkRenameInput.value.trim()) applyBulkRename();
+                render();
+                showToast(appState.convertAll ? "Converted to WebP" : "Reverted to Original");
+            } else {
+                showToast("No changes needed");
+            }
+        }
+
         async function handleFiles(fileList, isPasted = false) {
             const rawFiles = Array.from(fileList);
             if (rawFiles.length === 0) return;
@@ -651,11 +700,14 @@
                 }
             }
 
-            // 2. Process Files (Convert if needed)
+            // 2. Process Files
             const processedItems = [];
             for (const file of filesToProcess) {
                 let finalFile = file;
                 let isConverted = false;
+
+                // Save reference to original file immediately for reverting logic
+                const originalFile = file; 
 
                 // If Convert All is on, and it's an image (and not already webp or pasted which is already webp)
                 if (appState.convertAll && file.type.startsWith('image/') && file.type !== 'image/webp' && !isPasted) {
@@ -671,12 +723,19 @@
                 const newItem = {
                     id: Date.now() + Math.random(),
                     type: 'image',
-                    originalName: finalFile.name,
+                    originalName: finalFile.name === originalFile.name ? originalFile.name : finalFile.name, // Initial name
                     filename: finalFile.name,
                     preview: previewUrl,
                     fileObject: finalFile,
+                    originalFileObject: originalFile, // STORED: The base form
                     isPasted: isPasted || isConverted // Mark as 'generated' if converted
                 };
+                
+                // Fix: if we converted, make sure originalName tracks the source (e.g. .png)
+                if(isConverted) {
+                    newItem.originalName = originalFile.name;
+                }
+
                 processedItems.push(newItem);
             }
 
@@ -705,7 +764,7 @@
             let imgCount = 1;
             items.forEach(item => {
                 if(item.type === 'image') {
-                    const ext = item.fileObject.type === 'image/webp' ? 'webp' : item.originalName.split('.').pop();
+                    const ext = item.fileObject.type === 'image/webp' ? 'webp' : item.originalFileObject.name.split('.').pop();
                     item.filename = `${prefix}-${imgCount}.${ext}`;
                     imgCount++;
                 }
@@ -798,11 +857,10 @@
 
         async function downloadItems() {
             let targets = [];
-            if (appState.convertAll) {
-                targets = items.filter(i => i.type === 'image');
-            } else {
-                targets = items.filter(i => i.type === 'image' && i.isPasted);
-            }
+            // If Convert All is TRUE: Download All Images
+            // If Convert All is FALSE: Download All Images (Originals)
+            // The logic here is simplified: Just download what is in fileObject
+            targets = items.filter(i => i.type === 'image');
 
             if(targets.length === 0) {
                 showToast("No downloadable items found.");
@@ -875,8 +933,9 @@
 
         // --- Render Engine ---
         function updateDownloadButtonVisibility() {
-            const hasDownloadable = appState.convertAll ? items.some(i => i.type === 'image') : items.some(i => i.isPasted);
-            if (hasDownloadable) downloadBtn.classList.remove('hidden');
+            // Always show download button if there are images, regardless of mode
+            const hasImages = items.some(i => i.type === 'image');
+            if (hasImages) downloadBtn.classList.remove('hidden');
             else downloadBtn.classList.add('hidden');
         }
 
