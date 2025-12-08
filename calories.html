@@ -459,7 +459,12 @@
     </div>
 
     <script>
-        feather.replace();
+        // Check for Feather availability before running
+        document.addEventListener("DOMContentLoaded", () => {
+            if (typeof feather !== 'undefined') {
+                feather.replace();
+            }
+        });
 
         // --- CONFIG ---
         const APP_KEY = 'reputifly_tracker_v12';
@@ -486,13 +491,10 @@
 
         window.addEventListener('scroll', () => {
             const currentScrollY = window.scrollY;
-            
-            // If scrolling down AND scrolled past 50px, hide nav
             if (currentScrollY > lastScrollY && currentScrollY > 50) {
                 navElement.classList.add('nav-hidden');
                 navElement.classList.remove('nav-visible');
             } else {
-                // If scrolling up OR at top, show nav
                 navElement.classList.remove('nav-hidden');
                 navElement.classList.add('nav-visible');
             }
@@ -501,18 +503,43 @@
 
         // --- INIT ---
         function init() {
-            const saved = localStorage.getItem(APP_KEY);
-            if (saved) {
-                state = { ...state, ...JSON.parse(saved) };
-                if (!state.history) state.history = [];
-                if (!state.savedItems) state.savedItems = [];
+            try {
+                const saved = localStorage.getItem(APP_KEY);
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    state = { ...state, ...parsed };
+                    
+                    // Safety check for arrays
+                    if (!Array.isArray(state.history)) state.history = [];
+                    if (!Array.isArray(state.savedItems)) state.savedItems = [];
+                    if (!Array.isArray(state.logs)) state.logs = [];
+
+                    // New Day Logic: If date changed, reset daily logs
+                    const today = new Date().toDateString();
+                    if (state.lastReset !== today) {
+                        console.log("New day detected. Resetting daily log.");
+                        state.logs = []; 
+                        state.lastReset = today;
+                        saveState(); // Save the new date immediately
+                    }
+                }
+            } catch (e) {
+                console.error("Save file corrupted, resetting.", e);
+                // If corrupted, we stick to default state to allow app to function
+                localStorage.removeItem(APP_KEY);
             }
+            
             updateHeaderDate();
             updateUI();
         }
 
         function saveState() {
-            localStorage.setItem(APP_KEY, JSON.stringify(state));
+            try {
+                localStorage.setItem(APP_KEY, JSON.stringify(state));
+            } catch (e) {
+                console.error("Could not save to localStorage", e);
+                alert("Storage full or disabled. Data may not persist.");
+            }
             updateUI();
         }
 
@@ -520,8 +547,11 @@
             const now = new Date();
             const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
             const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            document.getElementById('header-day').innerText = days[now.getDay()];
-            document.getElementById('header-date').innerText = `${months[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`;
+            const dayEl = document.getElementById('header-day');
+            const dateEl = document.getElementById('header-date');
+            
+            if(dayEl) dayEl.innerText = days[now.getDay()];
+            if(dateEl) dateEl.innerText = `${months[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`;
         }
 
         // --- UI RENDERERS ---
@@ -573,7 +603,7 @@
                     `;
                     list.appendChild(el);
                 });
-                feather.replace();
+                if (typeof feather !== 'undefined') feather.replace();
             }
         }
 
@@ -603,7 +633,7 @@
                 `;
                 container.appendChild(el);
             });
-            feather.replace();
+            if (typeof feather !== 'undefined') feather.replace();
         }
 
         function renderHistoryList() {
@@ -662,7 +692,7 @@
                 `;
                 container.appendChild(el);
             });
-            feather.replace();
+            if (typeof feather !== 'undefined') feather.replace();
         }
 
         // --- MUSCLE TOGGLE (Generic) ---
@@ -724,6 +754,13 @@
                 if(historyDayIndex > -1) {
                     // Update History Log
                     state.history[historyDayIndex].logs[index] = { ...state.history[historyDayIndex].logs[index], name, calories: cal, protein: prot };
+                    
+                    // IMPORTANT: Update totals for that history day so summary card is correct
+                    const day = state.history[historyDayIndex];
+                    day.totalCal = day.logs.reduce((sum, item) => sum + item.calories, 0);
+                    day.totalProt = day.logs.reduce((sum, item) => sum + item.protein, 0);
+                    
+                    saveState(); // Ensure this is saved to localStorage!
                     openHistoryDetail(historyDayIndex); // Refresh parent modal
                 } else {
                     // Update Today's Log
@@ -804,7 +841,7 @@
                 badge.className = "py-2 rounded-lg text-sm font-bold border border-red-500/30 bg-red-500/10 text-red-400";
                 badge.innerHTML = "Goal Missed";
             }
-            feather.replace();
+            if (typeof feather !== 'undefined') feather.replace();
             document.getElementById('finish-modal').classList.remove('hidden');
         }
 
@@ -925,13 +962,19 @@
             } else { 
                 list.innerHTML = "<div class='text-gray-500 text-center text-xs'>No logs saved for this day.</div>"; 
             }
-            feather.replace();
+            if (typeof feather !== 'undefined') feather.replace();
         }
 
         function removeHistoryLog(dayIndex, logIndex) {
             if(confirm("Delete this item from history?")) {
                 state.history[dayIndex].logs.splice(logIndex, 1);
-                // Update UI immediately
+                
+                // Recalculate Totals
+                const day = state.history[dayIndex];
+                day.totalCal = day.logs.reduce((sum, item) => sum + item.calories, 0);
+                day.totalProt = day.logs.reduce((sum, item) => sum + item.protein, 0);
+                
+                saveState(); // Ensure delete is persisted!
                 openHistoryDetail(dayIndex);
             }
         }
@@ -966,7 +1009,7 @@
                 success
             };
 
-            saveState();
+            saveState(); // Ensure changes are persisted!
             document.getElementById('history-detail-modal').classList.add('hidden');
         }
 
