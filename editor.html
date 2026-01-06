@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reputifly | Visual Workspace</title>
+    
+    <link rel="icon" type="image/png" href="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/feather-icons"></script>
+
+    <style>
+        :root {
+            --bg-main: #0B0A14;
+            --accent-primary: #E6397F;
+            --accent-secondary: #FF8A00;
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-bg: rgba(20, 20, 30, 0.7);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-main);
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        /* --- UI COMPONENTS --- */
+        
+        /* Floating Nav Capsule */
+        .nav-capsule {
+            position: absolute;
+            top: 24px; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 1000px; height: 64px;
+            background: rgba(15, 14, 24, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 9999px;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 24px; z-index: 50;
+            box-shadow: 0 20px 50px -10px rgba(0,0,0,0.5);
+            transition: all 0.3s ease;
+        }
+
+        /* Buttons */
+        .btn-action {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 18px; border-radius: 999px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-glass {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #ccc;
+        }
+        .btn-glass:hover { background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.3); }
+
+        .btn-glow {
+            background: linear-gradient(90deg, #E6397F, #FF8A00);
+            color: white; border: none;
+            box-shadow: 0 4px 20px rgba(230, 57, 127, 0.4);
+        }
+        .btn-glow:hover { transform: translateY(-1px); box-shadow: 0 8px 25px rgba(255, 138, 0, 0.5); }
+        .btn-glow.disabled { opacity: 0.5; pointer-events: none; filter: grayscale(1); }
+
+        /* Viewport */
+        #editor-frame-container {
+            flex: 1; margin-top: 0; position: relative; width: 100%; height: 100%;
+        }
+        iframe { width: 100%; height: 100%; border: none; display: block; background: white; }
+
+        /* Empty State */
+        #empty-state {
+            position: absolute; inset: 0; z-index: 10;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: var(--bg-main);
+            background-image: radial-gradient(circle at center, rgba(230, 57, 127, 0.1) 0%, transparent 60%);
+        }
+        
+        /* Modal */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px);
+            z-index: 100; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+        }
+        .modal-overlay.active { opacity: 1; pointer-events: auto; }
+
+        .modal-panel {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.95);
+            width: 90%; max-width: 420px;
+            background: #181820; border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px; padding: 32px;
+            box-shadow: 0 40px 80px rgba(0,0,0,0.6);
+            opacity: 0; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .modal-overlay.active .modal-panel { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+
+        .drop-zone {
+            border: 2px dashed rgba(255,255,255,0.1); border-radius: 16px;
+            padding: 40px 20px; text-align: center; cursor: pointer;
+            transition: all 0.2s; background: rgba(255,255,255,0.02);
+        }
+        .drop-zone:hover { border-color: var(--accent-primary); background: rgba(230, 57, 127, 0.05); }
+
+        .tab-btn {
+            padding: 10px; flex: 1; text-align: center; font-size: 13px; font-weight: 600;
+            color: #666; border-bottom: 2px solid transparent; cursor: pointer; transition: 0.2s;
+        }
+        .tab-btn.active { color: white; border-color: var(--accent-primary); }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px);
+            background: #1E1E2E; border: 1px solid rgba(255,255,255,0.1);
+            padding: 12px 24px; border-radius: 50px;
+            display: flex; align-items: center; gap: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+            opacity: 0; pointer-events: none; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 200; font-size: 13px; font-weight: 600;
+        }
+        .toast.visible { transform: translateX(-50%) translateY(0); opacity: 1; }
+        .toast i { color: #10B981; }
+
+        /* Loader */
+        .loader { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.2); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <nav class="nav-capsule">
+        <div class="flex items-center gap-4">
+            <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-6 w-auto brightness-125" alt="Logo">
+            <div class="h-4 w-px bg-white/10 hidden md:block"></div>
+            <span class="text-xs font-bold text-gray-400 uppercase tracking-widest hidden md:block">Visual Editor</span>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <button onclick="document.getElementById('fileInput').click()" class="btn-action btn-glass">
+                <i data-feather="folder" class="w-4 h-4"></i> Upload Design
+            </button>
+            <button onclick="downloadCode()" id="saveBtn" class="btn-action btn-glow disabled">
+                <i data-feather="download-cloud" class="w-4 h-4"></i> Save Changes
+            </button>
+        </div>
+    </nav>
+
+    <div id="editor-frame-container">
+        <div id="empty-state">
+            <div class="w-24 h-24 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-6 shadow-2xl">
+                <i data-feather="layout" class="w-10 h-10 text-gray-500"></i>
+            </div>
+            <h1 class="text-3xl font-bold font-['Space_Grotesk'] mb-3">Load your website</h1>
+            <p class="text-gray-400 text-sm mb-8">Upload the .html file to start editing images visually.</p>
+            <button onclick="document.getElementById('fileInput').click()" class="btn-action btn-glow px-8 py-3 text-sm">
+                Select HTML File
+            </button>
+        </div>
+
+        <iframe id="editorFrame"></iframe>
+    </div>
+
+    <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+        <div class="modal-panel" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-lg font-bold font-['Space_Grotesk'] flex items-center gap-2">
+                    <i data-feather="image" class="text-pink-500 w-5 h-5"></i> Replace Image
+                </h3>
+                <button onclick="closeModal()" class="text-gray-500 hover:text-white transition"><i data-feather="x" class="w-5 h-5"></i></button>
+            </div>
+
+            <div class="flex border-b border-white/10 mb-6">
+                <div class="tab-btn active" onclick="switchTab('upload')" id="tab-upload">Upload File</div>
+                <div class="tab-btn" onclick="switchTab('url')" id="tab-url">Image Link</div>
+            </div>
+
+            <div id="view-upload">
+                <div class="drop-zone" onclick="document.getElementById('imgUpload').click()" id="dropArea">
+                    <i data-feather="upload-cloud" class="w-8 h-8 mx-auto mb-3 text-gray-400"></i>
+                    <p class="text-sm font-bold text-white">Click to Upload</p>
+                    <p class="text-xs text-gray-500 mt-1">Supports PNG, JPG, WEBP</p>
+                </div>
+            </div>
+
+            <div id="view-url" class="hidden">
+                <label class="text-[10px] uppercase font-bold text-gray-500 mb-2 block">Paste Image Address</label>
+                <div class="flex gap-2">
+                    <input type="text" id="urlInput" class="w-full bg-black/30 border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-pink-500 transition" placeholder="https://...">
+                </div>
+                <button onclick="applyUrl()" class="w-full mt-4 btn-action btn-glass justify-center text-white">Apply Link</button>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="toast" id="toast">
+        <i data-feather="check-circle"></i>
+        <span id="toastMsg">Changes Saved</span>
+    </div>
+
+    <input type="file" id="fileInput" accept=".html" class="hidden" onchange="loadFile(this)">
+    <input type="file" id="imgUpload" accept="image/*" class="hidden" onchange="handleImageUpload(this)">
+
+    <script>
+        feather.replace();
+
+        let currentImgElement = null;
+
+        // --- 1. FILE LOADING ---
+        function loadFile(input) {
+            const file = input.files[0];
+            if(!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const frame = document.getElementById('editorFrame');
+                const emptyState = document.getElementById('empty-state');
+                const saveBtn = document.getElementById('saveBtn');
+
+                // Load content
+                frame.srcdoc = e.target.result;
+                
+                frame.onload = () => {
+                    emptyState.style.opacity = '0';
+                    setTimeout(() => emptyState.style.display = 'none', 300);
+                    saveBtn.classList.remove('disabled');
+                    injectEditorScripts(frame);
+                    showToast("Design Loaded Successfully");
+                };
+            };
+            reader.readAsText(file);
+        }
+
+        // --- 2. INJECT EDITOR MAGIC ---
+        function injectEditorScripts(iframe) {
+            const doc = iframe.contentDocument;
+            
+            // Inject Styles for "Edit Mode"
+            const style = doc.createElement('style');
+            style.textContent = `
+                /* Highlight clickable images */
+                img {
+                    cursor: pointer !important;
+                    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+                    position: relative;
+                }
+                img:hover {
+                    box-shadow: 0 0 0 4px #E6397F !important;
+                    filter: brightness(1.1);
+                    transform: scale(1.02);
+                    z-index: 9999;
+                }
+                /* Prevent link navigation inside editor */
+                a { pointer-events: none !important; cursor: default !important; }
+            `;
+            doc.head.appendChild(style);
+
+            // Add Click Listeners
+            doc.querySelectorAll('img').forEach(img => {
+                // Determine if this is a "logo" to avoid breaking layout, but generally allow all edits
+                img.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    currentImgElement = img;
+                    openModal();
+                });
+            });
+        }
+
+        // --- 3. MODAL LOGIC ---
+        function openModal() {
+            document.getElementById('modalOverlay').classList.add('active');
+            // Reset fields
+            document.getElementById('urlInput').value = '';
+            switchTab('upload'); 
+        }
+
+        function closeModal(e) {
+            if(e && e.target !== document.getElementById('modalOverlay')) return; // Only close if clicking overlay or X
+            document.getElementById('modalOverlay').classList.remove('active');
+            currentImgElement = null;
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('tab-'+tab).classList.add('active');
+            
+            document.getElementById('view-upload').classList.toggle('hidden', tab !== 'upload');
+            document.getElementById('view-url').classList.toggle('hidden', tab !== 'url');
+        }
+
+        // --- 4. IMAGE HANDLING ---
+        
+        // Option A: File Upload
+        function handleImageUpload(input) {
+            const file = input.files[0];
+            if(!file || !currentImgElement) return;
+
+            // Show loading state on dropzone
+            const dropZone = document.getElementById('dropArea');
+            const originalContent = dropZone.innerHTML;
+            dropZone.innerHTML = '<div class="loader mx-auto"></div><p class="text-xs mt-2 text-gray-400">Processing...</p>';
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                currentImgElement.src = e.target.result;
+                // Optional: Reset max-width if necessary to prevent layout break
+                // currentImgElement.style.maxWidth = "100%"; 
+                
+                closeModal();
+                showToast("Image Updated");
+                
+                // Reset Dropzone
+                setTimeout(() => dropZone.innerHTML = originalContent, 300);
+                input.value = ''; // Reset input to allow re-uploading same file
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Option B: URL
+        function applyUrl() {
+            const url = document.getElementById('urlInput').value;
+            if(!url || !currentImgElement) return;
+            
+            currentImgElement.src = url;
+            closeModal();
+            showToast("Image Link Applied");
+        }
+
+        // --- 5. EXPORT ---
+        function downloadCode() {
+            const frame = document.getElementById('editorFrame');
+            if(!frame.contentDocument) return;
+
+            // Clone the doc to clean it up before saving
+            const docContent = frame.contentDocument.documentElement.outerHTML;
+            
+            // (Optional) We could strip the injected CSS style block here if we wanted to be super clean, 
+            // but it's harmless to leave it (it only affects hover states).
+            
+            const blob = new Blob([docContent], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'website-updated.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            showToast("File Downloaded!");
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            document.getElementById('toastMsg').innerText = msg;
+            t.classList.add('visible');
+            setTimeout(() => t.classList.remove('visible'), 3000);
+        }
+    </script>
+</body>
+</html>
