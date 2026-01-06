@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Reputifly | Visual Workspace</title>
+    
+    <link rel="icon" type="image/png" href="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/feather-icons"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <style>
+        :root {
+            --bg-main: #0B0A14;
+            --accent-primary: #E6397F;
+            --accent-secondary: #FF8A00;
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-bg: rgba(20, 20, 30, 0.7);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-main);
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        /* --- UI COMPONENTS --- */
+        .liquid-glow {
+            background: radial-gradient(circle at top, rgba(255,255,255,0.4) 0%, transparent 60%),
+                        linear-gradient(90deg, #E6397F, #FF8A00);
+            box-shadow: 
+                0 6px 20px rgba(230, 57, 127, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.4);
+            border: none; position: relative; overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            color: white; font-weight: 700; border-radius: 9999px;
+            display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;
+        }
+        .liquid-glow:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 15px 30px rgba(255, 138, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+        .liquid-glow.disabled { opacity: 0.5; pointer-events: none; filter: grayscale(1); }
+
+        .btn-glass { 
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #ccc; 
+            border-radius: 9999px; transition: all 0.2s ease; font-weight: 600; font-size: 13px;
+            display: flex; align-items: center; gap: 6px; padding: 0 18px; cursor: pointer;
+        }
+        .btn-glass:hover { background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.3); }
+
+        .input-dark {
+            background: #050505; border: 1px solid rgba(255,255,255,0.15); color: white; 
+            border-radius: 12px; padding: 14px 18px; width: 100%; font-family: 'Inter', sans-serif; 
+            font-size: 13px; outline: none; transition: all 0.3s ease; box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .input-dark:focus { border-color: var(--accent-primary); box-shadow: 0 0 0 1px rgba(230, 57, 127, 0.5), inset 0 2px 4px rgba(0,0,0,0.5); }
+
+        /* --- MODALS --- */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(5, 5, 8, 0.95); backdrop-filter: blur(10px);
+            z-index: 100; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .modal-overlay.active { opacity: 1; pointer-events: auto; }
+        
+        .modal-card {
+            background: #121218; border: 1px solid rgba(255,255,255,0.08); border-radius: 24px; 
+            padding: 40px; width: 90%; max-width: 500px; text-align: center;
+            box-shadow: 0 50px 100px -20px rgba(0,0,0,0.8);
+            transform: scale(0.95); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .modal-overlay.active .modal-card { transform: scale(1); }
+
+        .icon-circle {
+            width: 64px; height: 64px; background: rgba(255,255,255,0.03); 
+            border: 1px solid rgba(255,255,255,0.08); border-radius: 50%; 
+            display: flex; align-items: center; justify-content: center; margin: 0 auto 24px auto;
+        }
+
+        /* --- RICH TEXT EDITOR STYLES --- */
+        .editor-container {
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 12px;
+            overflow: hidden;
+            background: #050505;
+            text-align: left;
+        }
+        
+        .editor-toolbar {
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding: 8px 12px;
+            display: flex;
+            gap: 6px;
+        }
+
+        .toolbar-btn {
+            width: 32px; height: 32px;
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            color: #aaa;
+            transition: all 0.2s;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+        }
+        .toolbar-btn:hover, .toolbar-btn.active { background: rgba(255,255,255,0.1); color: white; }
+        .toolbar-btn svg { width: 16px; height: 16px; }
+
+        .editor-content {
+            padding: 16px;
+            min-height: 120px;
+            max-height: 200px;
+            overflow-y: auto;
+            color: white;
+            font-size: 14px;
+            line-height: 1.6;
+            outline: none;
+        }
+        .editor-content b, .editor-content strong { font-weight: bold; color: #fff; }
+        .editor-content i, .editor-content em { font-style: italic; }
+        .editor-content u { text-decoration: underline; }
+        .editor-content a { color: #E6397F; text-decoration: underline; cursor: pointer; }
+
+        .link-drawer {
+            background: #1a1a24;
+            padding: 12px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            display: none;
+            animation: slideDown 0.2s ease;
+        }
+        @keyframes slideDown { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        /* --- NAV CAPSULE & TOGGLES --- */
+        .nav-capsule {
+            position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
+            width: 92%; max-width: 1000px; height: 68px;
+            background: rgba(20, 20, 30, 0.85); backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border); border-radius: 9999px;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 20px; z-index: 50; box-shadow: 0 20px 40px -10px rgba(0,0,0,0.5);
+            transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55), opacity 0.3s ease;
+        }
+        .nav-capsule.nav-hidden { transform: translateX(-50%) translateY(-200%); opacity: 0; pointer-events: none; }
+
+        .toggle-btn {
+            position: absolute; z-index: 60;
+            width: 40px; height: 40px; border-radius: 50%;
+            background: rgba(20, 20, 30, 0.9); border: 1px solid rgba(255,255,255,0.1);
+            color: white; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+            transition: all 0.2s ease; opacity: 0.7;
+        }
+        .toggle-btn:hover { opacity: 1; transform: scale(1.1); background: #E6397F; border-color: #E6397F; }
+        
+        #navToggleBtn { top: 38px; right: 24px; }
+        #mobileToggleBtn { top: 38px; right: 74px; }
+
+        @media (max-width: 768px) {
+            #mobileToggleBtn { display: none; }
+            #navToggleBtn { top: auto; bottom: 24px; left: 24px; right: auto; background: rgba(230, 57, 127, 0.9); border-color: #E6397F; opacity: 1; }
+        }
+
+        .loader { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .pulse-ring {
+            position: absolute; width: 100%; height: 100%; border-radius: 50%;
+            border: 1px solid var(--accent-primary); opacity: 0;
+            animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        @keyframes pulse-ring { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(1.5); opacity: 0; } }
+    </style>
+</head>
+<body>
+
+    <button id="mobileToggleBtn" class="toggle-btn" onclick="toggleMobileView()" title="Toggle Mobile View">
+        <i data-feather="smartphone" class="w-5 h-5"></i>
+    </button>
+    <button id="navToggleBtn" class="toggle-btn" onclick="toggleHeader()" title="Show/Hide Header">
+        <i data-feather="eye" class="w-5 h-5"></i>
+    </button>
+
+    <div id="setupScreen" class="modal-overlay active" style="z-index: 200;">
+        <div class="modal-card">
+            <div class="icon-circle relative">
+                <div class="pulse-ring"></div>
+                <i data-feather="globe" class="w-8 h-8 text-pink-500 relative z-10"></i>
+            </div>
+            <h1 class="text-2xl font-bold font-['Space_Grotesk'] mb-3 text-white">Project Setup</h1>
+            <p class="text-gray-400 text-sm mb-8 leading-relaxed px-2">Enter the <strong>exact URL</strong> you are currently working on.</p>
+            <div class="text-left mb-8">
+                <label class="text-[10px] uppercase font-bold text-gray-500 mb-2 block ml-1 tracking-wider">Website Domain</label>
+                <input type="text" id="domainInput" class="input-dark" placeholder="e.g. staging.client-site.com">
+            </div>
+            <button onclick="finishSetup()" class="liquid-glow w-full py-4 text-sm shadow-lg">Start Project <i data-feather="arrow-right" class="w-4 h-4 ml-1"></i></button>
+            <button onclick="clearStorage()" class="mt-4 text-[10px] text-gray-600 hover:text-red-500 transition-colors">Reset Saved Data</button>
+        </div>
+    </div>
+
+    <nav class="nav-capsule" id="mainHeader">
+        <div class="flex items-center gap-3">
+            <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-6 w-auto brightness-125">
+            <button onclick="exitProject()" class="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white hover:bg-red-500/20 hover:border-red-500/50 transition-all ml-1" title="Exit Project">
+                <i data-feather="log-out" class="w-3.5 h-3.5"></i>
+            </button>
+            <div class="h-4 w-px bg-white/10 hidden md:block ml-2"></div>
+            <span class="text-xs font-bold text-gray-500 font-mono hidden md:block truncate max-w-[150px]" id="domainDisplay">...</span>
+        </div>
+        <div class="flex items-center gap-3">
+            <button onclick="document.getElementById('fileInput').click()" class="btn-glass h-10">
+                <i data-feather="layout" class="w-4 h-4"></i> <span class="hidden sm:inline">Load HTML</span>
+            </button>
+            <button onclick="downloadProject()" id="saveBtn" class="liquid-glow h-10 px-5 text-xs disabled">
+                <i data-feather="download-cloud" class="w-4 h-4"></i> <span class="hidden sm:inline">Download Zip</span>
+            </button>
+        </div>
+    </nav>
+
+    <div id="editor-frame-container" style="flex: 1; position: relative; width: 100%; height: 100%; transition: all 0.3s ease;">
+        <div id="empty-state" class="absolute inset-0 z-10 bg-[#0B0A14] flex flex-col items-center justify-center">
+            <div class="icon-circle mb-4">
+                <i data-feather="code" class="w-8 h-8 text-gray-500"></i>
+            </div>
+            <h2 class="text-xl font-bold mb-2">No Page Loaded</h2>
+            <p class="text-gray-500 text-sm mb-6">Upload your HTML template to begin.</p>
+        </div>
+        <iframe id="editorFrame" style="width: 100%; height: 100%; border: none; display: block; background: white; transition: all 0.3s ease;"></iframe>
+    </div>
+
+    <div class="modal-overlay" id="imageModal" onclick="closeModal('imageModal', event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-lg font-bold font-['Space_Grotesk']">Change Image</h3>
+                <button onclick="closeModal('imageModal')" class="text-gray-500 hover:text-white"><i data-feather="x" class="w-5 h-5"></i></button>
+            </div>
+            <div class="border-2 border-dashed border-white/10 rounded-2xl p-8 hover:bg-white/5 hover:border-pink-500/50 cursor-pointer transition-all mb-6 group" onclick="document.getElementById('imgUpload').click()" id="dropZone">
+                <div id="dropContent">
+                    <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
+                        <i data-feather="image" class="w-6 h-6 text-pink-500"></i>
+                    </div>
+                    <p class="text-sm font-bold text-white">Upload, Drag or Paste (Ctrl+V)</p>
+                    <p class="text-[10px] text-gray-400 mt-1">Auto-converts to WebP</p>
+                </div>
+            </div>
+            <div class="relative mb-6">
+                <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-white/10"></div></div>
+                <div class="relative flex justify-center text-xs uppercase"><span class="bg-[#121218] px-2 text-gray-500 font-bold">Or URL</span></div>
+            </div>
+            <div class="flex gap-3">
+                <input type="text" id="urlInput" class="input-dark flex-grow" placeholder="https://...">
+                <button onclick="applyUrl()" class="liquid-glow px-6 py-0 text-xs shadow-lg hover:shadow-pink-500/20 whitespace-nowrap">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="textModal" onclick="closeModal('textModal', event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-lg font-bold font-['Space_Grotesk']">Edit Content</h3>
+                <button onclick="closeModal('textModal')" class="text-gray-500 hover:text-white"><i data-feather="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <div class="text-left mb-6">
+                <label class="text-[10px] uppercase font-bold text-gray-500 mb-2 block ml-1 tracking-wider">Content</label>
+                
+                <div class="editor-container">
+                    <div class="editor-toolbar">
+                        <button class="toolbar-btn" onmousedown="formatDoc('bold')" title="Bold"><i data-feather="bold"></i></button>
+                        <button class="toolbar-btn" onmousedown="formatDoc('italic')" title="Italic"><i data-feather="italic"></i></button>
+                        <button class="toolbar-btn" onmousedown="formatDoc('underline')" title="Underline"><i data-feather="underline"></i></button>
+                        <div class="w-px h-4 bg-white/20 my-auto mx-1"></div>
+                        <button class="toolbar-btn" onmousedown="toggleLinkInput()" title="Link Selection"><i data-feather="link"></i></button>
+                        <button class="toolbar-btn" onmousedown="formatDoc('unlink')" title="Remove Link"><i data-feather="link-2"></i></button>
+                    </div>
+                    
+                    <div id="inlineLinkDrawer" class="link-drawer">
+                        <div class="flex gap-2">
+                            <input type="text" id="inlineLinkInput" class="input-dark py-2" placeholder="https://google.com">
+                            <button onclick="applyInlineLink()" class="bg-pink-600 hover:bg-pink-500 text-white px-3 rounded text-xs font-bold">Add</button>
+                            <button onclick="closeLinkDrawer()" class="text-gray-400 hover:text-white"><i data-feather="x" class="w-4 h-4"></i></button>
+                        </div>
+                    </div>
+
+                    <div id="richEditor" class="editor-content" contenteditable="true"></div>
+                </div>
+            </div>
+
+            <div id="blockLinkSection" class="text-left mb-6 hidden">
+                <label class="text-[10px] uppercase font-bold text-gray-500 mb-2 block ml-1 tracking-wider text-pink-500">Button / Link Destination</label>
+                <div class="relative">
+                    <i data-feather="external-link" class="absolute left-3 top-3.5 w-4 h-4 text-gray-500"></i>
+                    <input type="text" id="blockLinkInput" class="input-dark pl-10" placeholder="https://...">
+                </div>
+            </div>
+
+            <button onclick="applyTextUpdate()" class="liquid-glow w-full py-3 text-sm font-bold shadow-lg">Update Content</button>
+        </div>
+    </div>
+
+    <input type="file" id="fileInput" accept=".html" class="hidden" onchange="loadTemplate(this)">
+    <input type="file" id="imgUpload" accept="image/*" class="hidden" onchange="handleImageUpload(this)">
+
+    <script>
+        feather.replace();
+
+        let projectDomain = localStorage.getItem('reputifly_domain') || "";
+        let savedHTML = localStorage.getItem('reputifly_html') || "";
+        let currentElement = null; 
+        let assetsToZip = []; 
+        let headerLocked = false;
+        let isMobileView = false;
+        let savedSelection = null; 
+
+        // --- PASTE & INIT ---
+        document.addEventListener('paste', (e) => {
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            for (let index in items) {
+                const item = items[index];
+                if (item.kind === 'file' && item.type.includes('image/')) {
+                    e.preventDefault();
+                    if (document.getElementById('imageModal').classList.contains('active')) {
+                        processNewImage(item.getAsFile()); 
+                    }
+                    return; 
+                }
+            }
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            if(projectDomain) {
+                document.getElementById('domainInput').value = projectDomain;
+                document.getElementById('domainDisplay').innerText = projectDomain;
+                document.getElementById('setupScreen').classList.remove('active');
+            }
+            if(savedHTML) {
+                loadContentIntoFrame(savedHTML);
+            }
+        });
+
+        // --- RICH TEXT LOGIC ---
+        function formatDoc(cmd, value = null) {
+            document.execCommand(cmd, false, value);
+            document.getElementById('richEditor').focus();
+        }
+
+        function saveSelection() {
+            if (window.getSelection) {
+                const sel = window.getSelection();
+                if (sel.getRangeAt && sel.rangeCount) {
+                    return sel.getRangeAt(0);
+                }
+            }
+            return null;
+        }
+
+        function restoreSelection(range) {
+            if (range && window.getSelection) {
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+        }
+
+        function toggleLinkInput() {
+            const drawer = document.getElementById('inlineLinkDrawer');
+            if (drawer.style.display === 'block') {
+                closeLinkDrawer();
+            } else {
+                savedSelection = saveSelection(); 
+                if(!savedSelection || savedSelection.toString().length === 0) {
+                    alert("Please select some text first.");
+                    return;
+                }
+                drawer.style.display = 'block';
+                document.getElementById('inlineLinkInput').focus();
+            }
+        }
+
+        function closeLinkDrawer() {
+            document.getElementById('inlineLinkDrawer').style.display = 'none';
+            document.getElementById('inlineLinkInput').value = '';
+        }
+
+        function applyInlineLink() {
+            const url = document.getElementById('inlineLinkInput').value;
+            if (url && savedSelection) {
+                restoreSelection(savedSelection);
+                formatDoc('createLink', url);
+                closeLinkDrawer();
+            }
+        }
+        
+        document.querySelectorAll('.toolbar-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => e.preventDefault());
+        });
+
+        // --- VIEW CONTROLS ---
+        window.parentAutoShow = function() {
+            if(headerLocked) return; 
+            document.getElementById('mainHeader').classList.remove('nav-hidden');
+        }
+        window.parentAutoHide = function() {
+            if(headerLocked) return;
+            document.getElementById('mainHeader').classList.add('nav-hidden');
+        }
+
+        function toggleHeader() {
+            const header = document.getElementById('mainHeader');
+            const btn = document.getElementById('navToggleBtn');
+            headerLocked = !headerLocked; 
+            if(headerLocked) {
+                header.classList.add('nav-hidden');
+                btn.innerHTML = '<i data-feather="eye" class="w-5 h-5"></i>';
+                btn.style.opacity = "1";
+            } else {
+                header.classList.remove('nav-hidden');
+                btn.innerHTML = '<i data-feather="eye-off" class="w-5 h-5"></i>';
+                btn.style.opacity = "0.5";
+            }
+            feather.replace();
+        }
+
+        function toggleMobileView() {
+            const frameContainer = document.getElementById('editor-frame-container');
+            const frame = document.getElementById('editorFrame');
+            const btn = document.getElementById('mobileToggleBtn');
+            isMobileView = !isMobileView;
+            if(isMobileView) {
+                frame.style.width = "375px"; frame.style.height = "90%"; 
+                frame.style.margin = "0 auto"; frame.style.border = "4px solid #333";
+                frame.style.borderRadius = "20px"; frame.style.boxShadow = "0 20px 50px rgba(0,0,0,0.5)";
+                frameContainer.style.display = "flex"; frameContainer.style.alignItems = "center";
+                frameContainer.style.justifyContent = "center";
+                btn.style.background = "#E6397F"; btn.style.borderColor = "#E6397F";
+            } else {
+                frame.style.width = "100%"; frame.style.height = "100%";
+                frame.style.margin = "0"; frame.style.border = "none";
+                frame.style.borderRadius = "0";
+                frameContainer.style.display = "block";
+                btn.style.background = "rgba(20, 20, 30, 0.9)"; btn.style.borderColor = "rgba(255,255,255,0.1)";
+            }
+        }
+
+        function exitProject() {
+            if(confirm("Exit project? This will clear saved data and start fresh.")) {
+                localStorage.removeItem('reputifly_domain');
+                localStorage.removeItem('reputifly_html');
+                location.reload();
+            }
+        }
+
+        function clearStorage() {
+            if(confirm("Reset all saved data?")) {
+                localStorage.removeItem('reputifly_domain');
+                localStorage.removeItem('reputifly_html');
+                location.reload();
+            }
+        }
+
+        function saveProgress() {
+            const frame = document.getElementById('editorFrame');
+            if(frame.contentDocument) {
+                localStorage.setItem('reputifly_html', frame.contentDocument.documentElement.outerHTML);
+            }
+        }
+
+        // --- SETUP & LOAD ---
+        function finishSetup() {
+            const input = document.getElementById('domainInput').value.trim();
+            if(!input) return alert("Please enter the URL.");
+            projectDomain = input.replace(/^https?:\/\//, '').replace(/\/$/, '');
+            localStorage.setItem('reputifly_domain', projectDomain);
+            document.getElementById('domainDisplay').innerText = projectDomain;
+            document.getElementById('setupScreen').classList.remove('active');
+        }
+
+        function loadTemplate(input) {
+            const file = input.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                let content = e.target.result;
+                content = content.replace(/body\s*>\s*header\s*\{\s*display:\s*none\s*!important;?\s*\}/gi, "");
+                content = content.replace(/,\s*body\s*>\s*header/gi, ""); 
+                localStorage.setItem('reputifly_html', content);
+                loadContentIntoFrame(content);
+            };
+            reader.readAsText(file);
+        }
+
+        function loadContentIntoFrame(htmlContent) {
+            const frame = document.getElementById('editorFrame');
+            frame.srcdoc = htmlContent;
+            frame.onload = () => {
+                document.getElementById('empty-state').style.display = 'none';
+                document.getElementById('saveBtn').classList.remove('disabled');
+                injectEditorScripts(frame);
+            };
+        }
+
+        function injectEditorScripts(iframe) {
+            const doc = iframe.contentDocument;
+            const win = iframe.contentWindow;
+
+            // Updated Styles: Less aggressive hover
+            const style = doc.createElement('style');
+            style.textContent = `
+                img { cursor: pointer !important; transition: outline 0.2s ease; position: relative; }
+                img:hover { outline: 3px solid #E6397F !important; z-index: 99999 !important; }
+                
+                h1:hover, h2:hover, h3:hover, h4:hover, h5:hover, h6:hover, p:hover, li:hover, a:hover, button:hover, label:hover, caption:hover {
+                    cursor: text; 
+                    outline: 1px dashed rgba(255, 138, 0, 0.7);
+                    background: rgba(255, 138, 0, 0.05);
+                }
+                a { pointer-events: auto !important; }
+            `;
+            doc.head.appendChild(style);
+
+            let lastScrollY = 0;
+            win.addEventListener('scroll', () => {
+                const currentScrollY = win.scrollY;
+                if(currentScrollY > lastScrollY && currentScrollY > 50) window.parent.parentAutoHide(); 
+                else if (currentScrollY < lastScrollY) window.parent.parentAutoShow(); 
+                lastScrollY = currentScrollY;
+            });
+
+            doc.body.addEventListener('click', (e) => {
+                const link = e.target.closest('a');
+                if (link) e.preventDefault();
+
+                let target = e.target;
+                if (target.tagName !== 'IMG') {
+                    // Check if clicked image underneath
+                    const elements = doc.elementsFromPoint(e.clientX, e.clientY);
+                    const imgUnderneath = elements.find(el => el.tagName === 'IMG');
+                    if (imgUnderneath) target = imgUnderneath;
+                }
+
+                if (target.tagName === 'IMG') {
+                    e.preventDefault(); e.stopPropagation();
+                    currentElement = target;
+                    openModal('imageModal');
+                    return;
+                }
+            });
+
+            // UPDATED: Strict Child Check Logic
+            function handleTextEdit(e) {
+                let target = e.target;
+                
+                if(target.tagName === 'IMG' || target.tagName === 'HTML' || target.tagName === 'BODY' || target.tagName === 'svg' || target.tagName === 'path') return;
+                
+                // Find nearest meaningful container
+                // We add DIV back here to support text sitting directly in a div
+                let editable = target.closest('h1, h2, h3, h4, h5, h6, p, li, a, button, label, caption, strong, em, b, u, span, div');
+                
+                if (!editable) return;
+
+                // --- CRITICAL FIX ---
+                // If this element contains layout blocks (like other Divs, Lists, Images), it is a CONTAINER.
+                // We do NOT want to edit containers, only text leaves.
+                const isContainer = Array.from(editable.children).some(child => {
+                    return ['DIV', 'UL', 'OL', 'IMG', 'SECTION', 'FORM', 'TABLE', 'IFRAME', 'HEADER', 'FOOTER'].includes(child.tagName);
+                });
+
+                // If it's a container, abort. This forces the user to click the actual text node inside.
+                // We check mainly for DIV, SECTION, A because standard text tags like P usually don't contain divs.
+                if ((editable.tagName === 'DIV' || editable.tagName === 'SECTION' || editable.tagName === 'A') && isContainer) {
+                    return; 
+                }
+                
+                if (editable.innerText.trim().length === 0) return;
+
+                e.preventDefault(); e.stopPropagation();
+                currentElement = editable;
+                openTextModal(editable);
+            }
+
+            doc.body.addEventListener('contextmenu', handleTextEdit);
+            doc.body.addEventListener('dblclick', handleTextEdit);
+            doc.body.addEventListener('click', (e) => {
+               // Optional: Allow single click if it's clearly a text element? 
+               // For now, let's stick to the existing behavior or just map click too if you want it super easy.
+               // Currently your code seems to rely on custom click handlers or just DblClick.
+               // Let's add click support for explicit text elements to make it snappy.
+               
+               let t = e.target;
+               if(['H1','H2','H3','H4','H5','H6','P','SPAN','A','LI'].includes(t.tagName)) {
+                   handleTextEdit(e);
+               }
+            });
+        }
+
+        // --- MODALS & HELPERS ---
+        function openModal(id) { document.getElementById(id).classList.add('active'); }
+        function closeModal(id, e) { 
+            if(e && e.target !== document.getElementById(id) && e.type === 'click') return;
+            document.getElementById(id).classList.remove('active'); 
+        }
+
+        function openTextModal(element) {
+            const editor = document.getElementById('richEditor');
+            editor.innerHTML = element.innerHTML;
+            
+            const linkSection = document.getElementById('blockLinkSection');
+            const linkInput = document.getElementById('blockLinkInput');
+            
+            const anchor = element.tagName === 'A' ? element : element.closest('a');
+            
+            if (anchor) {
+                linkSection.classList.remove('hidden');
+                linkInput.value = anchor.getAttribute('href');
+                currentElement = anchor; 
+            } else {
+                linkSection.classList.add('hidden');
+                linkInput.value = "";
+            }
+
+            closeLinkDrawer(); 
+            openModal('textModal');
+        }
+
+        function applyTextUpdate() {
+            if (!currentElement) return;
+
+            const editor = document.getElementById('richEditor');
+            currentElement.innerHTML = editor.innerHTML;
+
+            const linkSection = document.getElementById('blockLinkSection');
+            if (!linkSection.classList.contains('hidden')) {
+                const newHref = document.getElementById('blockLinkInput').value;
+                if(newHref) {
+                    currentElement.setAttribute('href', newHref);
+                }
+            }
+
+            saveProgress();
+            closeModal('textModal');
+        }
+
+        function getUniqueFilename(baseName) {
+            let name = baseName;
+            let counter = 1;
+            while (assetsToZip.some(a => a.name === name)) {
+                const parts = baseName.split('.');
+                const ext = parts.pop();
+                name = `${parts.join('.')}-${counter}.${ext}`;
+                counter++;
+            }
+            return name;
+        }
+
+        // --- ASSET LOGIC ---
+        async function processNewImage(file) {
+            if (!currentElement) return;
+            const dropContent = document.getElementById('dropContent');
+            const originalHTML = dropContent.innerHTML;
+            dropContent.innerHTML = '<div class="loader mx-auto mb-2"></div><span class="text-xs">Processing...</span>';
+
+            const webpBlob = await convertToWebP(file);
+            let baseName = file.name.split('.')[0].toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9\-]/g, '') + ".webp";
+            if (file.name === 'image.png' || file.name === 'pasted-image.png') {
+                baseName = `pasted-image-${Date.now()}.webp`;
+            }
+            let safeName = getUniqueFilename(baseName);
+            const date = new Date();
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const wpUrl = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${safeName}`;
+
+            const previewUrl = URL.createObjectURL(webpBlob);
+            currentElement.src = previewUrl; 
+            currentElement.dataset.exportSrc = wpUrl; 
+            
+            addToZipQueue(safeName, webpBlob);
+            saveProgress();
+
+            dropContent.innerHTML = originalHTML;
+            document.getElementById('imgUpload').value = '';
+            closeModal('imageModal');
+        }
+
+        async function handleImageUpload(input) {
+            const file = input.files[0];
+            if(!file) return;
+            await processNewImage(file);
+        }
+
+        function applyUrl() {
+            const url = document.getElementById('urlInput').value;
+            if(url && currentElement) {
+                currentElement.src = url;
+                delete currentElement.dataset.exportSrc;
+                saveProgress();
+                closeModal('imageModal');
+            }
+        }
+
+        function convertToWebP(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let w = img.width, h = img.height;
+                        if(w > 2500) { h = Math.round(h * 2500/w); w = 2500; }
+                        canvas.width = w; canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        canvas.toBlob((blob) => resolve(blob), 'image/webp', 0.9);
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function addToZipQueue(filename, blob) {
+            assetsToZip.push({ name: filename, blob: blob });
+        }
+
+        function cleanGSAPArtifacts(doc) {
+            const dirtyElements = doc.querySelectorAll('*[style]');
+            dirtyElements.forEach(el => {
+                const style = el.getAttribute('style');
+                if (style.includes('opacity') || style.includes('transform') || style.includes('translate') || style.includes('visibility')) {
+                    el.style.removeProperty('opacity');
+                    el.style.removeProperty('transform');
+                    el.style.removeProperty('translate');
+                    el.style.removeProperty('rotate');
+                    el.style.removeProperty('scale');
+                    el.style.removeProperty('visibility'); 
+                    if (el.getAttribute('style') === '') el.removeAttribute('style');
+                }
+            });
+        }
+
+        async function downloadProject() {
+            const btn = document.getElementById('saveBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<div class="loader"></div> Zipping...';
+            btn.classList.add('disabled');
+
+            const zip = new JSZip();
+            const doc = document.getElementById('editorFrame').contentDocument.cloneNode(true);
+            
+            doc.querySelectorAll('img').forEach(img => {
+                if(img.dataset.exportSrc) {
+                    img.src = img.dataset.exportSrc;
+                    delete img.dataset.exportSrc;
+                }
+                img.removeAttribute('style'); 
+            });
+            
+            const styles = doc.querySelectorAll('style');
+            if(styles.length > 0) styles[styles.length - 1].remove();
+
+            cleanGSAPArtifacts(doc);
+
+            zip.file("index.html", doc.documentElement.outerHTML);
+            const imgFolder = zip.folder("images_to_upload");
+            assetsToZip.forEach(asset => {
+                imgFolder.file(asset.name, asset.blob);
+            });
+
+            const content = await zip.generateAsync({type:"blob"});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(content);
+            a.download = `${projectDomain.split('.')[0]}_update.zip`;
+            a.click();
+
+            btn.innerHTML = originalText;
+            btn.classList.remove('disabled');
+        }
+    </script>
+</body>
+</html>
