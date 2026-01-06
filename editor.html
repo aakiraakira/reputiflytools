@@ -116,7 +116,7 @@
             margin: 0 auto 24px auto;
         }
 
-        /* --- NAV CAPSULE (With Hide Logic) --- */
+        /* --- NAV CAPSULE & TOGGLES --- */
         .nav-capsule {
             position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
             width: 92%; max-width: 1000px; height: 68px;
@@ -130,21 +130,21 @@
         /* Hidden State */
         .nav-capsule.nav-hidden {
             transform: translateX(-50%) translateY(-150%);
-            opacity: 0;
-            pointer-events: none;
+            opacity: 0; pointer-events: none;
         }
 
-        /* Manual Toggle Button */
-        #navToggleBtn {
-            position: absolute; top: 24px; right: 24px; z-index: 60;
+        .toggle-btn {
+            position: absolute; top: 24px; z-index: 60;
             width: 40px; height: 40px; border-radius: 50%;
             background: rgba(20, 20, 30, 0.9); border: 1px solid rgba(255,255,255,0.1);
             color: white; display: flex; align-items: center; justify-content: center;
             cursor: pointer; box-shadow: 0 10px 20px rgba(0,0,0,0.3);
-            transition: all 0.2s ease;
-            opacity: 0.5;
+            transition: all 0.2s ease; opacity: 0.7;
         }
-        #navToggleBtn:hover { opacity: 1; transform: scale(1.1); background: #E6397F; border-color: #E6397F; }
+        .toggle-btn:hover { opacity: 1; transform: scale(1.1); background: #E6397F; border-color: #E6397F; }
+        
+        #navToggleBtn { right: 24px; }
+        #mobileToggleBtn { right: 74px; }
 
         /* Loader */
         .loader { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; }
@@ -160,7 +160,10 @@
 </head>
 <body>
 
-    <button id="navToggleBtn" onclick="toggleHeader()" title="Show/Hide Header">
+    <button id="mobileToggleBtn" class="toggle-btn" onclick="toggleMobileView()" title="Toggle Mobile View">
+        <i data-feather="smartphone" class="w-5 h-5"></i>
+    </button>
+    <button id="navToggleBtn" class="toggle-btn" onclick="toggleHeader()" title="Show/Hide Header">
         <i data-feather="eye" class="w-5 h-5"></i>
     </button>
 
@@ -208,7 +211,7 @@
         </div>
     </nav>
 
-    <div id="editor-frame-container" style="flex: 1; position: relative; width: 100%; height: 100%;">
+    <div id="editor-frame-container" style="flex: 1; position: relative; width: 100%; height: 100%; transition: all 0.3s ease;">
         <div id="empty-state" class="absolute inset-0 z-10 bg-[#0B0A14] flex flex-col items-center justify-center">
             <div class="icon-circle mb-4">
                 <i data-feather="code" class="w-8 h-8 text-gray-500"></i>
@@ -216,7 +219,7 @@
             <h2 class="text-xl font-bold mb-2">No Page Loaded</h2>
             <p class="text-gray-500 text-sm mb-6">Upload your HTML template to begin.</p>
         </div>
-        <iframe id="editorFrame" style="width: 100%; height: 100%; border: none; display: block; background: white;"></iframe>
+        <iframe id="editorFrame" style="width: 100%; height: 100%; border: none; display: block; background: white; transition: all 0.3s ease;"></iframe>
     </div>
 
     <div class="modal-overlay" id="imageModal" onclick="closeModal('imageModal', event)">
@@ -280,6 +283,7 @@
         let currentElement = null;
         let assetsToZip = []; 
         let headerVisible = true;
+        let isMobileView = false;
 
         // --- INITIAL LOAD ---
         window.addEventListener('DOMContentLoaded', () => {
@@ -288,24 +292,16 @@
                 document.getElementById('domainDisplay').innerText = projectDomain;
                 document.getElementById('setupScreen').classList.remove('active');
             }
-
             if(savedHTML) {
-                const frame = document.getElementById('editorFrame');
-                frame.srcdoc = savedHTML;
-                frame.onload = () => {
-                    document.getElementById('empty-state').style.display = 'none';
-                    document.getElementById('saveBtn').classList.remove('disabled');
-                    injectEditorScripts(frame);
-                };
+                loadContentIntoFrame(savedHTML);
             }
         });
 
+        // --- VIEW CONTROLS ---
         function toggleHeader() {
             const header = document.getElementById('mainHeader');
             const btn = document.getElementById('navToggleBtn');
-            
             headerVisible = !headerVisible;
-            
             if(headerVisible) {
                 header.classList.remove('nav-hidden');
                 btn.innerHTML = '<i data-feather="eye-off" class="w-5 h-5"></i>';
@@ -318,8 +314,41 @@
             feather.replace();
         }
 
+        function toggleMobileView() {
+            const frameContainer = document.getElementById('editor-frame-container');
+            const frame = document.getElementById('editorFrame');
+            const btn = document.getElementById('mobileToggleBtn');
+            
+            isMobileView = !isMobileView;
+            
+            if(isMobileView) {
+                // Mobile Mode
+                frame.style.width = "375px";
+                frame.style.height = "90%"; 
+                frame.style.margin = "0 auto";
+                frame.style.border = "4px solid #333";
+                frame.style.borderRadius = "20px";
+                frame.style.boxShadow = "0 20px 50px rgba(0,0,0,0.5)";
+                frameContainer.style.display = "flex";
+                frameContainer.style.alignItems = "center";
+                frameContainer.style.justifyContent = "center";
+                btn.style.background = "#E6397F";
+                btn.style.borderColor = "#E6397F";
+            } else {
+                // Desktop Mode
+                frame.style.width = "100%";
+                frame.style.height = "100%";
+                frame.style.margin = "0";
+                frame.style.border = "none";
+                frame.style.borderRadius = "0";
+                frameContainer.style.display = "block";
+                btn.style.background = "rgba(20, 20, 30, 0.9)";
+                btn.style.borderColor = "rgba(255,255,255,0.1)";
+            }
+        }
+
         function clearStorage() {
-            if(confirm("Reset all saved data? This cannot be undone.")) {
+            if(confirm("Reset all saved data?")) {
                 localStorage.removeItem('reputifly_domain');
                 localStorage.removeItem('reputifly_html');
                 location.reload();
@@ -333,44 +362,47 @@
             }
         }
 
-        // --- 1. SETUP ---
+        // --- SETUP & LOAD ---
         function finishSetup() {
             const input = document.getElementById('domainInput').value.trim();
             if(!input) return alert("Please enter the URL.");
-            
             projectDomain = input.replace(/^https?:\/\//, '').replace(/\/$/, '');
             localStorage.setItem('reputifly_domain', projectDomain);
-            
             document.getElementById('domainDisplay').innerText = projectDomain;
             document.getElementById('setupScreen').classList.remove('active');
         }
 
-        // --- 2. LOAD & INJECT ---
         function loadTemplate(input) {
             const file = input.files[0];
             if(!file) return;
-
             const reader = new FileReader();
             reader.onload = (e) => {
-                const frame = document.getElementById('editorFrame');
-                const content = e.target.result;
-                frame.srcdoc = content;
+                let content = e.target.result;
+                // --- FIX FOR INVISIBLE HEADER ---
+                // Removes 'body > header { display: none }' which accidentally hides custom headers
+                content = content.replace(/body\s*>\s*header\s*\{\s*display:\s*none\s*!important;?\s*\}/gi, "");
+                content = content.replace(/,\s*body\s*>\s*header/gi, ""); 
+                
                 localStorage.setItem('reputifly_html', content);
-
-                frame.onload = () => {
-                    document.getElementById('empty-state').style.display = 'none';
-                    document.getElementById('saveBtn').classList.remove('disabled');
-                    injectEditorScripts(frame);
-                };
+                loadContentIntoFrame(content);
             };
             reader.readAsText(file);
+        }
+
+        function loadContentIntoFrame(htmlContent) {
+            const frame = document.getElementById('editorFrame');
+            frame.srcdoc = htmlContent;
+            frame.onload = () => {
+                document.getElementById('empty-state').style.display = 'none';
+                document.getElementById('saveBtn').classList.remove('disabled');
+                injectEditorScripts(frame);
+            };
         }
 
         function injectEditorScripts(iframe) {
             const doc = iframe.contentDocument;
             const win = iframe.contentWindow;
 
-            // 1. Inject Styles
             const style = doc.createElement('style');
             style.textContent = `
                 img { cursor: pointer !important; transition: outline 0.2s ease; position: relative; }
@@ -382,21 +414,19 @@
             `;
             doc.head.appendChild(style);
 
-            // 2. SCROLL LOGIC (Auto Hide Header)
+            // Scroll Logic (Auto-Hide Header)
             let lastScrollY = 0;
             win.addEventListener('scroll', () => {
                 const currentScrollY = win.scrollY;
                 if(currentScrollY > lastScrollY && currentScrollY > 50) {
-                    // Scrolling Down -> Hide
                     if(headerVisible) toggleHeader();
                 } else if (currentScrollY < lastScrollY) {
-                    // Scrolling Up -> Show
                     if(!headerVisible) toggleHeader();
                 }
                 lastScrollY = currentScrollY;
             });
 
-            // 3. Interactions
+            // Click Listeners
             doc.querySelectorAll('img').forEach(img => {
                 img.addEventListener('click', (e) => {
                     e.preventDefault(); e.stopPropagation();
@@ -409,7 +439,6 @@
                 e.preventDefault();
                 let target = e.target;
                 if(target.tagName === 'B' || target.tagName === 'I' || target.tagName === 'STRONG') target = target.parentElement;
-                
                 if(target.innerText && target.innerText.trim().length > 0 && target.tagName !== 'IMG') {
                     currentElement = target;
                     openTextModal(target.innerText.trim());
@@ -425,7 +454,7 @@
             });
         }
 
-        // --- 3. MODALS ---
+        // --- MODALS ---
         function openModal(id) { document.getElementById(id).classList.add('active'); }
         function closeModal(id, e) { 
             if(e && e.target !== document.getElementById(id) && e.type === 'click') return;
@@ -436,7 +465,20 @@
             openModal('textModal');
         }
 
-        // --- 4. IMAGE LOGIC ---
+        // --- SMART FILENAME HANDLING ---
+        function getUniqueFilename(baseName) {
+            let name = baseName;
+            let counter = 1;
+            while (assetsToZip.some(a => a.name === name)) {
+                const parts = baseName.split('.');
+                const ext = parts.pop();
+                name = `${parts.join('.')}-${counter}.${ext}`;
+                counter++;
+            }
+            return name;
+        }
+
+        // --- IMAGE LOGIC ---
         async function handleImageUpload(input) {
             const file = input.files[0];
             if(!file || !currentElement) return;
@@ -446,17 +488,25 @@
             dropContent.innerHTML = '<div class="loader mx-auto mb-2"></div><span class="text-xs">Processing...</span>';
 
             const webpBlob = await convertToWebP(file);
+            
+            // 1. Generate Clean Base Name
+            let baseName = file.name.split('.')[0].toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9\-]/g, '') + ".webp";
+            
+            // 2. Ensure Uniqueness (Fix for Overwriting)
+            let safeName = getUniqueFilename(baseName);
+
+            // 3. Generate URL
             const date = new Date();
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
-            
-            let safeName = file.name.split('.')[0].toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9\-]/g, '') + ".webp";
             const wpUrl = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${safeName}`;
 
+            // 4. Update
             const previewUrl = URL.createObjectURL(webpBlob);
             currentElement.src = previewUrl; 
             currentElement.dataset.exportSrc = wpUrl; 
             
+            // 5. Add to Zip
             addToZipQueue(safeName, webpBlob);
             saveProgress();
 
@@ -475,7 +525,6 @@
             }
         }
 
-        // --- 5. TEXT LOGIC ---
         function applyTextUpdate() {
             const newText = document.getElementById('textEditorInput').value;
             if(currentElement) {
@@ -485,7 +534,6 @@
             closeModal('textModal');
         }
 
-        // --- 6. UTILITIES ---
         function convertToWebP(file) {
             return new Promise((resolve) => {
                 const reader = new FileReader();
@@ -506,7 +554,6 @@
         }
 
         function addToZipQueue(filename, blob) {
-            assetsToZip = assetsToZip.filter(a => a.name !== filename);
             assetsToZip.push({ name: filename, blob: blob });
         }
 
@@ -519,6 +566,7 @@
             const zip = new JSZip();
             const doc = document.getElementById('editorFrame').contentDocument.cloneNode(true);
             
+            // Final Cleanup for export
             doc.querySelectorAll('img').forEach(img => {
                 if(img.dataset.exportSrc) {
                     img.src = img.dataset.exportSrc;
