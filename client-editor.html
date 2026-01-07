@@ -355,7 +355,7 @@
         </div>
 
         <div class="flex items-center gap-3">
-            <div class="relative group z-50">
+            <div id="navLoadMenu" class="relative group z-50">
                 <button class="btn-glass h-10 pr-4">
                     <i data-feather="layout" class="w-4 h-4"></i> 
                     <span class="hidden sm:inline">Load HTML</span>
@@ -675,74 +675,95 @@
 
         // --- CLOUD LOGIC ---
         async function checkUrlForProject() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const projectId = urlParams.get('id');
-    
-    if(projectId && db) {
-        isCloudMode = true;
-        currentProjectId = projectId; // Set the global ID
-        
-        document.getElementById('cloudLoader').classList.add('active');
+            const urlParams = new URLSearchParams(window.location.search);
+            const projectId = urlParams.get('id');
+            
+            if(projectId && db) {
+                isCloudMode = true;
+                currentProjectId = projectId; 
+                
+                document.getElementById('cloudLoader').classList.add('active');
         document.getElementById('setupScreen').classList.remove('active');
-        document.getElementById('loadHtmlBtn').style.display = 'none'; 
         
-        // Hide Admin controls for clients
-        document.getElementById('navExitBtn').style.display = 'none'; 
-        document.getElementById('navHelpBtn').classList.remove('hidden-force'); 
-        document.getElementById('navShareBtn').style.display = 'none'; // Hidden by default now
+        // Hide the Load/Paste menu for clients
+        const loadMenu = document.getElementById('navLoadMenu');
+        if(loadMenu) loadMenu.style.display = 'none';
+        
+        // Fallback for safety
+        const oldBtn = document.getElementById('loadHtmlBtn');
+        if(oldBtn) oldBtn.style.display = 'none';
+                
+                // --- SAFE UI UPDATES (Prevents Crash) ---
+                const loadBtn = document.getElementById('loadHtmlBtn') || document.getElementById('loadNavWrapper');
+                if(loadBtn) loadBtn.style.display = 'none'; 
+                
+                const exitBtn = document.getElementById('navExitBtn');
+                if(exitBtn) exitBtn.style.display = 'none';
+                
+                const helpBtn = document.getElementById('navHelpBtn');
+                if(helpBtn) helpBtn.classList.remove('hidden-force');
+                
+                const shareBtn = document.getElementById('navShareBtn');
+                if(shareBtn) shareBtn.style.display = 'none';
+                // ----------------------------------------
 
-        // 1. CHECK LOCAL STORAGE FIRST (The "Refresh" Fix)
-        // Check Big Storage first, then fallback to LocalStorage
-        let localDraft = await loadFromBigStorage(`reputifly_draft_${projectId}`);
-        if(!localDraft) localDraft = localStorage.getItem(`reputifly_draft_${projectId}`);
-        if(localDraft) {
-            console.log("Restoring from local draft...");
-            // We still need domain from DB, so we fetch quickly
-            try {
-                const docRef = window.firebaseApp.doc(db, "projects", projectId);
-                const docSnap = await window.firebaseApp.getDoc(docRef);
-                if(docSnap.exists()) {
-                    projectDomain = docSnap.data().domain;
-                    document.getElementById('domainDisplay').innerText = projectDomain;
-                    localStorage.setItem('reputifly_domain', projectDomain);
+                // 1. CHECK LOCAL STORAGE SAFELY
+                let localDraft = null;
+                try {
+                    localDraft = await loadFromBigStorage(`reputifly_draft_${projectId}`);
+                } catch(e) { console.warn("BigStorage error:", e); }
+                
+                // Fallback to standard storage
+                if(!localDraft) localDraft = localStorage.getItem(`reputifly_draft_${projectId}`);
+                
+                if(localDraft) {
+                    console.log("Restoring from local draft...");
+                    try {
+                        const docRef = window.firebaseApp.doc(db, "projects", projectId);
+                        const docSnap = await window.firebaseApp.getDoc(docRef);
+                        if(docSnap.exists()) {
+                            projectDomain = docSnap.data().domain;
+                            const displayEl = document.getElementById('domainDisplay');
+                            if(displayEl) displayEl.innerText = projectDomain;
+                            localStorage.setItem('reputifly_domain', projectDomain);
+                        }
+                    } catch(e) { console.error("Background fetch failed", e); }
+                    
+                    loadContentIntoFrame(localDraft);
+                    pushHistory(localDraft);
+                    document.getElementById('cloudLoader').classList.remove('active');
+                    setTimeout(() => { openModal('helpModal'); }, 500);
+                    return; 
                 }
-            } catch(e) { console.error("Background fetch failed", e); }
-            
-            loadContentIntoFrame(localDraft);
-            pushHistory(localDraft);
-            document.getElementById('cloudLoader').classList.remove('active');
-            setTimeout(() => { openModal('helpModal'); }, 500);
-            return; // Stop here, don't overwrite with old DB data
-        }
-        
-        // 2. IF NO LOCAL DRAFT, FETCH FROM DB
-        try {
-            const docRef = window.firebaseApp.doc(db, "projects", projectId);
-            const docSnap = await window.firebaseApp.getDoc(docRef);
-            
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                projectDomain = data.domain;
                 
-                const displayEl = document.getElementById('domainDisplay');
-                if(displayEl) displayEl.innerText = projectDomain;
-                
-                localStorage.setItem('reputifly_domain', projectDomain); 
-                loadContentIntoFrame(data.html);
-                pushHistory(data.html);
-                
-                setTimeout(() => { openModal('helpModal'); }, 500);
-            } else {
-                alert("Project not found or expired.");
+                // 2. IF NO LOCAL DRAFT, FETCH FROM DB
+                try {
+                    const docRef = window.firebaseApp.doc(db, "projects", projectId);
+                    const docSnap = await window.firebaseApp.getDoc(docRef);
+                    
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        projectDomain = data.domain;
+                        
+                        const displayEl = document.getElementById('domainDisplay');
+                        if(displayEl) displayEl.innerText = projectDomain;
+                        
+                        localStorage.setItem('reputifly_domain', projectDomain); 
+                        loadContentIntoFrame(data.html);
+                        pushHistory(data.html);
+                        
+                        setTimeout(() => { openModal('helpModal'); }, 500);
+                    } else {
+                        alert("Project not found or expired.");
+                    }
+                } catch(e) {
+                    console.error(e);
+                    alert("Error loading project.");
+                } finally {
+                    document.getElementById('cloudLoader').classList.remove('active');
+                }
             }
-        } catch(e) {
-            console.error(e);
-            alert("Error loading project.");
-        } finally {
-            document.getElementById('cloudLoader').classList.remove('active');
         }
-    }
-}
 
         async function createShareableLink() {
             if(!db) return alert("Firebase not configured properly.");
@@ -839,21 +860,30 @@
         window.addEventListener('DOMContentLoaded', async () => {
             const urlParams = new URLSearchParams(window.location.search);
             if(urlParams.get('id')) {
-                return; 
+                return; // Cloud loader handles this
             }
 
             if(projectDomain) {
                 document.getElementById('domainInput').value = projectDomain;
-                const domainDisplay = document.getElementById('domainDisplay');
-                if(domainDisplay) domainDisplay.innerText = projectDomain;
+                const displayEl = document.getElementById('domainDisplay');
+                if(displayEl) displayEl.innerText = projectDomain;
                 document.getElementById('setupScreen').classList.remove('active');
             }
-            // --- UPDATED LOADING LOGIC ---
+
+            // --- SAFELY LOAD CONTENT ---
+            let contentToLoad = null;
+
             // 1. Try Big Storage
-            let contentToLoad = await loadFromBigStorage('reputifly_html');
+            try {
+                contentToLoad = await loadFromBigStorage('reputifly_html');
+            } catch(e) {
+                console.warn("Big Storage unavailable, skipping...");
+            }
             
-            // 2. If empty, try Standard Storage (Fallback)
-            if(!contentToLoad) contentToLoad = localStorage.getItem('reputifly_html');
+            // 2. Fallback to Standard Storage
+            if(!contentToLoad) {
+                contentToLoad = localStorage.getItem('reputifly_html');
+            }
             
             // 3. Load whatever we found
             if(contentToLoad) {
@@ -1077,11 +1107,16 @@
             content = content.replace(/body\s*>\s*header\s*\{\s*display:\s*none\s*!important;?\s*\}/gi, "");
             content = content.replace(/,\s*body\s*>\s*header/gi, ""); 
             
+            // Save Safely
+            try {
+                saveToBigStorage('reputifly_html', content);
+            } catch(e) {}
             localStorage.setItem('reputifly_html', content);
+            
             loadContentIntoFrame(content);
             pushHistory(content);
             
-            document.getElementById('pasteInput').value = ""; // Clear input
+            document.getElementById('pasteInput').value = ""; 
             closeModal('pasteModal');
         }
 
