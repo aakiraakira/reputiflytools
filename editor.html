@@ -11,13 +11,20 @@
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, addDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        
+        window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, collection, addDoc };
+        window.dispatchEvent(new Event('firebaseLoaded'));
+    </script>
+
     <style>
         :root {
             --bg-main: #0B0A14;
             --accent-primary: #E6397F;
             --accent-secondary: #FF8A00;
             --glass-border: rgba(255, 255, 255, 0.08);
-            --glass-bg: rgba(20, 20, 30, 0.7);
         }
 
         body {
@@ -56,6 +63,21 @@
             display: flex; align-items: center; gap: 6px; padding: 0 18px; cursor: pointer;
         }
         .btn-glass:hover { background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.3); }
+        
+        .btn-share {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            border-radius: 9999px;
+            font-weight: 600; font-size: 13px;
+            height: 40px;
+            padding: 0 20px;
+            display: flex; align-items: center; gap: 6px;
+            transition: all 0.2s;
+        }
+        .btn-share:hover { background: rgba(255,255,255,0.15); border-color: white; }
+
+        .hidden-force { display: none !important; }
 
         .input-dark {
             background: #050505; border: 1px solid rgba(255,255,255,0.15); color: white; 
@@ -213,6 +235,14 @@
         .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
         .toast-content h4 { color: white; font-weight: bold; font-size: 14px; margin: 0; }
         .toast-content p { color: #aaa; font-size: 12px; margin: 2px 0 0 0; }
+        
+        /* SHARE MODAL SPECIFIC */
+        .copy-box {
+            background: #050505; border: 1px solid rgba(255,255,255,0.15); 
+            border-radius: 12px; padding: 12px; display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 20px; font-family: monospace; color: #E6397F; font-size: 12px;
+            overflow: hidden;
+        }
     </style>
 </head>
 <body>
@@ -223,6 +253,32 @@
     <button id="navToggleBtn" class="toggle-btn" onclick="toggleHeader()" title="Show/Hide Header">
         <i data-feather="eye" class="w-5 h-5"></i>
     </button>
+
+    <div id="cloudLoader" class="modal-overlay" style="z-index: 300;">
+        <div class="flex flex-col items-center">
+            <div class="loader mb-4" style="width: 40px; height: 40px;"></div>
+            <h2 class="text-xl font-bold">Loading Project...</h2>
+        </div>
+    </div>
+
+    <div id="shareModal" class="modal-overlay" onclick="closeModal('shareModal', event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="icon-circle">
+                <i data-feather="share-2" class="w-8 h-8 text-pink-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Share Link</h1>
+            <p class="text-gray-400 text-sm mb-6">Send this link to share the current progress.</p>
+            
+            <div class="copy-box" id="shareLinkBox">
+                Generating...
+            </div>
+            
+            <button onclick="copyShareLink()" class="liquid-glow w-full py-3 text-sm shadow-lg mb-3">
+                <i data-feather="copy" class="w-4 h-4"></i> Copy Link
+            </button>
+            <button onclick="closeModal('shareModal')" class="text-xs text-gray-500 hover:text-white">Close</button>
+        </div>
+    </div>
 
     <div id="setupScreen" class="modal-overlay active" style="z-index: 200;">
         <div class="modal-card">
@@ -247,7 +303,7 @@
                 <i data-feather="help-circle" class="w-8 h-8 text-pink-500"></i>
             </div>
             <h1 class="text-2xl font-bold font-['Space_Grotesk'] mb-2 text-white">How it Works</h1>
-            <p class="text-gray-400 text-sm mb-8">Follow these steps to update your website.</p>
+            <p class="text-gray-400 text-sm mb-8">Follow these steps to update the website.</p>
             
             <div class="step-row">
                 <div class="step-icon"><i data-feather="type" class="w-5 h-5"></i></div>
@@ -267,7 +323,7 @@
                 <div class="step-icon"><i data-feather="download-cloud" class="w-5 h-5"></i></div>
                 <div>
                     <h4 class="font-bold text-sm text-white">Save & Send</h4>
-                    <p class="text-xs text-gray-400 mt-1">When finished, click <strong>Download Zip</strong> and send the file to us.</p>
+                    <p class="text-xs text-gray-400 mt-1">When finished, click <strong>Download Zip</strong> (or Share).</p>
                 </div>
             </div>
 
@@ -278,9 +334,15 @@
     <nav class="nav-capsule" id="mainHeader">
         <div class="flex items-center gap-3">
             <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-6 w-auto brightness-125">
-            <button onclick="exitProject()" class="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white hover:bg-red-500/20 hover:border-red-500/50 transition-all ml-1" title="Exit Project">
+            
+            <button id="navHelpBtn" onclick="openModal('helpModal')" class="hidden-force w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white transition-all ml-1" title="Help">
+                <i data-feather="help-circle" class="w-4 h-4"></i>
+            </button>
+
+            <button id="navExitBtn" onclick="exitProject()" class="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white hover:bg-red-500/20 hover:border-red-500/50 transition-all ml-1" title="Exit Project">
                 <i data-feather="log-out" class="w-3.5 h-3.5"></i>
             </button>
+            
             <div class="h-4 w-px bg-white/10 hidden md:block ml-2"></div>
             <span class="text-xs font-bold text-gray-500 font-mono hidden md:block truncate max-w-[150px]" id="domainDisplay">...</span>
             
@@ -291,13 +353,16 @@
                 <i data-feather="arrow-right" class="w-4 h-4"></i>
             </button>
         </div>
+
         <div class="flex items-center gap-3">
-            <button onclick="openModal('helpModal')" class="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white transition-all" title="Help">
-                <i data-feather="help-circle" class="w-4 h-4"></i>
-            </button>
-            <button onclick="document.getElementById('fileInput').click()" class="btn-glass h-10">
+            <button id="loadHtmlBtn" onclick="document.getElementById('fileInput').click()" class="btn-glass h-10">
                 <i data-feather="layout" class="w-4 h-4"></i> <span class="hidden sm:inline">Load HTML</span>
             </button>
+
+            <button id="navShareBtn" onclick="createShareableLink()" class="btn-share">
+                <i data-feather="share-2" class="w-4 h-4"></i> <span class="hidden sm:inline">Share</span>
+            </button>
+            
             <button onclick="downloadProject()" id="saveBtn" class="liquid-glow h-10 px-5 text-xs disabled">
                 <i data-feather="download-cloud" class="w-4 h-4"></i> <span class="hidden sm:inline">Download Zip</span>
             </button>
@@ -350,7 +415,6 @@
             
             <div class="text-left mb-6">
                 <label class="text-[10px] uppercase font-bold text-gray-500 mb-2 block ml-1 tracking-wider">Content</label>
-                
                 <div class="editor-container">
                     <div class="editor-toolbar">
                         <button class="toolbar-btn" onmousedown="formatDoc('bold')" title="Bold"><i data-feather="bold"></i></button>
@@ -360,7 +424,6 @@
                         <button class="toolbar-btn" onmousedown="toggleLinkInput()" title="Link Selection"><i data-feather="link"></i></button>
                         <button class="toolbar-btn" onmousedown="formatDoc('unlink')" title="Remove Link"><i data-feather="link-2"></i></button>
                     </div>
-                    
                     <div id="inlineLinkDrawer" class="link-drawer">
                         <div class="flex gap-2">
                             <input type="text" id="inlineLinkInput" class="input-dark py-2" placeholder="https://google.com">
@@ -368,7 +431,6 @@
                             <button onclick="closeLinkDrawer()" class="text-gray-400 hover:text-white"><i data-feather="x" class="w-4 h-4"></i></button>
                         </div>
                     </div>
-
                     <div id="richEditor" class="editor-content" contenteditable="true"></div>
                 </div>
             </div>
@@ -401,6 +463,33 @@
     <script>
         feather.replace();
 
+        // --- FIREBASE CONFIG (INTEGRATED) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyDqpzqEVtrEtQvvmcMie_Et7xiNh8QU_Ao",
+            authDomain: "reputifly-editor.firebaseapp.com",
+            projectId: "reputifly-editor",
+            storageBucket: "reputifly-editor.firebasestorage.app",
+            messagingSenderId: "455384979132",
+            appId: "1:455384979132:web:9079ec81182115b16622b9"
+        };
+
+        let db = null;
+        let isCloudMode = false;
+        
+        window.addEventListener('firebaseLoaded', () => {
+            try {
+                if(window.firebaseApp) {
+                    const app = window.firebaseApp.initializeApp(firebaseConfig);
+                    db = window.firebaseApp.getFirestore(app);
+                    
+                    const urlParams = new URLSearchParams(window.location.search);
+                    if(urlParams.get('id')) {
+                        checkUrlForProject();
+                    }
+                }
+            } catch(e) { console.error("Firebase init error", e); }
+        });
+
         let projectDomain = localStorage.getItem('reputifly_domain') || "";
         let savedHTML = localStorage.getItem('reputifly_html') || "";
         let currentElement = null; 
@@ -408,23 +497,126 @@
         let headerLocked = false;
         let isMobileView = false;
         let savedSelection = null;
-        let restoreScrollY = 0; // Tracks scroll position
+        let restoreScrollY = 0; 
         
-        // --- HISTORY STACK FOR UNDO/REDO ---
         let historyStack = [];
         let historyIndex = -1;
 
-        // --- GLOBAL PASTE LISTENER (SMART) ---
+        // --- CORE HTML CLEANING FUNCTION (UPDATED TO PRESERVE STYLES) ---
+        function getCleanHTML() {
+            if(!document.getElementById('editorFrame').contentDocument) return "";
+            
+            const docClone = document.getElementById('editorFrame').contentDocument.cloneNode(true);
+            
+            // Clean GSAP inline styles
+            const dirtyElements = docClone.querySelectorAll('*[style]');
+            dirtyElements.forEach(el => {
+                const style = el.getAttribute('style');
+                if (style && (style.includes('opacity') || style.includes('transform') || style.includes('visibility'))) {
+                    el.style.removeProperty('opacity');
+                    el.style.removeProperty('transform');
+                    el.style.removeProperty('translate');
+                    el.style.removeProperty('rotate');
+                    el.style.removeProperty('scale');
+                    el.style.removeProperty('visibility'); 
+                    if (el.getAttribute('style') === '') el.removeAttribute('style');
+                }
+            });
+
+            // FIX: Only remove the style tag with our specific ID
+            const editorStyle = docClone.getElementById('reputifly-editor-css');
+            if(editorStyle) editorStyle.remove();
+
+            return docClone.documentElement.outerHTML;
+        }
+
+        // --- CLOUD LOGIC ---
+        async function checkUrlForProject() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const projectId = urlParams.get('id');
+            
+            if(projectId && db) {
+                isCloudMode = true;
+                
+                document.getElementById('cloudLoader').classList.add('active');
+                document.getElementById('setupScreen').classList.remove('active');
+                document.getElementById('loadHtmlBtn').style.display = 'none'; 
+                
+                document.getElementById('navExitBtn').style.display = 'none'; 
+                document.getElementById('navHelpBtn').classList.remove('hidden-force'); 
+                document.getElementById('navShareBtn').style.display = 'none';
+                
+                try {
+                    const docRef = window.firebaseApp.doc(db, "projects", projectId);
+                    const docSnap = await window.firebaseApp.getDoc(docRef);
+                    
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        projectDomain = data.domain;
+                        
+                        const displayEl = document.getElementById('domainDisplay');
+                        if(displayEl) displayEl.innerText = projectDomain;
+                        
+                        localStorage.setItem('reputifly_domain', projectDomain); 
+                        loadContentIntoFrame(data.html);
+                        pushHistory(data.html);
+                        
+                        setTimeout(() => { openModal('helpModal'); }, 500);
+                    } else {
+                        alert("Project not found or expired.");
+                    }
+                } catch(e) {
+                    console.error(e);
+                    alert("Error loading project.");
+                } finally {
+                    document.getElementById('cloudLoader').classList.remove('active');
+                }
+            }
+        }
+
+        async function createShareableLink() {
+            if(!db) return alert("Firebase not configured properly.");
+            if(!document.getElementById('editorFrame').contentDocument) return alert("Load a page first.");
+            
+            const btn = document.getElementById('navShareBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "Saving...";
+            
+            try {
+                const html = getCleanHTML();
+                
+                const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), {
+                    domain: projectDomain,
+                    html: html,
+                    createdAt: new Date()
+                });
+                
+                const link = window.location.origin + window.location.pathname + "?id=" + docRef.id;
+                document.getElementById('shareLinkBox').innerText = link;
+                openModal('shareModal');
+            } catch(e) {
+                console.error(e);
+                alert("Error saving to cloud. See console.");
+            }
+            btn.innerHTML = originalText;
+        }
+
+        function copyShareLink() {
+            const text = document.getElementById('shareLinkBox').innerText;
+            navigator.clipboard.writeText(text);
+            const btn = document.querySelector('#shareModal .liquid-glow');
+            const oldHtml = btn.innerHTML;
+            btn.innerHTML = "Copied!";
+            setTimeout(() => btn.innerHTML = oldHtml, 2000);
+        }
+
+        // --- GLOBAL PASTE LISTENER ---
         document.addEventListener('paste', (e) => {
             const items = (e.clipboardData || e.originalEvent.clipboardData).items;
-            
-            // Check if Image Modal is open
             const isImageModalOpen = document.getElementById('imageModal').classList.contains('active');
-            
             for (let index in items) {
                 const item = items[index];
                 if (item.kind === 'file' && item.type.includes('image/')) {
-                    // IF image modal is open, we capture immediately even if not focused on input
                     if (isImageModalOpen) {
                         e.preventDefault();
                         processNewImage(item.getAsFile()); 
@@ -459,7 +651,7 @@
                         content = content.replace(/,\s*body\s*>\s*header/gi, ""); 
                         localStorage.setItem('reputifly_html', content);
                         loadContentIntoFrame(content);
-                        pushHistory(content); // Initial History
+                        pushHistory(content); 
                     };
                     reader.readAsText(file);
                 } else {
@@ -468,7 +660,6 @@
             }
         });
         
-        // --- SAFE TEXT PASTE ---
         document.getElementById('richEditor').addEventListener('paste', function(e) {
             e.preventDefault();
             const text = (e.clipboardData || window.clipboardData).getData('text');
@@ -476,20 +667,16 @@
         });
 
         window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            if(urlParams.get('id')) {
+                return; 
+            }
+
             if(projectDomain) {
                 document.getElementById('domainInput').value = projectDomain;
-                
-                // Safe Set InnerText
                 const domainDisplay = document.getElementById('domainDisplay');
                 if(domainDisplay) domainDisplay.innerText = projectDomain;
-
                 document.getElementById('setupScreen').classList.remove('active');
-                
-                // FIXED: Only show if NOT seen before
-                if (!localStorage.getItem('reputifly_tutorial_seen')) {
-                    setTimeout(() => { openModal('helpModal'); }, 500);
-                    localStorage.setItem('reputifly_tutorial_seen', 'true');
-                }
             }
             if(savedHTML) {
                 loadContentIntoFrame(savedHTML);
@@ -497,7 +684,7 @@
             }
         });
 
-        // --- HISTORY MANAGEMENT (FIXED SCROLL) ---
+        // --- HISTORY MANAGEMENT ---
         function pushHistory(htmlContent) {
             if (historyIndex < historyStack.length - 1) {
                 historyStack = historyStack.slice(0, historyIndex + 1);
@@ -509,7 +696,6 @@
 
         function performUndo() {
             if (historyIndex > 0) {
-                // Save current scroll before undoing
                 const frame = document.getElementById('editorFrame');
                 if(frame.contentWindow) restoreScrollY = frame.contentWindow.scrollY;
 
@@ -523,7 +709,6 @@
 
         function performRedo() {
             if (historyIndex < historyStack.length - 1) {
-                // Save current scroll before redoing
                 const frame = document.getElementById('editorFrame');
                 if(frame.contentWindow) restoreScrollY = frame.contentWindow.scrollY;
 
@@ -640,8 +825,8 @@
             if(confirm("Exit project? This will clear saved data and start fresh.")) {
                 localStorage.removeItem('reputifly_domain');
                 localStorage.removeItem('reputifly_html');
-                localStorage.removeItem('reputifly_tutorial_seen'); // Clear so they see it next time they reset
-                location.reload();
+                localStorage.removeItem('reputifly_tutorial_seen'); 
+                window.location.href = window.location.pathname; 
             }
         }
 
@@ -650,16 +835,15 @@
                 localStorage.removeItem('reputifly_domain');
                 localStorage.removeItem('reputifly_html');
                 localStorage.removeItem('reputifly_tutorial_seen');
-                location.reload();
+                window.location.href = window.location.pathname;
             }
         }
 
         function saveProgress() {
-            const frame = document.getElementById('editorFrame');
-            if(frame.contentDocument) {
-                const html = frame.contentDocument.documentElement.outerHTML;
+            const html = getCleanHTML();
+            if(html) {
                 localStorage.setItem('reputifly_html', html);
-                pushHistory(html); // SAVE STATE
+                pushHistory(html); 
             }
         }
 
@@ -670,17 +854,10 @@
             projectDomain = input.replace(/^https?:\/\//, '').replace(/\/$/, '');
             localStorage.setItem('reputifly_domain', projectDomain);
             
-            // FIX: Check if element exists before setting innerText
             const displayEl = document.getElementById('domainDisplay');
             if(displayEl) displayEl.innerText = projectDomain;
             
             document.getElementById('setupScreen').classList.remove('active');
-            
-            // Show Help & Set Flag
-            if (!localStorage.getItem('reputifly_tutorial_seen')) {
-                setTimeout(() => { openModal('helpModal'); }, 500);
-                localStorage.setItem('reputifly_tutorial_seen', 'true');
-            }
         }
 
         function loadTemplate(input) {
@@ -693,7 +870,7 @@
                 content = content.replace(/,\s*body\s*>\s*header/gi, ""); 
                 localStorage.setItem('reputifly_html', content);
                 loadContentIntoFrame(content);
-                pushHistory(content); // Save initial state
+                pushHistory(content); 
             };
             reader.readAsText(file);
         }
@@ -705,10 +882,9 @@
                 document.getElementById('empty-state').style.display = 'none';
                 document.getElementById('saveBtn').classList.remove('disabled');
                 
-                // RESTORE SCROLL IF EXISTS
                 if(restoreScrollY > 0) {
                     frame.contentWindow.scrollTo(0, restoreScrollY);
-                    restoreScrollY = 0; // Reset
+                    restoreScrollY = 0; 
                 }
                 
                 injectEditorScripts(frame);
@@ -720,6 +896,7 @@
             const win = iframe.contentWindow;
 
             const style = doc.createElement('style');
+            style.id = 'reputifly-editor-css'; // FIX: ID Added so we can remove safely later
             style.textContent = `
                 img { cursor: pointer !important; transition: outline 0.2s ease; position: relative; }
                 img:hover { outline: 3px solid #E6397F !important; z-index: 99999 !important; }
@@ -730,6 +907,13 @@
                     background: rgba(255, 138, 0, 0.05);
                 }
                 a { pointer-events: auto !important; }
+
+                /* FORCE VISIBILITY FOR EDITOR ONLY */
+                .tes-svc-row, [style*="opacity: 0"], [style*="visibility: hidden"] {
+                    opacity: 1 !important;
+                    visibility: visible !important;
+                    transform: none !important;
+                }
             `;
             doc.head.appendChild(style);
 
@@ -755,6 +939,17 @@
                 if (target.tagName === 'IMG') {
                     e.preventDefault(); e.stopPropagation();
                     currentElement = target;
+                    // FIX: Reset Inputs when opening modal
+                    document.getElementById('urlInput').value = '';
+                    const defaultDrop = `
+                        <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
+                            <i data-feather="image" class="w-6 h-6 text-pink-500"></i>
+                        </div>
+                        <p class="text-sm font-bold text-white">Upload, Drag or Paste (Ctrl+V)</p>
+                        <p class="text-[10px] text-gray-400 mt-1">Auto-converts to WebP</p>`;
+                    document.getElementById('dropContent').innerHTML = defaultDrop;
+                    feather.replace();
+                    
                     openModal('imageModal');
                     return;
                 }
@@ -854,29 +1049,38 @@
             const originalHTML = dropContent.innerHTML;
             dropContent.innerHTML = '<div class="loader mx-auto mb-2"></div><span class="text-xs">Processing...</span>';
 
-            const webpBlob = await convertToWebP(file);
+            const base64String = await convertToBase64(file);
+            
             let baseName = file.name.split('.')[0].toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9\-]/g, '') + ".webp";
             if (file.name === 'image.png' || file.name === 'pasted-image.png') {
                 baseName = `pasted-image-${Date.now()}.webp`;
             }
-            let safeName = getUniqueFilename(baseName);
+            
             const date = new Date();
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
-            const wpUrl = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${safeName}`;
+            const wpUrl = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${baseName}`;
 
-            const previewUrl = URL.createObjectURL(webpBlob);
-            
             currentElement.removeAttribute('srcset'); 
-            currentElement.src = previewUrl; 
-            currentElement.dataset.exportSrc = wpUrl; 
+            currentElement.src = base64String; 
             
-            addToZipQueue(safeName, webpBlob);
+            currentElement.dataset.exportSrc = wpUrl; 
+            currentElement.dataset.filename = baseName;
+            
             saveProgress();
 
             dropContent.innerHTML = originalHTML;
             document.getElementById('imgUpload').value = '';
             closeModal('imageModal');
+        }
+
+        function convertToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+            });
         }
 
         async function handleImageUpload(input) {
@@ -885,54 +1089,23 @@
             await processNewImage(file);
         }
 
+        // FIX: Ensure URL images are NOT added to ZIP list by cleaning dataset
         function applyUrl() {
             const url = document.getElementById('urlInput').value;
             if(url && currentElement) {
                 currentElement.src = url;
                 currentElement.removeAttribute('srcset');
+                // CLEAN DATASET so zipper ignores it
                 delete currentElement.dataset.exportSrc;
+                delete currentElement.dataset.filename;
+                
                 saveProgress();
                 closeModal('imageModal');
             }
         }
 
-        function convertToWebP(file) {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        let w = img.width, h = img.height;
-                        if(w > 2500) { h = Math.round(h * 2500/w); w = 2500; }
-                        canvas.width = w; canvas.height = h;
-                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-                        canvas.toBlob((blob) => resolve(blob), 'image/webp', 0.9);
-                    };
-                    img.src = e.target.result;
-                };
-                reader.readAsDataURL(file);
-            });
-        }
-
         function addToZipQueue(filename, blob) {
             assetsToZip.push({ name: filename, blob: blob });
-        }
-
-        function cleanGSAPArtifacts(doc) {
-            const dirtyElements = doc.querySelectorAll('*[style]');
-            dirtyElements.forEach(el => {
-                const style = el.getAttribute('style');
-                if (style.includes('opacity') || style.includes('transform') || style.includes('translate') || style.includes('visibility')) {
-                    el.style.removeProperty('opacity');
-                    el.style.removeProperty('transform');
-                    el.style.removeProperty('translate');
-                    el.style.removeProperty('rotate');
-                    el.style.removeProperty('scale');
-                    el.style.removeProperty('visibility'); 
-                    if (el.getAttribute('style') === '') el.removeAttribute('style');
-                }
-            });
         }
 
         async function downloadProject() {
@@ -942,29 +1115,61 @@
             btn.classList.add('disabled');
 
             const zip = new JSZip();
-            const doc = document.getElementById('editorFrame').contentDocument.cloneNode(true);
+            const cleanHTML = getCleanHTML(); 
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(cleanHTML, "text/html");
+            const imgFolder = zip.folder("images_to_upload");
             
-            doc.querySelectorAll('img').forEach(img => {
+            let usedFilenames = [];
+            let hasImagesToUpload = false;
+
+            const images = doc.querySelectorAll('img');
+            
+            for (let img of images) {
+                // FIX: Only process if exportSrc exists (URL images won't have this)
                 if(img.dataset.exportSrc) {
-                    img.src = img.dataset.exportSrc;
+                    hasImagesToUpload = true;
+                    const base64Data = img.src;
+                    
+                    if(base64Data.startsWith('data:image')) {
+                        let filename = img.dataset.filename || 'image.webp';
+                        
+                        let counter = 1;
+                        let originalName = filename.replace('.webp', '');
+                        while(usedFilenames.includes(filename)) {
+                            filename = `${originalName}-${counter}.webp`;
+                            counter++;
+                            const date = new Date();
+                            const year = date.getFullYear();
+                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                            img.dataset.exportSrc = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${filename}`;
+                        }
+                        usedFilenames.push(filename);
+
+                        const response = await fetch(base64Data);
+                        const blob = await response.blob();
+                        imgFolder.file(filename, blob);
+
+                        img.src = img.dataset.exportSrc;
+                    }
+                    
                     delete img.dataset.exportSrc;
+                    delete img.dataset.filename;
                 }
-                img.removeAttribute('style'); 
+                
                 if(img.src.includes('wp-content/uploads')) {
                      img.removeAttribute('srcset');
                 }
-            });
+                img.removeAttribute('style');
+            }
             
-            const styles = doc.querySelectorAll('style');
-            if(styles.length > 0) styles[styles.length - 1].remove();
+            // If no images were uploaded, remove the empty folder to keep zip clean
+            if(!hasImagesToUpload) zip.remove("images_to_upload");
 
-            cleanGSAPArtifacts(doc);
-
+            // FIX: DO NOT remove styles by searching for cursor:pointer. 
+            // The getCleanHTML() function already removed the editor-specific style by ID.
+            
             zip.file("index.html", doc.documentElement.outerHTML);
-            const imgFolder = zip.folder("images_to_upload");
-            assetsToZip.forEach(asset => {
-                imgFolder.file(asset.name, asset.blob);
-            });
 
             const content = await zip.generateAsync({type:"blob"});
             const a = document.createElement('a');
@@ -972,7 +1177,6 @@
             a.download = `${projectDomain.split('.')[0]}_update.zip`;
             a.click();
 
-            // TRIGGER TOAST
             const toast = document.getElementById('downloadToast');
             toast.classList.add('show');
             setTimeout(() => { toast.classList.remove('show'); }, 6000);
