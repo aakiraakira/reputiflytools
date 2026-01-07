@@ -15,7 +15,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, collection, addDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
         
-        // Expose to window so our script can use it
         window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, collection, addDoc };
         window.dispatchEvent(new Event('firebaseLoaded'));
     </script>
@@ -26,7 +25,6 @@
             --accent-primary: #E6397F;
             --accent-secondary: #FF8A00;
             --glass-border: rgba(255, 255, 255, 0.08);
-            --glass-bg: rgba(20, 20, 30, 0.7);
         }
 
         body {
@@ -65,6 +63,21 @@
             display: flex; align-items: center; gap: 6px; padding: 0 18px; cursor: pointer;
         }
         .btn-glass:hover { background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.3); }
+        
+        .btn-share {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            border-radius: 9999px;
+            font-weight: 600; font-size: 13px;
+            height: 40px;
+            padding: 0 20px;
+            display: flex; align-items: center; gap: 6px;
+            transition: all 0.2s;
+        }
+        .btn-share:hover { background: rgba(255,255,255,0.15); border-color: white; }
+
+        .hidden-force { display: none !important; }
 
         .input-dark {
             background: #050505; border: 1px solid rgba(255,255,255,0.15); color: white; 
@@ -253,8 +266,8 @@
             <div class="icon-circle">
                 <i data-feather="share-2" class="w-8 h-8 text-pink-500"></i>
             </div>
-            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Share with Client</h1>
-            <p class="text-gray-400 text-sm mb-6">Send this link to your client. They can edit instantly without any setup.</p>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Share Link</h1>
+            <p class="text-gray-400 text-sm mb-6">Send this link to share the current progress.</p>
             
             <div class="copy-box" id="shareLinkBox">
                 Generating...
@@ -290,7 +303,7 @@
                 <i data-feather="help-circle" class="w-8 h-8 text-pink-500"></i>
             </div>
             <h1 class="text-2xl font-bold font-['Space_Grotesk'] mb-2 text-white">How it Works</h1>
-            <p class="text-gray-400 text-sm mb-8">Follow these steps to update your website.</p>
+            <p class="text-gray-400 text-sm mb-8">Follow these steps to update the website.</p>
             
             <div class="step-row">
                 <div class="step-icon"><i data-feather="type" class="w-5 h-5"></i></div>
@@ -310,7 +323,7 @@
                 <div class="step-icon"><i data-feather="download-cloud" class="w-5 h-5"></i></div>
                 <div>
                     <h4 class="font-bold text-sm text-white">Save & Send</h4>
-                    <p class="text-xs text-gray-400 mt-1">When finished, click <strong>Download Zip</strong> and send the file to us.</p>
+                    <p class="text-xs text-gray-400 mt-1">When finished, click <strong>Download Zip</strong> (or Share).</p>
                 </div>
             </div>
 
@@ -321,9 +334,15 @@
     <nav class="nav-capsule" id="mainHeader">
         <div class="flex items-center gap-3">
             <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-6 w-auto brightness-125">
-            <button onclick="exitProject()" class="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white hover:bg-red-500/20 hover:border-red-500/50 transition-all ml-1" title="Exit Project">
+            
+            <button id="navHelpBtn" onclick="openModal('helpModal')" class="hidden-force w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white transition-all ml-1" title="Help">
+                <i data-feather="help-circle" class="w-4 h-4"></i>
+            </button>
+
+            <button id="navExitBtn" onclick="exitProject()" class="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white hover:bg-red-500/20 hover:border-red-500/50 transition-all ml-1" title="Exit Project">
                 <i data-feather="log-out" class="w-3.5 h-3.5"></i>
             </button>
+            
             <div class="h-4 w-px bg-white/10 hidden md:block ml-2"></div>
             <span class="text-xs font-bold text-gray-500 font-mono hidden md:block truncate max-w-[150px]" id="domainDisplay">...</span>
             
@@ -334,17 +353,33 @@
                 <i data-feather="arrow-right" class="w-4 h-4"></i>
             </button>
         </div>
+
         <div class="flex items-center gap-3">
-            <button onclick="createShareableLink()" class="btn-glass h-10 border-pink-500/30 text-pink-400 hover:bg-pink-500/10">
+            <div class="relative group z-50">
+                <button class="btn-glass h-10 pr-4">
+                    <i data-feather="layout" class="w-4 h-4"></i> 
+                    <span class="hidden sm:inline">Load HTML</span>
+                    <i data-feather="chevron-down" class="w-3 h-3 ml-1 opacity-50"></i>
+                </button>
+                
+                <div class="absolute top-full left-1/2 transform -translate-x-1/2 mt-3 w-48 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 translate-y-2 group-hover:translate-y-0">
+                    <div class="bg-[#121218] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col backdrop-blur-xl ring-1 ring-white/5">
+                        <div class="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#121218] border-l border-t border-white/10 transform rotate-45"></div>
+                        
+                        <button onclick="document.getElementById('fileInput').click()" class="relative z-10 text-left px-4 py-3 text-xs font-medium text-gray-300 hover:bg-white/5 hover:text-white flex items-center gap-3 transition-colors border-b border-white/5">
+                            <i data-feather="upload" class="w-4 h-4 text-pink-500"></i> Upload File
+                        </button>
+                        <button onclick="openModal('pasteModal'); setTimeout(() => document.getElementById('pasteInput').focus(), 100);" class="relative z-10 text-left px-4 py-3 text-xs font-medium text-gray-300 hover:bg-white/5 hover:text-white flex items-center gap-3 transition-colors">
+                            <i data-feather="clipboard" class="w-4 h-4 text-orange-500"></i> Paste Code
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <button id="navShareBtn" onclick="createShareableLink()" class="btn-share">
                 <i data-feather="share-2" class="w-4 h-4"></i> <span class="hidden sm:inline">Share</span>
             </button>
             
-            <button onclick="openModal('helpModal')" class="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white transition-all" title="Help">
-                <i data-feather="help-circle" class="w-4 h-4"></i>
-            </button>
-            <button id="loadHtmlBtn" onclick="document.getElementById('fileInput').click()" class="btn-glass h-10">
-                <i data-feather="layout" class="w-4 h-4"></i> <span class="hidden sm:inline">Load HTML</span>
-            </button>
             <button onclick="downloadProject()" id="saveBtn" class="liquid-glow h-10 px-5 text-xs disabled">
                 <i data-feather="download-cloud" class="w-4 h-4"></i> <span class="hidden sm:inline">Download Zip</span>
             </button>
@@ -352,12 +387,25 @@
     </nav>
 
     <div id="editor-frame-container" style="flex: 1; position: relative; width: 100%; height: 100%; transition: all 0.3s ease;">
-        <div id="empty-state" class="absolute inset-0 z-10 bg-[#0B0A14] flex flex-col items-center justify-center transition-colors">
-            <div class="icon-circle mb-4" style="pointer-events: none;">
-                <i data-feather="code" class="w-8 h-8 text-gray-500"></i>
+        <div id="empty-state" onclick="document.getElementById('fileInput').click()" class="absolute inset-0 z-10 bg-[#0B0A14] flex flex-col items-center justify-center cursor-pointer">
+            <div class="relative z-20 flex flex-col items-center">
+                <div class="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-5 border border-white/10 shadow-2xl transition-transform duration-300 hover:scale-110">
+                    <i data-feather="upload-cloud" class="w-8 h-8 text-gray-400"></i>
+                </div>
+                
+                <h2 class="text-2xl font-bold mb-2 text-white font-['Space_Grotesk'] tracking-tight">No Page Loaded</h2>
+                <p class="text-gray-500 text-sm mb-6">Click anywhere to <span class="text-white font-bold">Upload HTML</span></p>
+                
+                <div class="flex items-center gap-3 text-xs text-gray-700 font-bold tracking-widest uppercase my-2">
+                    <span class="w-8 h-px bg-white/5"></span>
+                    <span>OR</span>
+                    <span class="w-8 h-px bg-white/5"></span>
+                </div>
+    
+                <button onclick="event.stopPropagation(); openModal('pasteModal'); setTimeout(() => document.getElementById('pasteInput').focus(), 100);" class="liquid-glow mt-4 px-8 py-3 text-xs shadow-lg flex items-center gap-2">
+                    <i data-feather="clipboard" class="w-3 h-3"></i> Paste Code Directly
+                </button>
             </div>
-            <h2 class="text-xl font-bold mb-2" style="pointer-events: none;">No Page Loaded</h2>
-            <p class="text-gray-500 text-sm mb-6" style="pointer-events: none;">Drag & Drop HTML file here or click Load.</p>
         </div>
         <iframe id="editorFrame" style="width: 100%; height: 100%; border: none; display: block; background: white; transition: all 0.3s ease;"></iframe>
     </div>
@@ -387,6 +435,58 @@
             </div>
         </div>
     </div>
+    <div id="exitModal" class="modal-overlay" onclick="closeModal('exitModal', event)">
+        <div class="modal-card" style="max-width: 400px;" onclick="event.stopPropagation()">
+            <div class="icon-circle" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2);">
+                <i data-feather="log-out" class="w-10 h-10 text-red-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Exit Project?</h1>
+            <p class="text-gray-400 text-sm mb-6">Any unsaved progress will be lost. This will clear the current workspace.</p>
+            
+            <div class="flex gap-3">
+                <button onclick="confirmExit()" class="liquid-glow w-full py-3 text-sm font-bold shadow-lg" style="background: #ef4444; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);">
+                    Yes, Exit
+                </button>
+                <button onclick="closeModal('exitModal')" class="w-full py-3 text-sm font-bold rounded-full bg-white/5 hover:bg-white/10 text-white transition-colors">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+    <div id="exitModal" class="modal-overlay" onclick="closeModal('exitModal', event)">
+        <div class="modal-card" style="max-width: 400px;" onclick="event.stopPropagation()">
+            <div class="icon-circle" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2);">
+                <i data-feather="log-out" class="w-10 h-10 text-red-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Exit Project?</h1>
+            <p class="text-gray-400 text-sm mb-6">Any unsaved progress will be lost. This will clear the current workspace.</p>
+            
+            <div class="flex gap-3">
+                <button onclick="confirmExit()" class="liquid-glow w-full py-3 text-sm font-bold shadow-lg" style="background: #ef4444; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);">
+                    Yes, Exit
+                </button>
+                <button onclick="closeModal('exitModal')" class="w-full py-3 text-sm font-bold rounded-full bg-white/5 hover:bg-white/10 text-white transition-colors">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+    <div id="pasteModal" class="modal-overlay" onclick="closeModal('pasteModal', event)">
+        <div class="modal-card" style="max-width: 600px;" onclick="event.stopPropagation()">
+            <div class="icon-circle">
+                <i data-feather="clipboard" class="w-8 h-8 text-pink-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Paste Source Code</h1>
+            <p class="text-gray-400 text-sm mb-6">Paste your raw HTML code below to load it into the editor.</p>
+            
+            <textarea id="pasteInput" class="input-dark font-mono text-xs mb-6 h-64 resize-none focus:ring-2 focus:ring-pink-500/50" placeholder="<!DOCTYPE html><html>..."></textarea>
+            
+            <button onclick="loadPastedHTML()" class="liquid-glow w-full py-3 text-sm shadow-lg mb-3">
+                <i data-feather="play" class="w-4 h-4"></i> Load Project
+            </button>
+            <button onclick="closeModal('pasteModal')" class="text-xs text-gray-500 hover:text-white">Cancel</button>
+        </div>
+    </div>
 
     <div class="modal-overlay" id="textModal" onclick="closeModal('textModal', event)">
         <div class="modal-card" onclick="event.stopPropagation()">
@@ -397,7 +497,6 @@
             
             <div class="text-left mb-6">
                 <label class="text-[10px] uppercase font-bold text-gray-500 mb-2 block ml-1 tracking-wider">Content</label>
-                
                 <div class="editor-container">
                     <div class="editor-toolbar">
                         <button class="toolbar-btn" onmousedown="formatDoc('bold')" title="Bold"><i data-feather="bold"></i></button>
@@ -407,7 +506,6 @@
                         <button class="toolbar-btn" onmousedown="toggleLinkInput()" title="Link Selection"><i data-feather="link"></i></button>
                         <button class="toolbar-btn" onmousedown="formatDoc('unlink')" title="Remove Link"><i data-feather="link-2"></i></button>
                     </div>
-                    
                     <div id="inlineLinkDrawer" class="link-drawer">
                         <div class="flex gap-2">
                             <input type="text" id="inlineLinkInput" class="input-dark py-2" placeholder="https://google.com">
@@ -415,7 +513,6 @@
                             <button onclick="closeLinkDrawer()" class="text-gray-400 hover:text-white"><i data-feather="x" class="w-4 h-4"></i></button>
                         </div>
                     </div>
-
                     <div id="richEditor" class="editor-content" contenteditable="true"></div>
                 </div>
             </div>
@@ -429,6 +526,24 @@
             </div>
 
             <button onclick="applyTextUpdate()" class="liquid-glow w-full py-3 text-sm font-bold shadow-lg">Update Content</button>
+        </div>
+    </div>
+    <div id="successModal" class="modal-overlay" onclick="closeModal('successModal', event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="icon-circle" style="background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.2);">
+                <i data-feather="check" class="w-10 h-10 text-green-500"></i>
+            </div>
+            <h1 class="text-2xl font-bold font-['Space_Grotesk'] mb-2 text-white">Download Complete!</h1>
+            <div class="bg-white/5 border border-white/10 rounded-xl p-4 mb-6 text-left">
+                <p class="text-gray-400 text-xs uppercase font-bold mb-2 tracking-wider">Next Step</p>
+                <p class="text-sm text-white leading-relaxed">
+                    Please <strong>email the ZIP file</strong> you just downloaded to our team. We need this file to publish your changes live.
+                </p>
+            </div>
+            
+            <button onclick="closeModal('successModal')" class="liquid-glow w-full py-3 text-sm font-bold shadow-lg">
+                Got it, I'll send it now
+            </button>
         </div>
     </div>
     
@@ -447,6 +562,48 @@
 
     <script>
         feather.replace();
+        // --- SUPER STORAGE (IndexedDB Wrapper) ---
+        // Allows saving huge files (500MB+) locally
+        const dbPromise = new Promise((resolve, reject) => {
+            const request = indexedDB.open('reputifly-db', 1);
+            request.onupgradeneeded = (e) => {
+                e.target.result.createObjectStore('drafts');
+            };
+            request.onsuccess = (e) => resolve(e.target.result);
+            request.onerror = (e) => reject(e);
+        });
+
+        async function saveToBigStorage(key, value) {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('drafts', 'readwrite');
+                const store = tx.objectStore('drafts');
+                const req = store.put(value, key);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function loadFromBigStorage(key) {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('drafts', 'readonly');
+                const store = tx.objectStore('drafts');
+                const req = store.get(key);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+        async function clearBigStorage() {
+        const db = await dbPromise;
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction('drafts', 'readwrite');
+            const store = tx.objectStore('drafts');
+            const req = store.clear(); // Wipes the database
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    }
 
         // --- FIREBASE CONFIG (INTEGRATED) ---
         const firebaseConfig = {
@@ -457,19 +614,17 @@
             messagingSenderId: "455384979132",
             appId: "1:455384979132:web:9079ec81182115b16622b9"
         };
-        // ------------------------------------
 
         let db = null;
         let isCloudMode = false;
+        let currentProjectId = null;
         
-        // Initialize Firebase when library loads
         window.addEventListener('firebaseLoaded', () => {
             try {
                 if(window.firebaseApp) {
                     const app = window.firebaseApp.initializeApp(firebaseConfig);
                     db = window.firebaseApp.getFirestore(app);
                     
-                    // Check URL immediately after init
                     const urlParams = new URLSearchParams(window.location.search);
                     if(urlParams.get('id')) {
                         checkUrlForProject();
@@ -490,58 +645,116 @@
         let historyStack = [];
         let historyIndex = -1;
 
+        // --- CORE HTML CLEANING FUNCTION (UPDATED TO PRESERVE STYLES) ---
+        function getCleanHTML() {
+            if(!document.getElementById('editorFrame').contentDocument) return "";
+            
+            const docClone = document.getElementById('editorFrame').contentDocument.cloneNode(true);
+            
+            // Clean GSAP inline styles
+            const dirtyElements = docClone.querySelectorAll('*[style]');
+            dirtyElements.forEach(el => {
+                const style = el.getAttribute('style');
+                if (style && (style.includes('opacity') || style.includes('transform') || style.includes('visibility'))) {
+                    el.style.removeProperty('opacity');
+                    el.style.removeProperty('transform');
+                    el.style.removeProperty('translate');
+                    el.style.removeProperty('rotate');
+                    el.style.removeProperty('scale');
+                    el.style.removeProperty('visibility'); 
+                    if (el.getAttribute('style') === '') el.removeAttribute('style');
+                }
+            });
+
+            // FIX: Only remove the style tag with our specific ID
+            const editorStyle = docClone.getElementById('reputifly-editor-css');
+            if(editorStyle) editorStyle.remove();
+
+            return docClone.documentElement.outerHTML;
+        }
+
         // --- CLOUD LOGIC ---
         async function checkUrlForProject() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const projectId = urlParams.get('id');
-            
-            if(projectId && db) {
-                isCloudMode = true;
-                
-                // CLIENT MODE UI UPDATES
-                document.getElementById('cloudLoader').classList.add('active');
-                document.getElementById('setupScreen').classList.remove('active'); // Hide setup for client
-                document.getElementById('loadHtmlBtn').style.display = 'none'; // Hide load button for client
-                
-                try {
-                    const docRef = window.firebaseApp.doc(db, "projects", projectId);
-                    const docSnap = await window.firebaseApp.getDoc(docRef);
-                    
-                    if (docSnap.exists()) {
-                        const data = docSnap.data();
-                        projectDomain = data.domain;
-                        
-                        const displayEl = document.getElementById('domainDisplay');
-                        if(displayEl) displayEl.innerText = projectDomain;
-                        
-                        localStorage.setItem('reputifly_domain', projectDomain); 
-                        loadContentIntoFrame(data.html);
-                        pushHistory(data.html);
-                        
-                        // Show help for client
-                        setTimeout(() => { openModal('helpModal'); }, 500);
-                    } else {
-                        alert("Project not found or expired.");
-                    }
-                } catch(e) {
-                    console.error(e);
-                    alert("Error loading project. Check console.");
-                } finally {
-                    document.getElementById('cloudLoader').classList.remove('active');
+    const urlParams = new URLSearchParams(window.location.search);
+    const projectId = urlParams.get('id');
+    
+    if(projectId && db) {
+        isCloudMode = true;
+        currentProjectId = projectId; // Set the global ID
+        
+        document.getElementById('cloudLoader').classList.add('active');
+        document.getElementById('setupScreen').classList.remove('active');
+        document.getElementById('loadHtmlBtn').style.display = 'none'; 
+        
+        // Hide Admin controls for clients
+        document.getElementById('navExitBtn').style.display = 'none'; 
+        document.getElementById('navHelpBtn').classList.remove('hidden-force'); 
+        document.getElementById('navShareBtn').style.display = 'none'; // Hidden by default now
+
+        // 1. CHECK LOCAL STORAGE FIRST (The "Refresh" Fix)
+        // Check Big Storage first, then fallback to LocalStorage
+        let localDraft = await loadFromBigStorage(`reputifly_draft_${projectId}`);
+        if(!localDraft) localDraft = localStorage.getItem(`reputifly_draft_${projectId}`);
+        if(localDraft) {
+            console.log("Restoring from local draft...");
+            // We still need domain from DB, so we fetch quickly
+            try {
+                const docRef = window.firebaseApp.doc(db, "projects", projectId);
+                const docSnap = await window.firebaseApp.getDoc(docRef);
+                if(docSnap.exists()) {
+                    projectDomain = docSnap.data().domain;
+                    document.getElementById('domainDisplay').innerText = projectDomain;
+                    localStorage.setItem('reputifly_domain', projectDomain);
                 }
-            }
+            } catch(e) { console.error("Background fetch failed", e); }
+            
+            loadContentIntoFrame(localDraft);
+            pushHistory(localDraft);
+            document.getElementById('cloudLoader').classList.remove('active');
+            setTimeout(() => { openModal('helpModal'); }, 500);
+            return; // Stop here, don't overwrite with old DB data
         }
+        
+        // 2. IF NO LOCAL DRAFT, FETCH FROM DB
+        try {
+            const docRef = window.firebaseApp.doc(db, "projects", projectId);
+            const docSnap = await window.firebaseApp.getDoc(docRef);
+            
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                projectDomain = data.domain;
+                
+                const displayEl = document.getElementById('domainDisplay');
+                if(displayEl) displayEl.innerText = projectDomain;
+                
+                localStorage.setItem('reputifly_domain', projectDomain); 
+                loadContentIntoFrame(data.html);
+                pushHistory(data.html);
+                
+                setTimeout(() => { openModal('helpModal'); }, 500);
+            } else {
+                alert("Project not found or expired.");
+            }
+        } catch(e) {
+            console.error(e);
+            alert("Error loading project.");
+        } finally {
+            document.getElementById('cloudLoader').classList.remove('active');
+        }
+    }
+}
 
         async function createShareableLink() {
             if(!db) return alert("Firebase not configured properly.");
             if(!document.getElementById('editorFrame').contentDocument) return alert("Load a page first.");
             
-            const btn = document.querySelector('button[onclick="createShareableLink()"]');
+            const btn = document.getElementById('navShareBtn');
             const originalText = btn.innerHTML;
             btn.innerHTML = "Saving...";
             
             try {
-                const html = document.getElementById('editorFrame').contentDocument.documentElement.outerHTML;
+                const html = getCleanHTML();
+                
                 const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), {
                     domain: projectDomain,
                     html: html,
@@ -623,8 +836,7 @@
             document.execCommand('insertText', false, text);
         });
 
-        window.addEventListener('DOMContentLoaded', () => {
-            // Check params - if ID exists, stop normal load logic
+        window.addEventListener('DOMContentLoaded', async () => {
             const urlParams = new URLSearchParams(window.location.search);
             if(urlParams.get('id')) {
                 return; 
@@ -635,15 +847,18 @@
                 const domainDisplay = document.getElementById('domainDisplay');
                 if(domainDisplay) domainDisplay.innerText = projectDomain;
                 document.getElementById('setupScreen').classList.remove('active');
-                
-                if (!localStorage.getItem('reputifly_tutorial_seen')) {
-                    setTimeout(() => { openModal('helpModal'); }, 500);
-                    localStorage.setItem('reputifly_tutorial_seen', 'true');
-                }
             }
-            if(savedHTML) {
-                loadContentIntoFrame(savedHTML);
-                pushHistory(savedHTML); 
+            // --- UPDATED LOADING LOGIC ---
+            // 1. Try Big Storage
+            let contentToLoad = await loadFromBigStorage('reputifly_html');
+            
+            // 2. If empty, try Standard Storage (Fallback)
+            if(!contentToLoad) contentToLoad = localStorage.getItem('reputifly_html');
+            
+            // 3. Load whatever we found
+            if(contentToLoad) {
+                loadContentIntoFrame(contentToLoad);
+                pushHistory(contentToLoad); 
             }
         });
 
@@ -785,28 +1000,59 @@
         }
 
         function exitProject() {
-            if(confirm("Exit project? This will clear saved data and start fresh.")) {
-                localStorage.removeItem('reputifly_domain');
-                localStorage.removeItem('reputifly_html');
-                localStorage.removeItem('reputifly_tutorial_seen'); 
-                window.location.href = window.location.pathname; // Clear ID from URL
-            }
+            // Open the custom modal instead of the browser popup
+            openModal('exitModal');
         }
 
-        function clearStorage() {
-            if(confirm("Reset all saved data?")) {
+        async function confirmExit() {
+            const btn = document.querySelector('#exitModal .liquid-glow');
+            if(btn) btn.innerHTML = "Clearing...";
+            
+            try {
+                // 1. Clear Small Storage
                 localStorage.removeItem('reputifly_domain');
                 localStorage.removeItem('reputifly_html');
                 localStorage.removeItem('reputifly_tutorial_seen');
-                window.location.href = window.location.pathname;
+                
+                // 2. Clear Super Storage (IndexedDB) - CRITICAL
+                await clearBigStorage(); 
+            } catch(e) { 
+                console.error("DB Clear Error", e); 
             }
+            
+            // 3. Reload Page
+            window.location.href = window.location.pathname; 
         }
 
-        function saveProgress() {
-            const frame = document.getElementById('editorFrame');
-            if(frame.contentDocument) {
-                const html = frame.contentDocument.documentElement.outerHTML;
-                localStorage.setItem('reputifly_html', html);
+        // Updated clearStorage to use the same logic
+        function clearStorage() {
+             openModal('exitModal'); // Re-use the nice modal
+        }
+
+        async function saveProgress() {
+            const html = getCleanHTML();
+            if(html) {
+                try {
+                    // 1. Try Big Storage (Unlimited)
+                    await saveToBigStorage('reputifly_html', html);
+                    
+                    // If Cloud Mode, save to specific draft ID
+                    if(currentProjectId) {
+                        await saveToBigStorage(`reputifly_draft_${currentProjectId}`, html);
+                    }
+                } catch(e) { console.error("IndexedDB Save Failed", e); }
+
+                // 2. Try Standard Storage (Backup - might fail if >5MB)
+                try {
+                    localStorage.setItem('reputifly_html', html);
+                    if(currentProjectId) {
+                        localStorage.setItem(`reputifly_draft_${currentProjectId}`, html);
+                    }
+                } catch(e) {
+                    // Ignore quota errors here since we likely saved to BigStorage successfully above
+                }
+
+                // 3. Visual Feedback
                 pushHistory(html); 
             }
         }
@@ -822,11 +1068,21 @@
             if(displayEl) displayEl.innerText = projectDomain;
             
             document.getElementById('setupScreen').classList.remove('active');
+        }
+        function loadPastedHTML() {
+            let content = document.getElementById('pasteInput').value;
+            if(!content || !content.trim()) return alert("Please paste some HTML code first.");
             
-            if (!localStorage.getItem('reputifly_tutorial_seen')) {
-                setTimeout(() => { openModal('helpModal'); }, 500);
-                localStorage.setItem('reputifly_tutorial_seen', 'true');
-            }
+            // Clean the HTML (Standard Protocol)
+            content = content.replace(/body\s*>\s*header\s*\{\s*display:\s*none\s*!important;?\s*\}/gi, "");
+            content = content.replace(/,\s*body\s*>\s*header/gi, ""); 
+            
+            localStorage.setItem('reputifly_html', content);
+            loadContentIntoFrame(content);
+            pushHistory(content);
+            
+            document.getElementById('pasteInput').value = ""; // Clear input
+            closeModal('pasteModal');
         }
 
         function loadTemplate(input) {
@@ -865,6 +1121,7 @@
             const win = iframe.contentWindow;
 
             const style = doc.createElement('style');
+            style.id = 'reputifly-editor-css'; // FIX: ID Added so we can remove safely later
             style.textContent = `
                 img { cursor: pointer !important; transition: outline 0.2s ease; position: relative; }
                 img:hover { outline: 3px solid #E6397F !important; z-index: 99999 !important; }
@@ -875,6 +1132,13 @@
                     background: rgba(255, 138, 0, 0.05);
                 }
                 a { pointer-events: auto !important; }
+
+                /* FORCE VISIBILITY FOR EDITOR ONLY */
+                .tes-svc-row, [style*="opacity: 0"], [style*="visibility: hidden"] {
+                    opacity: 1 !important;
+                    visibility: visible !important;
+                    transform: none !important;
+                }
             `;
             doc.head.appendChild(style);
 
@@ -900,6 +1164,17 @@
                 if (target.tagName === 'IMG') {
                     e.preventDefault(); e.stopPropagation();
                     currentElement = target;
+                    // FIX: Reset Inputs when opening modal
+                    document.getElementById('urlInput').value = '';
+                    const defaultDrop = `
+                        <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
+                            <i data-feather="image" class="w-6 h-6 text-pink-500"></i>
+                        </div>
+                        <p class="text-sm font-bold text-white">Upload, Drag or Paste (Ctrl+V)</p>
+                        <p class="text-[10px] text-gray-400 mt-1">Auto-converts to WebP</p>`;
+                    document.getElementById('dropContent').innerHTML = defaultDrop;
+                    feather.replace();
+                    
                     openModal('imageModal');
                     return;
                 }
@@ -999,29 +1274,44 @@
             const originalHTML = dropContent.innerHTML;
             dropContent.innerHTML = '<div class="loader mx-auto mb-2"></div><span class="text-xs">Processing...</span>';
 
-            const webpBlob = await convertToWebP(file);
+            // Compress if larger than 1MB, otherwise just convert
+let base64String;
+if(file.size > 1024 * 1024) {
+    base64String = await compressImageSmart(file);
+} else {
+    base64String = await convertToBase64(file);
+}
+            
             let baseName = file.name.split('.')[0].toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9\-]/g, '') + ".webp";
             if (file.name === 'image.png' || file.name === 'pasted-image.png') {
                 baseName = `pasted-image-${Date.now()}.webp`;
             }
-            let safeName = getUniqueFilename(baseName);
+            
             const date = new Date();
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
-            const wpUrl = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${safeName}`;
+            const wpUrl = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${baseName}`;
 
-            const previewUrl = URL.createObjectURL(webpBlob);
-            
             currentElement.removeAttribute('srcset'); 
-            currentElement.src = previewUrl; 
-            currentElement.dataset.exportSrc = wpUrl; 
+            currentElement.src = base64String; 
             
-            addToZipQueue(safeName, webpBlob);
+            currentElement.dataset.exportSrc = wpUrl; 
+            currentElement.dataset.filename = baseName;
+            
             saveProgress();
 
             dropContent.innerHTML = originalHTML;
             document.getElementById('imgUpload').value = '';
             closeModal('imageModal');
+        }
+
+        function convertToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+            });
         }
 
         async function handleImageUpload(input) {
@@ -1030,55 +1320,63 @@
             await processNewImage(file);
         }
 
+        // FIX: Ensure URL images are NOT added to ZIP list by cleaning dataset
         function applyUrl() {
             const url = document.getElementById('urlInput').value;
             if(url && currentElement) {
                 currentElement.src = url;
                 currentElement.removeAttribute('srcset');
+                // CLEAN DATASET so zipper ignores it
                 delete currentElement.dataset.exportSrc;
+                delete currentElement.dataset.filename;
+                
                 saveProgress();
                 closeModal('imageModal');
             }
         }
 
-        function convertToWebP(file) {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        let w = img.width, h = img.height;
-                        if(w > 2500) { h = Math.round(h * 2500/w); w = 2500; }
-                        canvas.width = w; canvas.height = h;
-                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-                        canvas.toBlob((blob) => resolve(blob), 'image/webp', 0.9);
-                    };
-                    img.src = e.target.result;
-                };
-                reader.readAsDataURL(file);
-            });
-        }
-
         function addToZipQueue(filename, blob) {
             assetsToZip.push({ name: filename, blob: blob });
         }
+        function compressImageSmart(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+                
+                // Max dimensions (prevents massive 4k/8k images from crashing)
+                const MAX_WIDTH = 1600;
+                const MAX_HEIGHT = 1600;
 
-        function cleanGSAPArtifacts(doc) {
-            const dirtyElements = doc.querySelectorAll('*[style]');
-            dirtyElements.forEach(el => {
-                const style = el.getAttribute('style');
-                if (style.includes('opacity') || style.includes('transform') || style.includes('translate') || style.includes('visibility')) {
-                    el.style.removeProperty('opacity');
-                    el.style.removeProperty('transform');
-                    el.style.removeProperty('translate');
-                    el.style.removeProperty('rotate');
-                    el.style.removeProperty('scale');
-                    el.style.removeProperty('visibility'); 
-                    if (el.getAttribute('style') === '') el.removeAttribute('style');
+                if (width > height) {
+                    if (width > MAX_WIDTH) {
+                        height *= MAX_WIDTH / width;
+                        width = MAX_WIDTH;
+                    }
+                } else {
+                    if (height > MAX_HEIGHT) {
+                        width *= MAX_HEIGHT / height;
+                        height = MAX_HEIGHT;
+                    }
                 }
-            });
-        }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // Compress to WebP at 80% quality
+                resolve(canvas.toDataURL('image/webp', 0.8));
+            };
+        };
+    });
+}
 
         async function downloadProject() {
             const btn = document.getElementById('saveBtn');
@@ -1087,29 +1385,61 @@
             btn.classList.add('disabled');
 
             const zip = new JSZip();
-            const doc = document.getElementById('editorFrame').contentDocument.cloneNode(true);
+            const cleanHTML = getCleanHTML(); 
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(cleanHTML, "text/html");
+            const imgFolder = zip.folder("images_to_upload");
             
-            doc.querySelectorAll('img').forEach(img => {
+            let usedFilenames = [];
+            let hasImagesToUpload = false;
+
+            const images = doc.querySelectorAll('img');
+            
+            for (let img of images) {
+                // FIX: Only process if exportSrc exists (URL images won't have this)
                 if(img.dataset.exportSrc) {
-                    img.src = img.dataset.exportSrc;
+                    hasImagesToUpload = true;
+                    const base64Data = img.src;
+                    
+                    if(base64Data.startsWith('data:image')) {
+                        let filename = img.dataset.filename || 'image.webp';
+                        
+                        let counter = 1;
+                        let originalName = filename.replace('.webp', '');
+                        while(usedFilenames.includes(filename)) {
+                            filename = `${originalName}-${counter}.webp`;
+                            counter++;
+                            const date = new Date();
+                            const year = date.getFullYear();
+                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                            img.dataset.exportSrc = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${filename}`;
+                        }
+                        usedFilenames.push(filename);
+
+                        const response = await fetch(base64Data);
+                        const blob = await response.blob();
+                        imgFolder.file(filename, blob);
+
+                        img.src = img.dataset.exportSrc;
+                    }
+                    
                     delete img.dataset.exportSrc;
+                    delete img.dataset.filename;
                 }
-                img.removeAttribute('style'); 
+                
                 if(img.src.includes('wp-content/uploads')) {
                      img.removeAttribute('srcset');
                 }
-            });
+                img.removeAttribute('style');
+            }
             
-            const styles = doc.querySelectorAll('style');
-            if(styles.length > 0) styles[styles.length - 1].remove();
+            // If no images were uploaded, remove the empty folder to keep zip clean
+            if(!hasImagesToUpload) zip.remove("images_to_upload");
 
-            cleanGSAPArtifacts(doc);
-
+            // FIX: DO NOT remove styles by searching for cursor:pointer. 
+            // The getCleanHTML() function already removed the editor-specific style by ID.
+            
             zip.file("index.html", doc.documentElement.outerHTML);
-            const imgFolder = zip.folder("images_to_upload");
-            assetsToZip.forEach(asset => {
-                imgFolder.file(asset.name, asset.blob);
-            });
 
             const content = await zip.generateAsync({type:"blob"});
             const a = document.createElement('a');
@@ -1117,14 +1447,29 @@
             a.download = `${projectDomain.split('.')[0]}_update.zip`;
             a.click();
 
-            // TRIGGER TOAST
-            const toast = document.getElementById('downloadToast');
-            toast.classList.add('show');
-            setTimeout(() => { toast.classList.remove('show'); }, 6000);
+            // TRIGGER SUCCESS MODAL INSTEAD
+            openModal('successModal');
+            
+            // Re-render icons for the new modal
+            feather.replace();
 
             btn.innerHTML = originalText;
             btn.classList.remove('disabled');
         }
+
+        // Global Keyboard Shortcuts
+    document.addEventListener('keydown', (e) => {
+        // Undo: Ctrl+Z or Cmd+Z
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            performUndo();
+        }
+        // Redo: Ctrl+Y or Cmd+Shift+Z
+        if (((e.ctrlKey || e.metaKey) && e.key === 'y') || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z')) {
+            e.preventDefault();
+            performRedo();
+        }
+    });
     </script>
 </body>
 </html>
