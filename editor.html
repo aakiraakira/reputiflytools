@@ -355,9 +355,26 @@
         </div>
 
         <div class="flex items-center gap-3">
-            <button id="loadHtmlBtn" onclick="document.getElementById('fileInput').click()" class="btn-glass h-10">
-                <i data-feather="layout" class="w-4 h-4"></i> <span class="hidden sm:inline">Load HTML</span>
-            </button>
+            <div class="relative group z-50">
+                <button class="btn-glass h-10 pr-4">
+                    <i data-feather="layout" class="w-4 h-4"></i> 
+                    <span class="hidden sm:inline">Load HTML</span>
+                    <i data-feather="chevron-down" class="w-3 h-3 ml-1 opacity-50"></i>
+                </button>
+                
+                <div class="absolute top-full left-1/2 transform -translate-x-1/2 mt-3 w-48 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 translate-y-2 group-hover:translate-y-0">
+                    <div class="bg-[#121218] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col backdrop-blur-xl ring-1 ring-white/5">
+                        <div class="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#121218] border-l border-t border-white/10 transform rotate-45"></div>
+                        
+                        <button onclick="document.getElementById('fileInput').click()" class="relative z-10 text-left px-4 py-3 text-xs font-medium text-gray-300 hover:bg-white/5 hover:text-white flex items-center gap-3 transition-colors border-b border-white/5">
+                            <i data-feather="upload" class="w-4 h-4 text-pink-500"></i> Upload File
+                        </button>
+                        <button onclick="openModal('pasteModal'); setTimeout(() => document.getElementById('pasteInput').focus(), 100);" class="relative z-10 text-left px-4 py-3 text-xs font-medium text-gray-300 hover:bg-white/5 hover:text-white flex items-center gap-3 transition-colors">
+                            <i data-feather="clipboard" class="w-4 h-4 text-orange-500"></i> Paste Code
+                        </button>
+                    </div>
+                </div>
+            </div>
 
             <button id="navShareBtn" onclick="createShareableLink()" class="btn-share">
                 <i data-feather="share-2" class="w-4 h-4"></i> <span class="hidden sm:inline">Share</span>
@@ -403,6 +420,22 @@
                 <input type="text" id="urlInput" class="input-dark flex-grow" placeholder="https://...">
                 <button onclick="applyUrl()" class="liquid-glow px-6 py-0 text-xs shadow-lg hover:shadow-pink-500/20 whitespace-nowrap">Apply</button>
             </div>
+        </div>
+    </div>
+    <div id="pasteModal" class="modal-overlay" onclick="closeModal('pasteModal', event)">
+        <div class="modal-card" style="max-width: 600px;" onclick="event.stopPropagation()">
+            <div class="icon-circle">
+                <i data-feather="clipboard" class="w-8 h-8 text-pink-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Paste Source Code</h1>
+            <p class="text-gray-400 text-sm mb-6">Paste your raw HTML code below to load it into the editor.</p>
+            
+            <textarea id="pasteInput" class="input-dark font-mono text-xs mb-6 h-64 resize-none focus:ring-2 focus:ring-pink-500/50" placeholder="<!DOCTYPE html><html>..."></textarea>
+            
+            <button onclick="loadPastedHTML()" class="liquid-glow w-full py-3 text-sm shadow-lg mb-3">
+                <i data-feather="play" class="w-4 h-4"></i> Load Project
+            </button>
+            <button onclick="closeModal('pasteModal')" class="text-xs text-gray-500 hover:text-white">Cancel</button>
         </div>
     </div>
 
@@ -512,6 +545,16 @@
                 req.onerror = () => reject(req.error);
             });
         }
+        async function clearBigStorage() {
+        const db = await dbPromise;
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction('drafts', 'readwrite');
+            const store = tx.objectStore('drafts');
+            const req = store.clear(); // Wipes the database
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    }
 
         // --- FIREBASE CONFIG (INTEGRATED) ---
         const firebaseConfig = {
@@ -907,23 +950,32 @@
             }
         }
 
-        function exitProject() {
-            if(confirm("Exit project? This will clear saved data and start fresh.")) {
-                localStorage.removeItem('reputifly_domain');
-                localStorage.removeItem('reputifly_html');
-                localStorage.removeItem('reputifly_tutorial_seen'); 
-                window.location.href = window.location.pathname; 
-            }
+        async function exitProject() {
+        if(confirm("Exit project? This will clear saved data and start fresh.")) {
+            // 1. Clear Small Storage
+            localStorage.removeItem('reputifly_domain');
+            localStorage.removeItem('reputifly_html');
+            localStorage.removeItem('reputifly_tutorial_seen');
+            
+            // 2. Clear Super Storage (The Fix)
+            try { await clearBigStorage(); } catch(e) { console.error("DB Clear Error", e); }
+            
+            // 3. Reload
+            window.location.href = window.location.pathname; 
         }
+    }
 
-        function clearStorage() {
-            if(confirm("Reset all saved data?")) {
-                localStorage.removeItem('reputifly_domain');
-                localStorage.removeItem('reputifly_html');
-                localStorage.removeItem('reputifly_tutorial_seen');
-                window.location.href = window.location.pathname;
-            }
+    async function clearStorage() {
+        if(confirm("Reset all saved data?")) {
+            localStorage.removeItem('reputifly_domain');
+            localStorage.removeItem('reputifly_html');
+            localStorage.removeItem('reputifly_tutorial_seen');
+            
+            try { await clearBigStorage(); } catch(e) { console.error("DB Clear Error", e); }
+            
+            window.location.href = window.location.pathname;
         }
+    }
 
         async function saveProgress() {
             const html = getCleanHTML();
@@ -964,6 +1016,21 @@
             if(displayEl) displayEl.innerText = projectDomain;
             
             document.getElementById('setupScreen').classList.remove('active');
+        }
+        function loadPastedHTML() {
+            let content = document.getElementById('pasteInput').value;
+            if(!content || !content.trim()) return alert("Please paste some HTML code first.");
+            
+            // Clean the HTML (Standard Protocol)
+            content = content.replace(/body\s*>\s*header\s*\{\s*display:\s*none\s*!important;?\s*\}/gi, "");
+            content = content.replace(/,\s*body\s*>\s*header/gi, ""); 
+            
+            localStorage.setItem('reputifly_html', content);
+            loadContentIntoFrame(content);
+            pushHistory(content);
+            
+            document.getElementById('pasteInput').value = ""; // Clear input
+            closeModal('pasteModal');
         }
 
         function loadTemplate(input) {
