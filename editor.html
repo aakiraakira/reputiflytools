@@ -475,6 +475,7 @@
 
         let db = null;
         let isCloudMode = false;
+        let currentProjectId = null;
         
         window.addEventListener('firebaseLoaded', () => {
             try {
@@ -532,47 +533,72 @@
 
         // --- CLOUD LOGIC ---
         async function checkUrlForProject() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const projectId = urlParams.get('id');
-            
-            if(projectId && db) {
-                isCloudMode = true;
-                
-                document.getElementById('cloudLoader').classList.add('active');
-                document.getElementById('setupScreen').classList.remove('active');
-                document.getElementById('loadHtmlBtn').style.display = 'none'; 
-                
-                document.getElementById('navExitBtn').style.display = 'none'; 
-                document.getElementById('navHelpBtn').classList.remove('hidden-force'); 
-                document.getElementById('navShareBtn').style.display = 'none';
-                
-                try {
-                    const docRef = window.firebaseApp.doc(db, "projects", projectId);
-                    const docSnap = await window.firebaseApp.getDoc(docRef);
-                    
-                    if (docSnap.exists()) {
-                        const data = docSnap.data();
-                        projectDomain = data.domain;
-                        
-                        const displayEl = document.getElementById('domainDisplay');
-                        if(displayEl) displayEl.innerText = projectDomain;
-                        
-                        localStorage.setItem('reputifly_domain', projectDomain); 
-                        loadContentIntoFrame(data.html);
-                        pushHistory(data.html);
-                        
-                        setTimeout(() => { openModal('helpModal'); }, 500);
-                    } else {
-                        alert("Project not found or expired.");
-                    }
-                } catch(e) {
-                    console.error(e);
-                    alert("Error loading project.");
-                } finally {
-                    document.getElementById('cloudLoader').classList.remove('active');
+    const urlParams = new URLSearchParams(window.location.search);
+    const projectId = urlParams.get('id');
+    
+    if(projectId && db) {
+        isCloudMode = true;
+        currentProjectId = projectId; // Set the global ID
+        
+        document.getElementById('cloudLoader').classList.add('active');
+        document.getElementById('setupScreen').classList.remove('active');
+        document.getElementById('loadHtmlBtn').style.display = 'none'; 
+        
+        // Hide Admin controls for clients
+        document.getElementById('navExitBtn').style.display = 'none'; 
+        document.getElementById('navHelpBtn').classList.remove('hidden-force'); 
+        document.getElementById('navShareBtn').style.display = 'none'; // Hidden by default now
+
+        // 1. CHECK LOCAL STORAGE FIRST (The "Refresh" Fix)
+        const localDraft = localStorage.getItem(`reputifly_draft_${projectId}`);
+        if(localDraft) {
+            console.log("Restoring from local draft...");
+            // We still need domain from DB, so we fetch quickly
+            try {
+                const docRef = window.firebaseApp.doc(db, "projects", projectId);
+                const docSnap = await window.firebaseApp.getDoc(docRef);
+                if(docSnap.exists()) {
+                    projectDomain = docSnap.data().domain;
+                    document.getElementById('domainDisplay').innerText = projectDomain;
+                    localStorage.setItem('reputifly_domain', projectDomain);
                 }
-            }
+            } catch(e) { console.error("Background fetch failed", e); }
+            
+            loadContentIntoFrame(localDraft);
+            pushHistory(localDraft);
+            document.getElementById('cloudLoader').classList.remove('active');
+            setTimeout(() => { openModal('helpModal'); }, 500);
+            return; // Stop here, don't overwrite with old DB data
         }
+        
+        // 2. IF NO LOCAL DRAFT, FETCH FROM DB
+        try {
+            const docRef = window.firebaseApp.doc(db, "projects", projectId);
+            const docSnap = await window.firebaseApp.getDoc(docRef);
+            
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                projectDomain = data.domain;
+                
+                const displayEl = document.getElementById('domainDisplay');
+                if(displayEl) displayEl.innerText = projectDomain;
+                
+                localStorage.setItem('reputifly_domain', projectDomain); 
+                loadContentIntoFrame(data.html);
+                pushHistory(data.html);
+                
+                setTimeout(() => { openModal('helpModal'); }, 500);
+            } else {
+                alert("Project not found or expired.");
+            }
+        } catch(e) {
+            console.error(e);
+            alert("Error loading project.");
+        } finally {
+            document.getElementById('cloudLoader').classList.remove('active');
+        }
+    }
+}
 
         async function createShareableLink() {
             if(!db) return alert("Firebase not configured properly.");
@@ -840,12 +866,19 @@
         }
 
         function saveProgress() {
-            const html = getCleanHTML();
-            if(html) {
-                localStorage.setItem('reputifly_html', html);
-                pushHistory(html); 
-            }
+    const html = getCleanHTML();
+    if(html) {
+        // Always save to generic storage (for non-cloud users)
+        localStorage.setItem('reputifly_html', html);
+        
+        // If the user is on a shared link, save to their specific ID draft
+        if(currentProjectId) {
+            localStorage.setItem(`reputifly_draft_${currentProjectId}`, html);
         }
+        
+        pushHistory(html); 
+    }
+}
 
         // --- SETUP & LOAD ---
         function finishSetup() {
