@@ -387,12 +387,25 @@
     </nav>
 
     <div id="editor-frame-container" style="flex: 1; position: relative; width: 100%; height: 100%; transition: all 0.3s ease;">
-        <div id="empty-state" class="absolute inset-0 z-10 bg-[#0B0A14] flex flex-col items-center justify-center transition-colors">
-            <div class="icon-circle mb-4" style="pointer-events: none;">
-                <i data-feather="code" class="w-8 h-8 text-gray-500"></i>
+        <div id="empty-state" onclick="document.getElementById('fileInput').click()" class="absolute inset-0 z-10 bg-[#0B0A14] flex flex-col items-center justify-center cursor-pointer">
+            <div class="relative z-20 flex flex-col items-center">
+                <div class="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-5 border border-white/10 shadow-2xl transition-transform duration-300 hover:scale-110">
+                    <i data-feather="upload-cloud" class="w-8 h-8 text-gray-400"></i>
+                </div>
+                
+                <h2 class="text-2xl font-bold mb-2 text-white font-['Space_Grotesk'] tracking-tight">No Page Loaded</h2>
+                <p class="text-gray-500 text-sm mb-6">Click anywhere to <span class="text-white font-bold">Upload HTML</span></p>
+                
+                <div class="flex items-center gap-3 text-xs text-gray-700 font-bold tracking-widest uppercase my-2">
+                    <span class="w-8 h-px bg-white/5"></span>
+                    <span>OR</span>
+                    <span class="w-8 h-px bg-white/5"></span>
+                </div>
+    
+                <button onclick="event.stopPropagation(); openModal('pasteModal'); setTimeout(() => document.getElementById('pasteInput').focus(), 100);" class="liquid-glow mt-4 px-8 py-3 text-xs shadow-lg flex items-center gap-2">
+                    <i data-feather="clipboard" class="w-3 h-3"></i> Paste Code Directly
+                </button>
             </div>
-            <h2 class="text-xl font-bold mb-2" style="pointer-events: none;">No Page Loaded</h2>
-            <p class="text-gray-500 text-sm mb-6" style="pointer-events: none;">Drag & Drop HTML file here or click Load.</p>
         </div>
         <iframe id="editorFrame" style="width: 100%; height: 100%; border: none; display: block; background: white; transition: all 0.3s ease;"></iframe>
     </div>
@@ -419,6 +432,42 @@
             <div class="flex gap-3">
                 <input type="text" id="urlInput" class="input-dark flex-grow" placeholder="https://...">
                 <button onclick="applyUrl()" class="liquid-glow px-6 py-0 text-xs shadow-lg hover:shadow-pink-500/20 whitespace-nowrap">Apply</button>
+            </div>
+        </div>
+    </div>
+    <div id="exitModal" class="modal-overlay" onclick="closeModal('exitModal', event)">
+        <div class="modal-card" style="max-width: 400px;" onclick="event.stopPropagation()">
+            <div class="icon-circle" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2);">
+                <i data-feather="log-out" class="w-10 h-10 text-red-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Exit Project?</h1>
+            <p class="text-gray-400 text-sm mb-6">Any unsaved progress will be lost. This will clear the current workspace.</p>
+            
+            <div class="flex gap-3">
+                <button onclick="confirmExit()" class="liquid-glow w-full py-3 text-sm font-bold shadow-lg" style="background: #ef4444; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);">
+                    Yes, Exit
+                </button>
+                <button onclick="closeModal('exitModal')" class="w-full py-3 text-sm font-bold rounded-full bg-white/5 hover:bg-white/10 text-white transition-colors">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+    <div id="exitModal" class="modal-overlay" onclick="closeModal('exitModal', event)">
+        <div class="modal-card" style="max-width: 400px;" onclick="event.stopPropagation()">
+            <div class="icon-circle" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2);">
+                <i data-feather="log-out" class="w-10 h-10 text-red-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Exit Project?</h1>
+            <p class="text-gray-400 text-sm mb-6">Any unsaved progress will be lost. This will clear the current workspace.</p>
+            
+            <div class="flex gap-3">
+                <button onclick="confirmExit()" class="liquid-glow w-full py-3 text-sm font-bold shadow-lg" style="background: #ef4444; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);">
+                    Yes, Exit
+                </button>
+                <button onclick="closeModal('exitModal')" class="w-full py-3 text-sm font-bold rounded-full bg-white/5 hover:bg-white/10 text-white transition-colors">
+                    Cancel
+                </button>
             </div>
         </div>
     </div>
@@ -950,32 +999,35 @@
             }
         }
 
-        async function exitProject() {
-        if(confirm("Exit project? This will clear saved data and start fresh.")) {
-            // 1. Clear Small Storage
-            localStorage.removeItem('reputifly_domain');
-            localStorage.removeItem('reputifly_html');
-            localStorage.removeItem('reputifly_tutorial_seen');
+        function exitProject() {
+            // Open the custom modal instead of the browser popup
+            openModal('exitModal');
+        }
+
+        async function confirmExit() {
+            const btn = document.querySelector('#exitModal .liquid-glow');
+            if(btn) btn.innerHTML = "Clearing...";
             
-            // 2. Clear Super Storage (The Fix)
-            try { await clearBigStorage(); } catch(e) { console.error("DB Clear Error", e); }
+            try {
+                // 1. Clear Small Storage
+                localStorage.removeItem('reputifly_domain');
+                localStorage.removeItem('reputifly_html');
+                localStorage.removeItem('reputifly_tutorial_seen');
+                
+                // 2. Clear Super Storage (IndexedDB) - CRITICAL
+                await clearBigStorage(); 
+            } catch(e) { 
+                console.error("DB Clear Error", e); 
+            }
             
-            // 3. Reload
+            // 3. Reload Page
             window.location.href = window.location.pathname; 
         }
-    }
 
-    async function clearStorage() {
-        if(confirm("Reset all saved data?")) {
-            localStorage.removeItem('reputifly_domain');
-            localStorage.removeItem('reputifly_html');
-            localStorage.removeItem('reputifly_tutorial_seen');
-            
-            try { await clearBigStorage(); } catch(e) { console.error("DB Clear Error", e); }
-            
-            window.location.href = window.location.pathname;
+        // Updated clearStorage to use the same logic
+        function clearStorage() {
+             openModal('exitModal'); // Re-use the nice modal
         }
-    }
 
         async function saveProgress() {
             const html = getCleanHTML();
