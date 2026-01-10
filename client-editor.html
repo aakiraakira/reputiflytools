@@ -1330,16 +1330,18 @@
             const originalHTML = dropContent.innerHTML;
             dropContent.innerHTML = '<div class="loader mx-auto mb-2"></div><span class="text-xs">Processing...</span>';
 
-            // ALWAYS use compressImageSmart. 
-// This ensures 1) It is real WebP data and 2) It is resized to max 1600px
-// This prevents WordPress from renaming to .jpg or adding -scaled
-let base64String = await compressImageSmart(file);
+            // 1. Get raw dimensions first to check for WordPress "Big Image" Threshold (2560px)
+            const isBigImage = await checkDimensions(file);
+
+            // 2. Compress/Convert to WebP
+            let base64String = await compressImageSmart(file);
             
             let baseName = file.name.split('.')[0].toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9\-]/g, '') + ".webp";
             if (file.name === 'image.png' || file.name === 'pasted-image.png') {
                 baseName = `pasted-image-${Date.now()}.webp`;
             }
             
+            // 3. Store the base URL structure (we will append -scaled later if needed)
             const date = new Date();
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -1351,11 +1353,32 @@ let base64String = await compressImageSmart(file);
             currentElement.dataset.exportSrc = wpUrl; 
             currentElement.dataset.filename = baseName;
             
+            // 4. Set the flag if it's big
+            if(isBigImage) {
+                currentElement.dataset.isBig = "true";
+            } else {
+                delete currentElement.dataset.isBig;
+            }
+            
             saveProgress();
 
             dropContent.innerHTML = originalHTML;
             document.getElementById('imgUpload').value = '';
             closeModal('imageModal');
+        }
+
+        // Helper function to check dimensions
+        function checkDimensions(file) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.src = URL.createObjectURL(file);
+                img.onload = () => {
+                    // WordPress threshold is 2560px
+                    if(img.width > 2560 || img.height > 2560) resolve(true);
+                    else resolve(false);
+                    URL.revokeObjectURL(img.src);
+                };
+            });
         }
 
         function convertToBase64(file) {
@@ -1449,7 +1472,6 @@ let base64String = await compressImageSmart(file);
             const images = doc.querySelectorAll('img');
             
             for (let img of images) {
-                // FIX: Only process if exportSrc exists (URL images won't have this)
                 if(img.dataset.exportSrc) {
                     hasImagesToUpload = true;
                     const base64Data = img.src;
@@ -1457,27 +1479,43 @@ let base64String = await compressImageSmart(file);
                     if(base64Data.startsWith('data:image')) {
                         let filename = img.dataset.filename || 'image.webp';
                         
+                        // Handle duplicates
                         let counter = 1;
                         let originalName = filename.replace('.webp', '');
                         while(usedFilenames.includes(filename)) {
                             filename = `${originalName}-${counter}.webp`;
                             counter++;
-                            const date = new Date();
-                            const year = date.getFullYear();
-                            const month = String(date.getMonth() + 1).padStart(2, '0');
-                            img.dataset.exportSrc = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${filename}`;
                         }
                         usedFilenames.push(filename);
 
+                        // --- WORDPRESS LOGIC FIX ---
+                        const date = new Date();
+                        const year = date.getFullYear();
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        
+                        // If it was flagged as Big, add -scaled to the HTML URL
+                        if(img.dataset.isBig === "true") {
+                            const scaledName = filename.replace('.webp', '-scaled.webp');
+                            img.dataset.exportSrc = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${scaledName}`;
+                        } else {
+                            // Normal URL
+                            img.dataset.exportSrc = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${filename}`;
+                        }
+                        // ---------------------------
+
                         const response = await fetch(base64Data);
                         const blob = await response.blob();
+                        
+                        // Always upload the ORIGINAL filename to the zip (WordPress handles the renaming)
                         imgFolder.file(filename, blob);
 
                         img.src = img.dataset.exportSrc;
                     }
                     
+                    // Cleanup dataset attributes so they don't appear in final code
                     delete img.dataset.exportSrc;
                     delete img.dataset.filename;
+                    delete img.dataset.isBig;
                 }
                 
                 if(img.src.includes('wp-content/uploads')) {
@@ -1486,11 +1524,7 @@ let base64String = await compressImageSmart(file);
                 img.removeAttribute('style');
             }
             
-            // If no images were uploaded, remove the empty folder to keep zip clean
             if(!hasImagesToUpload) zip.remove("images_to_upload");
-
-            // FIX: DO NOT remove styles by searching for cursor:pointer. 
-            // The getCleanHTML() function already removed the editor-specific style by ID.
             
             zip.file("index.html", doc.documentElement.outerHTML);
 
@@ -1500,10 +1534,7 @@ let base64String = await compressImageSmart(file);
             a.download = `${projectDomain.split('.')[0]}_update.zip`;
             a.click();
 
-            // TRIGGER SUCCESS MODAL INSTEAD
             openModal('successModal');
-            
-            // Re-render icons for the new modal
             feather.replace();
 
             btn.innerHTML = originalText;
