@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reputifly | Project Sanitizer</title>
+    <title>Reputifly | Sanitizer Pro</title>
     
     <link rel="icon" type="image/png" href="https://reputifly.com/wp-content/uploads/2026/01/IMG_2123.jpg">    
     <script src="https://cdn.tailwindcss.com"></script>
@@ -39,7 +39,6 @@
         ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.02); }
         ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(230, 57, 127, 0.5); }
-        /* Firefox Support */
         * { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.15) rgba(255, 255, 255, 0.02); }
 
         /* --- UI COMPONENTS --- */
@@ -132,6 +131,15 @@
         /* --- LOADING --- */
         .loader { width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.3); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .log-box {
+            background: #000; border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px; padding: 10px; font-family: monospace; font-size: 10px;
+            height: 100px; overflow-y: auto; color: #aaa; margin-top: 10px;
+        }
+        .log-item { border-bottom: 1px solid rgba(255,255,255,0.05); padding: 2px 0; }
+        .log-warn { color: #F59E0B; }
+        .log-ok { color: #10B981; }
 
         .hidden { display: none !important; }
         .slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
@@ -146,13 +154,33 @@
         <div class="flex items-center gap-3">
             <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-8 w-auto brightness-125">
             <div class="h-6 w-px bg-white/10 mx-2"></div>
-            <span class="text-sm font-bold text-gray-400 font-['Space_Grotesk'] tracking-wide">SANITIZER</span>
+            <span class="text-sm font-bold text-gray-400 font-['Space_Grotesk'] tracking-wide">SANITIZER PRO</span>
         </div>
         <button onclick="resetApp()" class="text-xs text-gray-500 hover:text-white transition-colors">Reset Tool</button>
     </nav>
 
     <main class="max-w-6xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-8 relative">
         
+        <div id="domainSection" class="hidden col-span-12 slide-up">
+            <div class="card p-6 flex flex-col md:flex-row items-center gap-4 border-l-4 border-l-pink-500">
+                <div class="flex items-center gap-3 min-w-[150px]">
+                    <div class="w-10 h-10 rounded-lg bg-pink-500/10 flex items-center justify-center text-pink-500">
+                        <i data-feather="globe" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-sm font-bold text-white">Domain</h2>
+                        <p class="text-[10px] text-gray-500">Check for Typos</p>
+                    </div>
+                </div>
+                <div class="flex-grow w-full">
+                    <input type="text" id="domainInput" class="bg-[#050505] border border-white/10 rounded-lg px-4 py-2 w-full text-sm text-white focus:border-pink-500 outline-none" placeholder="e.g. client-site.com">
+                </div>
+                <button onclick="updateDomainInCode()" id="domainBtn" class="liquid-glow outline px-6 py-2 text-xs h-10 whitespace-nowrap">
+                    Update Code
+                </button>
+            </div>
+        </div>
+
         <div id="uploadSection" class="col-span-12 card p-12 text-center drop-zone min-h-[400px] flex flex-col items-center justify-center"
              onclick="document.getElementById('fileInput').click()"
              ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
@@ -191,12 +219,12 @@
                 <textarea id="codeDisplay" class="code-block flex-grow" readonly spellcheck="false"></textarea>
                 
                 <div class="mt-4 flex gap-2">
-                    <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 flex gap-3 w-full items-start">
-                        <i data-feather="info" class="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0"></i>
-                        <p class="text-xs text-blue-200 leading-relaxed">
-                            Upload images below to WordPress. External links in HTML are preserved. <br>
-                            <span class="opacity-70 mt-1 block">If using <strong>Crunch Mode</strong>, filenames remain the same, so no HTML edits needed.</span>
-                        </p>
+                    <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 w-full">
+                        <div class="flex gap-2 items-center mb-2">
+                             <i data-feather="info" class="w-4 h-4 text-blue-400"></i>
+                             <p class="text-xs font-bold text-blue-200">System Log</p>
+                        </div>
+                        <div id="systemLog" class="log-box custom-scrollbar"></div>
                     </div>
                 </div>
             </div>
@@ -234,7 +262,7 @@
                 </div>
 
                 <div id="imageGrid" class="image-grid content-start overflow-y-auto max-h-[400px] custom-scrollbar pr-2 mb-6">
-                    </div>
+                </div>
 
                 <div class="mt-auto pt-4 border-t border-white/5 flex flex-col gap-2">
                     <button onclick="downloadImagesZip()" id="zipBtn" class="liquid-glow w-full py-3 text-sm shadow-lg">
@@ -252,8 +280,11 @@
     <script>
         feather.replace();
         let originalBlobs = []; // { name, blob, sizeString, originalSize }
-        let crunchedBlobs = []; // populated if crunch is on
+        let crunchedBlobs = []; 
         let isCrunchMode = false;
+        let currentDomain = "";
+        let rawHtml = "";
+        const WP_BIG_IMAGE_THRESHOLD = 2560;
 
         // --- DRAG & DROP HANDLERS ---
         function handleDragOver(e) {
@@ -276,15 +307,28 @@
             if(file) processZip(file);
         }
 
+        function log(msg, type='normal') {
+            const box = document.getElementById('systemLog');
+            const el = document.createElement('div');
+            el.className = 'log-item';
+            if(type==='warn') el.className += ' log-warn';
+            if(type==='ok') el.className += ' log-ok';
+            el.innerText = "> " + msg;
+            box.appendChild(el);
+            box.scrollTop = box.scrollHeight;
+        }
+
         // --- MAIN LOGIC ---
         async function processZip(file) {
             const uploadSec = document.getElementById('uploadSection');
             const errorEl = document.getElementById('errorMsg');
             const codeSec = document.getElementById('codeSection');
             const mediaSec = document.getElementById('mediaSection');
+            const domainSec = document.getElementById('domainSection');
             
             errorEl.classList.add('hidden');
-            
+            document.getElementById('systemLog').innerHTML = ""; // Clear log
+
             // Loading UI
             const originalHtml = uploadSec.innerHTML;
             uploadSec.innerHTML = `<div class="loader mb-4" style="width:40px;height:40px;"></div><h2 class="text-xl font-bold">Unpacking...</h2>`;
@@ -299,28 +343,53 @@
                 document.getElementById('crunchToggle').classList.remove('active');
 
                 // 1. Get HTML
-                // We simply read the text. We do NOT modify it. This preserves external URLs.
-                let htmlContent = "";
                 const htmlFile = Object.values(zip.files).find(f => f.name.endsWith('index.html'));
                 if (htmlFile) {
-                    htmlContent = await htmlFile.async("string");
+                    rawHtml = await htmlFile.async("string");
                 } else {
                     throw new Error("No index.html found in ZIP.");
                 }
-                document.getElementById('codeDisplay').value = htmlContent;
 
-                // 2. Get Images (Strictly from the folder)
+                // 2. DETECT DOMAIN
+                const domainMatch = rawHtml.match(/https?:\/\/([^\/]+)\/wp-content/);
+                currentDomain = domainMatch ? domainMatch[1] : "";
+                document.getElementById('domainInput').value = currentDomain;
+                log(`Detected Domain: ${currentDomain || 'None'}`, currentDomain ? 'ok' : 'warn');
+
+                // 3. PROCESS IMAGES (HASHING + WP LOGIC)
                 const imgPromises = [];
                 zip.forEach((relativePath, zipEntry) => {
                     if (!zipEntry.dir && relativePath.includes('images_to_upload/')) {
-                        const p = zipEntry.async("blob").then(blob => {
+                        const p = zipEntry.async("blob").then(async blob => {
                             const fileName = relativePath.split('/').pop();
-                            
-                            // Safety Check: Ignore Mac system files or empty names
                             if(fileName.startsWith('.') || !fileName || fileName.includes('__MACOSX')) return; 
 
+                            // --- A. SEO HASHING ---
+                            // Rename 'image.jpg' to 'image-x9d2.jpg'
+                            const hash = Math.random().toString(36).substring(2, 6);
+                            const parts = fileName.split('.');
+                            const ext = parts.pop();
+                            const baseName = parts.join('.');
+                            const hashedName = `${baseName}-${hash}.${ext}`;
+
+                            // --- B. WP BIG IMAGE CHECK ---
+                            const dims = await getImageDimensions(blob);
+                            let htmlLinkName = hashedName;
+                            
+                            if (dims.w > WP_BIG_IMAGE_THRESHOLD || dims.h > WP_BIG_IMAGE_THRESHOLD) {
+                                htmlLinkName = `${baseName}-${hash}-scaled.${ext}`;
+                                log(`Big Image (${dims.w}px): ${fileName} linked to -scaled version`, 'warn');
+                            } else {
+                                log(`Renamed: ${fileName} -> ${hashedName}`);
+                            }
+
+                            // --- C. UPDATE HTML ---
+                            // Replace all instances of original filename with new Logic Name
+                            const regex = new RegExp(fileName, 'g');
+                            rawHtml = rawHtml.replace(regex, htmlLinkName);
+
                             originalBlobs.push({
-                                name: fileName,
+                                name: hashedName, // File on disk uses Hashed Name (WP adds -scaled later if needed)
                                 blob: blob,
                                 originalSize: blob.size,
                                 sizeString: formatBytes(blob.size)
@@ -332,10 +401,12 @@
 
                 await Promise.all(imgPromises);
 
-                // 3. Render
+                // 4. Render
+                document.getElementById('codeDisplay').value = rawHtml;
                 renderGrid(originalBlobs);
                 
                 uploadSec.classList.add('hidden');
+                domainSec.classList.remove('hidden');
                 codeSec.classList.remove('hidden');
                 mediaSec.classList.remove('hidden');
 
@@ -346,6 +417,46 @@
                 errorEl.classList.remove('hidden');
                 feather.replace();
             }
+        }
+
+        // --- HELPERS ---
+        function getImageDimensions(blob) {
+            return new Promise(resolve => {
+                const img = new Image();
+                img.src = URL.createObjectURL(blob);
+                img.onload = () => {
+                    resolve({ w: img.width, h: img.height });
+                    URL.revokeObjectURL(img.src);
+                };
+                img.onerror = () => resolve({ w: 0, h: 0 }); 
+            });
+        }
+
+        function updateDomainInCode() {
+            const newDomain = document.getElementById('domainInput').value.trim();
+            const btn = document.getElementById('domainBtn');
+            
+            if(!newDomain || !currentDomain) {
+                log("Cannot update: No domain detected or input empty", 'warn');
+                return;
+            }
+
+            const escapedOldDomain = currentDomain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(escapedOldDomain, 'g');
+            
+            rawHtml = rawHtml.replace(regex, newDomain);
+            document.getElementById('codeDisplay').value = rawHtml;
+            
+            log(`Domain updated: ${currentDomain} -> ${newDomain}`, 'ok');
+            currentDomain = newDomain; 
+
+            const originalText = btn.innerText;
+            btn.innerText = "Updated!";
+            btn.classList.add('border-green-500', 'text-green-500');
+            setTimeout(() => {
+                btn.innerText = originalText;
+                btn.classList.remove('border-green-500', 'text-green-500');
+            }, 2000);
         }
 
         function formatBytes(bytes, decimals = 1) {
@@ -400,7 +511,6 @@
             toggle.classList.toggle('active', isCrunchMode);
 
             if(isCrunchMode) {
-                // Perform Crunch
                 if(crunchedBlobs.length === 0) {
                     grid.innerHTML = '<div class="col-span-full flex flex-col items-center py-10"><div class="loader mb-2"></div><span class="text-xs text-gray-500">Compressing images...</span></div>';
                     
@@ -409,12 +519,13 @@
                             const compressedBlob = await compressImage(item.blob);
                             const percentSaved = Math.round(((item.originalSize - compressedBlob.size) / item.originalSize) * 100);
                             return {
-                                name: item.name, // KEEP NAME SAME so HTML links don't break
+                                name: item.name, 
                                 blob: compressedBlob,
                                 originalSize: compressedBlob.size,
                                 sizeString: `${formatBytes(compressedBlob.size)} (-${percentSaved}%)`
                             };
                         }));
+                        log("Crunch complete. All images compressed.", 'ok');
                     } catch(e) {
                         console.error(e);
                         alert("Compression failed.");
@@ -439,7 +550,6 @@
                     let w = img.width;
                     let h = img.height;
                     
-                    // Resize logic: Max 1920px width/height
                     const MAX = 1920; 
                     if (w > MAX || h > MAX) {
                         if (w > h) { h *= MAX/w; w = MAX; }
@@ -451,7 +561,6 @@
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, w, h);
                     
-                    // Compress to WebP quality 0.7
                     canvas.toBlob((blob) => {
                         resolve(blob);
                         URL.revokeObjectURL(img.src);
@@ -499,12 +608,11 @@
 
             const btn = document.getElementById('multiBtn');
             const originalText = btn.innerHTML;
-            btn.innerHTML = 'Downloading... check popups';
+            btn.innerHTML = 'Downloading...';
             
-            // Loop with delay to prevent browser blocking
             for (let i = 0; i < list.length; i++) {
                 saveAs(list[i].blob, list[i].name);
-                await new Promise(r => setTimeout(r, 300)); // 300ms delay
+                await new Promise(r => setTimeout(r, 300)); 
             }
 
             btn.innerHTML = originalText;
