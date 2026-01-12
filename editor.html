@@ -817,18 +817,39 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
                     const docSnap = await window.firebaseApp.getDoc(docRef);
                     
                     if (docSnap.exists()) {
-                        const data = docSnap.data();
-                        projectDomain = data.domain;
-                        
-                        const displayEl = document.getElementById('domainDisplay');
-                        if(displayEl) displayEl.innerText = projectDomain;
-                        
-                        localStorage.setItem('reputifly_domain', projectDomain); 
-                        loadContentIntoFrame(data.html);
-                        pushHistory(data.html);
-                        
-                        setTimeout(() => { openModal('helpModal'); }, 500);
-                    } else {
+    const data = docSnap.data();
+    projectDomain = data.domain;
+
+    const displayEl = document.getElementById('domainDisplay');
+    if(displayEl) displayEl.innerText = projectDomain;
+
+    localStorage.setItem('reputifly_domain', projectDomain); 
+
+    // --- NEW LOADING LOGIC (Hybrid System) ---
+    let htmlContent = data.html; // 1. Check old location (Backward Compatibility)
+
+    // 2. If not found, check the new "pages_content" collection
+    if (!htmlContent) {
+        try {
+            const contentRef = window.firebaseApp.doc(db, "pages_content", projectId);
+            const contentSnap = await window.firebaseApp.getDoc(contentRef);
+            if(contentSnap.exists()) {
+                htmlContent = contentSnap.data().html;
+            }
+        } catch(e) { console.warn("Content fetch check", e); }
+    }
+
+    // 3. Load whatever we found
+    if(htmlContent) {
+        loadContentIntoFrame(htmlContent);
+        pushHistory(htmlContent);
+        setTimeout(() => { openModal('helpModal'); }, 500);
+    } else {
+        // Handle empty or error
+        alert("Could not load page content.");
+    }
+    // ----------------------------------
+} else {
     // REPLACE THE OLD ALERT WITH THIS:
     
     // 1. Hide Loading Screen
@@ -866,33 +887,39 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
     btn.innerHTML = "Saving...";
     
     try {
-        const html = getCleanHTML();
-        const payload = {
-            domain: projectDomain,
-            projectName: projectMeta.name,
-            pageName: projectMeta.page,
-            html: html,
-            updatedAt: window.firebaseApp.serverTimestamp() // Update timestamp
-        };
+    const html = getCleanHTML();
 
-        let docId = currentProjectId; // Defined globally in your file
+    // 1. Prepare Light Metadata (Fast for Admin)
+    const metaPayload = {
+        domain: projectDomain,
+        projectName: projectMeta.name,
+        pageName: projectMeta.page,
+        // html: html, <--- REMOVED: We don't save HTML here anymore
+        updatedAt: window.firebaseApp.serverTimestamp()
+    };
 
-        if (currentProjectId) {
-            // SMART SAVE: Update existing
-            const docRef = window.firebaseApp.doc(db, "projects", currentProjectId);
-            await window.firebaseApp.updateDoc(docRef, payload);
-        } else {
-            // CREATE NEW
-            payload.createdAt = window.firebaseApp.serverTimestamp();
-            const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), payload);
-            docId = docRef.id;
-            currentProjectId = docId; // Set current ID so next save is an Update
-        }
-        
-        const link = window.location.origin + window.location.pathname + "?id=" + docId;
-        document.getElementById('shareLinkBox').innerText = link;
-        openModal('shareModal');
-    } catch(e) {
+    let docId = currentProjectId;
+
+    // 2. Save Metadata to 'projects' collection
+    if (currentProjectId) {
+        const projectRef = window.firebaseApp.doc(db, "projects", currentProjectId);
+        await window.firebaseApp.updateDoc(projectRef, metaPayload);
+    } else {
+        metaPayload.createdAt = window.firebaseApp.serverTimestamp();
+        const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), metaPayload);
+        docId = docRef.id;
+        currentProjectId = docId;
+    }
+
+    // 3. Save Heavy HTML to NEW 'pages_content' collection
+    const contentRef = window.firebaseApp.doc(db, "pages_content", docId);
+    // We use setDoc with merge:true to be safe
+    await window.firebaseApp.setDoc(contentRef, { html: html }, { merge: true });
+
+    const link = window.location.origin + window.location.pathname + "?id=" + docId;
+    document.getElementById('shareLinkBox').innerText = link;
+    openModal('shareModal');
+} catch(e) {
         console.error(e);
         alert("Error saving to cloud. See console.");
     }
