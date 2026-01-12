@@ -202,7 +202,7 @@
                 <i data-feather="database" class="w-5 h-5 text-pink-500"></i>
             </div>
             <div>
-                <h1 class="text-lg font-bold text-white tracking-wide brand-font">COMMAND CENTER</h1>
+                <h1 class="text-lg font-bold text-white tracking-wide brand-font" id="mainTitle">COMMAND CENTER</h1>
                 <div class="flex items-center gap-3">
                     <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold" id="viewModeBadge">Global Admin</p>
                     <div class="live-badge"><div class="live-dot"></div> Live</div>
@@ -274,12 +274,50 @@
                 <h3 class="text-xl font-bold text-white brand-font">Stop Sharing?</h3>
             </div>
             <p class="text-gray-400 text-sm leading-relaxed mb-8">
-                The current shared link will <strong>stop working immediately</strong>. Employees viewing the page will lose access.
+                The current shared link will <strong>stop working immediately</strong>. Clients/Employees viewing the page will lose access.
             </p>
             <div class="flex gap-3">
                 <button onclick="confirmStopSharing()" class="flex-1 bg-red-600 hover:bg-red-500 text-white py-3 rounded-xl text-sm font-bold transition shadow-lg shadow-red-900/20">Yes, Stop Sharing</button>
                 <button onclick="closeModal('stopShareModal')" class="flex-1 bg-white/5 hover:bg-white/10 text-white py-3 rounded-xl text-sm font-bold transition">Cancel</button>
             </div>
+        </div>
+    </div>
+
+    <div id="shareOptionModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="flex items-center gap-3 mb-6">
+                <div class="w-10 h-10 rounded-full bg-pink-500/20 flex items-center justify-center text-pink-500">
+                    <i data-feather="share-2" class="w-5 h-5"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-white brand-font">Share Project</h3>
+                    <p class="text-xs text-gray-500">Choose who to share with</p>
+                </div>
+            </div>
+            
+            <div class="grid gap-3">
+                <button onclick="executeShare('team')" class="flex items-center gap-3 w-full bg-white/5 hover:bg-white/10 text-white p-4 rounded-xl border border-white/5 transition group text-left">
+                    <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 group-hover:text-white transition border border-blue-500/20">
+                        <i data-feather="users" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <div class="font-bold text-sm">Share Team View</div>
+                        <div class="text-[10px] text-gray-500">Full detailed list (Internal)</div>
+                    </div>
+                </button>
+                
+                <button onclick="executeShare('client')" class="flex items-center gap-3 w-full bg-white/5 hover:bg-white/10 text-white p-4 rounded-xl border border-white/5 transition group text-left">
+                    <div class="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center text-green-400 group-hover:text-white transition border border-green-500/20">
+                        <i data-feather="briefcase" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <div class="font-bold text-sm">Share Client Portal</div>
+                        <div class="text-[10px] text-gray-500">Polished, read-only status view</div>
+                    </div>
+                </button>
+            </div>
+            
+            <button onclick="closeModal('shareOptionModal')" class="w-full mt-6 text-xs text-gray-500 hover:text-white transition">Cancel</button>
         </div>
     </div>
 
@@ -315,7 +353,7 @@
                     <p class="text-xs text-gray-500">Visible on all pages in this project</p>
                 </div>
             </div>
-            <textarea id="projectNoteInput" class="input-glass h-32 resize-none mb-6 text-gray-300" placeholder="e.g. Deadline is Friday. Use bold fonts."></textarea>
+            <textarea id="projectNoteInput" class="input-glass h-32 resize-none mb-6 text-gray-300" placeholder="e.g. Phase 1 Complete. Waiting for images."></textarea>
             <div id="projectNoteReadOnly" class="hidden linkified-content bg-white/5 p-4 rounded-xl h-32 overflow-y-auto text-sm text-gray-300 mb-6 border border-white/10"></div>
             <div class="flex gap-3" id="projectNoteActions">
                 <button onclick="saveProjectNote()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white py-3 rounded-xl text-sm font-bold transition shadow-lg">Save Remark</button>
@@ -369,19 +407,33 @@
         let currentActionId = null;
         let currentProjectName = null;
         let isSharedMode = false;
+        let isClientMode = false;
         let sharedProjectFilter = null;
 
         // --- AUTH & INIT ---
         document.addEventListener('DOMContentLoaded', () => {
             const urlParams = new URLSearchParams(window.location.search);
             const projectToView = urlParams.get('project');
+            const clientToView = urlParams.get('client');
 
-            if(projectToView) {
-                // SHARED MODE
+            if(clientToView) {
+                // CLIENT MODE
+                isClientMode = true;
+                isSharedMode = true;
+                sharedProjectFilter = decodeURIComponent(clientToView);
+                document.getElementById('authOverlay').classList.remove('active');
+                
+                // UI Clean Up for Client
+                document.getElementById('mainTitle').innerText = "CLIENT PORTAL";
+                document.getElementById('viewModeBadge').innerText = "Status View";
+                document.getElementById('viewModeBadge').classList.add("text-green-500");
+                document.getElementById('searchContainer').style.display = 'none'; 
+            } else if(projectToView) {
+                // TEAM SHARED MODE
                 isSharedMode = true;
                 sharedProjectFilter = decodeURIComponent(projectToView);
                 document.getElementById('authOverlay').classList.remove('active');
-                document.getElementById('viewModeBadge').innerText = "Viewer Mode";
+                document.getElementById('viewModeBadge').innerText = "Team View";
                 document.getElementById('viewModeBadge').classList.add("text-pink-500");
                 document.getElementById('searchContainer').style.display = 'none'; 
             } else {
@@ -478,18 +530,52 @@
                 const domain = pages[0].domain || "No Domain";
                 const metaData = projectNotesMap[groupKey] || {};
                 const projectNote = metaData.note || "";
+                const noteTime = metaData.updatedAt ? formatFullDate(metaData.updatedAt) : "";
                 const isSharing = metaData.sharingEnabled === true;
                 
                 const hasRemark = projectNote.trim().length > 0;
+                
+                // CLIENT MODE SPECIFIC HEADER
+                if(isClientMode) {
+                    const groupHtml = `
+                        <div class="glass-panel overflow-hidden animate-in fade-in zoom-in duration-300">
+                            <div class="bg-[#121218] p-8 border-b border-white/5">
+                                <h3 class="text-2xl font-bold text-white tracking-tight brand-font mb-2">${groupKey}</h3>
+                                <a href="https://${domain}" target="_blank" class="text-sm text-pink-400 hover:text-pink-300 font-mono tracking-wide flex items-center gap-1 mb-6">
+                                    ${domain} <i data-feather="external-link" class="w-3 h-3"></i>
+                                </a>
+                                
+                                <div class="bg-white/5 border border-white/10 rounded-xl p-5 relative">
+                                    <div class="absolute -top-3 left-4 bg-[#121218] px-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest border border-white/10 rounded">Latest Update</div>
+                                    <p class="text-sm text-gray-200 leading-relaxed">${projectNote ? linkify(projectNote) : '<span class="italic text-gray-600">No project updates yet.</span>'}</p>
+                                    ${noteTime ? `<div class="text-[10px] text-gray-600 mt-3 text-right">Posted on ${noteTime}</div>` : ''}
+                                </div>
+                            </div>
+                            
+                            <div class="divide-y divide-white/5 bg-black/10">
+                                <div class="hidden md:grid grid-cols-12 px-8 py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest bg-black/20">
+                                    <div class="col-span-4">Page Name</div>
+                                    <div class="col-span-2">Status</div>
+                                    <div class="col-span-4">Specific Notes</div>
+                                    <div class="col-span-2 text-right">View Design</div>
+                                </div>
+                                ${pages.map(page => renderClientRow(page)).join('')}
+                            </div>
+                        </div>
+                    `;
+                    container.innerHTML += groupHtml;
+                    return; // Skip normal rendering
+                }
+
+                // NORMAL & TEAM SHARE HEADER
                 const remarkBtnStyle = (isSharedMode && hasRemark) 
                     ? "bg-red-500/20 text-red-500 border-red-500/50 animate-pulse" 
                     : "bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border-white/5";
-
+                
                 const remarkIcon = (isSharedMode && hasRemark)
                     ? `<div class="relative"><i data-feather="bell" class="w-3 h-3"></i><div class="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></div></div>`
                     : `<i data-feather="file-text" class="w-3 h-3"></i>`;
 
-                // STOP SHARING LOGIC: Only show if actively sharing
                 const stopSharingHtml = (!isSharedMode && isSharing) 
                     ? `<button onclick="askStopSharing('${groupKey}')" class="text-[10px] text-red-500 hover:text-red-400 hover:underline cursor-pointer flex items-center gap-1"><i data-feather="stop-circle" class="w-3 h-3"></i> Stop Sharing</button>`
                     : ``;
@@ -515,7 +601,7 @@
                             
                             <div class="flex flex-wrap items-center gap-2 self-start md:self-auto mt-4 md:mt-0 w-full md:w-auto">
                                 ${!isSharedMode ? `
-                                <button onclick="shareProjectView('${groupKey}')" class="flex-1 md:flex-none text-[10px] font-bold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-4 py-2 rounded-lg border border-white/5 flex items-center justify-center gap-2 transition" title="Share live view">
+                                <button onclick="openShareOptions('${groupKey}')" class="flex-1 md:flex-none text-[10px] font-bold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-4 py-2 rounded-lg border border-white/5 flex items-center justify-center gap-2 transition" title="Share Project">
                                     <i data-feather="share-2" class="w-3 h-3"></i> Share
                                 </button>
                                 ` : ''}
@@ -546,6 +632,40 @@
             feather.replace();
         }
 
+        // --- CLIENT ROW RENDERER ---
+        function renderClientRow(page) {
+            const hasComment = page.comments && page.comments.trim().length > 0;
+            const commentTime = page.commentUpdatedAt ? formatTime(page.commentUpdatedAt) : "";
+            const editorLink = `${window.location.origin}/editor.html?id=${page.id}`;
+            const downloaded = page.downloaded ? true : false;
+            
+            return `
+                <div class="grid grid-cols-1 md:grid-cols-12 items-center px-8 py-5 hover:bg-white/[0.02] transition-colors border-b border-white/5 last:border-0 gap-4 md:gap-0">
+                    <div class="col-span-4 font-bold text-white text-sm">${page.pageName || "Untitled"}</div>
+                    
+                    <div class="col-span-2">
+                        ${downloaded 
+                           ? `<span class="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[10px] font-bold flex w-fit items-center gap-1"><i data-feather="check" class="w-3 h-3"></i> Complete</span>`
+                           : `<span class="bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-1 rounded text-[10px] font-bold flex w-fit items-center gap-1"><i data-feather="loader" class="w-3 h-3"></i> In Progress</span>`
+                        }
+                    </div>
+                    
+                    <div class="col-span-4 text-xs text-gray-400 pr-4">
+                        ${hasComment 
+                            ? `<span class="text-white">${linkify(page.comments)}</span> <span class="text-[10px] text-gray-600 block mt-1">${commentTime}</span>` 
+                            : '<span class="text-gray-700 italic">-</span>'}
+                    </div>
+                    
+                    <div class="col-span-2 text-right">
+                        <a href="${editorLink}" target="_blank" class="bg-white/5 hover:bg-pink-600 hover:text-white text-gray-300 text-xs font-bold px-4 py-2 rounded-lg border border-white/10 transition inline-flex items-center gap-2">
+                            View Design <i data-feather="arrow-right" class="w-3 h-3"></i>
+                        </a>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- NORMAL ROW RENDERER ---
         function renderRow(page) {
             const timeStr = formatTime(page.last_active);
             const isLive = isRecent(page.last_active);
@@ -555,7 +675,6 @@
 
             return `
                 <div class="grid grid-cols-1 md:grid-cols-12 items-center px-6 py-4 hover:bg-white/[0.02] transition-colors group gap-4 md:gap-0 border-b border-white/5 md:border-none last:border-0">
-                    
                     <div class="col-span-4 pr-4 flex items-center justify-between md:block">
                         <div class="flex items-center gap-3">
                             <a href="${editorLink}" target="_blank" class="w-10 h-10 md:w-8 md:h-8 rounded-lg bg-white/5 flex items-center justify-center text-gray-400 hover:text-white hover:bg-pink-500/20 hover:scale-105 transition shadow-lg flex-shrink-0" title="Open Editor">
@@ -565,9 +684,6 @@
                                 <div class="font-bold text-white text-sm mb-0.5 truncate">${page.pageName || "Untitled"}</div>
                                 ${hasComment ? `<div class="text-[10px] text-yellow-500 flex items-center gap-1"><i data-feather="file-text" class="w-3 h-3"></i> Note Attached</div>` : ''}
                             </div>
-                        </div>
-                        <div class="md:hidden">
-                             ${isLive ? `<span class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(74,222,128,0.8)] animate-pulse inline-block"></span>` : ''}
                         </div>
                     </div>
 
@@ -610,89 +726,113 @@
             `;
         }
 
-        // --- NEW: SOURCE CODE MODAL LOGIC ---
+        // --- SOURCE CODE MODAL ---
         window.openSourceModal = function(id) {
             currentActionId = id;
             openModal('sourceModal');
         }
 
-        window.performDownload = function() {
-            if(!currentActionId) return;
-            const page = allProjects.find(p => p.id === currentActionId);
-            if(!page || !page.html) return showToast("No code found", "error");
+        window.performDownload = async function() {
+    if(!currentActionId) return;
+    const btn = document.querySelector("#sourceModal .btn-icon.download") || document.activeElement;
 
-            const blob = new Blob([page.html], { type: 'text/html' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            const safeName = (page.pageName || "untitled").replace(/[^a-z0-9]/gi, '_').toLowerCase();
-            a.download = `${safeName}.html`;
-            
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            closeModal('sourceModal');
-            showToast("Download Started");
-        }
+    showToast("Fetching source code..."); // Visual feedback
 
-        window.performCopySource = function() {
-            if(!currentActionId) return;
-            const page = allProjects.find(p => p.id === currentActionId);
-            if(!page || !page.html) return showToast("No code found", "error");
+    let html = null;
 
-            navigator.clipboard.writeText(page.html);
-            closeModal('sourceModal');
-            showToast("Source Code Copied!");
-        }
-
-        // --- CUSTOM TOAST SYSTEM ---
-        window.showToast = function(msg, type = "success") {
-            const container = document.getElementById('toast-container');
-            const box = document.getElementById('toast-box');
-            const icon = document.getElementById('toast-icon');
-            const txt = document.getElementById('toast-message');
-
-            txt.innerText = msg;
-            
-            if(type === 'error') {
-                box.className = "toast-box error";
-                icon.innerHTML = '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>';
-                icon.className = "w-5 h-5 text-red-500";
-            } else {
-                box.className = "toast-box success";
-                icon.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
-                icon.className = "w-5 h-5 text-green-500";
+    try {
+        // 1. Check if we already have it (Old projects)
+        const project = allProjects.find(p => p.id === currentActionId);
+        if(project && project.html) {
+            html = project.html;
+        } else {
+            // 2. Fetch from new system (pages_content)
+            const contentDoc = await window.getDoc(window.doc(window.db, "pages_content", currentActionId));
+            if(contentDoc.exists()) {
+                html = contentDoc.data().html;
             }
-            feather.replace();
-
-            container.classList.add('show');
-            setTimeout(() => {
-                container.classList.remove('show');
-            }, 3000);
         }
 
-        function linkify(text) {
-            var urlRegex =/(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-            return text.replace(urlRegex, function(url) {
-                return '<a href="' + url + '" target="_blank">' + url + '</a>';
-            });
+        if(!html) return showToast("No source code found", "error");
+
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safeName = (project.pageName || "untitled").replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        a.download = `${safeName}.html`;
+
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        closeModal('sourceModal');
+        showToast("Download Started");
+    } catch(e) {
+        console.error(e);
+        showToast("Error fetching code", "error");
+    }
+}
+
+        window.performCopySource = async function() {
+    if(!currentActionId) return;
+    showToast("Fetching source code...");
+
+    let html = null;
+
+    try {
+        // 1. Check Old System
+        const project = allProjects.find(p => p.id === currentActionId);
+        if(project && project.html) {
+            html = project.html;
+        } else {
+            // 2. Fetch New System
+            const contentDoc = await window.getDoc(window.doc(window.db, "pages_content", currentActionId));
+            if(contentDoc.exists()) {
+                html = contentDoc.data().html;
+            }
         }
 
-        // --- SHARE & STOP (UPDATED WITH POPUP) ---
-        window.shareProjectView = async function(projectName) {
+        if(!html) return showToast("No source code found", "error");
+
+        navigator.clipboard.writeText(html);
+        closeModal('sourceModal');
+        showToast("Source Code Copied!");
+    } catch(e) {
+        console.error(e);
+        showToast("Error copying code", "error");
+    }
+}
+
+        // --- SHARE LOGIC ---
+        window.openShareOptions = function(projectName) {
+            currentProjectName = projectName;
+            openModal('shareOptionModal');
+        }
+
+        window.executeShare = async function(type) {
+            if(!currentProjectName) return;
+            
             try {
-                await window.setDoc(window.doc(window.db, "project_metadata", projectName), {
+                // Activate Sharing in DB
+                await window.setDoc(window.doc(window.db, "project_metadata", currentProjectName), {
                     sharingEnabled: true
                 }, { merge: true });
-                
+
                 const baseUrl = window.location.href.split('?')[0];
-                const safeName = encodeURIComponent(projectName);
-                const shareUrl = `${baseUrl}?project=${safeName}`;
+                const safeName = encodeURIComponent(currentProjectName);
+                let shareUrl = "";
+
+                if(type === 'client') {
+                    shareUrl = `${baseUrl}?client=${safeName}`;
+                } else {
+                    shareUrl = `${baseUrl}?project=${safeName}`;
+                }
                 
                 navigator.clipboard.writeText(shareUrl);
-                showToast("Shared Link Copied!");
+                closeModal('shareOptionModal');
+                showToast(type === 'client' ? "Client Link Copied!" : "Team Link Copied!");
             } catch(e) {
                 console.error(e);
                 showToast("Error Activating Share", "error");
@@ -712,12 +852,10 @@
                 }, { merge: true });
                 closeModal('stopShareModal');
                 showToast("Sharing Stopped", "success");
-            } catch(e) {
-                showToast("Error Stopping Share", "error");
-            }
+            } catch(e) { showToast("Error", "error"); }
         }
 
-        // --- PROJECT REMARKS ---
+        // --- NOTES & COMMENTS ---
         window.openProjectNote = function(projectName) {
             currentProjectName = projectName;
             const meta = projectNotesMap[projectName] || {};
@@ -744,7 +882,6 @@
             if(!currentProjectName) return;
             const text = document.getElementById('projectNoteInput').value;
             const btn = document.querySelector('#projectNoteModal button');
-            const originalText = btn.innerText;
             btn.innerText = "Saving...";
             
             try {
@@ -754,51 +891,8 @@
                 }, { merge: true }); 
                 closeModal('projectNoteModal');
                 showToast("Remark Saved");
-            } catch(e) { 
-                console.error(e); 
-                showToast("Failed to save", "error");
-            }
-            btn.innerText = originalText;
-        }
-
-        // --- HISTORY & MISC ---
-        window.openHistory = function(id) {
-            const project = allProjects.find(p => p.id === id);
-            if(!project) return;
-            const tCreate = formatFullDate(project.createdAt);
-            const tActive = project.last_active ? formatFullDate(project.last_active) : "No activity yet";
-            const html = `
-                <div class="timeline-item">
-                    <div class="timeline-dot active"></div>
-                    <div>
-                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Project Created</div>
-                        <div class="text-white text-sm mt-1">${tCreate}</div>
-                        <div class="text-[10px] text-gray-600 font-mono mt-1">ID: ${project.id}</div>
-                    </div>
-                </div>
-                <div class="timeline-item">
-                    <div class="timeline-dot ${project.last_active ? 'active' : ''}"></div>
-                    <div>
-                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Last Interaction</div>
-                        <div class="text-white text-sm mt-1">${tActive}</div>
-                    </div>
-                </div>
-                <div class="timeline-item">
-                    <div class="timeline-dot ${project.downloaded ? 'active' : ''}"></div>
-                    <div>
-                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Download Status</div>
-                        <div class="text-white text-sm mt-1">${project.downloaded ? '<span class="text-green-400">Files Downloaded</span>' : 'Not yet downloaded'}</div>
-                    </div>
-                </div>
-            `;
-            document.getElementById('historyContent').innerHTML = html;
-            openModal('historyModal');
-        }
-
-        // UPDATED: Now uses showToast instead of alert()
-        window.copyLink = function(url) {
-            navigator.clipboard.writeText(url);
-            showToast("Editor Link Copied!");
+            } catch(e) { console.error(e); }
+            btn.innerText = "Save Remark";
         }
 
         window.openComment = function(id, existingText) {
@@ -825,17 +919,53 @@
             const text = document.getElementById('commentInput').value;
             try {
                 const docRef = window.doc(window.db, "projects", currentActionId);
-                await window.updateDoc(docRef, { comments: text });
+                // UPGRADE: Now saves timestamp!
+                await window.updateDoc(docRef, { 
+                    comments: text,
+                    commentUpdatedAt: new Date() 
+                });
                 closeModal('commentModal');
                 showToast("Note Saved");
             } catch(e) { console.error(e); }
+        }
+
+        // --- UTILS ---
+        window.showToast = function(msg, type = "success") {
+            const container = document.getElementById('toast-container');
+            const box = document.getElementById('toast-box');
+            const icon = document.getElementById('toast-icon');
+            const txt = document.getElementById('toast-message');
+            txt.innerText = msg;
+            if(type === 'error') {
+                box.className = "toast-box error";
+                icon.innerHTML = '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>';
+                icon.className = "w-5 h-5 text-red-500";
+            } else {
+                box.className = "toast-box success";
+                icon.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
+                icon.className = "w-5 h-5 text-green-500";
+            }
+            feather.replace();
+            container.classList.add('show');
+            setTimeout(() => { container.classList.remove('show'); }, 3000);
+        }
+
+        function linkify(text) {
+            var urlRegex =/(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+            return text.replace(urlRegex, function(url) {
+                return '<a href="' + url + '" target="_blank">' + url + '</a>';
+            });
+        }
+
+        window.copyLink = function(url) {
+            navigator.clipboard.writeText(url);
+            showToast("Editor Link Copied!");
         }
 
         window.askDelete = function(id) {
             currentActionId = id;
             openModal('deleteModal');
         }
-
         window.confirmDelete = async function() {
             if(!currentActionId) return;
             try {
@@ -843,6 +973,38 @@
                 closeModal('deleteModal');
                 showToast("Page Deleted");
             } catch(e) { console.error(e); }
+        }
+
+        window.openHistory = function(id) {
+            const project = allProjects.find(p => p.id === id);
+            if(!project) return;
+            const tCreate = formatFullDate(project.createdAt);
+            const tActive = project.last_active ? formatFullDate(project.last_active) : "No activity yet";
+            const html = `
+                <div class="timeline-item">
+                    <div class="timeline-dot active"></div>
+                    <div>
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Created</div>
+                        <div class="text-white text-sm mt-1">${tCreate}</div>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot ${project.last_active ? 'active' : ''}"></div>
+                    <div>
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Last Interaction</div>
+                        <div class="text-white text-sm mt-1">${tActive}</div>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot ${project.downloaded ? 'active' : ''}"></div>
+                    <div>
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Status</div>
+                        <div class="text-white text-sm mt-1">${project.downloaded ? '<span class="text-green-400">Files Downloaded</span>' : 'Not yet downloaded'}</div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('historyContent').innerHTML = html;
+            openModal('historyModal');
         }
 
         function openModal(id) { document.getElementById(id).classList.add('active'); }
