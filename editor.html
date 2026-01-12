@@ -14,7 +14,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
         // ADDED: updateDoc, serverTimestamp
-import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
 window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs };
         window.dispatchEvent(new Event('firebaseLoaded'));
@@ -766,6 +766,35 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
                     console.log("Restoring from local draft...");
                     try {
                         const docRef = window.firebaseApp.doc(db, "projects", projectId);
+                        // --- REAL-TIME SECURITY CHECK (ADDED) ---
+                // This listens for deletion events while the user is working
+                window.firebaseApp.onSnapshot(docRef, (snapshot) => {
+                    // If the document no longer exists (Admin deleted it)
+                    if (!snapshot.exists()) {
+                        // 1. Force Open "Access Revoked" Modal
+                        document.getElementById('cloudLoader').classList.remove('active');
+                        document.getElementById('expiredModal').classList.add('active');
+                        
+                        // 2. Remove Controls (Prevent Saving)
+                        const loadMenu = document.getElementById('navLoadMenu');
+                        if(loadMenu) loadMenu.remove();
+                        const saveBtn = document.getElementById('saveBtn');
+                        if(saveBtn) saveBtn.remove();
+                        const shareBtn = document.getElementById('navShareBtn');
+                        if(shareBtn) shareBtn.remove();
+                        
+                        // 3. Lock Header
+                        document.getElementById('mainHeader').classList.add('pointer-events-none', 'opacity-50');
+                        
+                        // 4. Wipe the Editor Workspace
+                        const frameContainer = document.getElementById('editor-frame-container');
+                        if(frameContainer) {
+                            frameContainer.innerHTML = ''; // Removes iframe
+                            frameContainer.style.background = '#0B0A14';
+                        }
+                    }
+                });
+                // ----------------------------------------
                         const docSnap = await window.firebaseApp.getDoc(docRef);
                         if(docSnap.exists()) {
                             projectDomain = docSnap.data().domain;
