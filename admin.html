@@ -5,14 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Reputifly | Command Center</title>
     
-    <link rel="icon" type="image/png" href="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug">
+    <link rel="icon" type="image/png" href="https://reputifly.com/wp-content/uploads/2026/01/IMG_2123.jpg">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/feather-icons"></script>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-        // ADDED: onSnapshot for realtime updates
         import { getFirestore, collection, onSnapshot, deleteDoc, updateDoc, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
         const firebaseConfig = {
@@ -84,6 +83,8 @@
             border: 1px solid transparent; cursor: pointer;
         }
         .btn-icon:hover { background: rgba(255,255,255,0.15); color: white; border-color: rgba(255,255,255,0.1); }
+        
+        .btn-icon.download:hover { background: rgba(16, 185, 129, 0.15); color: #10b981; border-color: rgba(16, 185, 129, 0.3); }
         .btn-icon.delete:hover { background: rgba(239, 68, 68, 0.15); color: #ef4444; border-color: rgba(239, 68, 68, 0.3); }
         .btn-icon.comment:hover { background: rgba(234, 179, 8, 0.15); color: #eab308; border-color: rgba(234, 179, 8, 0.3); }
         .btn-icon.history:hover { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border-color: rgba(59, 130, 246, 0.3); }
@@ -103,7 +104,7 @@
 
         /* MODAL */
         .modal-overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+            position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(10px);
             z-index: 100; display: flex; align-items: center; justify-content: center;
             opacity: 0; pointer-events: none; transition: 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
@@ -123,7 +124,7 @@
         .input-glass:focus { border-color: var(--accent-primary); background: rgba(0,0,0,0.2); }
 
         .timeline-item {
-            display: flex; gap: 12px; padding-bottom: 20px; position: relative;
+            display: flex; gap: 12px; padding-bottom: 24px; position: relative;
         }
         .timeline-item:last-child { padding-bottom: 0; }
         .timeline-item::before {
@@ -132,12 +133,66 @@
         .timeline-item:last-child::before { display: none; }
         .timeline-dot {
             width: 16px; height: 16px; border-radius: 50%; background: #1a1a24;
-            border: 2px solid #333; flex-shrink: 0; margin-top: 4px; z-index: 10;
+            border: 2px solid #333; flex-shrink: 0; margin-top: 2px; z-index: 10;
         }
         .timeline-dot.active { border-color: #E6397F; background: rgba(230, 57, 127, 0.2); }
+        
+        /* PASSWORD SCREEN */
+        #authOverlay { z-index: 9999; background: #0B0A14; }
+
+        /* TOAST NOTIFICATION */
+        #toast-container {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(100px);
+            z-index: 10000; transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); opacity: 0;
+        }
+        #toast-container.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+        
+        .toast-box {
+            background: #1a1a24; border: 1px solid #333; box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+            padding: 12px 24px; border-radius: 99px; display: flex; align-items: center; gap: 12px;
+            color: white; font-size: 14px; font-weight: 600;
+        }
+        .toast-box.success { border-color: rgba(34, 197, 94, 0.3); }
+        .toast-box.error { border-color: rgba(239, 68, 68, 0.3); }
+
+        /* LINKIFY STYLES */
+        .linkified-content a { color: #E6397F; text-decoration: underline; }
+        .linkified-content a:hover { color: white; }
     </style>
 </head>
 <body class="p-4 md:p-10">
+
+    <div id="authOverlay" class="modal-overlay active">
+        <div class="modal-card text-center">
+            <div class="w-12 h-12 rounded-full bg-pink-500/10 border border-pink-500/20 flex items-center justify-center mx-auto mb-4">
+                <i data-feather="lock" class="w-5 h-5 text-pink-500"></i>
+            </div>
+            <h1 class="text-2xl font-bold text-white brand-font mb-2">Restricted Access</h1>
+            <p class="text-gray-500 text-sm mb-6">Please enter the admin passcode to continue.</p>
+            
+            <input type="password" id="authInput" class="input-glass text-center tracking-[0.5em] text-xl font-bold mb-4" placeholder="••••••" maxlength="6">
+            <button onclick="checkPassword()" class="w-full bg-pink-600 hover:bg-pink-500 text-white py-3 rounded-xl text-sm font-bold transition shadow-lg shadow-pink-500/20">
+                Unlock Dashboard
+            </button>
+        </div>
+    </div>
+    
+    <div id="deniedOverlay" class="modal-overlay" style="background: #0B0A14;">
+        <div class="modal-card text-center border-red-900/30">
+            <div class="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
+                <i data-feather="slash" class="w-8 h-8 text-red-500"></i>
+            </div>
+            <h1 class="text-2xl font-bold text-white brand-font mb-2">Access Revoked</h1>
+            <p class="text-gray-500 text-sm mb-6">The sharing link for this project has been disabled by the administrator.</p>
+        </div>
+    </div>
+
+    <div id="toast-container">
+        <div class="toast-box success" id="toast-box">
+            <i data-feather="check-circle" class="w-5 h-5 text-green-500" id="toast-icon"></i>
+            <span id="toast-message">Operation Successful</span>
+        </div>
+    </div>
 
     <div class="fixed top-0 left-0 w-full h-full -z-10 bg-[#0B0A14] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1a1a24] via-[#0B0A14] to-[#0B0A14]"></div>
 
@@ -149,13 +204,13 @@
             <div>
                 <h1 class="text-lg font-bold text-white tracking-wide brand-font">COMMAND CENTER</h1>
                 <div class="flex items-center gap-3">
-                    <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Project Overview</p>
+                    <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold" id="viewModeBadge">Global Admin</p>
                     <div class="live-badge"><div class="live-dot"></div> Live Connection</div>
                 </div>
             </div>
         </div>
         
-        <div class="flex flex-1 max-w-lg gap-3 w-full">
+        <div class="flex flex-1 max-w-lg gap-3 w-full" id="searchContainer">
             <div class="relative w-full group">
                 <i data-feather="search" class="absolute left-4 top-3.5 w-4 h-4 text-gray-500 group-focus-within:text-pink-500 transition-colors"></i>
                 <input type="text" id="searchInput" class="search-bar" placeholder="Search Projects, Domains..." onkeyup="filterProjects()">
@@ -183,13 +238,15 @@
                     <p class="text-xs text-gray-500">Specific to this page</p>
                 </div>
             </div>
-            
             <textarea id="commentInput" class="input-glass h-32 resize-none mb-6 text-gray-300" placeholder="e.g. Client requested blue header..."></textarea>
             
-            <div class="flex gap-3">
+            <div id="commentReadOnly" class="hidden linkified-content bg-white/5 p-4 rounded-xl h-32 overflow-y-auto text-sm text-gray-300 mb-6"></div>
+
+            <div class="flex gap-3" id="commentActions">
                 <button onclick="saveComment()" class="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white py-3 rounded-xl text-sm font-bold transition shadow-lg">Save Note</button>
                 <button onclick="closeModal('commentModal')" class="flex-1 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white py-3 rounded-xl text-sm font-bold transition">Cancel</button>
             </div>
+            <button onclick="closeModal('commentModal')" id="commentCloseBtn" class="hidden w-full bg-white/5 hover:bg-white/10 text-white py-3 rounded-xl text-sm font-bold transition">Close</button>
         </div>
     </div>
 
@@ -204,13 +261,15 @@
                     <p class="text-xs text-gray-500">Visible on all pages in this project</p>
                 </div>
             </div>
-            
             <textarea id="projectNoteInput" class="input-glass h-32 resize-none mb-6 text-gray-300" placeholder="e.g. Deadline is Friday. Use bold fonts."></textarea>
             
-            <div class="flex gap-3">
-                <button onclick="saveProjectNote()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white py-3 rounded-xl text-sm font-bold transition shadow-lg">Save Project Remark</button>
+            <div id="projectNoteReadOnly" class="hidden linkified-content bg-white/5 p-4 rounded-xl h-32 overflow-y-auto text-sm text-gray-300 mb-6 border border-white/10"></div>
+            
+            <div class="flex gap-3" id="projectNoteActions">
+                <button onclick="saveProjectNote()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white py-3 rounded-xl text-sm font-bold transition shadow-lg">Save Remark</button>
                 <button onclick="closeModal('projectNoteModal')" class="flex-1 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white py-3 rounded-xl text-sm font-bold transition">Cancel</button>
             </div>
+            <button onclick="closeModal('projectNoteModal')" id="projectNoteCloseBtn" class="hidden w-full bg-white/5 hover:bg-white/10 text-white py-3 rounded-xl text-sm font-bold transition">Close</button>
         </div>
     </div>
 
@@ -220,12 +279,12 @@
                 <div class="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-500">
                     <i data-feather="clock" class="w-4 h-4"></i>
                 </div>
-                <h3 class="text-lg font-bold text-white brand-font">Activity Log</h3>
-            </div>
-            
-            <div class="space-y-2 mb-8" id="historyContent">
+                <div>
+                    <h3 class="text-lg font-bold text-white brand-font">Activity Log</h3>
+                    <p class="text-xs text-gray-500">Event Timeline</p>
                 </div>
-            
+            </div>
+            <div class="space-y-2 mb-8" id="historyContent"></div>
             <button onclick="closeModal('historyModal')" class="w-full bg-white/5 hover:bg-white/10 text-white py-3 rounded-xl text-sm font-bold transition">Close</button>
         </div>
     </div>
@@ -238,11 +297,9 @@
                 </div>
                 <h3 class="text-xl font-bold text-white brand-font">Delete Page?</h3>
             </div>
-            
             <p class="text-gray-400 text-sm leading-relaxed mb-8">
                 This action is <strong class="text-red-400">irreversible</strong>. The client's shared link will stop working immediately.
             </p>
-            
             <div class="flex gap-3">
                 <button onclick="confirmDelete()" class="flex-1 bg-red-600 hover:bg-red-500 text-white py-3 rounded-xl text-sm font-bold transition shadow-lg shadow-red-900/20">Yes, Delete</button>
                 <button onclick="closeModal('deleteModal')" class="flex-1 bg-white/5 hover:bg-white/10 text-white py-3 rounded-xl text-sm font-bold transition">Cancel</button>
@@ -251,32 +308,59 @@
     </div>
 
     <script>
+        // --- CONSTANTS ---
+        const ADMIN_PASS = "738081";
         
+        // --- STATE ---
         let allProjects = []; 
-        let projectNotesMap = {}; // Stores notes keyed by Project Name
+        let projectNotesMap = {}; 
         let currentActionId = null;
         let currentProjectName = null;
+        let isSharedMode = false;
+        let sharedProjectFilter = null;
 
-        // --- REALTIME LISTENER ---
+        // --- AUTH & INIT ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const projectToView = urlParams.get('project');
+
+            if(projectToView) {
+                // SHARED MODE
+                isSharedMode = true;
+                sharedProjectFilter = decodeURIComponent(projectToView);
+                document.getElementById('authOverlay').classList.remove('active');
+                document.getElementById('viewModeBadge').innerText = "Viewer Mode";
+                document.getElementById('viewModeBadge').classList.add("text-pink-500");
+                document.getElementById('searchContainer').style.display = 'none'; 
+            } else {
+                // ADMIN MODE
+                const savedAuth = localStorage.getItem('reputifly_admin_auth');
+                if(savedAuth === ADMIN_PASS) {
+                    document.getElementById('authOverlay').classList.remove('active');
+                }
+            }
+        });
+
+        function checkPassword() {
+            const input = document.getElementById('authInput').value;
+            if(input === ADMIN_PASS) {
+                localStorage.setItem('reputifly_admin_auth', ADMIN_PASS);
+                document.getElementById('authOverlay').classList.remove('active');
+            } else {
+                showToast("Incorrect Password", "error");
+                const box = document.querySelector('#authOverlay .modal-card');
+                box.classList.add('animate-pulse', 'border-red-500');
+                setTimeout(() => box.classList.remove('animate-pulse', 'border-red-500'), 500);
+            }
+        }
+
+        // --- FIREBASE LISTENERS ---
         window.addEventListener('firebaseReady', () => {
             initListeners();
         });
 
         function initListeners() {
-            const container = document.getElementById('projectContainer');
-
-            // 1. Listen for Pages
             window.onSnapshot(window.collection(window.db, "projects"), (snapshot) => {
-                if (snapshot.empty) {
-                    container.innerHTML = `
-                        <div class="glass-panel p-16 text-center opacity-50 flex flex-col items-center">
-                            <i data-feather="inbox" class="w-12 h-12 text-gray-600 mb-4"></i>
-                            <p class="text-sm text-gray-500 font-bold">DATABASE EMPTY</p>
-                        </div>`;
-                    feather.replace();
-                    return;
-                }
-
                 allProjects = [];
                 snapshot.forEach(doc => {
                     allProjects.push({ id: doc.id, ...doc.data() });
@@ -284,21 +368,45 @@
                 renderProjects();
             });
 
-            // 2. Listen for Project Meta (Remarks)
             window.onSnapshot(window.collection(window.db, "project_metadata"), (snapshot) => {
                 projectNotesMap = {};
                 snapshot.forEach(doc => {
-                    projectNotesMap[doc.id] = doc.data().note;
+                    projectNotesMap[doc.id] = doc.data();
                 });
-                renderProjects(); // Re-render to show updated notes badges
+                
+                if(isSharedMode && sharedProjectFilter) {
+                    const meta = projectNotesMap[sharedProjectFilter];
+                    if(meta && meta.sharingEnabled === false) {
+                         document.getElementById('deniedOverlay').classList.add('active');
+                         document.getElementById('projectContainer').innerHTML = ""; 
+                    }
+                }
+                renderProjects();
             });
         }
 
         function renderProjects(forcedProjects = null) {
-            const projects = forcedProjects || allProjects;
+            let projects = forcedProjects || allProjects;
             const container = document.getElementById('projectContainer');
-            
-            // Grouping logic: Project Name -> Domain
+
+            if(isSharedMode && sharedProjectFilter) {
+                const meta = projectNotesMap[sharedProjectFilter];
+                if(meta && meta.sharingEnabled === false) return; 
+                projects = projects.filter(p => p.projectName === sharedProjectFilter);
+            }
+
+            container.innerHTML = "";
+
+            if (projects.length === 0) {
+                 container.innerHTML = `
+                    <div class="glass-panel p-16 text-center opacity-50 flex flex-col items-center">
+                        <i data-feather="inbox" class="w-12 h-12 text-gray-600 mb-4"></i>
+                        <p class="text-sm text-gray-500 font-bold">NO DATA AVAILABLE</p>
+                    </div>`;
+                feather.replace();
+                return;
+            }
+
             const grouped = {};
             projects.forEach(p => {
                 const key = p.projectName || "Uncategorized";
@@ -306,14 +414,9 @@
                 grouped[key].push(p);
             });
 
-            // Prevent clearing if inputting search (optional, but good UX)
-            if(!document.getElementById('searchInput').value) container.innerHTML = "";
-            else container.innerHTML = "";
-
             const sortedKeys = Object.keys(grouped).sort();
 
             sortedKeys.forEach(groupKey => {
-                // Sort pages: Newest Last Active first
                 const pages = grouped[groupKey].sort((a,b) => {
                     const tA = a.last_active ? a.last_active.toMillis() : 0;
                     const tB = b.last_active ? b.last_active.toMillis() : 0;
@@ -321,9 +424,18 @@
                 });
 
                 const domain = pages[0].domain || "No Domain";
-                const projectNote = projectNotesMap[groupKey] || "";
+                const metaData = projectNotesMap[groupKey] || {};
+                const projectNote = metaData.note || "";
+                
+                const hasRemark = projectNote.trim().length > 0;
+                const remarkBtnStyle = (isSharedMode && hasRemark) 
+                    ? "bg-red-500/20 text-red-500 border-red-500/50 animate-pulse" 
+                    : "bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border-white/5";
 
-                // Header
+                const remarkIcon = (isSharedMode && hasRemark)
+                    ? `<div class="relative"><i data-feather="bell" class="w-3 h-3"></i><div class="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></div></div>`
+                    : `<i data-feather="file-text" class="w-3 h-3"></i>`;
+
                 const groupHtml = `
                     <div class="glass-panel overflow-hidden animate-in fade-in zoom-in duration-300">
                         <div class="bg-gradient-to-r from-white/[0.03] to-transparent p-6 border-b border-white/5 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
@@ -334,7 +446,8 @@
                                 <div>
                                     <div class="flex items-center gap-3">
                                         <h3 class="text-lg font-bold text-white tracking-tight brand-font">${groupKey}</h3>
-                                        ${projectNote ? `<span class="bg-pink-500/20 text-pink-400 text-[10px] px-2 py-0.5 rounded border border-pink-500/20 font-bold" title="${projectNote}">HAS REMARKS</span>` : ''}
+                                        ${projectNote ? `<span class="bg-pink-500/20 text-pink-400 text-[10px] px-2 py-0.5 rounded border border-pink-500/20 font-bold" title="Has Remarks">REMARKS</span>` : ''}
+                                        ${!isSharedMode ? `<button onclick="stopSharing('${groupKey}')" class="text-[10px] text-red-500 hover:text-red-400 hover:underline cursor-pointer">(Stop Sharing)</button>` : ''}
                                     </div>
                                     <a href="https://${domain}" target="_blank" class="text-xs text-pink-400 hover:text-pink-300 font-mono tracking-wide flex items-center gap-1 mt-0.5">
                                         ${domain} <i data-feather="external-link" class="w-3 h-3"></i>
@@ -343,9 +456,15 @@
                             </div>
                             
                             <div class="flex items-center gap-2 self-start md:self-auto">
-                                <button onclick="openProjectNote('${groupKey}')" class="text-[10px] font-bold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-4 py-2 rounded-lg border border-white/5 flex items-center gap-2 transition">
-                                    <i data-feather="file-text" class="w-3 h-3"></i> 
-                                    ${projectNote ? 'Edit Remarks' : 'Add Remarks'}
+                                ${!isSharedMode ? `
+                                <button onclick="shareProjectView('${groupKey}')" class="text-[10px] font-bold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-4 py-2 rounded-lg border border-white/5 flex items-center gap-2 transition" title="Share live view with employee">
+                                    <i data-feather="share-2" class="w-3 h-3"></i> Share View
+                                </button>
+                                ` : ''}
+                                
+                                <button onclick="openProjectNote('${groupKey}')" class="text-[10px] font-bold px-4 py-2 rounded-lg border flex items-center gap-2 transition ${remarkBtnStyle}">
+                                    ${remarkIcon}
+                                    ${isSharedMode && hasRemark ? 'Read Remarks' : (projectNote ? 'Edit Remarks' : 'Remarks')}
                                 </button>
                                 <span class="text-[10px] font-bold text-gray-500 bg-black/20 px-3 py-2 rounded-lg border border-white/5">
                                     ${pages.length} PAGES
@@ -357,7 +476,7 @@
                             <div class="hidden md:grid grid-cols-12 px-6 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest bg-black/20">
                                 <div class="col-span-4">Page Name</div>
                                 <div class="col-span-3">Status</div>
-                                <div class="col-span-2">Created</div>
+                                <div class="col-span-2">Last Active</div>
                                 <div class="col-span-3 text-right">Actions</div>
                             </div>
                             ${pages.map(page => renderRow(page)).join('')}
@@ -366,25 +485,18 @@
                 `;
                 container.innerHTML += groupHtml;
             });
-            
             feather.replace();
         }
 
         function renderRow(page) {
             const timeStr = formatTime(page.last_active);
-            const createdStr = formatTime(page.createdAt);
             const isLive = isRecent(page.last_active);
             const hasComment = page.comments && page.comments.trim().length > 0;
-            
-            // Status Logic
             const downloaded = page.downloaded ? true : false;
-            
-            // Link
             const editorLink = `${window.location.origin}/editor.html?id=${page.id}`;
 
             return `
                 <div class="grid grid-cols-1 md:grid-cols-12 items-center px-6 py-4 hover:bg-white/[0.02] transition-colors group gap-4 md:gap-0">
-                    
                     <div class="col-span-4 pr-4">
                         <div class="flex items-center gap-3">
                             <a href="${editorLink}" target="_blank" class="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-gray-400 hover:text-white hover:bg-pink-500/20 hover:scale-105 transition shadow-lg" title="Open Editor">
@@ -408,32 +520,139 @@
                     </div>
                     
                     <div class="col-span-2 text-xs text-gray-500 font-mono">
-                         ${createdStr}
+                         ${timeStr}
                     </div>
 
                     <div class="col-span-3 flex justify-end gap-2">
-                        <button onclick="copyLink('${editorLink}')" class="btn-icon" title="Copy Link">
+                        <button onclick="downloadSource('${page.id}')" class="btn-icon download" title="Download Source Code">
+                            <i data-feather="code" class="w-4 h-4"></i>
+                        </button>
+                        <button onclick="copyLink('${editorLink}')" class="btn-icon" title="Copy Editor Link">
                             <i data-feather="link" class="w-4 h-4"></i>
                         </button>
-                        <button onclick="openHistory('${page.id}')" class="btn-icon history" title="Timeline & Logs">
+                        <button onclick="openHistory('${page.id}')" class="btn-icon history" title="Timeline">
                             <i data-feather="clock" class="w-4 h-4"></i>
                         </button>
                         <button onclick="openComment('${page.id}', '${(page.comments || '').replace(/'/g, "&apos;")}')" class="btn-icon comment ${hasComment ? 'active-indicator' : ''}" title="Page Notes">
                             <i data-feather="file-text" class="w-4 h-4"></i>
                         </button>
+                        
+                        ${!isSharedMode ? `
                         <button onclick="askDelete('${page.id}')" class="btn-icon delete" title="Delete">
                             <i data-feather="trash-2" class="w-4 h-4"></i>
                         </button>
+                        ` : ''}
                     </div>
                 </div>
             `;
         }
 
-        // --- PROJECT REMARKS LOGIC ---
+        // --- NEW DOWNLOAD FEATURE ---
+        window.downloadSource = function(id) {
+            const page = allProjects.find(p => p.id === id);
+            if(!page || !page.html) return showToast("No source code found", "error");
+
+            const blob = new Blob([page.html], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            
+            // Clean filename: "Pricing Page - 1" -> "pricing_page_1.html"
+            const safeName = (page.pageName || "untitled").replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            a.download = `${safeName}.html`;
+            
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showToast("Source Code Downloaded");
+        }
+
+        // --- CUSTOM TOAST SYSTEM ---
+        window.showToast = function(msg, type = "success") {
+            const container = document.getElementById('toast-container');
+            const box = document.getElementById('toast-box');
+            const icon = document.getElementById('toast-icon');
+            const txt = document.getElementById('toast-message');
+
+            txt.innerText = msg;
+            
+            if(type === 'error') {
+                box.className = "toast-box error";
+                icon.innerHTML = '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>';
+                icon.className = "w-5 h-5 text-red-500";
+            } else {
+                box.className = "toast-box success";
+                icon.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
+                icon.className = "w-5 h-5 text-green-500";
+            }
+            feather.replace();
+
+            container.classList.add('show');
+            setTimeout(() => {
+                container.classList.remove('show');
+            }, 3000);
+        }
+
+        function linkify(text) {
+            var urlRegex =/(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+            return text.replace(urlRegex, function(url) {
+                return '<a href="' + url + '" target="_blank">' + url + '</a>';
+            });
+        }
+
+        // --- SHARE & STOP ---
+        window.shareProjectView = async function(projectName) {
+            try {
+                await window.setDoc(window.doc(window.db, "project_metadata", projectName), {
+                    sharingEnabled: true
+                }, { merge: true });
+                
+                const baseUrl = window.location.href.split('?')[0];
+                const safeName = encodeURIComponent(projectName);
+                const shareUrl = `${baseUrl}?project=${safeName}`;
+                
+                navigator.clipboard.writeText(shareUrl);
+                showToast("Shared Link Copied!");
+            } catch(e) {
+                console.error(e);
+                showToast("Error Activating Share", "error");
+            }
+        }
+
+        window.stopSharing = async function(projectName) {
+            if(!confirm("Are you sure? The shared link will stop working immediately.")) return;
+            try {
+                await window.setDoc(window.doc(window.db, "project_metadata", projectName), {
+                    sharingEnabled: false
+                }, { merge: true });
+                showToast("Sharing Stopped", "success");
+            } catch(e) {
+                showToast("Error Stopping Share", "error");
+            }
+        }
+
+        // --- PROJECT REMARKS ---
         window.openProjectNote = function(projectName) {
             currentProjectName = projectName;
-            const existing = projectNotesMap[projectName] || "";
-            document.getElementById('projectNoteInput').value = existing;
+            const meta = projectNotesMap[projectName] || {};
+            const existing = meta.note || "";
+            
+            if(isSharedMode) {
+                document.getElementById('projectNoteInput').classList.add('hidden');
+                document.getElementById('projectNoteActions').classList.add('hidden');
+                const readEl = document.getElementById('projectNoteReadOnly');
+                readEl.innerHTML = existing ? linkify(existing.replace(/\n/g, '<br>')) : '<span class="text-gray-500 italic">No remarks found.</span>';
+                readEl.classList.remove('hidden');
+                document.getElementById('projectNoteCloseBtn').classList.remove('hidden');
+            } else {
+                document.getElementById('projectNoteInput').classList.remove('hidden');
+                document.getElementById('projectNoteActions').classList.remove('hidden');
+                document.getElementById('projectNoteReadOnly').classList.add('hidden');
+                document.getElementById('projectNoteCloseBtn').classList.add('hidden');
+                document.getElementById('projectNoteInput').value = existing;
+            }
             openModal('projectNoteModal');
         }
 
@@ -441,49 +660,50 @@
             if(!currentProjectName) return;
             const text = document.getElementById('projectNoteInput').value;
             const btn = document.querySelector('#projectNoteModal button');
+            const originalText = btn.innerText;
             btn.innerText = "Saving...";
-
+            
             try {
-                // Save to a collection called 'project_metadata' using ProjectName as ID
                 await window.setDoc(window.doc(window.db, "project_metadata", currentProjectName), {
                     note: text,
                     updatedAt: new Date()
-                }, { merge: true });
-                
+                }, { merge: true }); 
                 closeModal('projectNoteModal');
-            } catch(e) { console.error(e); alert("Failed to save note"); }
-            btn.innerText = "Save Project Remark";
+                showToast("Remark Saved");
+            } catch(e) { 
+                console.error(e); 
+                showToast("Failed to save", "error");
+            }
+            btn.innerText = originalText;
         }
 
-        // --- HISTORY / TIMELINE LOGIC ---
+        // --- HISTORY & MISC ---
         window.openHistory = function(id) {
             const project = allProjects.find(p => p.id === id);
             if(!project) return;
-
             const tCreate = formatFullDate(project.createdAt);
-            const tActive = formatFullDate(project.last_active);
-            const tDownload = project.downloaded ? "Downloaded" : "Not yet";
-            
+            const tActive = project.last_active ? formatFullDate(project.last_active) : "No activity yet";
             const html = `
                 <div class="timeline-item">
                     <div class="timeline-dot active"></div>
                     <div>
-                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Created</div>
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Project Created</div>
                         <div class="text-white text-sm mt-1">${tCreate}</div>
+                        <div class="text-[10px] text-gray-600 font-mono mt-1">ID: ${project.id}</div>
                     </div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-dot ${project.last_active ? 'active' : ''}"></div>
                     <div>
-                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Last Edited</div>
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Last Interaction</div>
                         <div class="text-white text-sm mt-1">${tActive}</div>
                     </div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-dot ${project.downloaded ? 'active' : ''}"></div>
                     <div>
-                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Status</div>
-                        <div class="text-white text-sm mt-1">${project.downloaded ? 'Completed & Downloaded' : 'Work in Progress'}</div>
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Download Status</div>
+                        <div class="text-white text-sm mt-1">${project.downloaded ? '<span class="text-green-400">Files Downloaded</span>' : 'Not yet downloaded'}</div>
                     </div>
                 </div>
             `;
@@ -491,15 +711,27 @@
             openModal('historyModal');
         }
 
-        // --- STANDARD LOGIC ---
         window.copyLink = function(url) {
             navigator.clipboard.writeText(url);
-            alert("Link copied to clipboard!");
+            showToast("Editor Link Copied!");
         }
 
         window.openComment = function(id, existingText) {
             currentActionId = id;
-            document.getElementById('commentInput').value = existingText; 
+            if(isSharedMode) {
+                document.getElementById('commentInput').classList.add('hidden');
+                document.getElementById('commentActions').classList.add('hidden');
+                const readEl = document.getElementById('commentReadOnly');
+                readEl.innerHTML = existingText ? linkify(existingText.replace(/\n/g, '<br>')) : '<span class="text-gray-500 italic">No notes found.</span>';
+                readEl.classList.remove('hidden');
+                document.getElementById('commentCloseBtn').classList.remove('hidden');
+            } else {
+                document.getElementById('commentInput').classList.remove('hidden');
+                document.getElementById('commentActions').classList.remove('hidden');
+                document.getElementById('commentReadOnly').classList.add('hidden');
+                document.getElementById('commentCloseBtn').classList.add('hidden');
+                document.getElementById('commentInput').value = existingText; 
+            }
             openModal('commentModal');
         }
 
@@ -510,6 +742,7 @@
                 const docRef = window.doc(window.db, "projects", currentActionId);
                 await window.updateDoc(docRef, { comments: text });
                 closeModal('commentModal');
+                showToast("Note Saved");
             } catch(e) { console.error(e); }
         }
 
@@ -523,6 +756,7 @@
             try {
                 await window.deleteDoc(window.doc(window.db, "projects", currentActionId));
                 closeModal('deleteModal');
+                showToast("Page Deleted");
             } catch(e) { console.error(e); }
         }
 
@@ -554,7 +788,7 @@
         function formatFullDate(timestamp) {
             if(!timestamp) return "Never";
             const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-            return date.toLocaleString(); 
+            return date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }); 
         }
 
         feather.replace();
