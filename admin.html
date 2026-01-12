@@ -534,7 +534,6 @@
                 const hasRemark = projectNote.trim().length > 0;
                 
                 // CLIENT MODE SPECIFIC HEADER
-                // CLIENT MODE SPECIFIC HEADER & FOOTER
                 if(isClientMode) {
                     const groupHtml = `
                         <div class="glass-panel overflow-hidden animate-in fade-in zoom-in duration-300">
@@ -641,7 +640,7 @@
         function renderClientRow(page) {
             const hasComment = page.comments && page.comments.trim().length > 0;
             const commentTime = page.commentUpdatedAt ? formatTime(page.commentUpdatedAt) : "";
-            const editorLink = `${window.location.origin}/editor.html?id=${page.id}`;
+            const editorLink = `${window.location.origin}/editor.html?id=${page.id}&readonly=true`;
             const downloaded = page.downloaded ? true : false;
             
             return `
@@ -738,77 +737,77 @@
         }
 
         window.performDownload = async function() {
-    if(!currentActionId) return;
-    const btn = document.querySelector("#sourceModal .btn-icon.download") || document.activeElement;
+            if(!currentActionId) return;
+            const btn = document.querySelector("#sourceModal .btn-icon.download") || document.activeElement;
 
-    showToast("Fetching source code..."); // Visual feedback
+            showToast("Fetching source code..."); // Visual feedback
 
-    let html = null;
+            let html = null;
 
-    try {
-        // 1. Check if we already have it (Old projects)
-        const project = allProjects.find(p => p.id === currentActionId);
-        if(project && project.html) {
-            html = project.html;
-        } else {
-            // 2. Fetch from new system (pages_content)
-            const contentDoc = await window.getDoc(window.doc(window.db, "pages_content", currentActionId));
-            if(contentDoc.exists()) {
-                html = contentDoc.data().html;
+            try {
+                // 1. Check if we already have it (Old projects)
+                const project = allProjects.find(p => p.id === currentActionId);
+                if(project && project.html) {
+                    html = project.html;
+                } else {
+                    // 2. Fetch from new system (pages_content)
+                    const contentDoc = await window.getDoc(window.doc(window.db, "pages_content", currentActionId));
+                    if(contentDoc.exists()) {
+                        html = contentDoc.data().html;
+                    }
+                }
+
+                if(!html) return showToast("No source code found", "error");
+
+                const blob = new Blob([html], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const safeName = (project.pageName || "untitled").replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                a.download = `${safeName}.html`;
+
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                closeModal('sourceModal');
+                showToast("Download Started");
+            } catch(e) {
+                console.error(e);
+                showToast("Error fetching code", "error");
             }
         }
-
-        if(!html) return showToast("No source code found", "error");
-
-        const blob = new Blob([html], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const safeName = (project.pageName || "untitled").replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        a.download = `${safeName}.html`;
-
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        closeModal('sourceModal');
-        showToast("Download Started");
-    } catch(e) {
-        console.error(e);
-        showToast("Error fetching code", "error");
-    }
-}
 
         window.performCopySource = async function() {
-    if(!currentActionId) return;
-    showToast("Fetching source code...");
+            if(!currentActionId) return;
+            showToast("Fetching source code...");
 
-    let html = null;
+            let html = null;
 
-    try {
-        // 1. Check Old System
-        const project = allProjects.find(p => p.id === currentActionId);
-        if(project && project.html) {
-            html = project.html;
-        } else {
-            // 2. Fetch New System
-            const contentDoc = await window.getDoc(window.doc(window.db, "pages_content", currentActionId));
-            if(contentDoc.exists()) {
-                html = contentDoc.data().html;
+            try {
+                // 1. Check Old System
+                const project = allProjects.find(p => p.id === currentActionId);
+                if(project && project.html) {
+                    html = project.html;
+                } else {
+                    // 2. Fetch New System
+                    const contentDoc = await window.getDoc(window.doc(window.db, "pages_content", currentActionId));
+                    if(contentDoc.exists()) {
+                        html = contentDoc.data().html;
+                    }
+                }
+
+                if(!html) return showToast("No source code found", "error");
+
+                navigator.clipboard.writeText(html);
+                closeModal('sourceModal');
+                showToast("Source Code Copied!");
+            } catch(e) {
+                console.error(e);
+                showToast("Error copying code", "error");
             }
         }
-
-        if(!html) return showToast("No source code found", "error");
-
-        navigator.clipboard.writeText(html);
-        closeModal('sourceModal');
-        showToast("Source Code Copied!");
-    } catch(e) {
-        console.error(e);
-        showToast("Error copying code", "error");
-    }
-}
 
         // --- SHARE LOGIC ---
         window.openShareOptions = function(projectName) {
@@ -816,32 +815,41 @@
             openModal('shareOptionModal');
         }
 
-        window.executeShare = async function(type) {
+        // FIXED: Mobile Copy Issue
+        // Removed 'async' from the main function wrapper to allow synchronous clipboard access
+        window.executeShare = function(type) {
             if(!currentProjectName) return;
             
-            try {
-                // Activate Sharing in DB
-                await window.setDoc(window.doc(window.db, "project_metadata", currentProjectName), {
-                    sharingEnabled: true
-                }, { merge: true });
+            // 1. Prepare URL immediately
+            const baseUrl = window.location.href.split('?')[0];
+            const safeName = encodeURIComponent(currentProjectName);
+            let shareUrl = "";
 
-                const baseUrl = window.location.href.split('?')[0];
-                const safeName = encodeURIComponent(currentProjectName);
-                let shareUrl = "";
-
-                if(type === 'client') {
-                    shareUrl = `${baseUrl}?client=${safeName}`;
-                } else {
-                    shareUrl = `${baseUrl}?project=${safeName}`;
-                }
-                
-                navigator.clipboard.writeText(shareUrl);
-                closeModal('shareOptionModal');
-                showToast(type === 'client' ? "Client Link Copied!" : "Team Link Copied!");
-            } catch(e) {
-                console.error(e);
-                showToast("Error Activating Share", "error");
+            if(type === 'client') {
+                shareUrl = `${baseUrl}?client=${safeName}`;
+            } else {
+                shareUrl = `${baseUrl}?project=${safeName}`;
             }
+            
+            // 2. Copy immediately (Critical for Mobile Safari/Chrome)
+            // We do this BEFORE the database call to ensure the "User Gesture" is still valid
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                showToast(type === 'client' ? "Client Link Copied!" : "Team Link Copied!");
+            }).catch(err => {
+                console.error("Copy failed", err);
+                showToast("Copy failed - check permissions", "error");
+            });
+
+            closeModal('shareOptionModal');
+
+            // 3. Update Database in Background
+            // We don't await this anymore so the UI remains responsive
+            window.setDoc(window.doc(window.db, "project_metadata", currentProjectName), {
+                sharingEnabled: true
+            }, { merge: true }).catch(e => {
+                console.error("Error activating share in DB", e);
+                showToast("Error Activating Share", "error");
+            });
         }
 
         window.askStopSharing = function(projectName) {
@@ -956,12 +964,12 @@
         }
 
         function linkify(text) {
-    var urlRegex =/(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-    return text.replace(urlRegex, function(url) {
-        // ADDED: text-pink-500 (Color) and font-bold (Bold)
-        return '<a href="' + url + '" target="_blank" class="text-pink-500 font-bold hover:underline">' + url + '</a>';
-    });
-}
+            var urlRegex =/(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+            return text.replace(urlRegex, function(url) {
+                // ADDED: text-pink-500 (Color) and font-bold (Bold)
+                return '<a href="' + url + '" target="_blank" class="text-pink-500 font-bold hover:underline">' + url + '</a>';
+            });
+        }
 
         window.copyLink = function(url) {
             navigator.clipboard.writeText(url);
