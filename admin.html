@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Reputifly | Master Database</title>
+    <title>Reputifly | Command Center</title>
     
     <link rel="icon" type="image/png" href="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -12,9 +12,9 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-        import { getFirestore, collection, getDocs, deleteDoc, updateDoc, doc, writeBatch } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        // ADDED: onSnapshot for realtime updates
+        import { getFirestore, collection, onSnapshot, deleteDoc, updateDoc, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
-        // CONFIG
         const firebaseConfig = {
             apiKey: "AIzaSyDqpzqEVtrEtQvvmcMie_Et7xiNh8QU_Ao",
             authDomain: "reputifly-editor.firebaseapp.com",
@@ -26,12 +26,15 @@
 
         const app = initializeApp(firebaseConfig);
         window.db = getFirestore(app);
+        
+        // Expose functions globally
         window.collection = collection;
-        window.getDocs = getDocs;
+        window.onSnapshot = onSnapshot;
         window.deleteDoc = deleteDoc;
         window.updateDoc = updateDoc;
+        window.setDoc = setDoc;
+        window.getDoc = getDoc;
         window.doc = doc;
-        window.writeBatch = writeBatch;
         
         window.dispatchEvent(new Event('firebaseReady'));
     </script>
@@ -40,7 +43,6 @@
         :root {
             --bg-deep: #0B0A14;
             --accent-primary: #E6397F;
-            --accent-secondary: #FF8A00;
             --glass-bg: rgba(20, 20, 30, 0.75);
             --glass-border: rgba(255, 255, 255, 0.08);
         }
@@ -84,33 +86,20 @@
         .btn-icon:hover { background: rgba(255,255,255,0.15); color: white; border-color: rgba(255,255,255,0.1); }
         .btn-icon.delete:hover { background: rgba(239, 68, 68, 0.15); color: #ef4444; border-color: rgba(239, 68, 68, 0.3); }
         .btn-icon.comment:hover { background: rgba(234, 179, 8, 0.15); color: #eab308; border-color: rgba(234, 179, 8, 0.3); }
-        .btn-icon.active-comment { color: #eab308; background: rgba(234, 179, 8, 0.1); border-color: rgba(234, 179, 8, 0.2); }
-
-        /* STATUS PIPELINE */
-        .status-pipeline {
-            display: flex; align-items: center; gap: 4px;
-            background: rgba(0,0,0,0.3); padding: 4px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);
-            width: fit-content;
-        }
-        .status-step {
-            display: flex; align-items: center; gap: 6px; padding: 4px 10px;
-            border-radius: 6px; font-size: 10px; font-weight: 700; color: #555;
-            transition: all 0.3s; uppercase; letter-spacing: 0.05em;
-        }
-        .status-step svg { width: 12px; height: 12px; opacity: 0.5; }
+        .btn-icon.history:hover { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border-color: rgba(59, 130, 246, 0.3); }
         
-        .status-step.active { background: rgba(255,255,255,0.1); color: white; }
-        .status-step.active svg { opacity: 1; }
-        
-        .status-step.live-edit { background: rgba(59, 130, 246, 0.15); color: #60a5fa; box-shadow: 0 0 10px rgba(59, 130, 246, 0.1); }
-        .status-step.done { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+        .btn-icon.active-indicator { color: #eab308; background: rgba(234, 179, 8, 0.1); border-color: rgba(234, 179, 8, 0.2); }
 
-        .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; position: relative; }
-        .pulse-dot::after {
-            content: ''; position: absolute; inset: -3px; border-radius: 50%;
-            border: 1.5px solid currentColor; opacity: 0; animation: pulse 2s infinite;
+        /* LIVE BADGE */
+        .live-badge {
+            display: flex; align-items: center; gap: 6px;
+            background: rgba(34, 197, 94, 0.1); color: #4ade80;
+            padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(34, 197, 94, 0.2);
+            font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
         }
-        @keyframes pulse { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(2.0); opacity: 0; } }
+        .live-dot { width: 6px; height: 6px; background: currentColor; border-radius: 50%; box-shadow: 0 0 10px currentColor; animation: pulse 2s infinite; }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
 
         /* MODAL */
         .modal-overlay {
@@ -121,7 +110,7 @@
         .modal-overlay.active { opacity: 1; pointer-events: auto; }
         .modal-card {
             background: #121218; border: 1px solid rgba(255,255,255,0.15); border-radius: 24px;
-            padding: 32px; width: 90%; max-width: 420px; transform: scale(0.95) translateY(10px); 
+            padding: 32px; width: 90%; max-width: 480px; transform: scale(0.95) translateY(10px); 
             transition: 0.3s cubic-bezier(0.16, 1, 0.3, 1); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
         }
         .modal-overlay.active .modal-card { transform: scale(1) translateY(0); }
@@ -133,7 +122,19 @@
         }
         .input-glass:focus { border-color: var(--accent-primary); background: rgba(0,0,0,0.2); }
 
-        .hidden { display: none !important; }
+        .timeline-item {
+            display: flex; gap: 12px; padding-bottom: 20px; position: relative;
+        }
+        .timeline-item:last-child { padding-bottom: 0; }
+        .timeline-item::before {
+            content: ''; position: absolute; left: 7px; top: 24px; bottom: 0; width: 1px; background: rgba(255,255,255,0.1);
+        }
+        .timeline-item:last-child::before { display: none; }
+        .timeline-dot {
+            width: 16px; height: 16px; border-radius: 50%; background: #1a1a24;
+            border: 2px solid #333; flex-shrink: 0; margin-top: 4px; z-index: 10;
+        }
+        .timeline-dot.active { border-color: #E6397F; background: rgba(230, 57, 127, 0.2); }
     </style>
 </head>
 <body class="p-4 md:p-10">
@@ -146,19 +147,19 @@
                 <i data-feather="database" class="w-5 h-5 text-pink-500"></i>
             </div>
             <div>
-                <h1 class="text-lg font-bold text-white tracking-wide brand-font">MASTER DATABASE</h1>
-                <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Project Control Center</p>
+                <h1 class="text-lg font-bold text-white tracking-wide brand-font">COMMAND CENTER</h1>
+                <div class="flex items-center gap-3">
+                    <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Project Overview</p>
+                    <div class="live-badge"><div class="live-dot"></div> Live Connection</div>
+                </div>
             </div>
         </div>
         
         <div class="flex flex-1 max-w-lg gap-3 w-full">
             <div class="relative w-full group">
                 <i data-feather="search" class="absolute left-4 top-3.5 w-4 h-4 text-gray-500 group-focus-within:text-pink-500 transition-colors"></i>
-                <input type="text" id="searchInput" class="search-bar" placeholder="Search by Project, Domain..." onkeyup="filterProjects()">
+                <input type="text" id="searchInput" class="search-bar" placeholder="Search Projects, Domains..." onkeyup="filterProjects()">
             </div>
-            <button onclick="loadProjects()" class="glass-panel w-12 h-12 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5 transition rounded-xl" title="Refresh">
-                <i data-feather="refresh-cw" class="w-5 h-5"></i>
-            </button>
         </div>
     </header>
 
@@ -166,7 +167,7 @@
         <div id="projectContainer" class="space-y-8">
             <div class="text-center py-24 opacity-50">
                 <div class="w-8 h-8 border-2 border-white/20 border-t-pink-500 rounded-full animate-spin mx-auto mb-4"></div>
-                <p class="text-xs text-gray-400 font-mono tracking-widest">CONNECTING TO SATELLITE...</p>
+                <p class="text-xs text-gray-400 font-mono tracking-widest">ESTABLISHING UPLINK...</p>
             </div>
         </div>
     </div>
@@ -175,17 +176,57 @@
         <div class="modal-card">
             <div class="flex items-center gap-3 mb-6">
                 <div class="w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500">
-                    <i data-feather="message-square" class="w-4 h-4"></i>
+                    <i data-feather="file-text" class="w-4 h-4"></i>
                 </div>
-                <h3 class="text-lg font-bold text-white brand-font">Internal Notes</h3>
+                <div>
+                    <h3 class="text-lg font-bold text-white brand-font">Page Notes</h3>
+                    <p class="text-xs text-gray-500">Specific to this page</p>
+                </div>
             </div>
             
             <textarea id="commentInput" class="input-glass h-32 resize-none mb-6 text-gray-300" placeholder="e.g. Client requested blue header..."></textarea>
             
             <div class="flex gap-3">
-                <button onclick="saveComment()" class="flex-1 bg-gradient-to-r from-pink-600 to-orange-600 hover:opacity-90 text-white py-3 rounded-xl text-sm font-bold transition shadow-lg">Save Note</button>
+                <button onclick="saveComment()" class="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white py-3 rounded-xl text-sm font-bold transition shadow-lg">Save Note</button>
                 <button onclick="closeModal('commentModal')" class="flex-1 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white py-3 rounded-xl text-sm font-bold transition">Cancel</button>
             </div>
+        </div>
+    </div>
+
+    <div id="projectNoteModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="flex items-center gap-3 mb-6">
+                <div class="w-8 h-8 rounded-full bg-pink-500/20 flex items-center justify-center text-pink-500">
+                    <i data-feather="folder" class="w-4 h-4"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-white brand-font">Project Remarks</h3>
+                    <p class="text-xs text-gray-500">Visible on all pages in this project</p>
+                </div>
+            </div>
+            
+            <textarea id="projectNoteInput" class="input-glass h-32 resize-none mb-6 text-gray-300" placeholder="e.g. Deadline is Friday. Use bold fonts."></textarea>
+            
+            <div class="flex gap-3">
+                <button onclick="saveProjectNote()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white py-3 rounded-xl text-sm font-bold transition shadow-lg">Save Project Remark</button>
+                <button onclick="closeModal('projectNoteModal')" class="flex-1 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white py-3 rounded-xl text-sm font-bold transition">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="historyModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="flex items-center gap-3 mb-6">
+                <div class="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-500">
+                    <i data-feather="clock" class="w-4 h-4"></i>
+                </div>
+                <h3 class="text-lg font-bold text-white brand-font">Activity Log</h3>
+            </div>
+            
+            <div class="space-y-2 mb-8" id="historyContent">
+                </div>
+            
+            <button onclick="closeModal('historyModal')" class="w-full bg-white/5 hover:bg-white/10 text-white py-3 rounded-xl text-sm font-bold transition">Close</button>
         </div>
     </div>
 
@@ -195,7 +236,7 @@
                 <div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center text-red-500 animate-pulse">
                     <i data-feather="alert-triangle" class="w-5 h-5"></i>
                 </div>
-                <h3 class="text-xl font-bold text-white brand-font">Delete Project?</h3>
+                <h3 class="text-xl font-bold text-white brand-font">Delete Page?</h3>
             </div>
             
             <p class="text-gray-400 text-sm leading-relaxed mb-8">
@@ -210,21 +251,22 @@
     </div>
 
     <script>
-        feather.replace();
         
         let allProjects = []; 
+        let projectNotesMap = {}; // Stores notes keyed by Project Name
         let currentActionId = null;
+        let currentProjectName = null;
 
+        // --- REALTIME LISTENER ---
         window.addEventListener('firebaseReady', () => {
-            loadProjects();
+            initListeners();
         });
 
-        async function loadProjects() {
+        function initListeners() {
             const container = document.getElementById('projectContainer');
-            
-            try {
-                const snapshot = await window.getDocs(window.collection(window.db, "projects"));
-                
+
+            // 1. Listen for Pages
+            window.onSnapshot(window.collection(window.db, "projects"), (snapshot) => {
                 if (snapshot.empty) {
                     container.innerHTML = `
                         <div class="glass-panel p-16 text-center opacity-50 flex flex-col items-center">
@@ -239,15 +281,21 @@
                 snapshot.forEach(doc => {
                     allProjects.push({ id: doc.id, ...doc.data() });
                 });
+                renderProjects();
+            });
 
-                renderProjects(allProjects);
-
-            } catch (e) {
-                console.error(e);
-            }
+            // 2. Listen for Project Meta (Remarks)
+            window.onSnapshot(window.collection(window.db, "project_metadata"), (snapshot) => {
+                projectNotesMap = {};
+                snapshot.forEach(doc => {
+                    projectNotesMap[doc.id] = doc.data().note;
+                });
+                renderProjects(); // Re-render to show updated notes badges
+            });
         }
 
-        function renderProjects(projects) {
+        function renderProjects(forcedProjects = null) {
+            const projects = forcedProjects || allProjects;
             const container = document.getElementById('projectContainer');
             
             // Grouping logic: Project Name -> Domain
@@ -258,19 +306,22 @@
                 grouped[key].push(p);
             });
 
-            container.innerHTML = "";
+            // Prevent clearing if inputting search (optional, but good UX)
+            if(!document.getElementById('searchInput').value) container.innerHTML = "";
+            else container.innerHTML = "";
+
             const sortedKeys = Object.keys(grouped).sort();
 
             sortedKeys.forEach(groupKey => {
-                // Strict Sorting: Newest Last Active first
+                // Sort pages: Newest Last Active first
                 const pages = grouped[groupKey].sort((a,b) => {
                     const tA = a.last_active ? a.last_active.toMillis() : 0;
                     const tB = b.last_active ? b.last_active.toMillis() : 0;
                     return tB - tA;
                 });
 
-                // Infer Domain from first page
                 const domain = pages[0].domain || "No Domain";
+                const projectNote = projectNotesMap[groupKey] || "";
 
                 // Header
                 const groupHtml = `
@@ -281,23 +332,33 @@
                                     <i data-feather="folder" class="w-5 h-5"></i>
                                 </div>
                                 <div>
-                                    <h3 class="text-lg font-bold text-white tracking-tight brand-font">${groupKey}</h3>
+                                    <div class="flex items-center gap-3">
+                                        <h3 class="text-lg font-bold text-white tracking-tight brand-font">${groupKey}</h3>
+                                        ${projectNote ? `<span class="bg-pink-500/20 text-pink-400 text-[10px] px-2 py-0.5 rounded border border-pink-500/20 font-bold" title="${projectNote}">HAS REMARKS</span>` : ''}
+                                    </div>
                                     <a href="https://${domain}" target="_blank" class="text-xs text-pink-400 hover:text-pink-300 font-mono tracking-wide flex items-center gap-1 mt-0.5">
                                         ${domain} <i data-feather="external-link" class="w-3 h-3"></i>
                                     </a>
                                 </div>
                             </div>
-                            <span class="text-[10px] font-bold text-gray-500 bg-black/20 px-3 py-1.5 rounded-full border border-white/5 self-start md:self-auto">
-                                ${pages.length} PAGES
-                            </span>
+                            
+                            <div class="flex items-center gap-2 self-start md:self-auto">
+                                <button onclick="openProjectNote('${groupKey}')" class="text-[10px] font-bold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-4 py-2 rounded-lg border border-white/5 flex items-center gap-2 transition">
+                                    <i data-feather="file-text" class="w-3 h-3"></i> 
+                                    ${projectNote ? 'Edit Remarks' : 'Add Remarks'}
+                                </button>
+                                <span class="text-[10px] font-bold text-gray-500 bg-black/20 px-3 py-2 rounded-lg border border-white/5">
+                                    ${pages.length} PAGES
+                                </span>
+                            </div>
                         </div>
                         
                         <div class="divide-y divide-white/5 bg-black/10">
                             <div class="hidden md:grid grid-cols-12 px-6 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest bg-black/20">
                                 <div class="col-span-4">Page Name</div>
-                                <div class="col-span-4">Status Pipeline</div>
-                                <div class="col-span-2">Last Active</div>
-                                <div class="col-span-2 text-right">Actions</div>
+                                <div class="col-span-3">Status</div>
+                                <div class="col-span-2">Created</div>
+                                <div class="col-span-3 text-right">Actions</div>
                             </div>
                             ${pages.map(page => renderRow(page)).join('')}
                         </div>
@@ -311,15 +372,14 @@
 
         function renderRow(page) {
             const timeStr = formatTime(page.last_active);
+            const createdStr = formatTime(page.createdAt);
             const isLive = isRecent(page.last_active);
             const hasComment = page.comments && page.comments.trim().length > 0;
             
-            // PIPELINE LOGIC
-            const sOpened = page.last_active ? 'active' : '';
-            const sEdited = (page.last_active && isLive) ? 'active live-edit' : (page.last_active ? 'active' : '');
-            const sDownloaded = page.downloaded ? 'active done' : '';
-
-            // Generate Link
+            // Status Logic
+            const downloaded = page.downloaded ? true : false;
+            
+            // Link
             const editorLink = `${window.location.origin}/editor.html?id=${page.id}`;
 
             return `
@@ -327,40 +387,41 @@
                     
                     <div class="col-span-4 pr-4">
                         <div class="flex items-center gap-3">
-                            <a href="${editorLink}" target="_blank" class="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-gray-400 hover:text-white hover:bg-pink-500/20 hover:scale-105 transition shadow-lg" title="Preview Client View">
-                                <i data-feather="eye" class="w-4 h-4"></i>
+                            <a href="${editorLink}" target="_blank" class="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-gray-400 hover:text-white hover:bg-pink-500/20 hover:scale-105 transition shadow-lg" title="Open Editor">
+                                <i data-feather="layout" class="w-4 h-4"></i>
                             </a>
                             <div>
                                 <div class="font-bold text-white text-sm mb-0.5">${page.pageName || "Untitled"}</div>
-                                ${hasComment ? `<div class="text-[10px] text-yellow-500 flex items-center gap-1"><i data-feather="message-circle" class="w-3 h-3"></i> ${truncate(page.comments, 20)}</div>` : ''}
+                                ${hasComment ? `<div class="text-[10px] text-yellow-500 flex items-center gap-1"><i data-feather="file-text" class="w-3 h-3"></i> Note Attached</div>` : ''}
                             </div>
                         </div>
                     </div>
 
-                    <div class="col-span-4">
-                        <div class="status-pipeline">
-                            <div class="status-step ${sOpened}">
-                                <i data-feather="eye"></i> Viewed
-                            </div>
-                            <div class="status-step ${sEdited}">
-                                ${sEdited.includes('live') ? '<div class="pulse-dot mr-1"></div>' : ''}
-                                <i data-feather="edit-2"></i> Edit
-                            </div>
-                            <div class="status-step ${sDownloaded}">
-                                <i data-feather="download"></i> Done
-                            </div>
+                    <div class="col-span-3">
+                        <div class="flex items-center gap-2">
+                             ${downloaded 
+                                ? `<span class="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1"><i data-feather="check" class="w-3 h-3"></i> Downloaded</span>`
+                                : `<span class="bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1"><i data-feather="loader" class="w-3 h-3"></i> In Progress</span>`
+                             }
+                             ${isLive ? `<span class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(74,222,128,0.8)] animate-pulse" title="Active Now"></span>` : ''}
                         </div>
                     </div>
                     
-                    <div class="col-span-2 text-xs text-gray-500 font-mono flex items-center gap-2">
-                        <i data-feather="clock" class="w-3 h-3 opacity-50"></i> ${timeStr}
+                    <div class="col-span-2 text-xs text-gray-500 font-mono">
+                         ${createdStr}
                     </div>
 
-                    <div class="col-span-2 flex justify-end gap-2">
-                        <button onclick="openComment('${page.id}', '${page.comments || ''}')" class="btn-icon comment ${hasComment ? 'active-comment' : ''}" title="Internal Notes">
-                            <i data-feather="message-square" class="w-4 h-4"></i>
+                    <div class="col-span-3 flex justify-end gap-2">
+                        <button onclick="copyLink('${editorLink}')" class="btn-icon" title="Copy Link">
+                            <i data-feather="link" class="w-4 h-4"></i>
                         </button>
-                        <button onclick="askDelete('${page.id}')" class="btn-icon delete" title="Delete Project">
+                        <button onclick="openHistory('${page.id}')" class="btn-icon history" title="Timeline & Logs">
+                            <i data-feather="clock" class="w-4 h-4"></i>
+                        </button>
+                        <button onclick="openComment('${page.id}', '${(page.comments || '').replace(/'/g, "&apos;")}')" class="btn-icon comment ${hasComment ? 'active-indicator' : ''}" title="Page Notes">
+                            <i data-feather="file-text" class="w-4 h-4"></i>
+                        </button>
+                        <button onclick="askDelete('${page.id}')" class="btn-icon delete" title="Delete">
                             <i data-feather="trash-2" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -368,29 +429,90 @@
             `;
         }
 
-        // --- COMMENT LOGIC ---
+        // --- PROJECT REMARKS LOGIC ---
+        window.openProjectNote = function(projectName) {
+            currentProjectName = projectName;
+            const existing = projectNotesMap[projectName] || "";
+            document.getElementById('projectNoteInput').value = existing;
+            openModal('projectNoteModal');
+        }
+
+        window.saveProjectNote = async function() {
+            if(!currentProjectName) return;
+            const text = document.getElementById('projectNoteInput').value;
+            const btn = document.querySelector('#projectNoteModal button');
+            btn.innerText = "Saving...";
+
+            try {
+                // Save to a collection called 'project_metadata' using ProjectName as ID
+                await window.setDoc(window.doc(window.db, "project_metadata", currentProjectName), {
+                    note: text,
+                    updatedAt: new Date()
+                }, { merge: true });
+                
+                closeModal('projectNoteModal');
+            } catch(e) { console.error(e); alert("Failed to save note"); }
+            btn.innerText = "Save Project Remark";
+        }
+
+        // --- HISTORY / TIMELINE LOGIC ---
+        window.openHistory = function(id) {
+            const project = allProjects.find(p => p.id === id);
+            if(!project) return;
+
+            const tCreate = formatFullDate(project.createdAt);
+            const tActive = formatFullDate(project.last_active);
+            const tDownload = project.downloaded ? "Downloaded" : "Not yet";
+            
+            const html = `
+                <div class="timeline-item">
+                    <div class="timeline-dot active"></div>
+                    <div>
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Created</div>
+                        <div class="text-white text-sm mt-1">${tCreate}</div>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot ${project.last_active ? 'active' : ''}"></div>
+                    <div>
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Last Edited</div>
+                        <div class="text-white text-sm mt-1">${tActive}</div>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot ${project.downloaded ? 'active' : ''}"></div>
+                    <div>
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Status</div>
+                        <div class="text-white text-sm mt-1">${project.downloaded ? 'Completed & Downloaded' : 'Work in Progress'}</div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('historyContent').innerHTML = html;
+            openModal('historyModal');
+        }
+
+        // --- STANDARD LOGIC ---
+        window.copyLink = function(url) {
+            navigator.clipboard.writeText(url);
+            alert("Link copied to clipboard!");
+        }
+
         window.openComment = function(id, existingText) {
             currentActionId = id;
-            document.getElementById('commentInput').value = existingText.replace(/'/g, ""); // Basic sanitize
+            document.getElementById('commentInput').value = existingText; 
             openModal('commentModal');
         }
 
         window.saveComment = async function() {
             if(!currentActionId) return;
             const text = document.getElementById('commentInput').value;
-            const btn = document.querySelector('#commentModal button');
-            btn.innerText = "Saving...";
-            
             try {
                 const docRef = window.doc(window.db, "projects", currentActionId);
                 await window.updateDoc(docRef, { comments: text });
                 closeModal('commentModal');
-                loadProjects();
-            } catch(e) { console.error(e); alert("Failed to save comment"); }
-            btn.innerText = "Save Note";
+            } catch(e) { console.error(e); }
         }
 
-        // --- DELETE LOGIC ---
         window.askDelete = function(id) {
             currentActionId = id;
             openModal('deleteModal');
@@ -398,18 +520,12 @@
 
         window.confirmDelete = async function() {
             if(!currentActionId) return;
-            const btn = document.querySelector('#deleteModal button');
-            btn.innerText = "Deleting...";
-            
             try {
                 await window.deleteDoc(window.doc(window.db, "projects", currentActionId));
                 closeModal('deleteModal');
-                loadProjects();
             } catch(e) { console.error(e); }
-            btn.innerText = "Yes, Delete";
         }
 
-        // --- HELPERS ---
         function openModal(id) { document.getElementById(id).classList.add('active'); }
         function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 
@@ -426,20 +542,22 @@
             const now = new Date();
             const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
             const diffMins = (now - date) / 1000 / 60;
-            return diffMins < 10; // Active in last 10 mins
+            return diffMins < 10;
         }
 
         function formatTime(timestamp) {
             if(!timestamp) return "-";
             const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-            const now = new Date();
-            if(date.toDateString() === now.toDateString()) return date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
             return date.toLocaleDateString();
         }
 
-        function truncate(str, n) {
-            return (str && str.length > n) ? str.substr(0, n-1) + '&hellip;' : str;
+        function formatFullDate(timestamp) {
+            if(!timestamp) return "Never";
+            const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+            return date.toLocaleString(); 
         }
+
+        feather.replace();
     </script>
 </body>
 </html>
