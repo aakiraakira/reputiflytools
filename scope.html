@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Reputifly | Scope Manager</title>
+    
+    <link rel="icon" type="image/png" href="https://reputifly.com/wp-content/uploads/2026/01/IMG_2123.jpg">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/feather-icons"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, getDoc, addDoc, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDqpzqEVtrEtQvvmcMie_Et7xiNh8QU_Ao",
+            authDomain: "reputifly-editor.firebaseapp.com",
+            projectId: "reputifly-editor",
+            storageBucket: "reputifly-editor.firebasestorage.app",
+            messagingSenderId: "455384979132",
+            appId: "1:455384979132:web:9079ec81182115b16622b9"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        window.db = getFirestore(app);
+        window.collection = collection;
+        window.onSnapshot = onSnapshot;
+        window.doc = doc;
+        window.setDoc = setDoc;
+        window.getDoc = getDoc;
+        window.addDoc = addDoc;
+        window.serverTimestamp = serverTimestamp;
+        window.query = query;
+        window.orderBy = orderBy;
+        
+        window.dispatchEvent(new Event('firebaseReady'));
+    </script>
+
+    <style>
+        :root {
+            --bg-deep: #050507;
+            --accent: #E6397F;
+            --glass: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.08);
+        }
+
+        body {
+            background-color: var(--bg-deep);
+            color: #F0F0F0;
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(230, 57, 127, 0.08) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(59, 130, 246, 0.08) 0px, transparent 50%);
+            background-attachment: fixed;
+        }
+
+        .brand-font { font-family: 'Space Grotesk', sans-serif; }
+
+        /* UI CARDS */
+        .glass-panel {
+            background: var(--glass);
+            backdrop-filter: blur(24px);
+            border: 1px solid var(--border);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+            border-radius: 24px;
+            transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        
+        /* BUTTONS */
+        .btn-primary {
+            background: var(--accent); color: white; padding: 12px 24px;
+            border-radius: 12px; font-weight: 700; transition: 0.2s;
+            box-shadow: 0 10px 20px -5px rgba(230, 57, 127, 0.4);
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 15px 30px -5px rgba(230, 57, 127, 0.5); }
+        
+        .btn-secondary {
+            background: rgba(255,255,255,0.05); color: white; border: 1px solid var(--border);
+            padding: 12px 24px; border-radius: 12px; font-weight: 600; transition: 0.2s; cursor: pointer;
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .btn-secondary:hover { background: rgba(255,255,255,0.1); }
+
+        .btn-ai {
+            background: linear-gradient(135deg, #6366f1, #a855f7); color: white; border: none;
+            box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
+        }
+        .btn-ai:hover { box-shadow: 0 0 25px rgba(168, 85, 247, 0.6); transform: scale(1.02); }
+
+        .input-field {
+            background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+            color: white; border-radius: 12px; padding: 12px 16px; width: 100%;
+            outline: none; transition: 0.2s; font-size: 14px;
+        }
+        .input-field:focus { border-color: var(--accent); background: rgba(0,0,0,0.5); }
+
+        /* STATUS BADGE */
+        .status-badge { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; }
+        .status-signed { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+        .status-draft { background: rgba(255, 255, 255, 0.05); color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.1); }
+
+        /* MODAL */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+            z-index: 100; display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: 0.3s;
+        }
+        .modal-overlay.active { opacity: 1; pointer-events: auto; }
+        .modal-card {
+            background: #121218; border: 1px solid rgba(255,255,255,0.1); border-radius: 24px;
+            padding: 32px; width: 90%; max-width: 500px; transform: scale(0.95); transition: 0.3s;
+        }
+        .modal-overlay.active .modal-card { transform: scale(1); }
+
+        /* TOAST */
+        #toast {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(100px);
+            background: #1a1a24; border: 1px solid #E6397F;
+            padding: 12px 24px; border-radius: 99px; font-weight: bold; font-size: 14px;
+            display: flex; align-items: center; gap: 10px; z-index: 200;
+            opacity: 0; transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+        /* Section Item Hover */
+        .section-item:hover .action-btns { opacity: 1; }
+        .action-btns { opacity: 0; transition: opacity 0.2s; }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div id="authScreen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#050507] p-4 transition-opacity duration-500">
+        <div class="glass-panel p-8 w-full max-w-sm text-center">
+            <div class="w-16 h-16 rounded-full bg-pink-500/10 flex items-center justify-center mx-auto mb-6 border border-pink-500/20">
+                <i data-feather="lock" class="w-6 h-6 text-pink-500"></i>
+            </div>
+            <h1 class="text-2xl font-bold brand-font text-white mb-2">Scope Manager</h1>
+            <p class="text-gray-500 text-sm mb-6">Enter admin access code</p>
+            <input type="password" id="passcodeInput" class="input-field text-center text-lg tracking-[5px] font-bold mb-4" placeholder="••••••">
+            <button onclick="authenticate()" class="btn-primary w-full">Unlock</button>
+        </div>
+    </div>
+
+    <div id="appContainer" class="hidden min-h-screen pb-20">
+        <header class="border-b border-white/5 bg-[#050507]/80 backdrop-blur-xl sticky top-0 z-40">
+            <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-8 brightness-125">
+                    <span class="text-xs font-bold bg-white/5 px-2 py-1 rounded text-gray-400 border border-white/5 hidden md:inline-block">SCOPE & CONTRACTS</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button onclick="openSettings()" class="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition" title="Settings"><i data-feather="settings" class="w-4 h-4"></i></button>
+                    <button onclick="showDashboard()" id="dashBtn" class="text-sm font-bold text-gray-400 hover:text-white transition hidden">Dashboard</button>
+                    <button onclick="createNewProjectModal()" id="newProjBtn" class="btn-primary py-2 px-4 text-xs"><i data-feather="plus" class="w-3 h-3"></i> New Project</button>
+                </div>
+            </div>
+        </header>
+
+        <main id="dashboardView" class="max-w-6xl mx-auto px-6 py-10 animate-in">
+            <div id="projectsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                </div>
+        </main>
+
+        <main id="editorView" class="hidden max-w-5xl mx-auto px-6 py-10 animate-in">
+            <div class="flex items-center justify-between mb-6">
+                <button onclick="showDashboard()" class="text-gray-500 hover:text-white flex items-center gap-2 text-sm font-bold"><i data-feather="arrow-left" class="w-4 h-4"></i> Back</button>
+                <div class="flex gap-3">
+                    <button onclick="openAIModal()" class="btn-primary btn-ai py-2 px-4 text-xs"><i data-feather="zap" class="w-3 h-3"></i> Auto-Generate with AI</button>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="md:col-span-1 space-y-6">
+                    <div>
+                        <h1 class="text-2xl font-bold brand-font text-white mb-1" id="editProjectTitle">...</h1>
+                        <p class="text-xs text-gray-500 font-mono" id="editProjectDomain">...</p>
+                    </div>
+
+                    <div class="glass-panel p-6">
+                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Actions</h3>
+                        <div class="space-y-3">
+                            <button onclick="addPage()" class="btn-secondary w-full justify-start text-sm"><i data-feather="plus-square" class="w-4 h-4 text-pink-500"></i> Add Page</button>
+                            <button onclick="saveScope()" id="saveScopeBtn" class="btn-primary w-full justify-start text-sm"><i data-feather="save" class="w-4 h-4"></i> Save Draft</button>
+                            <div class="h-px bg-white/10 my-2"></div>
+                            <button onclick="copyClientLink()" class="btn-secondary w-full justify-start text-sm text-blue-400 border-blue-500/20 hover:bg-blue-500/10"><i data-feather="link" class="w-4 h-4"></i> Copy Client Link</button>
+                        </div>
+                    </div>
+
+                    <div id="signatureStatusCard" class="glass-panel p-6 hidden border-green-500/30 bg-green-500/5">
+                        <div class="flex items-center gap-3 text-green-400 mb-2">
+                            <i data-feather="check-circle" class="w-5 h-5"></i>
+                            <span class="font-bold">Signed & Approved</span>
+                        </div>
+                        <p class="text-xs text-gray-400 mb-1">Approved by:</p>
+                        <p class="text-white font-bold" id="signerNameDisplay">...</p>
+                        <p class="text-xs text-gray-500 mt-1" id="signDateDisplay">...</p>
+                    </div>
+                </div>
+
+                <div class="md:col-span-2">
+                    <div id="scopeBuilderArea" class="space-y-6"></div>
+                    
+                    <div id="emptyState" class="text-center py-16 border-2 border-dashed border-white/10 rounded-2xl hidden">
+                        <div class="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-500"><i data-feather="map" class="w-6 h-6"></i></div>
+                        <p class="text-gray-500 text-sm mb-4">No pages defined yet.</p>
+                        <button onclick="openAIModal()" class="text-purple-400 font-bold text-sm hover:underline">✨ Generate with AI</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="clientView" class="hidden min-h-screen bg-[#050507] py-12 px-4 animate-in">
+        <div class="max-w-2xl mx-auto">
+            <div class="text-center mb-10">
+                <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-10 mx-auto mb-6 brightness-125">
+                <div class="inline-block bg-white/5 border border-white/10 px-3 py-1 rounded-full text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">Project Approval</div>
+                <h1 class="text-3xl md:text-4xl font-bold brand-font text-white mb-3" id="clientProjectTitle">Loading...</h1>
+            </div>
+
+            <div class="glass-panel p-1 border-t-4 border-t-pink-500 mb-8 shadow-2xl shadow-pink-900/20">
+                <div class="bg-[#0A0A0F] rounded-xl p-8">
+                    <h2 class="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                        <i data-feather="map" class="w-4 h-4 text-pink-500"></i> Scope of Work
+                    </h2>
+                    <div id="clientScopeList" class="space-y-8">
+                        <div class="text-center py-10 text-gray-500">Loading scope details...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="signForm" class="glass-panel p-8">
+                <h3 class="text-xl font-bold text-white mb-2">Digital Signature</h3>
+                <p class="text-sm text-gray-500 mb-6">By signing below, you approve the structure. <span class="text-pink-500">New sections requested after approval will be billed separately.</span></p>
+                <div class="mb-4">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Full Name</label>
+                    <input type="text" id="clientNameInput" class="input-field text-lg" placeholder="Type your full name...">
+                </div>
+                <div class="flex items-start gap-3 mb-6">
+                    <input type="checkbox" id="confirmCheck" class="mt-1 w-4 h-4 accent-pink-500 cursor-pointer">
+                    <label for="confirmCheck" class="text-sm text-gray-400 cursor-pointer">I confirm that this sitemap includes all required pages and sections.</label>
+                </div>
+                <button onclick="submitClientSignature()" class="btn-primary w-full py-4 text-lg shadow-lg">Approve & Sign Project</button>
+            </div>
+
+            <div id="signSuccess" class="hidden glass-panel p-10 text-center border-green-500/30 bg-green-900/10">
+                <div class="w-20 h-20 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-green-500/20"><i data-feather="check" class="w-10 h-10 text-green-500"></i></div>
+                <h2 class="text-2xl font-bold text-white mb-2">Project Approved</h2>
+                <div class="bg-white/5 inline-block px-6 py-3 rounded-lg text-xs font-mono text-gray-500 border border-white/5">
+                    Signed by <span id="successSigner" class="text-white font-bold">...</span><br>
+                    <span id="successDate">...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="newProjectModal" class="modal-overlay">
+        <div class="modal-card">
+            <h2 class="text-xl font-bold text-white mb-6">Create New Project</h2>
+            <div class="space-y-4 text-left">
+                <div><label class="text-xs font-bold text-gray-500 uppercase">Project Name</label><input type="text" id="newProjName" class="input-field mt-1" placeholder="e.g. My Hands Therapy"></div>
+                <div><label class="text-xs font-bold text-gray-500 uppercase">Domain</label><input type="text" id="newProjDomain" class="input-field mt-1" placeholder="e.g. myhands.com"></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3 mt-8">
+                <button onclick="closeModal('newProjectModal')" class="btn-secondary justify-center">Cancel</button>
+                <button onclick="createNewProject()" class="btn-primary justify-center">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="aiModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 text-white shadow-lg shadow-purple-500/30"><i data-feather="zap" class="w-6 h-6"></i></div>
+            <h2 class="text-xl font-bold text-white mb-2">AI Sitemap Generator</h2>
+            <p class="text-gray-400 text-sm mb-6">Describe the business (e.g., Dentist, Plumber) and AI will build the structure.</p>
+            <textarea id="aiPrompt" class="input-field h-32 resize-none mb-4" placeholder="e.g. A dental clinic. Needs braces, invisalign pages."></textarea>
+            <button onclick="generateWithAI()" id="aiGenBtn" class="btn-primary btn-ai w-full justify-center">Generate Structure</button>
+            <button onclick="closeModal('aiModal')" class="mt-4 text-xs text-gray-500 hover:text-white">Cancel</button>
+        </div>
+    </div>
+
+    <div id="settingsModal" class="modal-overlay">
+        <div class="modal-card">
+            <h2 class="text-xl font-bold text-white mb-6">Settings</h2>
+            <div class="space-y-4 text-left">
+                <div>
+                    <label class="text-xs font-bold text-gray-500 uppercase">Gemini API Key</label>
+                    <input type="password" id="apiKeyInput" class="input-field mt-1" placeholder="AIzaSy...">
+                </div>
+            </div>
+            <button onclick="saveSettings()" class="btn-primary w-full justify-center mt-6">Save Settings</button>
+            <button onclick="closeModal('settingsModal')" class="mt-4 text-xs text-gray-500 hover:text-white">Close</button>
+        </div>
+    </div>
+
+    <div id="toast"><i data-feather="info" class="w-4 h-4 text-pink-500"></i><span id="toastMsg">...</span></div>
+
+    <script>
+        const ADMIN_PASS = "738081"; 
+        let projects = [];
+        let metaMap = {};
+        let currentProjectID = null;
+        let scopeData = []; 
+
+        // --- INIT ---
+        document.addEventListener('DOMContentLoaded', () => {
+            feather.replace();
+            
+            // Auto-load Saved Password
+            const savedPass = localStorage.getItem('scope_admin_auth');
+            if (savedPass === ADMIN_PASS) {
+                const authScreen = document.getElementById('authScreen');
+                if(authScreen) authScreen.classList.add('hidden');
+                document.getElementById('appContainer').classList.remove('hidden');
+                initFirebaseListeners();
+            }
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const clientProject = urlParams.get('client_view');
+
+            if (clientProject) {
+                // Client Mode
+                const auth = document.getElementById('authScreen');
+                if(auth) auth.remove(); 
+                const app = document.getElementById('appContainer');
+                if(app) app.remove();
+                initClientView(clientProject);
+            }
+        });
+
+        function authenticate() {
+            const val = document.getElementById('passcodeInput').value;
+            if (val === ADMIN_PASS) {
+                localStorage.setItem('scope_admin_auth', ADMIN_PASS);
+                document.getElementById('authScreen').classList.add('hidden');
+                document.getElementById('appContainer').classList.remove('hidden');
+                initFirebaseListeners();
+            } else {
+                showToast("Incorrect Code");
+            }
+        }
+
+        // --- FIREBASE LOGIC ---
+        function initFirebaseListeners() {
+            const q = window.query(window.collection(window.db, "projects"), window.orderBy("createdAt", "desc"));
+            window.onSnapshot(q, (snapshot) => {
+                projects = [];
+                snapshot.forEach(doc => projects.push({ id: doc.id, ...doc.data() }));
+                renderDashboard();
+            });
+
+            window.onSnapshot(window.collection(window.db, "project_metadata"), (snapshot) => {
+                metaMap = {};
+                snapshot.forEach(doc => metaMap[doc.id] = doc.data());
+                renderDashboard();
+            });
+        }
+
+        function renderDashboard() {
+            const grid = document.getElementById('projectsGrid');
+            if(!grid) return;
+            
+            grid.innerHTML = `
+                <div onclick="createNewProjectModal()" class="glass-panel p-6 flex flex-col items-center justify-center cursor-pointer border-dashed border-2 border-white/10 hover:border-pink-500/50 hover:bg-pink-500/5 min-h-[200px] group transition-all">
+                    <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center group-hover:scale-110 transition mb-3">
+                        <i data-feather="plus" class="w-6 h-6 text-gray-400 group-hover:text-pink-500"></i>
+                    </div>
+                    <span class="font-bold text-gray-400 group-hover:text-white">Create New Project</span>
+                </div>
+            `;
+
+            projects.forEach(p => {
+                const meta = metaMap[p.projectName] || {}; 
+                const isSigned = meta.scope && meta.scope.signature;
+                const pageCount = meta.scope && meta.scope.pages ? meta.scope.pages.length : 0;
+
+                const statusHtml = isSigned 
+                    ? `<span class="status-badge status-signed"><i data-feather="check" class="w-3 h-3"></i> Signed</span>`
+                    : `<span class="status-badge status-draft">Draft</span>`;
+
+                const card = document.createElement('div');
+                card.className = "glass-panel p-6 cursor-pointer hover:border-white/20 relative overflow-hidden group";
+                if(isSigned) card.style.borderColor = "rgba(34, 197, 94, 0.3)";
+                
+                card.onclick = () => openEditor(p);
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center text-gray-400 group-hover:text-white group-hover:bg-white/10 transition"><i data-feather="layout" class="w-5 h-5"></i></div>
+                        ${statusHtml}
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-1 truncate">${p.projectName || 'Untitled'}</h3>
+                    <p class="text-xs text-gray-500 font-mono mb-6 truncate">${p.domain || 'No Domain'}</p>
+                    <div class="flex items-center gap-4 text-xs font-bold text-gray-500 border-t border-white/5 pt-4">
+                        <span class="flex items-center gap-1"><i data-feather="file" class="w-3 h-3"></i> ${pageCount} Pages</span>
+                        <span class="flex items-center gap-1"><i data-feather="clock" class="w-3 h-3"></i> ${p.updatedAt ? new Date(p.updatedAt.toDate()).toLocaleDateString() : 'New'}</span>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+            feather.replace();
+        }
+
+        // --- EDITOR LOGIC ---
+        function openEditor(project) {
+            currentProjectID = project.projectName;
+            document.getElementById('dashboardView').classList.add('hidden');
+            document.getElementById('editorView').classList.remove('hidden');
+            document.getElementById('dashBtn').classList.remove('hidden');
+            document.getElementById('newProjBtn').classList.add('hidden');
+            
+            document.getElementById('editProjectTitle').innerText = project.projectName;
+            document.getElementById('editProjectDomain').innerText = project.domain;
+
+            const meta = metaMap[currentProjectID] || {};
+            scopeData = (meta.scope && meta.scope.pages) ? meta.scope.pages : [];
+            
+            renderScopeBuilder();
+            
+            const sigCard = document.getElementById('signatureStatusCard');
+            if(meta.scope && meta.scope.signature) {
+                sigCard.classList.remove('hidden');
+                document.getElementById('signerNameDisplay').innerText = meta.scope.signature.name;
+                document.getElementById('signDateDisplay').innerText = new Date(meta.scope.signature.timestamp.toDate()).toLocaleString();
+            } else {
+                sigCard.classList.add('hidden');
+            }
+        }
+
+        function renderScopeBuilder() {
+            const container = document.getElementById('scopeBuilderArea');
+            container.innerHTML = "";
+
+            if(scopeData.length === 0) {
+                document.getElementById('emptyState').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('emptyState').classList.add('hidden');
+
+            scopeData.forEach((page, pIdx) => {
+                const el = document.createElement('div');
+                el.className = "glass-panel p-6 relative animate-in mb-6";
+                
+                // SINGLE COLUMN LAYOUT FOR SECTIONS (As Requested)
+                const sectionsHtml = page.sections.map((sec, sIdx) => `
+                    <div class="section-item flex items-center gap-3 mb-2 bg-black/30 p-3 rounded-lg group border border-transparent hover:border-white/10 transition-colors">
+                        <div class="w-1.5 h-1.5 bg-pink-500 rounded-full flex-shrink-0"></div>
+                        <input type="text" value="${sec}" onchange="updateSection(${pIdx}, ${sIdx}, this.value)" class="bg-transparent text-sm text-gray-300 w-full outline-none font-medium">
+                        
+                        <div class="action-btns flex gap-1">
+                            <button onclick="moveSection(${pIdx}, ${sIdx}, -1)" class="text-gray-600 hover:text-white p-1" title="Move Up"><i data-feather="arrow-up" class="w-3 h-3"></i></button>
+                            <button onclick="moveSection(${pIdx}, ${sIdx}, 1)" class="text-gray-600 hover:text-white p-1" title="Move Down"><i data-feather="arrow-down" class="w-3 h-3"></i></button>
+                            <button onclick="removeSection(${pIdx}, ${sIdx})" class="text-gray-600 hover:text-red-500 p-1" title="Remove"><i data-feather="x" class="w-3 h-3"></i></button>
+                        </div>
+                    </div>
+                `).join('');
+
+                el.innerHTML = `
+                    <div class="flex justify-between items-center mb-4 pb-4 border-b border-white/5">
+                        <input type="text" value="${page.name}" onchange="updatePageName(${pIdx}, this.value)" class="bg-transparent text-lg font-bold text-white outline-none w-full placeholder-gray-600" placeholder="Page Name">
+                        <button onclick="removePage(${pIdx})" class="text-gray-500 hover:text-red-500 p-2"><i data-feather="trash-2" class="w-4 h-4"></i></button>
+                    </div>
+                    <div class="space-y-1 pl-1">
+                        ${sectionsHtml}
+                    </div>
+                    <div class="mt-4 flex gap-2">
+                        <input type="text" id="newSecInput-${pIdx}" placeholder="Add section (e.g. Testimonials)" class="bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white w-full outline-none focus:border-pink-500 transition-colors" onkeydown="if(event.key==='Enter') addSection(${pIdx})">
+                        <button onclick="addSection(${pIdx})" class="bg-white/10 hover:bg-white/20 text-white rounded px-3"><i data-feather="plus" class="w-4 h-4"></i></button>
+                    </div>
+                `;
+                container.appendChild(el);
+            });
+            feather.replace();
+        }
+
+        // --- DATA OPERATIONS ---
+        window.addPage = () => { scopeData.push({ name: "New Page", sections: [] }); renderScopeBuilder(); };
+        window.removePage = (idx) => { scopeData.splice(idx, 1); renderScopeBuilder(); };
+        window.updatePageName = (idx, val) => { scopeData[idx].name = val; };
+        window.addSection = (idx) => {
+            const input = document.getElementById(`newSecInput-${idx}`);
+            if(input.value.trim()) { scopeData[idx].sections.push(input.value.trim()); input.value=""; renderScopeBuilder(); setTimeout(()=>document.getElementById(`newSecInput-${idx}`).focus(), 50); }
+        };
+        window.removeSection = (pIdx, sIdx) => { scopeData[pIdx].sections.splice(sIdx, 1); renderScopeBuilder(); };
+        window.updateSection = (pIdx, sIdx, val) => { scopeData[pIdx].sections[sIdx] = val; };
+        
+        // NEW: Reordering
+        window.moveSection = (pIdx, sIdx, direction) => {
+            const sections = scopeData[pIdx].sections;
+            const newIndex = sIdx + direction;
+            if (newIndex >= 0 && newIndex < sections.length) {
+                [sections[sIdx], sections[newIndex]] = [sections[newIndex], sections[sIdx]];
+                renderScopeBuilder();
+            }
+        };
+
+        // --- FIXED SAVE FUNCTION ---
+        window.saveScope = async () => {
+            const btn = document.getElementById('saveScopeBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "Saving...";
+            
+            try {
+                const existing = metaMap[currentProjectID] || {};
+                
+                // SANITIZATION: Ensure no undefined values
+                const sig = (existing.scope && existing.scope.signature) ? existing.scope.signature : null;
+                
+                await window.setDoc(window.doc(window.db, "project_metadata", currentProjectID), {
+                    scope: { 
+                        pages: scopeData, 
+                        signature: sig // Can be null, but NOT undefined
+                    }
+                }, { merge: true });
+                
+                showToast("Scope Saved Successfully!");
+            } catch(e) { 
+                console.error("Save Error:", e); 
+                showToast("Error Saving. See Console."); 
+            }
+            btn.innerHTML = originalText;
+        };
+
+        window.copyClientLink = () => {
+            const url = `${window.location.origin}${window.location.pathname}?client_view=${encodeURIComponent(currentProjectID)}`;
+            navigator.clipboard.writeText(url);
+            showToast("Client Link Copied!");
+        };
+
+        window.showDashboard = () => {
+            document.getElementById('editorView').classList.add('hidden');
+            document.getElementById('dashboardView').classList.remove('hidden');
+            document.getElementById('dashBtn').classList.add('hidden');
+            document.getElementById('newProjBtn').classList.remove('hidden');
+        };
+
+        // --- SETTINGS & AI ---
+        window.openSettings = () => {
+            const key = localStorage.getItem('reputifly_gemini_key');
+            if(key) document.getElementById('apiKeyInput').value = key;
+            openModal('settingsModal');
+        }
+        window.saveSettings = () => {
+            const key = document.getElementById('apiKeyInput').value.trim();
+            if(key) localStorage.setItem('reputifly_gemini_key', key);
+            closeModal('settingsModal');
+            showToast("Settings Saved");
+        }
+
+        function openAIModal() {
+            const key = localStorage.getItem('reputifly_gemini_key');
+            if(!key) { alert("Please add API Key in settings"); openSettings(); return; }
+            openModal('aiModal');
+        }
+
+        async function generateWithAI() {
+            const promptText = document.getElementById('aiPrompt').value;
+            if(!promptText) return showToast("Describe the project");
+            
+            const btn = document.getElementById('aiGenBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "Thinking...";
+            btn.disabled = true;
+
+            const apiKey = localStorage.getItem('reputifly_gemini_key');
+            
+            // SMARTER PROMPT
+            const sysPrompt = `
+                You are a professional website architect.
+                Create a complete sitemap for the client.
+                RULES:
+                1. Every page MUST have a Header and Footer section.
+                2. Home Page MUST have: Hero Section, About/Intro, Services Summary, Testimonials, CTA, Contact Form.
+                3. Contact Page MUST have: Map, Contact Form, Contact Info.
+                Output JSON ONLY format: { "pages": [{ "name": "Home", "sections": ["Hero", "About"] }] }
+            `;
+
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: sysPrompt + "\nClient Request: " + promptText }] }] })
+                });
+
+                const data = await response.json();
+                let rawText = data.candidates[0].content.parts[0].text;
+                rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+                
+                const json = JSON.parse(rawText);
+                if(json.pages) {
+                    scopeData = json.pages;
+                    renderScopeBuilder();
+                    saveScope(); // Auto-save
+                    closeModal('aiModal');
+                    showToast("Sitemap Generated! ✨");
+                }
+            } catch(e) { console.error(e); alert("AI Error."); }
+
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+
+        // --- CLIENT VIEW (FIXED) ---
+        async function initClientView(projectName) {
+            document.getElementById('clientView').classList.remove('hidden');
+            currentProjectID = decodeURIComponent(projectName);
+            
+            const titleEl = document.getElementById('clientProjectTitle');
+            if(titleEl) titleEl.innerText = currentProjectID;
+
+            try {
+                const docSnap = await window.getDoc(window.doc(window.db, "project_metadata", currentProjectID));
+                if(docSnap.exists()) {
+                    const data = docSnap.data();
+                    if(data.scope && data.scope.pages) {
+                        renderClientScope(data.scope);
+                    } else {
+                        document.getElementById('clientScopeList').innerHTML = "<div class='text-center p-8 text-gray-500'>Scope pending...</div>";
+                    }
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        function renderClientScope(scope) {
+    const container = document.getElementById('clientScopeList');
+    container.innerHTML = ""; 
+    
+    const isSigned = !!scope.signature;
+    
+    if(isSigned) {
+        document.getElementById('signForm').classList.add('hidden');
+        document.getElementById('signSuccess').classList.remove('hidden');
+        document.getElementById('successSigner').innerText = scope.signature.name;
+        document.getElementById('successDate').innerText = new Date(scope.signature.timestamp.toDate()).toLocaleString();
+    }
+
+    scope.pages.forEach(page => {
+        const icon = isSigned ? `<i data-feather="check" class="w-4 h-4 text-green-500"></i>` : '';
+        const itemClass = isSigned ? "bg-green-900/10 border-green-500/20 text-green-400" : "bg-white/5 border-white/5 text-gray-300";
+        
+        // Changed to use flex-col for a strict 1-line-per-section vertical list
+        const sectionsHtml = page.sections.map(sec => `
+            <div class="flex items-center gap-4 p-4 rounded-xl border ${itemClass} transition-all duration-300">
+                ${isSigned ? '<i data-feather="check-circle" class="w-5 h-5 text-green-500"></i>' : '<div class="w-2 h-2 rounded-full bg-pink-500 shadow-[0_0_8px_rgba(230,57,127,0.5)]"></div>'}
+                <span class="text-base font-bold tracking-tight">${sec}</span>
+            </div>
+        `).join('');
+
+        container.innerHTML += `
+            <div class="mb-12 animate-in">
+                <h3 class="text-xl font-bold text-white mb-5 pb-3 border-b border-white/10 flex items-center gap-3">
+                    ${page.name} ${icon}
+                </h3>
+                <div class="flex flex-col gap-3">
+                    ${sectionsHtml}
+                </div>
+            </div>
+        `;
+    });
+    feather.replace();
+}
+        window.submitClientSignature = async () => {
+            const name = document.getElementById('clientNameInput').value.trim();
+            const checked = document.getElementById('confirmCheck').checked;
+            if(!name || !checked) return showToast("Please fill all fields");
+
+            const btn = document.querySelector('#signForm button');
+            btn.innerText = "Signing..."; btn.disabled = true;
+
+            try {
+                const docRef = window.doc(window.db, "project_metadata", currentProjectID);
+                const docSnap = await window.getDoc(docRef);
+                const data = docSnap.data();
+                
+                await window.setDoc(docRef, { 
+                    scope: { 
+                        ...data.scope, 
+                        signature: { name: name, timestamp: window.serverTimestamp() } 
+                    } 
+                }, { merge: true });
+                
+                location.reload();
+            } catch(e) { console.error(e); showToast("Error Signing"); btn.disabled = false; }
+        };
+
+        // --- UTILS ---
+        window.createNewProjectModal = () => openModal('newProjectModal');
+        window.closeModal = (id, e) => { if(e && e.target !== document.getElementById(id)) return; document.getElementById(id).classList.remove('active'); };
+        window.openModal = (id) => document.getElementById(id).classList.add('active');
+        
+        window.createNewProject = async () => {
+            const name = document.getElementById('newProjName').value.trim();
+            const domain = document.getElementById('newProjDomain').value.trim();
+            if(!name) return showToast("Name required");
+
+            try {
+                await window.addDoc(window.collection(window.db, "projects"), {
+                    projectName: name, domain: domain, createdAt: window.serverTimestamp(), last_active: window.serverTimestamp()
+                });
+                await window.setDoc(window.doc(window.db, "project_metadata", name), {
+                    scope: { pages: [{ name: "Home", sections: ["Hero Section", "Footer"] }], signature: null }
+                });
+                closeModal('newProjectModal'); showToast("Created!");
+            } catch(e) { console.error(e); showToast("Error"); }
+        };
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            document.getElementById('toastMsg').innerText = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 3000);
+        }
+    </script>
+</body>
+</html>
