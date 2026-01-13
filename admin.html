@@ -113,6 +113,7 @@
             background: #121218; border: 1px solid rgba(255,255,255,0.15); border-radius: 24px;
             padding: 32px; width: 90%; max-width: 480px; transform: scale(0.95) translateY(10px); 
             transition: 0.3s cubic-bezier(0.16, 1, 0.3, 1); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+            max-height: 85vh; overflow-y: auto; /* Added for long content */
         }
         .modal-overlay.active .modal-card { transform: scale(1) translateY(0); }
         
@@ -222,6 +223,27 @@
                 <div class="w-8 h-8 border-2 border-white/20 border-t-pink-500 rounded-full animate-spin mx-auto mb-4"></div>
                 <p class="text-xs text-gray-400 font-mono tracking-widest">ESTABLISHING UPLINK...</p>
             </div>
+        </div>
+    </div>
+
+    <div id="scopeModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="flex justify-between items-start mb-6">
+                <div>
+                    <h3 class="text-lg font-bold text-white brand-font" id="scopeModalTitle">Project Scope</h3>
+                    <p class="text-xs text-gray-500">Sitemap & Approval Status</p>
+                </div>
+                <button onclick="closeModal('scopeModal')" class="text-gray-500 hover:text-white"><i data-feather="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <div id="scopeModalStatus" class="mb-6 animate-in"></div>
+            
+            <div class="bg-[#0A0A0F] rounded-xl p-6 text-left border border-white/5 shadow-inner">
+                <h4 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 border-b border-white/5 pb-2">Wireframe Structure</h4>
+                <div id="scopeModalContent" class="space-y-4"></div>
+            </div>
+            
+            <button onclick="closeModal('scopeModal')" class="w-full mt-6 bg-white/5 hover:bg-white/10 text-white py-3 rounded-xl text-sm font-bold transition">Close Viewer</button>
         </div>
     </div>
 
@@ -531,6 +553,12 @@
                 const noteTime = metaData.updatedAt ? formatFullDate(metaData.updatedAt) : "";
                 const isSharing = metaData.sharingEnabled === true;
                 
+                // NEW: SCOPE CHECKS
+                const scope = metaData.scope || {};
+                const isSigned = !!scope.signature;
+                const scopePages = scope.pages || [];
+                const hasScope = scopePages.length > 0;
+                
                 const hasRemark = projectNote.trim().length > 0;
                 
                 // CLIENT MODE SPECIFIC HEADER
@@ -594,6 +622,7 @@
                                 <div class="min-w-0">
                                     <div class="flex flex-wrap items-center gap-3">
                                         <h3 class="text-lg font-bold text-white tracking-tight brand-font truncate">${groupKey}</h3>
+                                        ${isSigned ? `<span class="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1"><i data-feather="check-circle" class="w-3 h-3"></i> SIGNED</span>` : ''}
                                         ${projectNote ? `<span class="bg-pink-500/20 text-pink-400 text-[10px] px-2 py-0.5 rounded border border-pink-500/20 font-bold flex-shrink-0" title="Has Remarks">REMARKS</span>` : ''}
                                         ${stopSharingHtml}
                                     </div>
@@ -610,6 +639,10 @@
                                 </button>
                                 ` : ''}
                                 
+                                <button onclick="openScopeModal('${groupKey}')" class="flex-1 md:flex-none text-[10px] font-bold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-4 py-2 rounded-lg border border-white/5 flex items-center justify-center gap-2 transition">
+                                    <i data-feather="map" class="w-3 h-3"></i> Sitemap
+                                </button>
+
                                 <button onclick="openProjectNote('${groupKey}')" class="flex-1 md:flex-none text-[10px] font-bold px-4 py-2 rounded-lg border flex items-center justify-center gap-2 transition ${remarkBtnStyle}">
                                     ${remarkIcon}
                                     ${isSharedMode && hasRemark ? 'Read' : (projectNote ? 'Edit' : 'Remarks')}
@@ -633,6 +666,66 @@
                 `;
                 container.innerHTML += groupHtml;
             });
+            feather.replace();
+        }
+
+        // --- SCOPE VIEWER LOGIC ---
+        window.openScopeModal = function(projectName) {
+            const meta = projectNotesMap[projectName] || {};
+            const scope = meta.scope || {};
+            const pages = scope.pages || [];
+            const sig = scope.signature;
+
+            // 1. Header (Status)
+            const statusEl = document.getElementById('scopeModalStatus');
+            if(sig) {
+                const date = sig.timestamp ? new Date(sig.timestamp.toDate()).toLocaleString() : 'Unknown Date';
+                statusEl.innerHTML = `
+                    <div class="bg-green-500/10 border border-green-500/20 rounded-xl p-4 flex items-center gap-4 mb-6">
+                        <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-black font-bold flex-shrink-0">
+                            <i data-feather="check"></i>
+                        </div>
+                        <div>
+                            <h4 class="text-green-500 font-bold text-sm uppercase tracking-wide">Scope Approved</h4>
+                            <p class="text-gray-400 text-xs">Signed by <strong class="text-white">${sig.name}</strong> on ${date}</p>
+                        </div>
+                    </div>`;
+            } else {
+                statusEl.innerHTML = `
+                    <div class="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 flex items-center gap-4 mb-6">
+                        <div class="w-10 h-10 rounded-full bg-yellow-500 flex items-center justify-center text-black font-bold flex-shrink-0">
+                            <i data-feather="clock"></i>
+                        </div>
+                        <div>
+                            <h4 class="text-yellow-500 font-bold text-sm uppercase tracking-wide">Pending Approval</h4>
+                            <p class="text-gray-400 text-xs">Client has not signed the scope yet.</p>
+                        </div>
+                    </div>`;
+            }
+
+            // 2. Content (Wireframe List)
+            const listEl = document.getElementById('scopeModalContent');
+            if(pages.length === 0) {
+                listEl.innerHTML = '<div class="text-center text-gray-500 py-8 italic">No sitemap data defined.</div>';
+            } else {
+                listEl.innerHTML = pages.map(p => `
+                    <div class="mb-6">
+                        <h3 class="text-white font-bold text-sm mb-2 flex items-center gap-2">
+                            <i data-feather="layout" class="w-3 h-3 text-pink-500"></i> ${p.name}
+                        </h3>
+                        <div class="space-y-1 pl-4 border-l border-white/10">
+                            ${p.sections.map(s => `
+                                <div class="text-xs text-gray-400 py-1 flex items-center gap-2">
+                                    <div class="w-1 h-1 bg-gray-600 rounded-full"></div> ${s}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            document.getElementById('scopeModalTitle').innerText = `${projectName} - Sitemap`;
+            openModal('scopeModal');
             feather.replace();
         }
 
