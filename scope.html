@@ -127,9 +127,17 @@
         }
         #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
 
-        /* Section Item Hover */
+        /* SECTION ITEM HOVER */
         .section-item:hover .action-btns { opacity: 1; }
         .action-btns { opacity: 0; transition: opacity 0.2s; }
+        
+        /* New Styles for Purpose Field */
+        .purpose-input {
+            background: transparent; border: none; border-bottom: 1px dashed rgba(255,255,255,0.1);
+            color: #888; font-size: 11px; width: 100%; padding: 4px 0; outline: none; transition: 0.2s;
+        }
+        .purpose-input:focus { border-color: var(--accent); color: #ccc; }
+        .purpose-input::placeholder { color: #444; font-style: italic; }
     </style>
 </head>
 <body class="antialiased">
@@ -277,7 +285,7 @@
         <div class="modal-card">
             <div class="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 text-white shadow-lg shadow-purple-500/30"><i data-feather="zap" class="w-6 h-6"></i></div>
             <h2 class="text-xl font-bold text-white mb-2">AI Sitemap Generator</h2>
-            <p class="text-gray-400 text-sm mb-6">Describe the business (e.g., Dentist, Plumber) and AI will build the structure.</p>
+            <p class="text-gray-400 text-sm mb-6">Describe the business (e.g., Dentist, Plumber) and AI will build the structure with explanations.</p>
             <textarea id="aiPrompt" class="input-field h-32 resize-none mb-4" placeholder="e.g. A dental clinic. Needs braces, invisalign pages."></textarea>
             <button onclick="generateWithAI()" id="aiGenBtn" class="btn-primary btn-ai w-full justify-center">Generate Structure</button>
             <button onclick="closeModal('aiModal')" class="mt-4 text-xs text-gray-500 hover:text-white">Cancel</button>
@@ -361,7 +369,6 @@
             });
         }
 
-        // --- FIXED: RENDER DASHBOARD (DEDUPLICATED) ---
         function renderDashboard() {
             const grid = document.getElementById('projectsGrid');
             if(!grid) return;
@@ -379,7 +386,6 @@
             const uniqueProjects = {};
             projects.forEach(p => {
                 const name = p.projectName || "Untitled";
-                // Since data is ordered by desc, the first one we find is the latest.
                 if (!uniqueProjects[name]) {
                     uniqueProjects[name] = p;
                 }
@@ -456,19 +462,26 @@
                 const el = document.createElement('div');
                 el.className = "glass-panel p-6 relative animate-in mb-6";
                 
-                // SINGLE COLUMN LAYOUT FOR SECTIONS (As Requested)
-                const sectionsHtml = page.sections.map((sec, sIdx) => `
-                    <div class="section-item flex items-center gap-3 mb-2 bg-black/30 p-3 rounded-lg group border border-transparent hover:border-white/10 transition-colors">
-                        <div class="w-1.5 h-1.5 bg-pink-500 rounded-full flex-shrink-0"></div>
-                        <input type="text" value="${sec}" onchange="updateSection(${pIdx}, ${sIdx}, this.value)" class="bg-transparent text-sm text-gray-300 w-full outline-none font-medium">
-                        
-                        <div class="action-btns flex gap-1">
-                            <button onclick="moveSection(${pIdx}, ${sIdx}, -1)" class="text-gray-600 hover:text-white p-1" title="Move Up"><i data-feather="arrow-up" class="w-3 h-3"></i></button>
-                            <button onclick="moveSection(${pIdx}, ${sIdx}, 1)" class="text-gray-600 hover:text-white p-1" title="Move Down"><i data-feather="arrow-down" class="w-3 h-3"></i></button>
-                            <button onclick="removeSection(${pIdx}, ${sIdx})" class="text-gray-600 hover:text-red-500 p-1" title="Remove"><i data-feather="x" class="w-3 h-3"></i></button>
+                // DATA NORMALIZATION (Handle old string vs new object format)
+                const sectionsHtml = page.sections.map((sec, sIdx) => {
+                    const secName = typeof sec === 'string' ? sec : sec.name;
+                    const secDesc = typeof sec === 'string' ? '' : (sec.description || '');
+                    
+                    return `
+                    <div class="section-item flex flex-col gap-2 mb-2 bg-black/30 p-3 rounded-lg group border border-transparent hover:border-white/10 transition-colors">
+                        <div class="flex items-center gap-3">
+                            <div class="w-1.5 h-1.5 bg-pink-500 rounded-full flex-shrink-0"></div>
+                            <input type="text" value="${secName}" onchange="updateSectionName(${pIdx}, ${sIdx}, this.value)" class="bg-transparent text-sm text-gray-300 w-full outline-none font-medium" placeholder="Section Name">
+                            
+                            <div class="action-btns flex gap-1">
+                                <button onclick="moveSection(${pIdx}, ${sIdx}, -1)" class="text-gray-600 hover:text-white p-1" title="Move Up"><i data-feather="arrow-up" class="w-3 h-3"></i></button>
+                                <button onclick="moveSection(${pIdx}, ${sIdx}, 1)" class="text-gray-600 hover:text-white p-1" title="Move Down"><i data-feather="arrow-down" class="w-3 h-3"></i></button>
+                                <button onclick="removeSection(${pIdx}, ${sIdx})" class="text-gray-600 hover:text-red-500 p-1" title="Remove"><i data-feather="x" class="w-3 h-3"></i></button>
+                            </div>
                         </div>
+                        <input type="text" value="${secDesc}" onchange="updateSectionDesc(${pIdx}, ${sIdx}, this.value)" class="purpose-input ml-4" placeholder="Purpose (e.g. Explains benefits to client)">
                     </div>
-                `).join('');
+                `}).join('');
 
                 el.innerHTML = `
                     <div class="flex justify-between items-center mb-4 pb-4 border-b border-white/5">
@@ -492,14 +505,33 @@
         window.addPage = () => { scopeData.push({ name: "New Page", sections: [] }); renderScopeBuilder(); };
         window.removePage = (idx) => { scopeData.splice(idx, 1); renderScopeBuilder(); };
         window.updatePageName = (idx, val) => { scopeData[idx].name = val; };
+        
         window.addSection = (idx) => {
             const input = document.getElementById(`newSecInput-${idx}`);
-            if(input.value.trim()) { scopeData[idx].sections.push(input.value.trim()); input.value=""; renderScopeBuilder(); setTimeout(()=>document.getElementById(`newSecInput-${idx}`).focus(), 50); }
+            if(input.value.trim()) { 
+                // Add as Object by default now
+                scopeData[idx].sections.push({ name: input.value.trim(), description: "" }); 
+                input.value=""; 
+                renderScopeBuilder(); 
+                setTimeout(()=>document.getElementById(`newSecInput-${idx}`).focus(), 50); 
+            }
         };
-        window.removeSection = (pIdx, sIdx) => { scopeData[pIdx].sections.splice(sIdx, 1); renderScopeBuilder(); };
-        window.updateSection = (pIdx, sIdx, val) => { scopeData[pIdx].sections[sIdx] = val; };
         
-        // NEW: Reordering
+        window.removeSection = (pIdx, sIdx) => { scopeData[pIdx].sections.splice(sIdx, 1); renderScopeBuilder(); };
+        
+        // Split updates for Name and Desc
+        window.updateSectionName = (pIdx, sIdx, val) => { 
+            const sec = scopeData[pIdx].sections[sIdx];
+            if (typeof sec === 'string') scopeData[pIdx].sections[sIdx] = { name: val, description: "" };
+            else sec.name = val;
+        };
+        
+        window.updateSectionDesc = (pIdx, sIdx, val) => { 
+            const sec = scopeData[pIdx].sections[sIdx];
+            if (typeof sec === 'string') scopeData[pIdx].sections[sIdx] = { name: sec, description: val };
+            else sec.description = val;
+        };
+        
         window.moveSection = (pIdx, sIdx, direction) => {
             const sections = scopeData[pIdx].sections;
             const newIndex = sIdx + direction;
@@ -517,14 +549,12 @@
             
             try {
                 const existing = metaMap[currentProjectID] || {};
-                
-                // SANITIZATION: Ensure no undefined values
                 const sig = (existing.scope && existing.scope.signature) ? existing.scope.signature : null;
                 
                 await window.setDoc(window.doc(window.db, "project_metadata", currentProjectID), {
                     scope: { 
                         pages: scopeData, 
-                        signature: sig // Can be null, but NOT undefined
+                        signature: sig 
                     }
                 }, { merge: true });
                 
@@ -579,15 +609,29 @@
 
             const apiKey = localStorage.getItem('reputifly_gemini_key');
             
-            // SMARTER PROMPT
+            // SMARTER PROMPT WITH DESCRIPTIONS
             const sysPrompt = `
                 You are a professional website architect.
-                Create a complete sitemap for the client.
+                Create a complete sitemap.
+                For EACH section, provide a short 1-sentence description of its purpose to educate the client.
+                
                 RULES:
                 1. Every page MUST have a Header and Footer section.
-                2. Home Page MUST have: Hero Section, About/Intro, Services Summary, Testimonials, CTA, Contact Form.
+                2. Home Page MUST have: Hero Section, About/Intro, Services Summary, CTA, Contact Form.
                 3. Contact Page MUST have: Map, Contact Form, Contact Info.
-                Output JSON ONLY format: { "pages": [{ "name": "Home", "sections": ["Hero", "About"] }] }
+                
+                Output JSON ONLY format: 
+                { 
+                    "pages": [
+                        { 
+                            "name": "Home", 
+                            "sections": [
+                                { "name": "Hero Section", "description": "High impact banner to capture attention immediately." },
+                                { "name": "Footer", "description": "Bottom navigation and legal links." }
+                            ] 
+                        }
+                    ] 
+                }
             `;
 
             try {
@@ -637,43 +681,51 @@
         }
 
         function renderClientScope(scope) {
-    const container = document.getElementById('clientScopeList');
-    container.innerHTML = ""; 
-    
-    const isSigned = !!scope.signature;
-    
-    if(isSigned) {
-        document.getElementById('signForm').classList.add('hidden');
-        document.getElementById('signSuccess').classList.remove('hidden');
-        document.getElementById('successSigner').innerText = scope.signature.name;
-        document.getElementById('successDate').innerText = new Date(scope.signature.timestamp.toDate()).toLocaleString();
-    }
+            const container = document.getElementById('clientScopeList');
+            container.innerHTML = ""; 
+            
+            const isSigned = !!scope.signature;
+            
+            if(isSigned) {
+                document.getElementById('signForm').classList.add('hidden');
+                document.getElementById('signSuccess').classList.remove('hidden');
+                document.getElementById('successSigner').innerText = scope.signature.name;
+                document.getElementById('successDate').innerText = new Date(scope.signature.timestamp.toDate()).toLocaleString();
+            }
 
-    scope.pages.forEach(page => {
-        const icon = isSigned ? `<i data-feather="check" class="w-4 h-4 text-green-500"></i>` : '';
-        const itemClass = isSigned ? "bg-green-900/10 border-green-500/20 text-green-400" : "bg-white/5 border-white/5 text-gray-300";
-        
-        // Changed to use flex-col for a strict 1-line-per-section vertical list
-        const sectionsHtml = page.sections.map(sec => `
-            <div class="flex items-center gap-4 p-4 rounded-xl border ${itemClass} transition-all duration-300">
-                ${isSigned ? '<i data-feather="check-circle" class="w-5 h-5 text-green-500"></i>' : '<div class="w-2 h-2 rounded-full bg-pink-500 shadow-[0_0_8px_rgba(230,57,127,0.5)]"></div>'}
-                <span class="text-base font-bold tracking-tight">${sec}</span>
-            </div>
-        `).join('');
+            scope.pages.forEach(page => {
+                const icon = isSigned ? `<i data-feather="check" class="w-4 h-4 text-green-500"></i>` : '';
+                const itemClass = isSigned ? "bg-green-900/10 border-green-500/20 text-green-400" : "bg-white/5 border-white/5 text-gray-300";
+                
+                const sectionsHtml = page.sections.map(sec => {
+                    // Handle Object vs String legacy data
+                    const name = typeof sec === 'string' ? sec : sec.name;
+                    const desc = (typeof sec === 'object' && sec.description) ? sec.description : '';
+                    
+                    return `
+                    <div class="flex flex-col p-4 rounded-xl border ${itemClass} transition-all duration-300">
+                        <div class="flex items-center gap-4">
+                            ${isSigned ? '<i data-feather="check-circle" class="w-5 h-5 text-green-500 flex-shrink-0"></i>' : '<div class="w-2 h-2 rounded-full bg-pink-500 shadow-[0_0_8px_rgba(230,57,127,0.5)] flex-shrink-0"></div>'}
+                            <span class="text-base font-bold tracking-tight">${name}</span>
+                        </div>
+                        ${desc ? `<p class="text-xs text-gray-500 mt-2 ml-6 pl-1 border-l-2 border-white/10 italic">${desc}</p>` : ''}
+                    </div>
+                `}).join('');
 
-        container.innerHTML += `
-            <div class="mb-12 animate-in">
-                <h3 class="text-xl font-bold text-white mb-5 pb-3 border-b border-white/10 flex items-center gap-3">
-                    ${page.name} ${icon}
-                </h3>
-                <div class="flex flex-col gap-3">
-                    ${sectionsHtml}
-                </div>
-            </div>
-        `;
-    });
-    feather.replace();
-}
+                container.innerHTML += `
+                    <div class="mb-12 animate-in">
+                        <h3 class="text-xl font-bold text-white mb-5 pb-3 border-b border-white/10 flex items-center gap-3">
+                            ${page.name} ${icon}
+                        </h3>
+                        <div class="flex flex-col gap-3">
+                            ${sectionsHtml}
+                        </div>
+                    </div>
+                `;
+            });
+            feather.replace();
+        }
+
         window.submitClientSignature = async () => {
             const name = document.getElementById('clientNameInput').value.trim();
             const checked = document.getElementById('confirmCheck').checked;
@@ -713,7 +765,7 @@
                     projectName: name, domain: domain, createdAt: window.serverTimestamp(), last_active: window.serverTimestamp()
                 });
                 await window.setDoc(window.doc(window.db, "project_metadata", name), {
-                    scope: { pages: [{ name: "Home", sections: ["Hero Section", "Footer"] }], signature: null }
+                    scope: { pages: [{ name: "Home", sections: [ {name: "Hero Section", description: "Top banner area"} ] }], signature: null }
                 });
                 closeModal('newProjectModal'); showToast("Created!");
             } catch(e) { console.error(e); showToast("Error"); }
