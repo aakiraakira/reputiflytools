@@ -778,19 +778,34 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
                     const app = window.firebaseApp.initializeApp(firebaseConfig);
                     db = window.firebaseApp.getFirestore(app);
                     
-                    // --- FIX: Only fetch history if we are the CREATOR (No ID in URL) ---
                     const urlParams = new URLSearchParams(window.location.search);
+
+                    // --- LAZY LOAD LOGIC (Saves $$$) ---
+                    // 1. If we are a CLIENT (have ID), do nothing.
+                    // 2. If we are YOU (no ID), wait for a click.
                     if(!urlParams.get('id')) {
-                         fetchProjectHistory(); 
+                        const pInput = document.getElementById('projectNameInput');
+                        
+                        // This function runs ONLY the first time you click
+                        const loadHistoryOnce = () => {
+                            console.log("Loading history..."); // Visual confirmation
+                            fetchProjectHistory();
+                            
+                            // Immediately remove itself so it never runs again this session
+                            pInput.removeEventListener('focus', loadHistoryOnce);
+                            pInput.removeEventListener('click', loadHistoryOnce);
+                        };
+                        
+                        if(pInput) {
+                            // Listen for interaction
+                            pInput.addEventListener('focus', loadHistoryOnce);
+                            pInput.addEventListener('click', loadHistoryOnce);
+                        }
                     }
-                    // -------------------------------------------------------------------
+                    // ------------------------------------
                     
                     if(urlParams.get('id')) {
                         checkUrlForProject();
-                    } else {
-                        // Optional: If you updated checkUrlForProject earlier to handle "No ID", call it here too.
-                        // If you are using the original logic where "No ID" = Setup Screen, the code above is sufficient.
-                        checkUrlForProject(); 
                     }
                 }
             } catch(e) { console.error("Firebase init error", e); }
@@ -1442,11 +1457,11 @@ async function fetchProjectHistory() {
     if(!db) return;
     try {
         // Fetch last 100 projects to build history
-        const q = window.firebaseApp.query(
-            window.firebaseApp.collection(db, "projects"), 
-            window.firebaseApp.orderBy("createdAt", "desc"), 
-            window.firebaseApp.limit(100)
-        );
+       const q = window.firebaseApp.query(
+    window.firebaseApp.collection(db, "projects"), 
+    window.firebaseApp.orderBy("createdAt", "desc"), 
+    window.firebaseApp.limit(20) // <--- Reduced to 15. Saves quota, still useful.
+);
         const snapshot = await window.firebaseApp.getDocs(q);
         
         const tempMap = {};
