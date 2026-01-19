@@ -13,7 +13,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-        import { getFirestore, collection, onSnapshot, doc, setDoc, getDoc, addDoc, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, getDoc, addDoc, serverTimestamp, query, orderBy, deleteDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDqpzqEVtrEtQvvmcMie_Et7xiNh8QU_Ao",
@@ -193,6 +193,7 @@
                         <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Actions</h3>
                         <div class="space-y-3">
                             <button onclick="addPage()" class="btn-secondary w-full justify-start text-sm"><i data-feather="plus-square" class="w-4 h-4 text-pink-500"></i> Add Page</button>
+                            <button onclick="deleteCurrentProject()" class="btn-secondary w-full justify-start text-sm text-red-400 border-red-500/20 hover:bg-red-500/10"><i data-feather="trash-2" class="w-4 h-4"></i> Delete Project</button>
                             <button onclick="saveScope()" id="saveScopeBtn" class="btn-primary w-full justify-start text-sm"><i data-feather="save" class="w-4 h-4"></i> Save Draft</button>
                             <div class="h-px bg-white/10 my-2"></div>
                             <button onclick="copyClientLink()" class="btn-secondary w-full justify-start text-sm text-blue-400 border-blue-500/20 hover:bg-blue-500/10"><i data-feather="link" class="w-4 h-4"></i> Copy Client Link</button>
@@ -319,25 +320,26 @@
         document.addEventListener('DOMContentLoaded', () => {
             feather.replace();
             
-            // Auto-load Saved Password
+            const urlParams = new URLSearchParams(window.location.search);
+            const clientProject = urlParams.get('client_view');
+
+            // --- FIX 1: If Client Link, STOP here. Do not load Admin logic. ---
+            if (clientProject) {
+                const auth = document.getElementById('authScreen');
+                if(auth) auth.remove(); 
+                const app = document.getElementById('appContainer');
+                if(app) app.remove();
+                initClientView(clientProject);
+                return; // <--- This 'return' is critical
+            }
+
+            // Auto-load Saved Password (Admin Only)
             const savedPass = localStorage.getItem('scope_admin_auth');
             if (savedPass === ADMIN_PASS) {
                 const authScreen = document.getElementById('authScreen');
                 if(authScreen) authScreen.classList.add('hidden');
                 document.getElementById('appContainer').classList.remove('hidden');
                 initFirebaseListeners();
-            }
-
-            const urlParams = new URLSearchParams(window.location.search);
-            const clientProject = urlParams.get('client_view');
-
-            if (clientProject) {
-                // Client Mode
-                const auth = document.getElementById('authScreen');
-                if(auth) auth.remove(); 
-                const app = document.getElementById('appContainer');
-                if(app) app.remove();
-                initClientView(clientProject);
             }
         });
 
@@ -362,12 +364,24 @@
                 renderDashboard();
             });
 
-            window.onSnapshot(window.collection(window.db, "project_metadata"), (snapshot) => {
-                metaMap = {};
-                snapshot.forEach(doc => metaMap[doc.id] = doc.data());
-                renderDashboard();
-            });
+            
         }
+        window.deleteCurrentProject = async () => {
+    if(confirm("Are you sure? This will delete the project and sitemap data permanently.")) {
+        try {
+            // Delete the Project Entry
+            const q = window.query(window.collection(window.db, "projects"), window.where("projectName", "==", currentProjectID));
+            const snapshot = await window.getDocs(q);
+            snapshot.forEach((doc) => window.deleteDoc(doc.ref));
+
+            // Delete the Metadata (Scope/Signatures)
+            await window.deleteDoc(window.doc(window.db, "project_metadata", currentProjectID));
+
+            showToast("Project Deleted");
+            setTimeout(() => location.reload(), 1000);
+        } catch(e) { console.error(e); showToast("Error deleting"); }
+    }
+};
 
         function renderDashboard() {
             const grid = document.getElementById('projectsGrid');
@@ -423,8 +437,10 @@
         }
 
         // --- EDITOR LOGIC ---
-        function openEditor(project) {
+        async function openEditor(project) {
             currentProjectID = project.projectName;
+            
+            // UI Switching
             document.getElementById('dashboardView').classList.add('hidden');
             document.getElementById('editorView').classList.remove('hidden');
             document.getElementById('dashBtn').classList.remove('hidden');
@@ -432,22 +448,38 @@
             
             document.getElementById('editProjectTitle').innerText = project.projectName;
             document.getElementById('editProjectDomain').innerText = project.domain;
-
-            const meta = metaMap[currentProjectID] || {};
-            scopeData = (meta.scope && meta.scope.pages) ? meta.scope.pages : [];
             
-            renderScopeBuilder();
+            // --- FIX 2: FETCH DATA ON CLICK (Lazy Load) ---
+            // Visual loading state
+            document.getElementById('scopeBuilderArea').innerHTML = '<div class="text-center p-10 text-gray-500">Loading scope data...</div>';
             
-            const sigCard = document.getElementById('signatureStatusCard');
-            if(meta.scope && meta.scope.signature) {
-                sigCard.classList.remove('hidden');
-                document.getElementById('signerNameDisplay').innerText = meta.scope.signature.name;
-                document.getElementById('signDateDisplay').innerText = new Date(meta.scope.signature.timestamp.toDate()).toLocaleString();
-            } else {
-                sigCard.classList.add('hidden');
+            try {
+                // Fetch FRESH data for just this one project (1 Read)
+                const docSnap = await window.getDoc(window.doc(window.db, "project_metadata", currentProjectID));
+                
+                if (docSnap.exists()) {
+                    const meta = docSnap.data();
+                    scopeData = (meta.scope && meta.scope.pages) ? meta.scope.pages : [];
+                    
+                    // Handle Signature Display
+                    const sigCard = document.getElementById('signatureStatusCard');
+                    if(meta.scope && meta.scope.signature) {
+                        sigCard.classList.remove('hidden');
+                        document.getElementById('signerNameDisplay').innerText = meta.scope.signature.name;
+                        document.getElementById('signDateDisplay').innerText = new Date(meta.scope.signature.timestamp.toDate()).toLocaleString();
+                    } else {
+                        sigCard.classList.add('hidden');
+                    }
+                } else {
+                    scopeData = []; // No data yet
+                }
+                
+                renderScopeBuilder();
+            } catch (e) {
+                console.error("Error loading scope:", e);
+                showToast("Could not load scope data");
             }
         }
-
         function renderScopeBuilder() {
             const container = document.getElementById('scopeBuilderArea');
             container.innerHTML = "";
