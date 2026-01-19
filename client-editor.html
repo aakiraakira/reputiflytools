@@ -779,31 +779,30 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
                     db = window.firebaseApp.getFirestore(app);
                     
                     const urlParams = new URLSearchParams(window.location.search);
-
-                    // --- LAZY LOAD LOGIC (Saves $$$) ---
-                    // 1. If we are a CLIENT (have ID), do nothing.
-                    // 2. If we are YOU (no ID), wait for a click.
+                    
+                    // --- OPTIMIZATION: Manual Load Only ---
                     if(!urlParams.get('id')) {
                         const pInput = document.getElementById('projectNameInput');
-                        
-                        // This function runs ONLY the first time you click
-                        const loadHistoryOnce = () => {
-                            console.log("Loading history..."); // Visual confirmation
-                            fetchProjectHistory();
-                            
-                            // Immediately remove itself so it never runs again this session
-                            pInput.removeEventListener('focus', loadHistoryOnce);
-                            pInput.removeEventListener('click', loadHistoryOnce);
-                        };
-                        
                         if(pInput) {
-                            // Listen for interaction
-                            pInput.addEventListener('focus', loadHistoryOnce);
-                            pInput.addEventListener('click', loadHistoryOnce);
+                            // 1. Single Click: Allows typing new project (0 Reads)
+                            // 2. Double Click: Loads history (Cost: 15 Reads)
+                            pInput.addEventListener('dblclick', () => {
+                                // Only fetch if we haven't already
+                                if(projectHistory.length === 0) {
+                                    const originalPlaceholder = pInput.placeholder;
+                                    pInput.placeholder = "Loading history...";
+                                    fetchProjectHistory().then(() => {
+                                        pInput.placeholder = originalPlaceholder;
+                                        // Force dropdown to show immediately after loading
+                                        pInput.dispatchEvent(new Event('focus'));
+                                        renderProjects(''); // Show list immediately
+                                    });
+                                }
+                            });
                         }
                     }
-                    // ------------------------------------
-                    
+                    // --------------------------------------
+
                     if(urlParams.get('id')) {
                         checkUrlForProject();
                     }
