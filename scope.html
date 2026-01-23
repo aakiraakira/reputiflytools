@@ -10,6 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
@@ -35,11 +36,9 @@
         window.serverTimestamp = serverTimestamp;
         window.query = query;
         window.orderBy = orderBy;
-        // --- ADD THESE LINES BELOW ---
         window.deleteDoc = deleteDoc;
         window.getDocs = getDocs;
         window.where = where;
-        // -----------------------------
         
         window.dispatchEvent(new Event('firebaseReady'));
     </script>
@@ -136,7 +135,6 @@
         .section-item:hover .action-btns { opacity: 1; }
         .action-btns { opacity: 0; transition: opacity 0.2s; }
         
-        /* New Styles for Purpose Field */
         .purpose-input {
             background: transparent; border: none; border-bottom: 1px dashed rgba(255,255,255,0.1);
             color: #888; font-size: 11px; width: 100%; padding: 4px 0; outline: none; transition: 0.2s;
@@ -146,6 +144,8 @@
     </style>
 </head>
 <body class="antialiased">
+
+    <canvas id="exportCanvas" style="display: none;"></canvas>
 
     <div id="authScreen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#050507] p-4 transition-opacity duration-500">
         <div class="glass-panel p-8 w-full max-w-sm text-center">
@@ -200,6 +200,9 @@
                             <button onclick="addPage()" class="btn-secondary w-full justify-start text-sm"><i data-feather="plus-square" class="w-4 h-4 text-pink-500"></i> Add Page</button>
                             <button onclick="deleteCurrentProject()" class="btn-secondary w-full justify-start text-sm text-red-400 border-red-500/20 hover:bg-red-500/10"><i data-feather="trash-2" class="w-4 h-4"></i> Delete Project</button>
                             <button onclick="saveScope()" id="saveScopeBtn" class="btn-primary w-full justify-start text-sm"><i data-feather="save" class="w-4 h-4"></i> Save Draft</button>
+                            
+                            <button onclick="exportSitemapImage()" class="btn-secondary w-full justify-start text-sm text-green-400 border-green-500/20 hover:bg-green-500/10"><i data-feather="download" class="w-4 h-4"></i> Download Sitemap</button>
+                            
                             <div class="h-px bg-white/10 my-2"></div>
                             <button onclick="copyClientLink()" class="btn-secondary w-full justify-start text-sm text-blue-400 border-blue-500/20 hover:bg-blue-500/10"><i data-feather="link" class="w-4 h-4"></i> Copy Client Link</button>
                         </div>
@@ -328,17 +331,15 @@
             const urlParams = new URLSearchParams(window.location.search);
             const clientProject = urlParams.get('client_view');
 
-            // --- FIX 1: If Client Link, STOP here. Do not load Admin logic. ---
             if (clientProject) {
                 const auth = document.getElementById('authScreen');
                 if(auth) auth.remove(); 
                 const app = document.getElementById('appContainer');
                 if(app) app.remove();
                 initClientView(clientProject);
-                return; // <--- This 'return' is critical
+                return;
             }
 
-            // Auto-load Saved Password (Admin Only)
             const savedPass = localStorage.getItem('scope_admin_auth');
             if (savedPass === ADMIN_PASS) {
                 const authScreen = document.getElementById('authScreen');
@@ -360,7 +361,7 @@
             }
         }
 
-        // --- FIREBASE LOGIC ---
+        // --- FIREBASE ---
         function initFirebaseListeners() {
             const q = window.query(window.collection(window.db, "projects"), window.orderBy("createdAt", "desc"));
             window.onSnapshot(q, (snapshot) => {
@@ -368,25 +369,20 @@
                 snapshot.forEach(doc => projects.push({ id: doc.id, ...doc.data() }));
                 renderDashboard();
             });
-
-            
         }
+
         window.deleteCurrentProject = async () => {
-    if(confirm("Are you sure? This will delete the project and sitemap data permanently.")) {
-        try {
-            // Delete the Project Entry
-            const q = window.query(window.collection(window.db, "projects"), window.where("projectName", "==", currentProjectID));
-            const snapshot = await window.getDocs(q);
-            snapshot.forEach((doc) => window.deleteDoc(doc.ref));
-
-            // Delete the Metadata (Scope/Signatures)
-            await window.deleteDoc(window.doc(window.db, "project_metadata", currentProjectID));
-
-            showToast("Project Deleted");
-            setTimeout(() => location.reload(), 1000);
-        } catch(e) { console.error(e); showToast("Error deleting"); }
-    }
-};
+            if(confirm("Are you sure? This will delete the project and sitemap data permanently.")) {
+                try {
+                    const q = window.query(window.collection(window.db, "projects"), window.where("projectName", "==", currentProjectID));
+                    const snapshot = await window.getDocs(q);
+                    snapshot.forEach((doc) => window.deleteDoc(doc.ref));
+                    await window.deleteDoc(window.doc(window.db, "project_metadata", currentProjectID));
+                    showToast("Project Deleted");
+                    setTimeout(() => location.reload(), 1000);
+                } catch(e) { console.error(e); showToast("Error deleting"); }
+            }
+        };
 
         function renderDashboard() {
             const grid = document.getElementById('projectsGrid');
@@ -401,72 +397,44 @@
                 </div>
             `;
 
-            // NEW: Group projects by Name to avoid duplicates
             const uniqueProjects = {};
             projects.forEach(p => {
                 const name = p.projectName || "Untitled";
-                if (!uniqueProjects[name]) {
-                    uniqueProjects[name] = p;
-                }
+                if (!uniqueProjects[name]) { uniqueProjects[name] = p; }
             });
 
             Object.values(uniqueProjects).forEach(p => {
-                const meta = metaMap[p.projectName] || {}; 
-                const isSigned = meta.scope && meta.scope.signature;
-                const pageCount = meta.scope && meta.scope.pages ? meta.scope.pages.length : 0;
-
-                const statusHtml = isSigned 
-                    ? `<span class="status-badge status-signed"><i data-feather="check" class="w-3 h-3"></i> Signed</span>`
-                    : `<span class="status-badge status-draft">Draft</span>`;
-
                 const card = document.createElement('div');
                 card.className = "glass-panel p-6 cursor-pointer hover:border-white/20 relative overflow-hidden group";
-                if(isSigned) card.style.borderColor = "rgba(34, 197, 94, 0.3)";
-                
                 card.onclick = () => openEditor(p);
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-4">
                         <div class="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center text-gray-400 group-hover:text-white group-hover:bg-white/10 transition"><i data-feather="layout" class="w-5 h-5"></i></div>
-                        ${statusHtml}
+                        <span class="status-badge status-draft">Edit</span>
                     </div>
                     <h3 class="text-xl font-bold text-white mb-1 truncate">${p.projectName || 'Untitled'}</h3>
                     <p class="text-xs text-gray-500 font-mono mb-6 truncate">${p.domain || 'No Domain'}</p>
-                    <div class="flex items-center gap-4 text-xs font-bold text-gray-500 border-t border-white/5 pt-4">
-                        <span class="flex items-center gap-1"><i data-feather="file" class="w-3 h-3"></i> ${pageCount} Pages in Scope</span>
-                        <span class="flex items-center gap-1"><i data-feather="clock" class="w-3 h-3"></i> ${p.updatedAt ? new Date(p.updatedAt.toDate()).toLocaleDateString() : 'New'}</span>
-                    </div>
                 `;
                 grid.appendChild(card);
             });
             feather.replace();
         }
 
-        // --- EDITOR LOGIC ---
         async function openEditor(project) {
             currentProjectID = project.projectName;
-            
-            // UI Switching
             document.getElementById('dashboardView').classList.add('hidden');
             document.getElementById('editorView').classList.remove('hidden');
             document.getElementById('dashBtn').classList.remove('hidden');
             document.getElementById('newProjBtn').classList.add('hidden');
-            
             document.getElementById('editProjectTitle').innerText = project.projectName;
             document.getElementById('editProjectDomain').innerText = project.domain;
-            
-            // --- FIX 2: FETCH DATA ON CLICK (Lazy Load) ---
-            // Visual loading state
             document.getElementById('scopeBuilderArea').innerHTML = '<div class="text-center p-10 text-gray-500">Loading scope data...</div>';
             
             try {
-                // Fetch FRESH data for just this one project (1 Read)
                 const docSnap = await window.getDoc(window.doc(window.db, "project_metadata", currentProjectID));
-                
                 if (docSnap.exists()) {
                     const meta = docSnap.data();
                     scopeData = (meta.scope && meta.scope.pages) ? meta.scope.pages : [];
-                    
-                    // Handle Signature Display
                     const sigCard = document.getElementById('signatureStatusCard');
                     if(meta.scope && meta.scope.signature) {
                         sigCard.classList.remove('hidden');
@@ -476,15 +444,15 @@
                         sigCard.classList.add('hidden');
                     }
                 } else {
-                    scopeData = []; // No data yet
+                    scopeData = [];
                 }
-                
                 renderScopeBuilder();
             } catch (e) {
                 console.error("Error loading scope:", e);
                 showToast("Could not load scope data");
             }
         }
+
         function renderScopeBuilder() {
             const container = document.getElementById('scopeBuilderArea');
             container.innerHTML = "";
@@ -498,8 +466,6 @@
             scopeData.forEach((page, pIdx) => {
                 const el = document.createElement('div');
                 el.className = "glass-panel p-6 relative animate-in mb-6";
-                
-                // DATA NORMALIZATION (Handle old string vs new object format)
                 const sectionsHtml = page.sections.map((sec, sIdx) => {
                     const secName = typeof sec === 'string' ? sec : sec.name;
                     const secDesc = typeof sec === 'string' ? '' : (sec.description || '');
@@ -538,7 +504,7 @@
             feather.replace();
         }
 
-        // --- DATA OPERATIONS ---
+        // --- SCOPE ACTIONS ---
         window.addPage = () => { scopeData.push({ name: "New Page", sections: [] }); renderScopeBuilder(); };
         window.removePage = (idx) => { scopeData.splice(idx, 1); renderScopeBuilder(); };
         window.updatePageName = (idx, val) => { scopeData[idx].name = val; };
@@ -546,17 +512,14 @@
         window.addSection = (idx) => {
             const input = document.getElementById(`newSecInput-${idx}`);
             if(input.value.trim()) { 
-                // Add as Object by default now
                 scopeData[idx].sections.push({ name: input.value.trim(), description: "" }); 
-                input.value=""; 
-                renderScopeBuilder(); 
+                input.value=""; renderScopeBuilder(); 
                 setTimeout(()=>document.getElementById(`newSecInput-${idx}`).focus(), 50); 
             }
         };
         
         window.removeSection = (pIdx, sIdx) => { scopeData[pIdx].sections.splice(sIdx, 1); renderScopeBuilder(); };
         
-        // Split updates for Name and Desc
         window.updateSectionName = (pIdx, sIdx, val) => { 
             const sec = scopeData[pIdx].sections[sIdx];
             if (typeof sec === 'string') scopeData[pIdx].sections[sIdx] = { name: val, description: "" };
@@ -578,28 +541,23 @@
             }
         };
 
-        // --- FIXED SAVE FUNCTION ---
         window.saveScope = async () => {
             const btn = document.getElementById('saveScopeBtn');
             const originalText = btn.innerHTML;
             btn.innerHTML = "Saving...";
             
             try {
-                const existing = metaMap[currentProjectID] || {};
-                const sig = (existing.scope && existing.scope.signature) ? existing.scope.signature : null;
+                const existingRef = window.doc(window.db, "project_metadata", currentProjectID);
+                const existingSnap = await window.getDoc(existingRef);
+                let existingData = existingSnap.exists() ? existingSnap.data() : {};
+                let sig = (existingData.scope && existingData.scope.signature) ? existingData.scope.signature : null;
                 
-                await window.setDoc(window.doc(window.db, "project_metadata", currentProjectID), {
-                    scope: { 
-                        pages: scopeData, 
-                        signature: sig 
-                    }
+                await window.setDoc(existingRef, {
+                    scope: { pages: scopeData, signature: sig }
                 }, { merge: true });
                 
                 showToast("Scope Saved Successfully!");
-            } catch(e) { 
-                console.error("Save Error:", e); 
-                showToast("Error Saving. See Console."); 
-            }
+            } catch(e) { console.error("Save Error:", e); showToast("Error Saving. See Console."); }
             btn.innerHTML = originalText;
         };
 
@@ -616,7 +574,6 @@
             document.getElementById('newProjBtn').classList.remove('hidden');
         };
 
-        // --- SETTINGS & AI ---
         window.openSettings = () => {
             const key = localStorage.getItem('reputifly_gemini_key');
             if(key) document.getElementById('apiKeyInput').value = key;
@@ -645,31 +602,7 @@
             btn.disabled = true;
 
             const apiKey = localStorage.getItem('reputifly_gemini_key');
-            
-            // SMARTER PROMPT WITH DESCRIPTIONS
-            const sysPrompt = `
-                You are a professional website architect.
-                Create a complete sitemap.
-                For EACH section, provide a short 1-sentence description of its purpose to educate the client.
-                
-                RULES:
-                1. Every page MUST have a Header and Footer section.
-                2. Home Page MUST have: Hero Section, About/Intro, Services Summary, CTA, Contact Form.
-                3. Contact Page MUST have: Map, Contact Form, Contact Info.
-                
-                Output JSON ONLY format: 
-                { 
-                    "pages": [
-                        { 
-                            "name": "Home", 
-                            "sections": [
-                                { "name": "Hero Section", "description": "High impact banner to capture attention immediately." },
-                                { "name": "Footer", "description": "Bottom navigation and legal links." }
-                            ] 
-                        }
-                    ] 
-                }
-            `;
+            const sysPrompt = `You are a professional website architect. Create a complete sitemap. For EACH section, provide a short 1-sentence description of its purpose to educate the client. Output JSON ONLY format: { "pages": [{ "name": "Home", "sections": [{ "name": "Hero Section", "description": "High impact banner." }] }] }`;
 
             try {
                 const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
@@ -681,38 +614,25 @@
                 const data = await response.json();
                 let rawText = data.candidates[0].content.parts[0].text;
                 rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-                
                 const json = JSON.parse(rawText);
-                if(json.pages) {
-                    scopeData = json.pages;
-                    renderScopeBuilder();
-                    saveScope(); // Auto-save
-                    closeModal('aiModal');
-                    showToast("Sitemap Generated! ✨");
-                }
+                if(json.pages) { scopeData = json.pages; renderScopeBuilder(); saveScope(); closeModal('aiModal'); showToast("Sitemap Generated! ✨"); }
             } catch(e) { console.error(e); alert("AI Error."); }
 
             btn.innerHTML = originalText;
             btn.disabled = false;
         }
 
-        // --- CLIENT VIEW (FIXED) ---
         async function initClientView(projectName) {
             document.getElementById('clientView').classList.remove('hidden');
             currentProjectID = decodeURIComponent(projectName);
-            
-            const titleEl = document.getElementById('clientProjectTitle');
-            if(titleEl) titleEl.innerText = currentProjectID;
+            document.getElementById('clientProjectTitle').innerText = currentProjectID;
 
             try {
                 const docSnap = await window.getDoc(window.doc(window.db, "project_metadata", currentProjectID));
                 if(docSnap.exists()) {
                     const data = docSnap.data();
-                    if(data.scope && data.scope.pages) {
-                        renderClientScope(data.scope);
-                    } else {
-                        document.getElementById('clientScopeList').innerHTML = "<div class='text-center p-8 text-gray-500'>Scope pending...</div>";
-                    }
+                    if(data.scope && data.scope.pages) { renderClientScope(data.scope); }
+                    else { document.getElementById('clientScopeList').innerHTML = "<div class='text-center p-8 text-gray-500'>Scope pending...</div>"; }
                 }
             } catch(e) { console.error(e); }
         }
@@ -720,7 +640,6 @@
         function renderClientScope(scope) {
             const container = document.getElementById('clientScopeList');
             container.innerHTML = ""; 
-            
             const isSigned = !!scope.signature;
             
             if(isSigned) {
@@ -731,16 +650,11 @@
             }
 
             scope.pages.forEach(page => {
-                const icon = isSigned ? `<i data-feather="check" class="w-4 h-4 text-green-500"></i>` : '';
-                const itemClass = isSigned ? "bg-green-900/10 border-green-500/20 text-green-400" : "bg-white/5 border-white/5 text-gray-300";
-                
                 const sectionsHtml = page.sections.map(sec => {
-                    // Handle Object vs String legacy data
                     const name = typeof sec === 'string' ? sec : sec.name;
                     const desc = (typeof sec === 'object' && sec.description) ? sec.description : '';
-                    
                     return `
-                    <div class="flex flex-col p-4 rounded-xl border ${itemClass} transition-all duration-300">
+                    <div class="flex flex-col p-4 rounded-xl border ${isSigned ? "bg-green-900/10 border-green-500/20 text-green-400" : "bg-white/5 border-white/5 text-gray-300"} transition-all duration-300">
                         <div class="flex items-center gap-4">
                             ${isSigned ? '<i data-feather="check-circle" class="w-5 h-5 text-green-500 flex-shrink-0"></i>' : '<div class="w-2 h-2 rounded-full bg-pink-500 shadow-[0_0_8px_rgba(230,57,127,0.5)] flex-shrink-0"></div>'}
                             <span class="text-base font-bold tracking-tight">${name}</span>
@@ -751,12 +665,8 @@
 
                 container.innerHTML += `
                     <div class="mb-12 animate-in">
-                        <h3 class="text-xl font-bold text-white mb-5 pb-3 border-b border-white/10 flex items-center gap-3">
-                            ${page.name} ${icon}
-                        </h3>
-                        <div class="flex flex-col gap-3">
-                            ${sectionsHtml}
-                        </div>
+                        <h3 class="text-xl font-bold text-white mb-5 pb-3 border-b border-white/10 flex items-center gap-3">${page.name}</h3>
+                        <div class="flex flex-col gap-3">${sectionsHtml}</div>
                     </div>
                 `;
             });
@@ -767,27 +677,17 @@
             const name = document.getElementById('clientNameInput').value.trim();
             const checked = document.getElementById('confirmCheck').checked;
             if(!name || !checked) return showToast("Please fill all fields");
-
             const btn = document.querySelector('#signForm button');
             btn.innerText = "Signing..."; btn.disabled = true;
-
             try {
                 const docRef = window.doc(window.db, "project_metadata", currentProjectID);
                 const docSnap = await window.getDoc(docRef);
                 const data = docSnap.data();
-                
-                await window.setDoc(docRef, { 
-                    scope: { 
-                        ...data.scope, 
-                        signature: { name: name, timestamp: window.serverTimestamp() } 
-                    } 
-                }, { merge: true });
-                
+                await window.setDoc(docRef, { scope: { ...data.scope, signature: { name: name, timestamp: window.serverTimestamp() } } }, { merge: true });
                 location.reload();
             } catch(e) { console.error(e); showToast("Error Signing"); btn.disabled = false; }
         };
 
-        // --- UTILS ---
         window.createNewProjectModal = () => openModal('newProjectModal');
         window.closeModal = (id, e) => { if(e && e.target !== document.getElementById(id)) return; document.getElementById(id).classList.remove('active'); };
         window.openModal = (id) => document.getElementById(id).classList.add('active');
@@ -796,14 +696,9 @@
             const name = document.getElementById('newProjName').value.trim();
             const domain = document.getElementById('newProjDomain').value.trim();
             if(!name) return showToast("Name required");
-
             try {
-                await window.addDoc(window.collection(window.db, "projects"), {
-                    projectName: name, domain: domain, createdAt: window.serverTimestamp(), last_active: window.serverTimestamp()
-                });
-                await window.setDoc(window.doc(window.db, "project_metadata", name), {
-                    scope: { pages: [{ name: "Home", sections: [ {name: "Hero Section", description: "Top banner area"} ] }], signature: null }
-                });
+                await window.addDoc(window.collection(window.db, "projects"), { projectName: name, domain: domain, createdAt: window.serverTimestamp(), last_active: window.serverTimestamp() });
+                await window.setDoc(window.doc(window.db, "project_metadata", name), { scope: { pages: [{ name: "Home", sections: [ {name: "Hero Section", description: "Top banner area"} ] }], signature: null } });
                 closeModal('newProjectModal'); showToast("Created!");
             } catch(e) { console.error(e); showToast("Error"); }
         };
@@ -814,6 +709,113 @@
             t.classList.add('show');
             setTimeout(() => t.classList.remove('show'), 3000);
         }
+
+        // --- NEW: EXPORT SITEMAP IMAGE FUNCTION ---
+        window.exportSitemapImage = () => {
+            const canvas = document.getElementById('exportCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // 1. Calculate Dimensions based on scopeData
+            // Max height depends on number of sections. Max width depends on number of pages.
+            // Using Gloopmap style layout logic
+            
+            const pages = scopeData;
+            const maxSections = Math.max(...pages.map(p => p.sections.length), 0);
+            
+            const nodeHeight = 40;
+            const nodeGap = 15;
+            const headerHeight = 150;
+            const colWidth = 220; // Width allocated per page column
+            const canvasWidth = Math.max(1200, pages.length * colWidth + 100);
+            const canvasHeight = headerHeight + (maxSections * (nodeHeight + nodeGap)) + 150;
+
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+
+            // 2. Clear & Background (White for clean export)
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 3. Draw Project Name (Root)
+            const rootX = canvasWidth / 2;
+            const rootY = 50;
+            const brandColor = '#2563eb'; // Blue export theme
+            const textColor = '#1e293b';
+
+            ctx.textAlign = 'center';
+            ctx.lineWidth = 2;
+            ctx.font = 'bold 16px Inter, sans-serif';
+
+            // Draw Root
+            ctx.fillStyle = '#1e293b'; // Dark bg for root
+            ctx.strokeStyle = '#0f172a';
+            ctx.fillRect(rootX - 100, rootY, 200, 50);
+            ctx.strokeRect(rootX - 100, rootY, 200, 50);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(currentProjectID || 'WEBSITE PROJECT', rootX, rootY + 30);
+
+            // 4. Draw Pages & Sections
+            const pageY = 150;
+            // Center the pages block
+            const totalPagesW = pages.length * colWidth;
+            const startX = (canvasWidth - totalPagesW) / 2 + (colWidth / 2);
+
+            pages.forEach((page, i) => {
+                const x = startX + (i * colWidth);
+                
+                // Connector from Root
+                ctx.beginPath();
+                ctx.strokeStyle = '#94a3b8';
+                ctx.moveTo(rootX, rootY + 50);
+                ctx.lineTo(rootX, (rootY + 50 + pageY) / 2);
+                ctx.lineTo(x, (rootY + 50 + pageY) / 2);
+                ctx.lineTo(x, pageY);
+                ctx.stroke();
+
+                // Page Node
+                ctx.fillStyle = brandColor;
+                ctx.strokeStyle = brandColor;
+                ctx.fillRect(x - 90, pageY, 180, 45);
+                ctx.strokeRect(x - 90, pageY, 180, 45);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 14px Inter, sans-serif';
+                ctx.fillText(page.name.toUpperCase(), x, pageY + 28);
+
+                // Child Sections
+                let currentY = pageY + 45 + 20;
+                
+                if (page.sections.length > 0) {
+                    // Vertical Line
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#cbd5e1';
+                    ctx.moveTo(x, pageY + 45);
+                    ctx.lineTo(x, currentY + ((page.sections.length - 1) * 55));
+                    ctx.stroke();
+
+                    page.sections.forEach(sect => {
+                        const secName = typeof sect === 'string' ? sect : sect.name;
+                        
+                        // Section Box (White Pill)
+                        ctx.fillStyle = '#f8fafc';
+                        ctx.strokeStyle = '#cbd5e1';
+                        ctx.fillRect(x - 80, currentY, 160, 40);
+                        ctx.strokeRect(x - 80, currentY, 160, 40);
+                        
+                        ctx.fillStyle = '#334155';
+                        ctx.font = '500 12px Inter, sans-serif';
+                        let displayName = secName.length > 22 ? secName.substring(0, 20) + '...' : secName;
+                        ctx.fillText(displayName, x, currentY + 25);
+
+                        currentY += 55;
+                    });
+                }
+            });
+
+            // 5. Download
+            canvas.toBlob(function(blob) {
+                saveAs(blob, `${currentProjectID}_sitemap.png`);
+            });
+        };
     </script>
 </body>
 </html>
