@@ -1313,16 +1313,35 @@ function updateSharingMenu() {
 }
 
         // --- GLOBAL PASTE LISTENER ---
+        // --- GLOBAL PASTE LISTENER (FIXED) ---
         document.addEventListener('paste', (e) => {
-            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            const clipboardData = e.clipboardData || window.clipboardData;
+            if (!clipboardData) return;
+            
+            const items = clipboardData.items;
             const isImageModalOpen = document.getElementById('imageModal').classList.contains('active');
-            for (let index in items) {
-                const item = items[index];
+            
+            // Loop correctly through clipboard items
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
                 if (item.kind === 'file' && item.type.includes('image/')) {
                     if (isImageModalOpen) {
                         e.preventDefault();
-                        processNewImage(item.getAsFile()); 
-                        return;
+                        e.stopPropagation();
+                        
+                        // Visual Feedback immediately
+                        const dropContent = document.getElementById('dropContent');
+                        dropContent.innerHTML = `
+                            <div class="flex flex-col items-center animate-pulse">
+                                <div class="loader w-8 h-8 border-pink-500 mb-3"></div>
+                                <span class="text-sm font-bold text-white">Paste Detected!</span>
+                                <span class="text-xs text-gray-400">Processing...</span>
+                            </div>
+                        `;
+                        
+                        const file = item.getAsFile();
+                        processNewImage(file); 
+                        return; // Stop after finding the first image
                     }
                 }
             }
@@ -1980,57 +1999,81 @@ function finishSetup() {
             if (!currentElement) return;
             const dropContent = document.getElementById('dropContent');
             const originalHTML = dropContent.innerHTML;
-            dropContent.innerHTML = '<div class="loader mx-auto mb-2"></div><span class="text-xs">Optimizing...</span>';
-
-            // 1. Compress & Resize
-            let base64String = await compressImageSmart(file);
             
-            // 2. Generate Clean Filename
-            let baseName = file.name.split('.')[0].toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9\-]/g, '') + ".webp";
-            if (file.name === 'image.png' || file.name === 'pasted-image.png') {
-                baseName = `pasted-image-${Date.now()}.webp`;
-            }
+            // 1. SHOW BIG LOADER (Safe: This is in the modal, not the iframe)
+            dropContent.innerHTML = `
+                <div class="flex flex-col items-center justify-center py-4">
+                    <div class="loader w-8 h-8 border-pink-500 mb-3"></div>
+                    <span class="text-lg font-bold text-white">Optimizing Image...</span>
+                    <span class="text-xs text-gray-400">Please wait</span>
+                </div>
+            `;
 
-            // 3. Prepare WordPress URL (For the final export)
-            const date = new Date();
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const wpUrl = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${baseName}`;
-
-            // 4. UPLOAD TO FIREBASE (Primary Source)
-            let displaySrc = base64String; // Fallback
-            
-            if(currentProjectId && storage) {
-                try {
-                    dropContent.innerHTML = '<div class="loader mx-auto mb-2"></div><span class="text-xs">Uploading...</span>';
-                    const storageRef = window.firebaseApp.ref(storage, `project-assets/${currentProjectId}/${baseName}`);
-                    await window.firebaseApp.uploadString(storageRef, base64String, 'data_url');
-                    
-                    // GET THE CLOUD URL
-                    displaySrc = await window.firebaseApp.getDownloadURL(storageRef);
-                } catch(e) {
-                    console.error("Upload failed, falling back to local", e);
-                }
-            }
-
-            // 5. UPDATE EDITOR (Use the clean URL, not Base64)
-            currentElement.src = displaySrc; 
-            currentElement.removeAttribute('srcset');
-            currentElement.dataset.exportSrc = wpUrl; 
-            currentElement.dataset.filename = baseName;
-            
-            // 6. SAVE RAW DATA TO INDEXED_DB (For the Zipper)
-            // This is the "Robust" part. We save the file locally so we don't have to fetch it later.
             try {
-                await saveToBigStorage('img_' + baseName, base64String);
-            } catch(e) { console.error("Cache save failed", e); }
+                // 2. Compress & Resize
+                let base64String = await compressImageSmart(file);
+                
+                // 3. Generate Clean Filename
+                let baseName = file.name.split('.')[0].toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9\-]/g, '') + ".webp";
+                if (file.name === 'image.png' || file.name === 'pasted-image.png') {
+                    baseName = `pasted-image-${Date.now()}.webp`;
+                }
 
-            delete currentElement.dataset.isBig;
-            saveProgress();
+                const date = new Date();
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const wpUrl = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${baseName}`;
 
-            dropContent.innerHTML = originalHTML;
-            document.getElementById('imgUpload').value = '';
-            closeModal('imageModal');
+                // 4. UPLOAD TO FIREBASE
+                let displaySrc = base64String; 
+                
+                if(currentProjectId && storage) {
+                    // Update Text
+                    dropContent.innerHTML = `
+                        <div class="flex flex-col items-center justify-center py-4">
+                            <div class="loader w-8 h-8 border-blue-500 mb-3"></div>
+                            <span class="text-lg font-bold text-white">Uploading to Cloud...</span>
+                            <span class="text-xs text-gray-400">Almost there</span>
+                        </div>
+                    `;
+
+                    try {
+                        const storageRef = window.firebaseApp.ref(storage, `project-assets/${currentProjectId}/${baseName}`);
+                        await window.firebaseApp.uploadString(storageRef, base64String, 'data_url');
+                        displaySrc = await window.firebaseApp.getDownloadURL(storageRef);
+                    } catch(e) {
+                        console.error("Upload failed, falling back to local", e);
+                    }
+                }
+
+                // 5. UPDATE EDITOR
+                currentElement.src = displaySrc; 
+                currentElement.removeAttribute('srcset');
+                currentElement.dataset.exportSrc = wpUrl; 
+                currentElement.dataset.filename = baseName;
+                
+                // 6. SAVE BACKUP
+                try {
+                    await saveToBigStorage('img_' + baseName, base64String);
+                } catch(e) { console.error("Cache save failed", e); }
+
+                delete currentElement.dataset.isBig;
+                saveProgress();
+
+                // Success!
+                closeModal('imageModal');
+                
+                // Reset the drop zone for next time
+                setTimeout(() => {
+                    dropContent.innerHTML = originalHTML;
+                    document.getElementById('imgUpload').value = '';
+                }, 500);
+
+            } catch (error) {
+                console.error(error);
+                alert("Error processing image. Please try again.");
+                dropContent.innerHTML = originalHTML;
+            }
         }
         // Helper function to check dimensions
         function checkDimensions(file) {
