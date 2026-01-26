@@ -1050,11 +1050,40 @@ function handleExpiredProject() {
     }
 }
         function copySourceCode() {
-            const html = getCleanHTML();
+            // 1. Get the raw HTML (which currently has Firebase URLs)
+            let html = getCleanHTML();
+
+            // 2. Parse it into a virtual document so we can edit it
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, "text/html");
+
+            // 3. Find all images that have a "WordPress Export Link"
+            const images = doc.querySelectorAll('img[data-export-src]');
+
+            images.forEach(img => {
+                // SWAP: Replace the Firebase URL with the WordPress URL
+                img.src = img.dataset.exportSrc;
+
+                // CLEANUP: Remove the helper tags so the code is clean
+                delete img.dataset.exportSrc;
+                delete img.dataset.filename;
+                delete img.dataset.isBig;
+
+                // Standard WP Cleanup (removes srcset so WP can regenerate it)
+                if(img.src.includes('wp-content/uploads')) img.removeAttribute('srcset');
+                img.removeAttribute('style'); 
+            });
+
+            // 4. Turn the virtual document back into a String
+            html = doc.documentElement.outerHTML;
+
+            // 5. Copy the CLEAN WordPress code to clipboard
             navigator.clipboard.writeText(html).then(() => {
                 const btn = document.getElementById('adminCopyBtn');
-                btn.innerHTML = `<i data-feather="check" class="w-4 h-4"></i> <span class="font-bold ml-2">Copied!</span>`;
+                // Visual Feedback
+                btn.innerHTML = `<i data-feather="check" class="w-4 h-4"></i> <span class="font-bold ml-2">Copied WP Code!</span>`;
                 btn.classList.add('bg-green-600', 'border-green-500');
+                
                 setTimeout(() => { 
                     btn.innerHTML = `<i data-feather="code" class="w-4 h-4"></i> <span class="font-bold ml-2">Copy Source Code</span>`;
                     btn.classList.remove('bg-green-600', 'border-green-500');
@@ -1062,11 +1091,18 @@ function handleExpiredProject() {
                 }, 2000);
             });
         }
-
        async function notifyTeam() {
     if(!db || !storage) return alert("System Error: Cloud not connected.");
     
     const btn = document.getElementById('notifyOption');
+
+    // --- ANTI-SPAM: BLOCK DOUBLE CLICKS ---
+    if(btn.dataset.loading === "true") return; 
+    btn.dataset.loading = "true";
+    btn.style.opacity = "0.5";
+    btn.style.pointerEvents = "none"; 
+    // -------------------------------------
+    
     const iconBox = btn.querySelector('.icon-box');
     const originalIcon = iconBox.innerHTML;
     iconBox.innerHTML = `<div class="loader w-4 h-4 border-green-500"></div>`;
@@ -1074,11 +1110,11 @@ function handleExpiredProject() {
     try {
         const html = getCleanHTML();
         
-        // --- 1. DETECT IMAGE CHANGES ---
+        // 1. DETECT IMAGE CHANGES
         const frameDoc = document.getElementById('editorFrame').contentDocument;
         const newImageCount = frameDoc.querySelectorAll('img[data-filename]').length;
         
-        // --- 2. CRITICAL FIX: ENSURE PROJECT ID EXISTS ---
+        // 2. ENSURE PROJECT ID EXISTS
         if (!currentProjectId) {
             console.log("Creating new project ID for notification...");
             const metaPayload = {
@@ -1091,8 +1127,13 @@ function handleExpiredProject() {
             };
             const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), metaPayload);
             currentProjectId = docRef.id;
+
+            // --- FIX: UPDATE URL SILENTLY ---
+            // This prevents "Untitled Project (1), (2)..." duplicates if they refresh
+            const newUrl = `${window.location.pathname}?id=${currentProjectId}`;
+            window.history.pushState({ path: newUrl }, '', newUrl);
+            // --------------------------------
         } else {
-             // Just update status if it already exists
              const projectRef = window.firebaseApp.doc(db, "projects", currentProjectId);
              await window.firebaseApp.updateDoc(projectRef, { 
                 updatedAt: window.firebaseApp.serverTimestamp(),
@@ -1100,12 +1141,11 @@ function handleExpiredProject() {
             });
         }
 
-        // --- 3. FORCE UPLOAD HTML TO FIREBASE STORAGE ---
-        // Now that currentProjectId is guaranteed to exist, this will always work.
+        // 3. FORCE UPLOAD HTML TO FIREBASE STORAGE
         const storageRef = window.firebaseApp.ref(storage, `project-files/${currentProjectId}.html`);
         await window.firebaseApp.uploadString(storageRef, html);
 
-        // --- 4. PREPARE EMAIL ---
+        // 4. PREPARE EMAIL
         const subjectStatus = newImageCount > 0 
             ? `📸 Edits (Has Images): ${projectDomain}` 
             : `📝 Edits (Text Only): ${projectDomain}`;
@@ -1139,11 +1179,14 @@ function handleExpiredProject() {
         console.error("Notify failed:", e);
         openModal('notifyErrorModal');
     } finally {
+        // --- RESTORE BUTTON ---
         iconBox.innerHTML = originalIcon;
         feather.replace();
+        btn.dataset.loading = "false";
+        btn.style.opacity = "1";
+        btn.style.pointerEvents = "auto";
     }
 }
-
 function updateSharingMenu() {
     // FORCE ENABLE NOTIFY (Storage implementation handles big files)
     const notifyBtn = document.getElementById('notifyOption');
@@ -1164,47 +1207,68 @@ function updateSharingMenu() {
     if(!document.getElementById('editorFrame').contentDocument) return alert("Load a page first.");
     
     const btn = document.getElementById('navShareBtn');
+    
+    // --- ANTI-SPAM START ---
+    if(btn.innerText === "Saving...") return; 
     const originalText = btn.innerHTML;
     btn.innerHTML = "Saving...";
-    
+    btn.style.pointerEvents = "none";
+    // ----------------------
+
     try {
-    const html = getCleanHTML();
+        const html = getCleanHTML();
 
-    // 1. Prepare Light Metadata (Fast for Admin)
-    const metaPayload = {
-        domain: projectDomain,
-        projectName: projectMeta.name,
-        pageName: projectMeta.page,
-        // html: html, <--- REMOVED: We don't save HTML here anymore
-        updatedAt: window.firebaseApp.serverTimestamp()
-    };
+        // 1. Prepare Metadata
+        const metaPayload = {
+            domain: projectDomain,
+            projectName: projectMeta.name,
+            pageName: projectMeta.page,
+            updatedAt: window.firebaseApp.serverTimestamp()
+        };
 
-    let docId = currentProjectId;
+        let docId = currentProjectId;
 
-    // 2. Save Metadata to 'projects' collection
-    if (currentProjectId) {
-        const projectRef = window.firebaseApp.doc(db, "projects", currentProjectId);
-        await window.firebaseApp.updateDoc(projectRef, metaPayload);
-    } else {
-        metaPayload.createdAt = window.firebaseApp.serverTimestamp();
-        const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), metaPayload);
-        docId = docRef.id;
-        currentProjectId = docId;
-    }
+        // 2. Save Metadata
+        if (currentProjectId) {
+            const projectRef = window.firebaseApp.doc(db, "projects", currentProjectId);
+            await window.firebaseApp.updateDoc(projectRef, metaPayload);
+        } else {
+            metaPayload.createdAt = window.firebaseApp.serverTimestamp();
+            const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), metaPayload);
+            docId = docRef.id;
+            currentProjectId = docId;
 
-    // 3. Save Heavy HTML to NEW 'pages_content' collection
-    const contentRef = window.firebaseApp.doc(db, "pages_content", docId);
-    // We use setDoc with merge:true to be safe
-    await window.firebaseApp.setDoc(contentRef, { html: html }, { merge: true });
+            // --- FIX: UPDATE URL SILENTLY ---
+            // Prevents creating "Untitled (1)" if they refresh immediately
+            const newUrl = `${window.location.pathname}?id=${docId}`;
+            window.history.pushState({ path: newUrl }, '', newUrl);
+            // --------------------------------
+        }
 
-    const link = window.location.origin + window.location.pathname + "?id=" + docId;
-    document.getElementById('shareLinkBox').innerText = link;
-    openModal('shareModal');
-} catch(e) {
+        // 3. Save Heavy HTML to STORAGE (Not Firestore)
+        // This is much cheaper and supports larger files
+        if(storage) {
+            const storageRef = window.firebaseApp.ref(storage, `project-files/${docId}.html`);
+            await window.firebaseApp.uploadString(storageRef, html);
+        } else {
+            // Fallback for legacy (optional)
+            const contentRef = window.firebaseApp.doc(db, "pages_content", docId);
+            await window.firebaseApp.setDoc(contentRef, { html: html }, { merge: true });
+        }
+
+        const link = window.location.origin + window.location.pathname + "?id=" + docId;
+        document.getElementById('shareLinkBox').innerText = link;
+        openModal('shareModal');
+
+    } catch(e) {
         console.error(e);
         alert("Error saving to cloud. See console.");
+    } finally {
+        // --- RESTORE BUTTON ---
+        btn.innerHTML = originalText;
+        btn.style.pointerEvents = "auto";
+        feather.replace();
     }
-    btn.innerHTML = originalText;
 }
 
         function copyShareLink() {
