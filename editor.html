@@ -13,11 +13,11 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-        // ADDED: updateDoc, serverTimestamp
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+// NEW: Import Storage functions
+import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-storage.js";
 
-window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs };
-        window.dispatchEvent(new Event('firebaseLoaded'));
+window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs, getStorage, ref, uploadString, getDownloadURL, onSnapshot };        window.dispatchEvent(new Event('firebaseLoaded'));
     </script>
 
     <style>
@@ -458,6 +458,9 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
             <button id="adminCopyBtn" onclick="copySourceCode()" class="hidden-force liquid-glow h-10 px-6 text-xs bg-purple-600 border-purple-500 mr-2 shadow-[0_0_20px_rgba(147,51,234,0.3)]">
                 <i data-feather="code" class="w-4 h-4"></i> <span class="font-bold ml-2">Copy Source Code</span>
             </button>
+            <button id="adminDownloadBtn" onclick="downloadProject()" class="hidden-force liquid-glow h-10 px-6 text-xs bg-blue-600 border-blue-500 mr-2 shadow-[0_0_20px_rgba(37,99,235,0.3)]">
+    <i data-feather="download" class="w-4 h-4"></i> <span class="font-bold ml-2">Download Zip</span>
+</button>
 
             <button id="navShareBtn" onclick="createShareableLink()" class="btn-share mr-2">
                 <i data-feather="share-2" class="w-4 h-4"></i> <span class="hidden sm:inline">Share</span>
@@ -770,6 +773,7 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
 
         let db = null;
         let isCloudMode = false;
+        let storage = null; // New Storage Variable
         let currentProjectId = null;
         
         window.addEventListener('firebaseLoaded', () => {
@@ -777,6 +781,7 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
                 if(window.firebaseApp) {
                     const app = window.firebaseApp.initializeApp(firebaseConfig);
                     db = window.firebaseApp.getFirestore(app);
+                    storage = window.firebaseApp.getStorage(app); // Initialize Storage
                     
                     const urlParams = new URLSearchParams(window.location.search);
                     
@@ -814,6 +819,7 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
         let savedHTML = localStorage.getItem('reputifly_html') || "";
         let currentElement = null; 
         let assetsToZip = []; 
+        window.zipBuffer = {}; // Memory storage for images
         let headerLocked = false;
         let isMobileView = false;
         let savedSelection = null;
@@ -852,185 +858,238 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
 
         // --- CLOUD LOGIC ---
        async function checkUrlForProject() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const projectId = urlParams.get('id');
-            const role = urlParams.get('role');
+    const urlParams = new URLSearchParams(window.location.search);
+    const projectId = urlParams.get('id');
+    const role = urlParams.get('role');
+    
+    // --- UI ELEMENT REFERENCES ---
+    const shareBtn = document.getElementById('navShareBtn');   // Creator: "Share"
+    const shareMenu = document.getElementById('sharingMenu');  // Client: "Finish / Download"
+    const adminBtn = document.getElementById('adminCopyBtn');  // Admin: "Copy Code"
+    const adminDlBtn = document.getElementById('adminDownloadBtn'); // Admin: "Download Zip" (NEW)
+    const exitBtn = document.getElementById('navExitBtn');     // Exit button
+    const helpBtn = document.getElementById('navHelpBtn');     // Help button
+    const loadMenu = document.getElementById('navLoadMenu');   // Upload/Load HTML menu
+
+    if(projectId && db) {
+        isCloudMode = true;
+        currentProjectId = projectId; 
+        
+        document.getElementById('cloudLoader').classList.add('active');
+        setupTelemetry(projectId);
+        document.getElementById('setupScreen').classList.remove('active');
+        
+        // 1. ALWAYS HIDE "LOAD/UPLOAD" in Cloud Mode (Client/Admin shouldn't change the base file)
+        if(loadMenu) loadMenu.style.display = 'none';
+
+        // 2. ROLE BASED UI LOGIC
+        if (role === 'admin') {
+            // --- ADMIN VIEW (From Email Link) ---
+            // SHOW: Copy Source Code AND Download Zip
+            // HIDE: Share, Finish, Exit, Help
+            if(adminBtn) {
+                adminBtn.classList.remove('hidden-force');
+                adminBtn.style.display = 'flex';
+            }
+            if(adminDlBtn) {
+                adminDlBtn.classList.remove('hidden-force');
+                adminDlBtn.style.display = 'flex';
+            }
+
+            if(shareMenu) shareMenu.style.display = 'none';
+            if(shareBtn) shareBtn.style.display = 'none';
+            if(exitBtn) exitBtn.style.display = 'none';
+            if(helpBtn) helpBtn.style.display = 'none';
+
+        } else {
+            // --- CLIENT VIEW (Notify Only) ---
+            // REPLACES the dropdown with a single "Notify" button
             
-            // --- UI ELEMENT REFERENCES ---
-            const shareBtn = document.getElementById('navShareBtn');   // The "Share" button (Creator only)
-            const shareMenu = document.getElementById('sharingMenu');  // The "Finish/Download" menu (Client only)
-            const adminBtn = document.getElementById('adminCopyBtn');  // The "Copy Code" button (Admin only)
-            const exitBtn = document.getElementById('navExitBtn');     // Exit button
-            const helpBtn = document.getElementById('navHelpBtn');     // Help button
-            const loadMenu = document.getElementById('navLoadMenu');   // Upload/Load HTML menu
+            if(shareMenu) {
+                // We overwrite the entire dropdown HTML with a single button
+                // We keep the ID "notifyOption" so your existing notifyTeam() function still works perfectly
+                shareMenu.outerHTML = `
+                    <button id="notifyOption" onclick="notifyTeam()" class="liquid-glow h-10 px-6 text-xs bg-green-600 border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all hover:scale-105 mr-4">
+                        <i data-feather="send" class="w-4 h-4"></i>
+                        <span class="font-bold ml-2">Notify Completion</span>
+                    </button>
+                `;
+                feather.replace();
+            }
+            
+            // Hide everything else
+            if(shareBtn) shareBtn.style.display = 'none';
+            if(adminBtn) adminBtn.style.display = 'none';
+            if(adminDlBtn) adminDlBtn.style.display = 'none';
+            if(exitBtn) exitBtn.style.display = 'none'; 
+            if(helpBtn) helpBtn.classList.remove('hidden-force');
+        }
 
-            if(projectId && db) {
-                isCloudMode = true;
-                currentProjectId = projectId; 
-                
-                document.getElementById('cloudLoader').classList.add('active');
-                setupTelemetry(projectId);
-                document.getElementById('setupScreen').classList.remove('active');
-                
-                // 1. ALWAYS HIDE "LOAD/UPLOAD" in Cloud Mode (Client/Admin shouldn't change the base file)
-                if(loadMenu) loadMenu.style.display = 'none';
+        // ----------------------------------------
+        // DATABASE LOADING LOGIC
+        // ----------------------------------------
 
-                // 2. ROLE BASED UI LOGIC
-                if (role === 'admin') {
-                    // --- ADMIN VIEW (From Email Link) ---
-                    // SHOW: Copy Source Code
-                    // HIDE: Share, Finish, Exit
-                    if(adminBtn) {
-                        adminBtn.classList.remove('hidden-force');
-                        adminBtn.style.display = 'flex';
-                    }
-                    if(shareMenu) shareMenu.style.display = 'none';
-                    if(shareBtn) shareBtn.style.display = 'none';
-                    if(exitBtn) exitBtn.style.display = 'none';
-                    if(helpBtn) helpBtn.style.display = 'none';
+        // 1. CHECK LOCAL STORAGE SAFELY (For unsaved drafts on the same device)
+        let localDraft = null;
+        try {
+            localDraft = await loadFromBigStorage(`reputifly_draft_${projectId}`);
+        } catch(e) { console.warn("BigStorage error:", e); }
+        
+        if(!localDraft) localDraft = localStorage.getItem(`reputifly_draft_${projectId}`);
+        
+        if(localDraft) {
+            console.log("Restoring from local draft...");
+            setupRealtimeListener(projectId); // Start listener
+            loadContentIntoFrame(localDraft);
+            pushHistory(localDraft);
+            document.getElementById('cloudLoader').classList.remove('active');
+            if(role !== 'admin') setTimeout(() => { openModal('helpModal'); }, 500);
+            return; 
+        }
+        
+        // 2. IF NO LOCAL DRAFT, FETCH FROM CLOUD
+        try {
+            const docRef = window.firebaseApp.doc(db, "projects", projectId);
+            
+            // Start Listener for Deletion/Revocation
+            setupRealtimeListener(projectId);
 
-                } else {
-                    // --- CLIENT VIEW (Standard Shared Link) ---
-                    // SHOW: Finish / Download (Notify)
-                    // HIDE: Share (They don't need to re-share), Admin Button
-                    
-                    if(shareMenu) {
-                        shareMenu.classList.remove('hidden');
-                        shareMenu.style.display = 'block';
-                    }
-                    
-                    // CRITICAL FIX: Hide the "Share" button for clients
-                    if(shareBtn) shareBtn.style.display = 'none';
-                    
-                    // Ensure Admin button is hidden
-                    if(adminBtn) adminBtn.style.display = 'none';
-                    
-                    // Allow exit/help for clients
-                    if(exitBtn) exitBtn.style.display = 'none'; // Optional: Hide exit for clients too if preferred
-                    if(helpBtn) helpBtn.classList.remove('hidden-force');
-                }
+            const docSnap = await window.firebaseApp.getDoc(docRef);
+            
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                projectDomain = data.domain;
 
-                // ----------------------------------------
-                // DATABASE LOADING LOGIC (Unchanged)
-                // ----------------------------------------
+                const displayEl = document.getElementById('domainDisplay');
+                if(displayEl) displayEl.innerText = projectDomain;
 
-                // 1. CHECK LOCAL STORAGE SAFELY
-                let localDraft = null;
-                try {
-                    localDraft = await loadFromBigStorage(`reputifly_draft_${projectId}`);
-                } catch(e) { console.warn("BigStorage error:", e); }
-                
-                // Fallback to standard storage
-                if(!localDraft) localDraft = localStorage.getItem(`reputifly_draft_${projectId}`);
-                
-                if(localDraft) {
-                    console.log("Restoring from local draft...");
+                localStorage.setItem('reputifly_domain', projectDomain); 
+
+                // --- CONTENT LOADING (Priority: Storage -> Firestore -> Data Field) ---
+                let htmlContent = null;
+
+                // A. Try Firebase Storage (The new method for big files)
+                if (!htmlContent && storage) {
                     try {
-                        const docRef = window.firebaseApp.doc(db, "projects", projectId);
-                        // --- REAL-TIME SECURITY CHECK ---
-                        window.firebaseApp.onSnapshot(docRef, (snapshot) => {
-                            if (!snapshot.exists()) {
-                                document.getElementById('cloudLoader').classList.remove('active');
-                                document.getElementById('expiredModal').classList.add('active');
-                                if(loadMenu) loadMenu.remove();
-                                const saveBtn = document.getElementById('saveBtn'); // Note: Ensure this ID matches your "Finish" button if different
-                                if(saveBtn) saveBtn.remove();
-                                if(shareBtn) shareBtn.remove();
-                                document.getElementById('mainHeader').classList.add('pointer-events-none', 'opacity-50');
-                                const frameContainer = document.getElementById('editor-frame-container');
-                                if(frameContainer) {
-                                    frameContainer.innerHTML = ''; 
-                                    frameContainer.style.background = '#0B0A14';
-                                }
-                            }
-                        });
-                        const docSnap = await window.firebaseApp.getDoc(docRef);
-                        if(docSnap.exists()) {
-                            projectDomain = docSnap.data().domain;
-                            const displayEl = document.getElementById('domainDisplay');
-                            if(displayEl) displayEl.innerText = projectDomain;
-                            localStorage.setItem('reputifly_domain', projectDomain);
+                        const storageRef = window.firebaseApp.ref(storage, `project-files/${projectId}.html`);
+                        const url = await window.firebaseApp.getDownloadURL(storageRef);
+                        const response = await fetch(url);
+                        if(response.ok) {
+                            htmlContent = await response.text();
+                            console.log("Loaded from Storage");
                         }
-                    } catch(e) { console.error("Background fetch failed", e); }
-                    
-                    loadContentIntoFrame(localDraft);
-                    pushHistory(localDraft);
-                    document.getElementById('cloudLoader').classList.remove('active');
-                    setTimeout(() => { openModal('helpModal'); }, 500);
-                    return; 
-                }
-                
-                // 2. IF NO LOCAL DRAFT, FETCH FROM DB
-                try {
-                    const docRef = window.firebaseApp.doc(db, "projects", projectId);
-                    const docSnap = await window.firebaseApp.getDoc(docRef);
-                    
-                    if (docSnap.exists()) {
-                        const data = docSnap.data();
-                        projectDomain = data.domain;
-
-                        const displayEl = document.getElementById('domainDisplay');
-                        if(displayEl) displayEl.innerText = projectDomain;
-
-                        localStorage.setItem('reputifly_domain', projectDomain); 
-
-                        // --- CONTENT LOADING ---
-                        let htmlContent = data.html; 
-                        if (!htmlContent) {
-                            try {
-                                const contentRef = window.firebaseApp.doc(db, "pages_content", projectId);
-                                const contentSnap = await window.firebaseApp.getDoc(contentRef);
-                                if(contentSnap.exists()) {
-                                    htmlContent = contentSnap.data().html;
-                                }
-                            } catch(e) { console.warn("Content fetch check", e); }
-                        }
-
-                        if(htmlContent) {
-                            loadContentIntoFrame(htmlContent);
-                            pushHistory(htmlContent);
-                            setTimeout(() => { openModal('helpModal'); }, 500);
-                        } else {
-                            alert("Could not load page content.");
-                        }
-                    } else {
-                        // PROJECT DOES NOT EXIST / REVOKED
-                        document.getElementById('cloudLoader').classList.remove('active');
-                        document.getElementById('expiredModal').classList.add('active');
-                        if(loadMenu) loadMenu.remove();
-                        if(shareBtn) shareBtn.remove();
-                        // Nuke the UI
-                        document.getElementById('mainHeader').classList.add('pointer-events-none', 'opacity-50');
-                        const frameContainer = document.getElementById('editor-frame-container');
-                        frameContainer.innerHTML = ''; 
-                        frameContainer.style.background = '#0B0A14';
+                    } catch(e) { 
+                        // It's okay if this fails, it might be an old project in the DB
+                        console.warn("Storage fetch check:", e.code); 
                     }
-                } catch(e) {
-                    console.error(e);
-                    alert("Error loading project.");
-                } finally {
-                    document.getElementById('cloudLoader').classList.remove('active');
+                }
+
+                // B. Fallback to Firestore 'pages_content' (Legacy method)
+                if (!htmlContent) {
+                    try {
+                        const contentRef = window.firebaseApp.doc(db, "pages_content", projectId);
+                        const contentSnap = await window.firebaseApp.getDoc(contentRef);
+                        if(contentSnap.exists()) {
+                            htmlContent = contentSnap.data().html;
+                        } 
+                    } catch(e) { console.warn("Content fetch check", e); }
+                }
+
+                // C. Fallback to Project Document (Oldest method)
+                if (!htmlContent && data.html) {
+                     htmlContent = data.html; 
+                }
+
+                if(htmlContent) {
+                    loadContentIntoFrame(htmlContent);
+                    pushHistory(htmlContent);
+                    if(role !== 'admin') setTimeout(() => { openModal('helpModal'); }, 500);
+                } else {
+                    alert("Could not load page content. It may be empty.");
                 }
             } else {
-                // --- CREATOR MODE (No ID in URL) ---
-                // This is YOU starting a new project
-                // SHOW: Share Button, Load Menu
-                // HIDE: Admin Button, Finish Menu (initially)
-                
-                if(shareBtn) shareBtn.style.display = 'flex'; // Ensure Share is visible
-                if(shareMenu) shareMenu.style.display = 'none'; // Hide client menu until they share? Or keep hidden.
-                if(adminBtn) adminBtn.style.display = 'none';
+                // PROJECT DOES NOT EXIST / REVOKED
+                handleExpiredProject();
             }
+        } catch(e) {
+            console.error(e);
+            alert("Error loading project.");
+        } finally {
+            document.getElementById('cloudLoader').classList.remove('active');
         }
-        // 1. Admin Copy Function
-        // --- UPDATED LOGIC ---
+    } else {
+        // --- CREATOR MODE (No ID in URL) ---
+        // This is YOU starting a new project locally
+        if(shareBtn) shareBtn.style.display = 'flex'; 
+        if(shareMenu) shareMenu.style.display = 'none'; 
+        if(adminBtn) adminBtn.style.display = 'none';
+        if(adminDlBtn) adminDlBtn.style.display = 'none';
+    }
+}
 
+// Helper to handle real-time revocation
+function setupRealtimeListener(projectId) {
+    const docRef = window.firebaseApp.doc(db, "projects", projectId);
+    window.firebaseApp.onSnapshot(docRef, (snapshot) => {
+        if (!snapshot.exists()) {
+            handleExpiredProject();
+        }
+    });
+}
+
+// Helper to nuke the UI when expired
+function handleExpiredProject() {
+    document.getElementById('cloudLoader').classList.remove('active');
+    document.getElementById('expiredModal').classList.add('active');
+    
+    // Remove controls
+    const loadMenu = document.getElementById('navLoadMenu');
+    if(loadMenu) loadMenu.remove();
+    const shareBtn = document.getElementById('navShareBtn');
+    if(shareBtn) shareBtn.remove();
+    
+    document.getElementById('mainHeader').classList.add('pointer-events-none', 'opacity-50');
+    const frameContainer = document.getElementById('editor-frame-container');
+    if(frameContainer) {
+        frameContainer.innerHTML = ''; 
+        frameContainer.style.background = '#0B0A14';
+    }
+}
         function copySourceCode() {
-            const html = getCleanHTML();
+            // 1. Get the raw HTML (which currently has Firebase URLs)
+            let html = getCleanHTML();
+
+            // 2. Parse it into a virtual document so we can edit it
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, "text/html");
+
+            // 3. Find all images that have a "WordPress Export Link"
+            const images = doc.querySelectorAll('img[data-export-src]');
+
+            images.forEach(img => {
+                // SWAP: Replace the Firebase URL with the WordPress URL
+                img.src = img.dataset.exportSrc;
+
+                // CLEANUP: Remove the helper tags so the code is clean
+                delete img.dataset.exportSrc;
+                delete img.dataset.filename;
+                delete img.dataset.isBig;
+
+                // Standard WP Cleanup (removes srcset so WP can regenerate it)
+                if(img.src.includes('wp-content/uploads')) img.removeAttribute('srcset');
+                img.removeAttribute('style'); 
+            });
+
+            // 4. Turn the virtual document back into a String
+            html = doc.documentElement.outerHTML;
+
+            // 5. Copy the CLEAN WordPress code to clipboard
             navigator.clipboard.writeText(html).then(() => {
                 const btn = document.getElementById('adminCopyBtn');
-                btn.innerHTML = `<i data-feather="check" class="w-4 h-4"></i> <span class="font-bold ml-2">Copied!</span>`;
+                // Visual Feedback
+                btn.innerHTML = `<i data-feather="check" class="w-4 h-4"></i> <span class="font-bold ml-2">Copied WP Code!</span>`;
                 btn.classList.add('bg-green-600', 'border-green-500');
+                
                 setTimeout(() => { 
                     btn.innerHTML = `<i data-feather="code" class="w-4 h-4"></i> <span class="font-bold ml-2">Copy Source Code</span>`;
                     btn.classList.remove('bg-green-600', 'border-green-500');
@@ -1038,87 +1097,127 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
                 }, 2000);
             });
         }
+       async function notifyTeam() {
+    if(!db || !storage) return alert("System Error: Cloud not connected.");
+    
+    const btn = document.getElementById('notifyOption');
 
-        async function notifyTeam() {
-            if(!db) return alert("System Error: Cloud not connected.");
-            
-            const btn = document.getElementById('notifyOption');
-            // Visual loading state inside the dropdown item
-            const iconBox = btn.querySelector('.icon-box');
-            const originalIcon = iconBox.innerHTML;
-            iconBox.innerHTML = `<div class="loader w-4 h-4 border-green-500"></div>`;
-            
-            try {
-                // 1. SILENT SAVE (Crucial Step)
-                const html = getCleanHTML();
-                if (currentProjectId) {
-                    const projectRef = window.firebaseApp.doc(db, "projects", currentProjectId);
-                    // Update timestamp & status
-                    await window.firebaseApp.updateDoc(projectRef, { 
-                        updatedAt: window.firebaseApp.serverTimestamp(),
-                        status: 'Review Ready'
-                    });
-                    // Save actual content
-                    const contentRef = window.firebaseApp.doc(db, "pages_content", currentProjectId);
-                    await window.firebaseApp.setDoc(contentRef, { html: html }, { merge: true });
-                }
+    // --- ANTI-SPAM: BLOCK DOUBLE CLICKS ---
+    if(btn.dataset.loading === "true") return; 
+    btn.dataset.loading = "true";
+    btn.style.opacity = "0.5";
+    btn.style.pointerEvents = "none"; 
+    // -------------------------------------
+    
+    // --- FIX: ADAPTIVE UI LOADER ---
+    // Checks if we are in "Dropdown Mode" (Admin) or "Button Mode" (Client)
+    const iconBox = btn.querySelector('.icon-box');
+    let originalContent = "";
+    
+    if (iconBox) {
+        // Scenario A: Admin Dropdown (Has .icon-box container)
+        originalContent = iconBox.innerHTML;
+        iconBox.innerHTML = `<div class="loader w-4 h-4 border-green-500"></div>`;
+    } else {
+        // Scenario B: Client Button (Direct button)
+        originalContent = btn.innerHTML;
+        // Swap the whole button content to show a white loader
+        btn.innerHTML = `<div class="flex items-center justify-center"><div class="loader w-4 h-4 border-white mr-2"></div> <span class="font-bold">Sending...</span></div>`;
+    }
+    
+    try {
+        const html = getCleanHTML();
+        
+        // 1. DETECT IMAGE CHANGES
+        const frameDoc = document.getElementById('editorFrame').contentDocument;
+        const newImageCount = frameDoc.querySelectorAll('img[data-filename]').length;
+        
+        // 2. ENSURE PROJECT ID EXISTS
+        if (!currentProjectId) {
+            console.log("Creating new project ID for notification...");
+            const metaPayload = {
+                domain: projectDomain || "pending-domain",
+                projectName: projectMeta.name || "Untitled",
+                pageName: projectMeta.page || "Home",
+                createdAt: window.firebaseApp.serverTimestamp(),
+                updatedAt: window.firebaseApp.serverTimestamp(),
+                status: 'Review Ready'
+            };
+            const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), metaPayload);
+            currentProjectId = docRef.id;
 
-                // 2. GENERATE ADMIN LINK
-                // We add role=admin to the URL so you get the special view
-                const adminLink = `${window.location.origin}${window.location.pathname}?id=${currentProjectId}&role=admin`;
-
-                // 3. SEND WEB3FORMS EMAIL
-                const response = await fetch('https://api.web3forms.com/submit', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                    body: JSON.stringify({
-                        access_key: '65b5a5eb-4364-4cbc-8674-e124eec0b52f', 
-                        subject: `✅ Edits Complete: ${projectDomain}`,
-                        message: `Client has finished editing.\n\n📂 Project: ${projectMeta.name}\n📄 Page: ${projectMeta.page}\n🌐 Domain: ${projectDomain}\n\n🔓 ADMIN ACCESS (Copy Code):\n${adminLink}`,
-                        from_name: "Reputifly Editor"
-                    })
-                });
-
-                const result = await response.json();
-
-                if(result.success) {
-                    openModal('notifySuccessModal');
-                } else {
-                    throw new Error("Form submission failed");
-                }
-
-            } catch(e) {
-                console.error("Notify failed:", e);
-                openModal('notifyErrorModal'); // Shows fallback to download
-            } finally {
-                // Reset UI
-                iconBox.innerHTML = originalIcon;
-                feather.replace();
-            }
+            // FIX: UPDATE URL SILENTLY
+            const newUrl = `${window.location.pathname}?id=${currentProjectId}`;
+            window.history.pushState({ path: newUrl }, '', newUrl);
+        } else {
+             const projectRef = window.firebaseApp.doc(db, "projects", currentProjectId);
+             await window.firebaseApp.updateDoc(projectRef, { 
+                updatedAt: window.firebaseApp.serverTimestamp(),
+                status: 'Review Ready'
+            });
         }
 
-        // Logic to toggle "Notify" vs "Download" visibility based on image changes
-        function updateSharingMenu() {
-            const frame = document.getElementById('editorFrame');
-            if(!frame.contentDocument) return;
+        // 3. FORCE UPLOAD HTML TO FIREBASE STORAGE
+        const storageRef = window.firebaseApp.ref(storage, `project-files/${currentProjectId}.html`);
+        await window.firebaseApp.uploadString(storageRef, html);
+
+        // 4. PREPARE EMAIL
+        const subjectStatus = newImageCount > 0 
+            ? `📸 Edits (Has Images): ${projectDomain}` 
+            : `📝 Edits (Text Only): ${projectDomain}`;
             
-            // Check for new images (data-filename) or pasted data-images
-            const changedImages = frame.contentDocument.querySelectorAll('img[data-filename], img[src^="data:"]');
-            const notifyBtn = document.getElementById('notifyOption');
-            
-            if(changedImages.length > 0) {
-                notifyBtn.style.opacity = '0.5';
-                notifyBtn.style.pointerEvents = 'none';
-                notifyBtn.querySelector('h5').innerText = "Notify Unavailable";
-                notifyBtn.querySelector('p').innerText = "New images detected.\nPlease download ZIP.";
-            } else {
-                notifyBtn.style.opacity = '1';
-                notifyBtn.style.pointerEvents = 'auto';
-                notifyBtn.querySelector('h5').innerText = "Notify Completion";
-                notifyBtn.querySelector('p').innerHTML = "Send changes directly to us.<br>No download required.";
-            }
+        const bodyStatus = newImageCount > 0 
+            ? `⚠️ CONTAINS ${newImageCount} NEW IMAGE(S).\nYou need to download the ZIP.` 
+            : `✅ TEXT ONLY.\nNo new images were uploaded.`;
+
+        const adminLink = `${window.location.origin}${window.location.pathname}?id=${currentProjectId}&role=admin`;
+
+        // 5. SEND EMAIL
+        const response = await fetch('https://api.web3forms.com/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({
+                access_key: '65b5a5eb-4364-4cbc-8674-e124eec0b52f', 
+                subject: subjectStatus,
+                message: `Client has finished editing.\n\nProject: ${projectMeta.name}\nPage: ${projectMeta.page}\nDomain: ${projectDomain}\n\n${bodyStatus}\n\n👉 CLICK HERE TO RETRIEVE FILES:\n${adminLink}`,
+                from_name: "Reputifly Editor"
+            })
+        });
+
+        const result = await response.json();
+        if(result.success) {
+            openModal('notifySuccessModal');
+        } else {
+            throw new Error("Form submission failed");
         }
 
+    } catch(e) {
+        console.error("Notify failed:", e);
+        openModal('notifyErrorModal');
+    } finally {
+        // --- RESTORE BUTTON ---
+        if (iconBox) {
+            iconBox.innerHTML = originalContent;
+        } else {
+            btn.innerHTML = originalContent;
+        }
+        feather.replace();
+        
+        btn.dataset.loading = "false";
+        btn.style.opacity = "1";
+        btn.style.pointerEvents = "auto";
+    }
+}
+function updateSharingMenu() {
+    // FORCE ENABLE NOTIFY (Storage implementation handles big files)
+    const notifyBtn = document.getElementById('notifyOption');
+    if(notifyBtn) {
+        notifyBtn.style.opacity = '1';
+        notifyBtn.style.pointerEvents = 'auto';
+        notifyBtn.querySelector('h5').innerText = "Notify Completion";
+        notifyBtn.querySelector('p').innerHTML = "Send changes directly to us.<br>No download required.";
+    }
+}
         // Event listener for the menu
         document.addEventListener('mouseover', (e) => {
             if(e.target.closest('#sharingMenu')) updateSharingMenu();
@@ -1129,47 +1228,68 @@ window.firebaseApp = { initializeApp, getFirestore, doc, getDoc, setDoc, updateD
     if(!document.getElementById('editorFrame').contentDocument) return alert("Load a page first.");
     
     const btn = document.getElementById('navShareBtn');
+    
+    // --- ANTI-SPAM START ---
+    if(btn.innerText === "Saving...") return; 
     const originalText = btn.innerHTML;
     btn.innerHTML = "Saving...";
-    
+    btn.style.pointerEvents = "none";
+    // ----------------------
+
     try {
-    const html = getCleanHTML();
+        const html = getCleanHTML();
 
-    // 1. Prepare Light Metadata (Fast for Admin)
-    const metaPayload = {
-        domain: projectDomain,
-        projectName: projectMeta.name,
-        pageName: projectMeta.page,
-        // html: html, <--- REMOVED: We don't save HTML here anymore
-        updatedAt: window.firebaseApp.serverTimestamp()
-    };
+        // 1. Prepare Metadata
+        const metaPayload = {
+            domain: projectDomain,
+            projectName: projectMeta.name,
+            pageName: projectMeta.page,
+            updatedAt: window.firebaseApp.serverTimestamp()
+        };
 
-    let docId = currentProjectId;
+        let docId = currentProjectId;
 
-    // 2. Save Metadata to 'projects' collection
-    if (currentProjectId) {
-        const projectRef = window.firebaseApp.doc(db, "projects", currentProjectId);
-        await window.firebaseApp.updateDoc(projectRef, metaPayload);
-    } else {
-        metaPayload.createdAt = window.firebaseApp.serverTimestamp();
-        const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), metaPayload);
-        docId = docRef.id;
-        currentProjectId = docId;
-    }
+        // 2. Save Metadata
+        if (currentProjectId) {
+            const projectRef = window.firebaseApp.doc(db, "projects", currentProjectId);
+            await window.firebaseApp.updateDoc(projectRef, metaPayload);
+        } else {
+            metaPayload.createdAt = window.firebaseApp.serverTimestamp();
+            const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), metaPayload);
+            docId = docRef.id;
+            currentProjectId = docId;
 
-    // 3. Save Heavy HTML to NEW 'pages_content' collection
-    const contentRef = window.firebaseApp.doc(db, "pages_content", docId);
-    // We use setDoc with merge:true to be safe
-    await window.firebaseApp.setDoc(contentRef, { html: html }, { merge: true });
+            // --- FIX: UPDATE URL SILENTLY ---
+            // Prevents creating "Untitled (1)" if they refresh immediately
+            const newUrl = `${window.location.pathname}?id=${docId}`;
+            window.history.pushState({ path: newUrl }, '', newUrl);
+            // --------------------------------
+        }
 
-    const link = window.location.origin + window.location.pathname + "?id=" + docId;
-    document.getElementById('shareLinkBox').innerText = link;
-    openModal('shareModal');
-} catch(e) {
+        // 3. Save Heavy HTML to STORAGE (Not Firestore)
+        // This is much cheaper and supports larger files
+        if(storage) {
+            const storageRef = window.firebaseApp.ref(storage, `project-files/${docId}.html`);
+            await window.firebaseApp.uploadString(storageRef, html);
+        } else {
+            // Fallback for legacy (optional)
+            const contentRef = window.firebaseApp.doc(db, "pages_content", docId);
+            await window.firebaseApp.setDoc(contentRef, { html: html }, { merge: true });
+        }
+
+        const link = window.location.origin + window.location.pathname + "?id=" + docId;
+        document.getElementById('shareLinkBox').innerText = link;
+        openModal('shareModal');
+
+    } catch(e) {
         console.error(e);
         alert("Error saving to cloud. See console.");
+    } finally {
+        // --- RESTORE BUTTON ---
+        btn.innerHTML = originalText;
+        btn.style.pointerEvents = "auto";
+        feather.replace();
     }
-    btn.innerHTML = originalText;
 }
 
         function copyShareLink() {
@@ -1575,38 +1695,29 @@ function setupAutocomplete() {
         }
         // --- NEW SAFETY CHECK FUNCTION ---
 function checkPayloadSize() {
-    const frame = document.getElementById('editorFrame');
+    // Safety check disabled - We are using Storage now
     const shareBtn = document.getElementById('navShareBtn');
-    
-    if(!frame.contentDocument || !shareBtn) return;
-
-    // --- FIX START: If Client Mode (ID exists), FORCE HIDE share button ---
-    // This prevents the code below from turning it back on
-    if (currentProjectId) {
-        shareBtn.style.display = 'none';
-        return; 
-    }
-    // --- FIX END ---
-
-    // Check for Base64 images (Uploads)
-    const heavyImages = frame.contentDocument.querySelectorAll('img[src^="data:"]');
-    
-    if (heavyImages.length > 0) {
-        // HIDE button if heavy images exist
-        shareBtn.style.display = 'none';
-    } else {
-        // SHOW button if clean (Text/URLs only)
-        shareBtn.style.display = 'flex';
-    }
+    if(shareBtn && !currentProjectId) shareBtn.style.display = 'flex';
 }
-
         async function saveProgress() {
     const html = getCleanHTML();
+    checkPayloadSize();
     
     // ADDED: Run safety check on every edit
     checkPayloadSize();
 
     if(html) {
+        // --- PERFORMANCE MONITOR ---
+        // Warn if project exceeds 15MB (approx 50-60 optimized images)
+        if(html.length > 15 * 1024 * 1024) { 
+            const toast = document.getElementById('downloadToast');
+            if(toast) {
+                toast.querySelector('h4').innerText = "⚠️ Project Heavy";
+                toast.querySelector('p').innerText = "Editor may slow down. Consider finishing soon.";
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 5000);
+            }
+        }
         
                 try {
                     // 1. Try Big Storage (Unlimited)
@@ -1869,45 +1980,58 @@ function finishSetup() {
             if (!currentElement) return;
             const dropContent = document.getElementById('dropContent');
             const originalHTML = dropContent.innerHTML;
-            dropContent.innerHTML = '<div class="loader mx-auto mb-2"></div><span class="text-xs">Processing...</span>';
+            dropContent.innerHTML = '<div class="loader mx-auto mb-2"></div><span class="text-xs">Optimizing...</span>';
 
-            // 1. Get raw dimensions first to check for WordPress "Big Image" Threshold (2560px)
-            const isBigImage = await checkDimensions(file);
-
-            // 2. Compress/Convert to WebP
+            // 1. Compress & Resize
             let base64String = await compressImageSmart(file);
             
+            // 2. Generate Clean Filename
             let baseName = file.name.split('.')[0].toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9\-]/g, '') + ".webp";
             if (file.name === 'image.png' || file.name === 'pasted-image.png') {
                 baseName = `pasted-image-${Date.now()}.webp`;
             }
-            
-            // 3. Store the base URL structure (we will append -scaled later if needed)
+
+            // 3. Prepare WordPress URL (For the final export)
             const date = new Date();
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const wpUrl = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${baseName}`;
 
-            currentElement.removeAttribute('srcset'); 
-            currentElement.src = base64String; 
+            // 4. UPLOAD TO FIREBASE (Primary Source)
+            let displaySrc = base64String; // Fallback
             
+            if(currentProjectId && storage) {
+                try {
+                    dropContent.innerHTML = '<div class="loader mx-auto mb-2"></div><span class="text-xs">Uploading...</span>';
+                    const storageRef = window.firebaseApp.ref(storage, `project-assets/${currentProjectId}/${baseName}`);
+                    await window.firebaseApp.uploadString(storageRef, base64String, 'data_url');
+                    
+                    // GET THE CLOUD URL
+                    displaySrc = await window.firebaseApp.getDownloadURL(storageRef);
+                } catch(e) {
+                    console.error("Upload failed, falling back to local", e);
+                }
+            }
+
+            // 5. UPDATE EDITOR (Use the clean URL, not Base64)
+            currentElement.src = displaySrc; 
+            currentElement.removeAttribute('srcset');
             currentElement.dataset.exportSrc = wpUrl; 
             currentElement.dataset.filename = baseName;
             
-            // 4. Set the flag if it's big
-            if(isBigImage) {
-                currentElement.dataset.isBig = "true";
-            } else {
-                delete currentElement.dataset.isBig;
-            }
-            
+            // 6. SAVE RAW DATA TO INDEXED_DB (For the Zipper)
+            // This is the "Robust" part. We save the file locally so we don't have to fetch it later.
+            try {
+                await saveToBigStorage('img_' + baseName, base64String);
+            } catch(e) { console.error("Cache save failed", e); }
+
+            delete currentElement.dataset.isBig;
             saveProgress();
 
             dropContent.innerHTML = originalHTML;
             document.getElementById('imgUpload').value = '';
             closeModal('imageModal');
         }
-
         // Helper function to check dimensions
         function checkDimensions(file) {
             return new Promise((resolve) => {
@@ -1956,45 +2080,46 @@ function finishSetup() {
             assetsToZip.push({ name: filename, blob: blob });
         }
         function compressImageSmart(file) {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onload = (event) => {
-                    const img = new Image();
-                    img.src = event.target.result;
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        let width = img.width;
-                        let height = img.height;
-                        
-                        // FIX: Increased limit to 4000px.
-                        // This preserves the "Big Image" status (>2560px) so WordPress
-                        // creates the '-scaled' version as expected by your download logic.
-                        const SAFE_MAX = 4000;
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+                
+                // STRATEGY: 2500px is the "Safe Zone".
+                // 1. High enough for Retina/4K screens.
+                // 2. Low enough to NEVER trigger WordPress "-scaled" renaming.
+                // 3. Keeps memory usage low (prevents browser crashes).
+                const SAFE_MAX = 2500;
 
-                        if (width > height) {
-                            if (width > SAFE_MAX) {
-                                height *= SAFE_MAX / width;
-                                width = SAFE_MAX;
-                            }
-                        } else {
-                            if (height > SAFE_MAX) {
-                                width *= SAFE_MAX / height;
-                                height = SAFE_MAX;
-                            }
-                        }
+                if (width > height) {
+                    if (width > SAFE_MAX) {
+                        height *= SAFE_MAX / width;
+                        width = SAFE_MAX;
+                    }
+                } else {
+                    if (height > SAFE_MAX) {
+                        width *= SAFE_MAX / height;
+                        height = SAFE_MAX;
+                    }
+                }
 
-                        canvas.width = width;
-                        canvas.height = height;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, width, height);
-                        
-                        // Compress to WebP at 85% quality
-                        resolve(canvas.toDataURL('image/webp', 0.85));
-                    };
-                };
-            });
-        }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // High Quality (0.90) but Efficient WebP
+                resolve(canvas.toDataURL('image/webp', 0.90));
+            };
+        };
+    });
+}
         // --- TELEMETRY SYSTEM ---
 let telemetryDebounce = 0;
 
@@ -2035,29 +2160,32 @@ function sendHeartbeat(id, isDownload) {
 }
 
         async function downloadProject() {
-            const btn = document.getElementById('saveBtn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<div class="loader"></div> Zipping...';
-            btn.classList.add('disabled');
+            const btn = document.getElementById('adminDownloadBtn') || document.getElementById('saveBtn');
+            let originalText = "";
 
-            const zip = new JSZip();
-            const cleanHTML = getCleanHTML(); 
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(cleanHTML, "text/html");
-            const imgFolder = zip.folder("images_to_upload");
-            
-            let usedFilenames = [];
-            let hasImagesToUpload = false;
+            if(btn) {
+                originalText = btn.innerHTML;
+                btn.innerHTML = '<div class="loader w-3 h-3 border-white"></div> <span class="ml-2">Zipping...</span>';
+                btn.classList.add('disabled', 'cursor-wait');
+            }
 
-            const images = doc.querySelectorAll('img');
-            
-            for (let img of images) {
-                if(img.dataset.exportSrc) {
-                    hasImagesToUpload = true;
-                    const base64Data = img.src;
-                    
-                    if(base64Data.startsWith('data:image')) {
-                        let filename = img.dataset.filename || 'image.webp';
+            try {
+                const zip = new JSZip();
+                const cleanHTML = getCleanHTML(); 
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(cleanHTML, "text/html");
+                const imgFolder = zip.folder("images_to_upload");
+                
+                let usedFilenames = [];
+                let hasImagesToUpload = false;
+
+                const images = doc.querySelectorAll('img');
+                
+                for (let img of images) {
+                    // We only care about images the user touched (has exportSrc)
+                    if(img.dataset.exportSrc && img.dataset.filename) {
+                        hasImagesToUpload = true;
+                        let filename = img.dataset.filename;
                         
                         // Handle duplicates
                         let counter = 1;
@@ -2067,61 +2195,71 @@ function sendHeartbeat(id, isDownload) {
                             counter++;
                         }
                         usedFilenames.push(filename);
-
-                        // --- WORDPRESS LOGIC FIX ---
-                        const date = new Date();
-                        const year = date.getFullYear();
-                        const month = String(date.getMonth() + 1).padStart(2, '0');
                         
-                        // If it was flagged as Big, add -scaled to the HTML URL
-                        if(img.dataset.isBig === "true") {
-                            const scaledName = filename.replace('.webp', '-scaled.webp');
-                            img.dataset.exportSrc = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${scaledName}`;
-                        } else {
-                            // Normal URL
-                            img.dataset.exportSrc = `https://${projectDomain}/wp-content/uploads/${year}/${month}/${filename}`;
+                        // --- ROBUST RETRIEVAL ---
+                        let blob = null;
+                        
+                        // A. Try Hidden Database First (Fastest, No CORS)
+                        try {
+                            const cachedB64 = await loadFromBigStorage('img_' + img.dataset.filename);
+                            if(cachedB64) {
+                                // Convert Base64 back to Blob
+                                const byteString = atob(cachedB64.split(',')[1]);
+                                const ab = new ArrayBuffer(byteString.length);
+                                const ia = new Uint8Array(ab);
+                                for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+                                blob = new Blob([ab], { type: 'image/webp' });
+                            }
+                        } catch(e) { console.log("Cache miss", e); }
+
+                        // B. Fallback to Network (Slow, might hit CORS)
+                        if (!blob) {
+                            try {
+                                const response = await fetch(img.src);
+                                blob = await response.blob();
+                            } catch(e) { console.error("Network fetch failed", e); }
                         }
-                        // ---------------------------
 
-                        const response = await fetch(base64Data);
-                        const blob = await response.blob();
+                        if(blob) {
+                            imgFolder.file(filename, blob);
+                            // Set the FINAL HTML src to the WordPress URL
+                            img.src = img.dataset.exportSrc; 
+                        }
                         
-                        // Always upload the ORIGINAL filename to the zip (WordPress handles the renaming)
-                        imgFolder.file(filename, blob);
-
-                        img.src = img.dataset.exportSrc;
+                        // Cleanup attributes for final HTML
+                        delete img.dataset.exportSrc;
+                        delete img.dataset.filename;
+                        delete img.dataset.isBig;
                     }
                     
-                    // Cleanup dataset attributes so they don't appear in final code
-                    delete img.dataset.exportSrc;
-                    delete img.dataset.filename;
-                    delete img.dataset.isBig;
+                    // Clean standard WP nonsense
+                    if(img.src.includes('wp-content/uploads')) img.removeAttribute('srcset');
+                    img.removeAttribute('style');
                 }
                 
-                if(img.src.includes('wp-content/uploads')) {
-                     img.removeAttribute('srcset');
+                if(!hasImagesToUpload) zip.remove("images_to_upload");
+                
+                zip.file("index.html", doc.documentElement.outerHTML);
+
+                const content = await zip.generateAsync({type:"blob"});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(content);
+                a.download = `${projectDomain ? projectDomain.split('.')[0] : 'project'}_update.zip`;
+                a.click();
+
+                openModal('successModal');
+
+            } catch(e) {
+                console.error("Zip failed:", e);
+                alert("Error creating Zip file. See console.");
+            } finally {
+                if(btn) {
+                    btn.innerHTML = originalText;
+                    btn.classList.remove('disabled', 'cursor-wait');
                 }
-                img.removeAttribute('style');
+                feather.replace();
             }
-            
-            if(!hasImagesToUpload) zip.remove("images_to_upload");
-            
-            zip.file("index.html", doc.documentElement.outerHTML);
-
-            const content = await zip.generateAsync({type:"blob"});
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(content);
-            a.download = `${projectDomain.split('.')[0]}_update.zip`;
-            a.click();
-
-            openModal('successModal');
-            feather.replace();
-
-            btn.innerHTML = originalText;
-            btn.classList.remove('disabled');
         }
-
-        // Global Keyboard Shortcuts
     document.addEventListener('keydown', (e) => {
         // Undo: Ctrl+Z or Cmd+Z
         if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
