@@ -446,6 +446,11 @@
                             </div>
 
                             <!-- AI TRIGGER BUTTON -->
+                            <button onclick="toggleStyleModal()" class="btn-hero-glass group">
+                                <i data-feather="pen-tool" class="w-4 h-4 group-hover:text-orange-500 transition"></i>
+                                <span class="group-hover:text-white transition">Styles</span>
+                            </button>
+
                             <button onclick="toggleAiModal()" class="btn-liquid-glow">
                                 <i data-feather="cpu" class="w-4 h-4"></i> Deep Context AI
                             </button>
@@ -573,6 +578,56 @@
         </div>
     </div>
 
+    <!-- STYLE INSPECTOR MODAL -->
+    <div id="styleModal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/90 backdrop-blur-md" onclick="toggleStyleModal()"></div>
+        <div
+            class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl max-h-[85vh] flex flex-col">
+            <div
+                class="glass-panel p-8 relative flex flex-col h-full border-orange-500/30 overflow-y-auto custom-scrollbar">
+
+                <div class="flex items-center justify-between mb-8">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-3">
+                        <i data-feather="pen-tool" class="text-orange-500"></i> Page Styles
+                    </h2>
+                    <button onclick="toggleStyleModal()"
+                        class="p-2 hover:bg-white/10 rounded-full text-gray-400 hover:text-white transition">
+                        <i data-feather="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+
+                <!-- Typography Section -->
+                <div class="mb-8">
+                    <div class="flex items-center justify-between mb-4 border-b border-white/10 pb-2">
+                        <h3 class="text-lg font-bold text-gray-200">Typography</h3>
+                        <button onclick="copyStyles('fonts')"
+                            class="text-xs text-orange-400 hover:text-white transition uppercase font-bold tracking-wide">Copy
+                            Fonts</button>
+                    </div>
+                    <div id="styleFonts" class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-400 font-mono">
+                        <!-- Fonts Injected Here -->
+                        <p class="italic opacity-50">No fonts detected.</p>
+                    </div>
+                </div>
+
+                <!-- Colors Section -->
+                <div>
+                    <div class="flex items-center justify-between mb-4 border-b border-white/10 pb-2">
+                        <h3 class="text-lg font-bold text-gray-200">Color Palette</h3>
+                        <button onclick="copyStyles('colors')"
+                            class="text-xs text-orange-400 hover:text-white transition uppercase font-bold tracking-wide">Copy
+                            Colors</button>
+                    </div>
+                    <div id="styleColors" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                        <!-- Colors Injected Here -->
+                        <p class="italic opacity-50 col-span-full">No colors detected.</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
     <!-- LOGIC -->
     <script>
         // Init Icons
@@ -650,6 +705,7 @@
         };
 
         // AI LOGIC
+        // AI LOGIC
         window.generateDeepContext = async () => {
             const key = localStorage.getItem('reputifly_api_key');
             if (!key) {
@@ -666,10 +722,10 @@
             aiLoading.classList.remove('hidden');
 
             // Build Context
-            let contextPrompt = "Here is the raw text content of a webpage, followed by a list of images found on it. \n\n";
-            contextPrompt += "=== RAW TEXT CONTENT ===\n" + rawTextContent.substring(0, 20000) + "\n\n"; // Limit for safety
-            contextPrompt += "=== IMAGE DATA ===\n" + extractedData.map(i => `- [Image: ${i.alt}] (Context: ${i.context})`).join('\n') + "\n\n";
-            contextPrompt += "=== TASK ===\nAnalyze this content deeply. Provide a structure breakdown of the page. Explain the context of the images. Output a detailed design brief and content summary that could be used to re-create or understand this page deeply. Format in Markdown.";
+            let contextPrompt = "Here is the raw text content of a webpage, followed by a list of images found on it. \\n\\n";
+            contextPrompt += "=== RAW TEXT CONTENT ===\\n" + rawTextContent.substring(0, 20000) + "\\n\\n"; // Limit for safety
+            contextPrompt += "=== IMAGE DATA ===\\n" + extractedData.map(i => `- [Image: ${i.alt}] (Context: ${i.context})`).join('\\n') + "\\n\\n";
+            contextPrompt += "=== TASK ===\\nAnalyze this content deeply. Provide a structure breakdown of the page. Explain the context of the images. Output a detailed design brief and content summary that could be used to re-create or understand this page deeply. Format in Markdown.";
 
             const model = localStorage.getItem('reputifly_model') || 'gemini-2.5-flash';
 
@@ -685,6 +741,7 @@
                 });
 
                 const data = await response.json();
+
                 if (data.error) throw new Error(data.error.message);
 
                 const text = data.candidates[0].content.parts[0].text;
@@ -698,6 +755,69 @@
             } finally {
                 aiLoading.classList.add('hidden');
             }
+        };
+
+        // STYLE INSPECTOR LOGIC
+        window.toggleStyleModal = () => {
+            if (extractedStyles.fonts.size === 0 && extractedStyles.colors.size === 0 && styleModal.classList.contains('hidden')) {
+                showToast('Paste content first!');
+                return;
+            }
+            renderStyles();
+            styleModal.classList.toggle('hidden');
+        };
+
+        function extractStyles(doc) {
+            extractedStyles = { fonts: new Set(), colors: new Set() };
+            const walker = document.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT, null);
+            while (walker.nextNode()) {
+                const node = walker.currentNode;
+                if (node.style) {
+                    if (node.style.fontFamily) extractedStyles.fonts.add(node.style.fontFamily);
+                    if (node.style.color) extractedStyles.colors.add(node.style.color);
+                    if (node.style.backgroundColor) extractedStyles.colors.add(node.style.backgroundColor);
+                }
+                // Try reading attributes for old emails/legacy html
+                if (node.getAttribute('color')) extractedStyles.colors.add(node.getAttribute('color'));
+                if (node.getAttribute('bgcolor')) extractedStyles.colors.add(node.getAttribute('bgcolor'));
+                if (node.getAttribute('face')) extractedStyles.fonts.add(node.getAttribute('face'));
+            }
+        }
+
+        function renderStyles() {
+            // Render Fonts
+            if (extractedStyles.fonts.size > 0) {
+                styleFonts.innerHTML = Array.from(extractedStyles.fonts).map(f =>
+                    `<div class="p-3 bg-white/5 rounded-lg border border-white/5 flex flex-col justify-center">
+                        <span style="font-family: ${f}" class="text-lg text-white mb-1 truncate">${f}</span>
+                        <span class="text-xs text-gray-500">${f}</span>
+                     </div>`
+                ).join('');
+            }
+
+            // Render Colors
+            if (extractedStyles.colors.size > 0) {
+                // Filter invalid colors/transparent
+                const validColors = Array.from(extractedStyles.colors).filter(c => c && c !== 'transparent' && c !== 'initial' && c !== 'inherit');
+
+                styleColors.innerHTML = validColors.map(c => `
+                    <div class="group cursor-pointer relative" onclick="copyLink('${c}')">
+                        <div class="h-20 w-full rounded-xl shadow-lg mb-2 border border-white/10 transition group-hover:scale-105" style="background-color: ${c}"></div>
+                        <p class="text-[10px] font-mono text-center text-gray-400 group-hover:text-white uppercase truncate">${c}</p>
+                         <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
+                            <span class="bg-black/80 text-white text-[10px] px-2 py-1 rounded backdrop-blur-md">COPY</span>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        window.copyStyles = (type) => {
+            let text = "";
+            if (type === 'fonts') text = "FONTS:\n" + Array.from(extractedStyles.fonts).join('\n');
+            if (type === 'colors') text = "PALETTE:\n" + Array.from(extractedStyles.colors).join('\n');
+            navigator.clipboard.writeText(text);
+            showToast('Copied to Clipboard!');
         };
 
         window.downloadAiContext = () => {
@@ -775,6 +895,9 @@
             if (doc.body.textContent.trim().length > rawTextContent.length) {
                 rawTextContent = doc.body.innerText; // Prefer innerText from DOM
             }
+
+            // Extract Styles
+            extractStyles(doc);
 
             extractedData = [];
             gridOutput.innerHTML = '';
