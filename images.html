@@ -507,6 +507,26 @@
         contextToggle.addEventListener('change', () => rerenderIfData());
         wpToggle.addEventListener('change', () => rerenderIfData());
 
+        // PERSISTENCE: LOAD
+        window.addEventListener('load', () => {
+            const saved = localStorage.getItem('reputifly_data');
+            if (saved) {
+                try {
+                    extractedData = JSON.parse(saved);
+                    if (extractedData.length > 0) {
+                        renderGrid();
+                        showToast('Restored previous session');
+                    }
+                } catch (e) { console.error('Save Corrupt'); }
+            }
+            pasteZone.focus();
+        });
+
+        // PERSISTENCE: SAVE
+        function saveState() {
+            localStorage.setItem('reputifly_data', JSON.stringify(extractedData));
+        }
+
         function rerenderIfData() {
             if (extractedData.length > 0) renderGrid();
         }
@@ -605,6 +625,7 @@
                 });
             }
 
+            saveState(); // SAVE ON NEW PASTE
             renderGrid();
         }
 
@@ -647,6 +668,11 @@
                 }
 
                 items.forEach(data => {
+                    // Find actual index in main array for deletion
+                    // This is simple since objects are references, but let's store the source index or use ID? 
+                    // Simpler: find index of this object in extractedData
+                    const realIndex = extractedData.indexOf(data);
+
                     // Prepare preview name
                     let displayName = data.alt;
                     if (isWP) {
@@ -659,9 +685,15 @@
                         <div class="relative aspect-square bg-black/50 rounded-lg overflow-hidden flex items-center justify-center">
                             <img src="${data.src}" class="max-w-full max-h-full object-contain" loading="lazy">
                             
-                            <!-- Hover Overlay -->
+                            <!-- ACTIONS OVERLAY -->
                             <div class="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2 p-4 text-center">
-                                <p class="text-[10px] text-gray-400 font-mono break-all line-clamp-2 mb-2">${data.src.substring(0, 50)}...</p>
+                                
+                                <!-- Delete Button (Top Right) -->
+                                <button onclick="deleteImage(${realIndex})" class="absolute top-2 right-2 p-1.5 bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition" title="Remove">
+                                    <i data-feather="x" class="w-4 h-4"></i>
+                                </button>
+                                
+                                <p class="text-[10px] text-gray-400 font-mono break-all line-clamp-2 mb-2 mt-4">${data.src.substring(0, 50)}...</p>
                                 <div class="flex gap-2">
                                     <a href="${data.src}" target="_blank" class="p-2 bg-white/10 hover:bg-pink-500 rounded-full text-white transition" title="Open">
                                         <i data-feather="external-link" class="w-4 h-4"></i>
@@ -698,10 +730,23 @@
 
         // RESET
         resetAction.addEventListener('click', () => {
+            if (!confirm('Clear all extracted images?')) return;
             extractedData = [];
+            saveState();
             resultsContainer.classList.add('hidden');
             pasteZone.innerHTML = `<i data-feather="download-cloud" class="w-10 h-10 mb-4 opacity-50"></i><p class="font-medium">Click here & Press <span class="text-white font-mono bg-white/10 px-2 py-1 rounded">Ctrl + V</span></p>`;
         });
+
+        // DELETE SINGLE
+        window.deleteImage = (index) => {
+            extractedData.splice(index, 1);
+            saveState();
+            if (extractedData.length === 0) {
+                resetAction.click(); // Trigger reset UI if empty
+            } else {
+                renderGrid();
+            }
+        }
 
         // COPY SINGLE
         window.copyLink = (url) => {
@@ -709,12 +754,33 @@
             showToast('URL Copied!');
         };
 
-        // COPY ALL
+        // HELPER: GET TEXT CONTENT
+        function getExportContent() {
+            if (contextToggle.checked) {
+                // Context Mode: Grouped
+                const grouped = extractedData.reduce((acc, item) => {
+                    (acc[item.context] = acc[item.context] || []).push(item.src);
+                    return acc;
+                }, {});
+
+                let output = "";
+                for (const [header, urls] of Object.entries(grouped)) {
+                    output += `## ${header}\n`;
+                    output += urls.join('\n') + "\n\n";
+                }
+                return output.trim();
+            } else {
+                // Flat Mode
+                return extractedData.map(i => i.src).join('\n');
+            }
+        }
+
+        // COPY ALL (Context Aware)
         window.copyAllUrls = () => {
             if (!extractedData.length) return;
-            const text = extractedData.map(i => i.src).join('\n');
+            const text = getExportContent();
             navigator.clipboard.writeText(text);
-            showToast('All URLs Copied!');
+            showToast(contextToggle.checked ? 'Context Copied!' : 'List Copied!');
         };
 
         // EXPORT MENU
@@ -727,12 +793,12 @@
             if (!e.target.closest('.relative')) exportMenu.classList.add('hidden');
         });
 
-        // DOWNLOAD TEXT
+        // DOWNLOAD TEXT (Context Aware)
         window.downloadText = () => {
             if (!extractedData.length) return;
-            const text = extractedData.map(i => i.src).join('\n');
+            const text = getExportContent();
             const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-            saveAs(blob, "image_list.txt");
+            saveAs(blob, contextToggle.checked ? "image_context_list.txt" : "image_list.txt");
             showToast('Downloaded TEXT List!');
             exportMenu.classList.add('hidden');
         };
