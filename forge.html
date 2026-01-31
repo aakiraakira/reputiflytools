@@ -853,11 +853,11 @@
                     }
 
                     updateColorInputs(state.colors.primary, state.colors.accent, state.colors.bg, state.colors.text);
-                    alert("Project Loaded Successfully!");
+                    showToast("Project Loaded Successfully!", "success");
 
                 } catch (err) {
                     console.error(err);
-                    alert("Invalid .brand file!");
+                    showToast("Invalid .brand file!", "error");
                 }
             };
             reader.readAsText(input.files[0]);
@@ -866,7 +866,7 @@
         function copyJSON() {
             const data = getBrandData();
             navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-            alert("Brand Data copied to clipboard!");
+            showToast("Brand Data copied to clipboard!", "success");
         }
 
         // TAILWIND REMOVED PER REQUEST
@@ -939,7 +939,7 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
 }
 `;
             navigator.clipboard.writeText(prompt);
-            alert("Strict System Prompt copied! (Includes JSON Schema & Safety Rules)");
+            showToast("Strict System Prompt copied!", "success");
         }
 
         // --- UI FUNCTIONS ---
@@ -961,11 +961,14 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
 
         // RESET FUNCTION
         function resetMemory() {
-            if (confirm("Are you sure? This will clear all saved data, API keys, and reload the page.")) {
-                localStorage.removeItem('reputifly_gemini_key');
-                localStorage.removeItem('reputifly_autosave');
-                window.location.reload();
-            }
+            showConfirm("Reset Everything?", "This will clear all saved data, API keys, and reload the page.")
+                .then(ok => {
+                    if (ok) {
+                        localStorage.removeItem('reputifly_gemini_key');
+                        localStorage.removeItem('reputifly_autosave');
+                        window.location.reload();
+                    }
+                });
         }
 
         // Auto-Save simple hook
@@ -1012,7 +1015,7 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
 
             } catch (e) {
                 console.error("Color Extraction Failed", e);
-                alert("Could not extract colors automatically. Please pick manually.");
+                showToast("Could not extract colors. Please pick manually.", "error");
             }
         }
 
@@ -1024,7 +1027,7 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
         // --- 2. AI LOGIC (GEMINI 2.5 FLASH) ---
         async function askAI() {
             const key = localStorage.getItem('reputifly_gemini_key');
-            if (!key) return alert("Please save API Key first!");
+            if (!key) return showToast("Please save API Key first!", "error");
 
             const img = document.getElementById('previewImg');
             const contextText = document.getElementById('brandContext').value;
@@ -1033,7 +1036,7 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             const hasImage = !img.classList.contains('hidden') && img.src;
             const hasText = contextText && contextText.trim().length > 0; // Fix: check exists first
 
-            if (!hasImage && !hasText) return alert("Please upload an image OR enter a brand description!");
+            if (!hasImage && !hasText) return showToast("Missing Input: Image or Description required.", "error");
 
             const btn = document.getElementById('aiBtn');
             const originalText = btn.innerHTML;
@@ -1045,13 +1048,13 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
                 let prompt = "";
 
                 if (activeTab === 'logo') {
-                    if (!img.src || img.classList.contains('hidden')) return alert("Please upload a logo in 'Logo Available' mode.");
+                    if (!img.src || img.classList.contains('hidden')) return showToast("Please upload a logo first.", "error");
                     prompt = `You are a Senior Brand Designer. Analyze this logo. 
                         Extract the TRUE brand colors. Ignore container backgrounds.
                         Predict the best 'Background' and 'Text' colors for a high-end web design.
                         Return strictly raw JSON (no markdown).`;
                 } else {
-                    if (contextText.trim().length === 0) return alert("Please enter a description in 'Start from Scratch' mode.");
+                    if (contextText.trim().length === 0) return showToast("Please enter a brand description.", "error");
                     prompt = `You are a Senior Brand Designer. Create a complete brand identity from scratch for this business: "${contextText}".
                         Generate a color palette, typography and UI vibe that perfectly fits this description.
                         Return strictly raw JSON (no markdown).`;
@@ -1128,11 +1131,11 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
                 // Trigger Updates
                 updateColorInputs(json.colors.primary, json.colors.accent, json.colors.background, json.colors.text);
 
-                alert(`✨ AI Refined: ${json.reasoning}`);
+                showToast(`✨ AI Refined: ${json.reasoning}`, "success");
 
             } catch (e) {
                 console.error(e);
-                alert("AI Error: " + e.message);
+                showToast("AI Error: " + e.message, "error");
             }
             btn.innerHTML = originalText;
             feather.replace();
@@ -1324,8 +1327,26 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
         function setRadius(r) { currentRadius = r; updatePreview(); }
 
         function saveKey() {
-            const k = document.getElementById('apiKeyInput').value;
-            if (k) { localStorage.setItem('reputifly_gemini_key', k); document.getElementById('apiKeyBox').classList.add('hidden'); alert("Key Saved! AI Mode Unlocked."); document.getElementById('aiBadge').innerText = "AI Active"; document.getElementById('aiBadge').classList.replace('text-gray-600', 'text-pink-400'); document.getElementById('aiBadge').classList.replace('border-gray-700', 'border-pink-500'); }
+            const input = document.getElementById('apiKeyInputModal');
+            const k = input ? input.value : '';
+
+            if (k) {
+                localStorage.setItem('reputifly_gemini_key', k);
+
+                const box = document.getElementById('apiKeyBox');
+                if (box) box.classList.add('hidden');
+
+                showToast("Key Saved! AI Mode Unlocked.", "success");
+
+                const badge = document.getElementById('aiBadge');
+                if (badge) {
+                    badge.innerText = "AI Active";
+                    badge.classList.replace('text-gray-600', 'text-pink-400');
+                    badge.classList.replace('border-gray-700', 'border-pink-500');
+                }
+            } else {
+                showToast("Please enter an API Key.", "error");
+            }
         }
 
         function getBrandData() {
@@ -1391,7 +1412,7 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
     --shadow: ${d.ui.shadow}; 
 }`;
             navigator.clipboard.writeText(css);
-            alert("CSS Variables copied to clipboard!");
+            showToast("CSS Variables copied to clipboard!", "success");
         }
 
         function toggleSettings() {
@@ -1610,10 +1631,92 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
                 })
                 .catch(err => {
                     console.error(err);
-                    alert("Error generating PDF. Please ensure your logo is valid.");
+                    showToast("Error generating PDF. Check logo.", "error");
                     document.body.removeChild(container);
                     btn.innerHTML = originalText;
                 });
+        }
+
+        // --- PRETTIER NOTIFICATIONS ---
+        function showToast(msg, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+
+            let colors = 'bg-gray-800 text-white border-gray-700';
+            let icon = 'info';
+
+            if (type === 'success' || msg.toLowerCase().includes('success') || msg.toLowerCase().includes('saved') || msg.toLowerCase().includes('copied')) {
+                colors = 'bg-[#052e16] text-[#4ade80] border-[#4ade80]/30 shadow-[0_0_15px_rgba(74,222,128,0.1)]';
+                icon = 'check-circle';
+                if (type === 'info') type = 'success'; // Auto-detect override
+            }
+            if (type === 'error' || msg.toLowerCase().includes('error') || msg.toLowerCase().includes('failed') || msg.toLowerCase().includes('invalid') || msg.toLowerCase().includes('please')) {
+                colors = 'bg-[#2e0505] text-[#f87171] border-[#f87171]/30 shadow-[0_0_15px_rgba(248,113,113,0.1)]';
+                icon = 'alert-octagon';
+                if (type === 'info') type = 'error';
+            }
+
+            toast.className = `pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border backdrop-blur-md shadow-2xl transform transition-all duration-500 ease-out translate-y-[-20px] opacity-0 ${colors}`;
+            toast.innerHTML = `<i data-feather="${icon}" class="w-4 h-4 shrink-0"></i> <span class="text-xs font-bold tracking-wide">${msg}</span>`;
+
+            container.appendChild(toast);
+            feather.replace();
+
+            // Animate In
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-[-20px]', 'opacity-0');
+            });
+
+            // Animate Out
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-[-20px]');
+                setTimeout(() => toast.remove(), 500);
+            }, 4000);
+        }
+
+        let currentModalResolve = null;
+
+        function closeModal() {
+            const el = document.getElementById('customModal');
+            const content = document.getElementById('customModalContent');
+            content.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => el.classList.add('hidden'), 200);
+            if (currentModalResolve) currentModalResolve(false);
+            currentModalResolve = null;
+        }
+
+        function showConfirm(title, msg) {
+            return new Promise((resolve) => {
+                const el = document.getElementById('customModal');
+                const content = document.getElementById('customModalContent');
+
+                document.getElementById('modalTitle').innerText = title;
+                document.getElementById('modalMessage').innerText = msg;
+
+                const btn = document.getElementById('modalConfirmBtn');
+                // Remove old listeners by cloning
+                const newBtn = btn.cloneNode(true);
+                btn.parentNode.replaceChild(newBtn, btn);
+
+                newBtn.onclick = () => {
+                    // Manually resolve true, close modal
+                    if (currentModalResolve) currentModalResolve = null; // Clear global to prevent double resolve
+                    const el = document.getElementById('customModal');
+                    const content = document.getElementById('customModalContent');
+                    content.classList.add('scale-95', 'opacity-0');
+                    setTimeout(() => el.classList.add('hidden'), 200);
+                    resolve(true);
+                };
+
+                // Override global resolve for cancel case (click outside/cancel btn)
+                currentModalResolve = resolve;
+
+                el.classList.remove('hidden');
+                // Animation
+                requestAnimationFrame(() => {
+                    content.classList.remove('scale-95', 'opacity-0');
+                });
+            });
         }
 
         // Init
@@ -1622,6 +1725,27 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             document.getElementById('aiBadge').className = "text-[10px] text-pink-400 border border-pink-500 px-1 rounded";
         }
     </script>
+    <!-- TOAST CONTAINER -->
+    <div id="toast-container"
+        class="fixed top-5 left-1/2 transform -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none w-full max-w-sm items-center">
+    </div>
+
+    <!-- CUSTOM MODAL -->
+    <div id="customModal" class="fixed inset-0 z-[100] hidden flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onclick="closeModal()"></div>
+        <div class="bg-[#0B0A14] border border-white/10 rounded-2xl shadow-2xl p-6 w-full max-w-sm relative transform scale-95 opacity-0 transition-all duration-200"
+            id="customModalContent">
+            <h3 class="text-lg font-bold text-white mb-2" id="modalTitle">Confirm Action</h3>
+            <p class="text-sm text-gray-400 mb-6 leading-relaxed" id="modalMessage">Are you sure you want to proceed?
+            </p>
+            <div class="flex gap-3 justify-end">
+                <button onclick="closeModal()"
+                    class="px-4 py-2 text-xs font-bold text-gray-500 hover:text-white transition rounded-lg hover:bg-white/5">Cancel</button>
+                <button id="modalConfirmBtn"
+                    class="px-4 py-2 text-xs font-bold bg-white text-black rounded-lg hover:bg-gray-200 transition shadow-lg hover:shadow-xl hover:-translate-y-0.5 transform">Confirm</button>
+            </div>
+        </div>
+    </div>
 </body>
 
 </html>
