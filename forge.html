@@ -309,6 +309,14 @@
                                 class="btn-secondary w-full text-xs text-red-400 border-red-400/30">Cancel</button>
                         </div>
                     </div>
+
+                    <!-- Detected Palette UI -->
+                    <div id="detectedPaletteBox" class="hidden mb-4 p-3 bg-white/5 rounded-lg border border-white/5">
+                        <p class="text-[10px] text-gray-500 uppercase font-bold mb-2">Colors Found in Image</p>
+                        <div id="detectedSwatches" class="flex flex-wrap gap-2">
+                            <!-- Swatches injected here -->
+                        </div>
+                    </div>
                 </div>
 
                 <!-- TAB CONTENT: NO LOGO -->
@@ -338,6 +346,9 @@
                             <button onclick="resetColor('colPrimary')"
                                 class="text-gray-600 hover:text-white opacity-0 group-hover:opacity-100 transition"
                                 title="Reset Color"><i data-feather="refresh-cw" class="w-3 h-3"></i></button>
+                            <button onclick="openColorModal('colPrimary', 'Primary')"
+                                class="text-gray-500 hover:text-blue-400 opacity-0 group-hover:opacity-100 transition"
+                                title="Pick from Image"><i data-feather="droplet" class="w-3 h-3"></i></button>
                         </div>
                         <div id="warnPrimary"
                             class="hidden flex items-center justify-between text-[10px] bg-red-400/10 text-red-400 px-2 py-1 rounded">
@@ -359,6 +370,9 @@
                             <button onclick="resetColor('colAccent')"
                                 class="text-gray-600 hover:text-white opacity-0 group-hover:opacity-100 transition"
                                 title="Reset Color"><i data-feather="refresh-cw" class="w-3 h-3"></i></button>
+                            <button onclick="openColorModal('colAccent', 'Accent')"
+                                class="text-gray-500 hover:text-pink-400 opacity-0 group-hover:opacity-100 transition"
+                                title="Pick from Image"><i data-feather="droplet" class="w-3 h-3"></i></button>
                         </div>
                         <!-- We typically check accent against BG for visibility -->
                         <div id="warnAccent"
@@ -381,6 +395,9 @@
                             <button onclick="resetColor('colBg')"
                                 class="text-gray-600 hover:text-white opacity-0 group-hover:opacity-100 transition"
                                 title="Reset Color"><i data-feather="refresh-cw" class="w-3 h-3"></i></button>
+                            <button onclick="openColorModal('colBg', 'Background')"
+                                class="text-gray-500 hover:text-yellow-400 opacity-0 group-hover:opacity-100 transition"
+                                title="Pick from Image"><i data-feather="droplet" class="w-3 h-3"></i></button>
                         </div>
                         <div class="flex items-center gap-3">
                             <input type="color" id="colText" value="#1e293b" data-original="#1e293b"
@@ -392,6 +409,9 @@
                             <button onclick="resetColor('colText')"
                                 class="text-gray-600 hover:text-white opacity-0 group-hover:opacity-100 transition"
                                 title="Reset Color"><i data-feather="refresh-cw" class="w-3 h-3"></i></button>
+                            <button onclick="openColorModal('colText', 'Text')"
+                                class="text-gray-500 hover:text-gray-400 opacity-0 group-hover:opacity-100 transition"
+                                title="Pick from Image"><i data-feather="droplet" class="w-3 h-3"></i></button>
                         </div>
                         <div id="warnText"
                             class="hidden flex items-center justify-between text-[10px] bg-red-400/10 text-red-400 px-2 py-1 rounded">
@@ -1053,20 +1073,199 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             document.getElementById('fileInput').value = '';
         }
 
+
+        // MANUAL COLOR PICKER LOGIC
+        let activePickerTarget = null;
+
+        function openColorPicker(targetId) {
+            const img = document.getElementById('cropperImg');
+            // If no image is visible/uploaded, confuse user less by saying so.
+            // But 'cropperImg' is always there, empty or not?
+            if (!img.src || img.src === window.location.href) {
+                // If the user hasn't uploaded a logo, maybe try to use the raw fileInput if possible?
+                // Or just error out.
+                if (!cropper) {
+                    showToast("Please upload an image first!", "error");
+                    return;
+                }
+            }
+
+            activePickerTarget = targetId;
+            const modal = document.getElementById('colorPickerModal');
+            const canvas = document.getElementById('pickerCanvas');
+            const ctx = canvas.getContext('2d');
+
+            // Use the image source (could be base64 cropped or original)
+            // We prefer the 'cropperImg' because that's what the user sees
+            const imageObj = new Image();
+            imageObj.src = img.src;
+
+            imageObj.onload = () => {
+                // Resize logic for canvas to fit screen
+                const maxW = window.innerWidth * 0.8;
+                const maxH = window.innerHeight * 0.7;
+                let scale = 1;
+
+                if (imageObj.naturalWidth > maxW || imageObj.naturalHeight > maxH) {
+                    scale = Math.min(maxW / imageObj.naturalWidth, maxH / imageObj.naturalHeight);
+                }
+
+                canvas.width = imageObj.naturalWidth * scale;
+                canvas.height = imageObj.naturalHeight * scale;
+
+                ctx.drawImage(imageObj, 0, 0, canvas.width, canvas.height);
+                modal.classList.remove('hidden');
+            }
+        }
+
+        function handleCanvasClick(e) {
+            if (!activePickerTarget) return;
+
+            const canvas = document.getElementById('pickerCanvas');
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            const p = ctx.getImageData(x, y, 1, 1).data;
+            const hex = rgbToHex(p[0], p[1], p[2]);
+
+            // Apply
+            const input = document.getElementById(activePickerTarget);
+            input.value = hex;
+
+            // Trigger updates
+            updatePreview();
+
+            // Also update the Hex Label text if exists
+            // ID pattern: colPrimary -> hexPrimary
+            const labelId = activePickerTarget.replace('col', 'hex');
+            const label = document.getElementById(labelId);
+            if (label) label.innerText = hex;
+
+            showToast(`Color Picked: ${hex}`, 'success');
+            closeColorPicker();
+        }
+
+        function closeColorPicker() {
+            document.getElementById('colorPickerModal').classList.add('hidden');
+            activePickerTarget = null;
+        }
+
+        // --- Helper --- 
+        function rgbToHex(r, g, b) {
+            return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+        }
+
         function extractColorsLocally(img) {
             try {
-                // Get Dominant Color (Primary)
+                // Get Dominant Color (Natural Primary)
                 const dom = colorThief.getColor(img);
-                const palette = colorThief.getPalette(img, 5); // Get 5 colors
+                // Get Detailed Palette (up to 10 colors for better discovery)
+                const palette = colorThief.getPalette(img, 10);
+                window.extractedPalette = palette; // Save for Modal
 
-                const primaryHex = rgbToHex(...dom);
-                // Simple logic: Accent is the color most different from Primary in the palette
-                const accentHex = rgbToHex(...(palette[1] || dom));
-                const bgHex = isLight(dom) ? '#ffffff' : '#0f172a'; // Guess BG based on Primary brightness
-                const textHex = isLight(dom) ? '#1e293b' : '#f8fafc';
+                // Helper: Get Saturation (0-100)
+                const getSat = (rgb) => {
+                    const r = rgb[0] / 255, g = rgb[1] / 255, b = rgb[2] / 255;
+                    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+                    return (max === 0) ? 0 : (max - min) / max * 100;
+                };
+
+                // Helper: Is Grayscale? (Low saturation)
+                const isGray = (rgb) => getSat(rgb) < 10;
+
+                // STRATEGY:
+                // 1. Identify the "Best" Colorful color in the palette
+                // Sort by Saturation
+                const sortedBySat = [...palette].sort((a, b) => getSat(b) - getSat(a));
+                const mostVibrant = sortedBySat[0];
+                const vibrantSat = getSat(mostVibrant);
+
+                let primaryRgb = dom;
+                let accentRgb = palette[1] || dom;
+
+                // 2. Logic: If Dominant is boring (Black/White/Gray) AND we found a very vibrant color,
+                // Promote the vibrant color to Primary (or at least used).
+                // Many logos are "Red text on White BG". Dominant = White. We want Red.
+                if (isGray(dom) && vibrantSat > 30) {
+                    // Dominant is boring, found something fun.
+                    primaryRgb = mostVibrant;
+
+                    // Try to find a secondary color for accent?
+                    // Maybe the second most vibrant, or the original dominant (to keep contrast)?
+                    // Let's set Accent to the 2nd vibrant one, or just keep it distinct.
+                    accentRgb = sortedBySat[1] || dom;
+                } else {
+                    // Dominant is colorful! Use it. 
+                    // Set accent to something contrasting if possible?
+                    // For now, standard palette logic is ok.
+                    accentRgb = palette[1] || dom;
+                }
+
+                // Convert to Hex
+                const primaryHex = rgbToHex(...primaryRgb);
+                const accentHex = rgbToHex(...accentRgb);
+
+                // BG/Text Logic (Standard)
+                const bgHex = isLight(primaryRgb) ? '#ffffff' : '#0B0A14';
+                const textHex = isLight(primaryRgb) ? '#0B0A14' : '#FFFFFF';
 
                 // Apply to UI
                 updateColorInputs(primaryHex, accentHex, bgHex, textHex);
+
+                // --- UI: RENDER DETECTED PALETTE ---
+                const box = document.getElementById('detectedPaletteBox');
+                const swatches = document.getElementById('detectedSwatches');
+                swatches.innerHTML = ''; // Clear
+                box.classList.remove('hidden');
+
+                // Render Top 8 colors
+                // We show them all so user can pick "That Red"
+                palette.slice(0, 8).forEach(rgb => {
+                    const hex = rgbToHex(...rgb);
+
+                    // Container for the swatch
+                    const wrapper = document.createElement('div');
+                    wrapper.className = "relative group";
+
+                    const btn = document.createElement('button');
+                    btn.className = "w-8 h-8 rounded-full border border-white/20 hover:scale-110 transition shadow-sm relative";
+                    btn.style.backgroundColor = hex;
+                    btn.onclick = () => {
+                        // On click, set specific color to Primary
+                        document.getElementById('colPrimary').value = hex;
+                        updatePreview();
+                        // Also update text label
+                        document.getElementById('hexPrimary').innerText = hex;
+                        showToast(`Primary Color updated to ${hex}`, 'success');
+                    }
+
+                    // Delete Button (X)
+                    const delBtn = document.createElement('button');
+                    delBtn.className = "absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition shadow-lg z-10";
+                    delBtn.innerHTML = '<i data-feather="x" class="w-2 h-2"></i>';
+                    delBtn.onclick = (e) => {
+                        e.stopPropagation(); // Stop it from triggering the color pick
+                        wrapper.remove(); // Remove this swatch
+                    };
+
+                    wrapper.appendChild(btn);
+                    wrapper.appendChild(delBtn);
+
+                    // Tooltip (Optional, can be messy with key overlap, removing for cleaner UI or keep simple)
+                    // const tooltip = document.createElement('span');
+                    // tooltip.className = "absolute -top-6 left-1/2 -translate-x-1/2 bg-black text-[10px] text-white px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none z-20";
+                    // tooltip.innerText = "Use as Primary";
+                    // wrapper.appendChild(tooltip);
+
+                    swatches.appendChild(wrapper);
+                });
+
+                // Re-init feather for the new X icons
+                feather.replace();
+
 
                 // Show AI Option if Key exists
                 if (localStorage.getItem('reputifly_gemini_key')) {
@@ -1286,6 +1485,85 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             // 6. Accessibility Checks
             checkContrast(p, a, b, t);
         }
+
+        // --- PREVIEW INTERACTIONS (DELEGATION) ---
+        function initPreviewInteractions() {
+            const preview = document.getElementById('livePreview');
+
+            // Add hover cursor for everything interactive
+            const style = document.createElement('style');
+            style.innerHTML = `
+                #livePreview * { cursor: default; }
+                #livePreview button, #livePreview .preview-btn { cursor: pointer; outline: 3px solid transparent; transition: outline 0.2s; }
+                #livePreview h1, #livePreview h2, #livePreview h3, #livePreview p, #livePreview span { cursor: pointer; }
+                #livePreview .preview-card { cursor: pointer; }
+                #livePreview:hover { cursor: crosshair; } 
+
+                #livePreview *:hover { 
+                    /* subtle highlight on hover to show interactivity */
+                    /* Note: This might conflict with actual visual design, so keeps it minimal */
+                }
+            `;
+            document.head.appendChild(style);
+
+            preview.addEventListener('click', (e) => {
+                // Prevent real links/buttons if needed, though here we want to trigger the color picker
+                // e.preventDefault(); 
+                e.stopPropagation();
+
+                const target = e.target;
+
+                // 1. Buttons / Primary (Check classes or tag)
+                if (target.classList.contains('preview-btn') ||
+                    target.closest('.preview-btn') ||
+                    getComputedStyle(target).backgroundColor === document.getElementById('colPrimary').value) {
+
+                    showToast("Editing Primary Color...", "info");
+                    openColorModal('colPrimary', 'Primary');
+                    return;
+                }
+
+                // 2. Headings / Text
+                if (['H1', 'H2', 'H3', 'P', 'SPAN'].includes(target.tagName)) {
+                    // Check if it's explicitly accent text
+                    if (target.style.color && target.style.color.includes('var(--p-accent)')) {
+                        showToast("Editing Accent Color...", "info");
+                        openColorModal('colAccent', 'Accent');
+                        return;
+                    }
+
+                    showToast("Editing Text Color...", "info");
+                    openColorModal('colText', 'Text');
+                    return;
+                }
+
+                // 3. Cards / Surface (Check specific class)
+                if (target.classList.contains('preview-card') || target.closest('.preview-card')) {
+                    // Usually surface color, but we might not have a specific picker for surface?
+                    // We generate surface from background. So maybe open Background picker?
+                    showToast("Surface depends on Background. Editing Background...", "info");
+                    openColorModal('colBg', 'Background');
+                    return;
+                }
+
+                // 4. Fallback: Background
+                if (target === preview || target.classList.contains('fixed-bg')) {
+                    showToast("Editing Background Color...", "info");
+                    openColorModal('colBg', 'Background');
+                    return;
+                }
+
+                // If element has specific styles matching our vars
+                const computed = getComputedStyle(target);
+                if (computed.color === document.getElementById('colAccent').value) {
+                    document.getElementById('colAccent').click();
+                    return;
+                }
+            });
+        }
+
+        // Call init
+        initPreviewInteractions();
 
         // --- ACCESSIBILITY LOGIC ---
         function getLuminance(r, g, b) {
@@ -1855,6 +2133,227 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             </div>
         </div>
     </div>
+    <!-- CUSTOM COLOR PICKER MODAL -->
+    <div id="colorModal"
+        class="fixed inset-0 z-[100] hidden flex items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div
+            class="bg-[#0B0A14] border border-white/10 rounded-xl w-[90%] max-w-md shadow-2xl transform transition-all scale-100 relative">
+
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between p-4 border-b border-white/10">
+                <h3 id="colorModalTitle" class="text-white font-bold text-lg brand-font">Edit Color</h3>
+                <button onclick="closeColorModal()" class="text-gray-500 hover:text-white transition p-1">
+                    <i data-feather="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <!-- Tabs -->
+            <div class="flex border-b border-white/10">
+                <button onclick="switchModalTab('manual')" id="tabModalManual"
+                    class="flex-1 py-3 text-sm font-bold text-center transition-colors tab-active relative">
+                    Manual
+                </button>
+                <button onclick="switchModalTab('image')" id="tabModalImage"
+                    class="flex-1 py-3 text-sm font-bold text-center transition-colors tab-inactive relative">
+                    From Image
+                </button>
+            </div>
+
+            <!-- Content -->
+            <div class="p-6 min-h-[250px]">
+
+                <!-- MANUAL TAB -->
+                <div id="modalContentManual" class="space-y-6">
+                    <div class="flex flex-col items-center justify-center space-y-4">
+                        <div class="relative group cursor-pointer hover:scale-105 transition-transform duration-300">
+                            <!-- Native Picker (Hidden but clickable) -->
+                            <input type="color" id="modalColorInput"
+                                class="w-32 h-32 rounded-full cursor-pointer opacity-0 absolute inset-0 z-20"
+                                oninput="updateModalManual(this.value)">
+
+                            <!-- Custom Visual -->
+                            <div id="modalColorPreview"
+                                class="w-32 h-32 rounded-full border-[6px] border-white/10 shadow-2xl flex items-center justify-center bg-blue-500 transition-colors z-10">
+                                <i data-feather="edit-2"
+                                    class="w-8 h-8 text-white/50 group-hover:text-white/90 transition"></i>
+                            </div>
+                        </div>
+
+                        <div class="w-full relative">
+                            <label
+                                class="text-[10px] text-gray-500 uppercase font-bold mb-1 block text-center tracking-widest">Hex
+                                Code</label>
+                            <div class="relative max-w-[150px] mx-auto">
+                                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-mono">#</span>
+                                <input type="text" id="modalHexInput" maxlength="7"
+                                    class="w-full bg-white/5 border border-white/10 rounded-lg py-2 pl-7 pr-2 text-white font-mono text-center focus:border-pink-500 outline-none transition uppercase"
+                                    placeholder="FFFFFF" oninput="updateModalFromHex(this.value)">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- IMAGE TAB -->
+                <div id="modalContentImage" class="hidden">
+                    <p class="text-xs text-gray-500 mb-4 uppercase font-bold text-center">Extracted from Uploaded Image
+                    </p>
+                    <div id="modalPaletteGrid" class="grid grid-cols-5 gap-3">
+                        <!-- Swatches injected here -->
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Footer -->
+            <div class="p-4 border-t border-white/10 bg-white/5 rounded-b-xl flex justify-end gap-2">
+                <button onclick="closeColorModal()"
+                    class="px-4 py-2 text-xs font-bold text-gray-400 hover:text-white transition rounded-lg hover:bg-white/5">Cancel</button>
+                <button onclick="applyColorFromModal()"
+                    class="btn-primary px-6 py-2 text-xs font-bold shadow-lg shadow-pink-500/20">Apply Change</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .tab-active {
+            color: #E6397F;
+            border-bottom: 2px solid #E6397F;
+            background: linear-gradient(to bottom, transparent, rgba(230, 57, 127, 0.05));
+        }
+
+        .tab-inactive {
+            color: #6b7280;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab-inactive:hover {
+            color: #d1d5db;
+            background: rgba(255, 255, 255, 0.02);
+        }
+    </style>
+
+    <script>
+        // --- CUSTOM COLOR MODAL LOGIC ---
+        let activeColorTargetId = null; // 'colPrimary', 'colText' etc.
+        let activeColorTargetName = ''; // 'Primary', 'Text' etc.
+        let currentModalColor = '#000000';
+        window.extractedPalette = []; // Store globally
+
+        function openColorModal(targetId, targetName) {
+            activeColorTargetId = targetId;
+            activeColorTargetName = targetName;
+
+            // Get current value
+            const currentVal = document.getElementById(targetId).value;
+            currentModalColor = currentVal;
+
+            // Prep UI
+            document.getElementById('colorModalTitle').innerText = `Edit ${targetName} Color`;
+            document.getElementById('modalColorInput').value = currentVal;
+            document.getElementById('modalHexInput').value = currentVal.replace('#', '').toUpperCase();
+            document.getElementById('modalColorPreview').style.backgroundColor = currentVal;
+
+            // Reset Tab to Manual defaults
+            switchModalTab('manual');
+
+            // Render Palette (Generic)
+            renderModalPalette();
+
+            // Show
+            const modal = document.getElementById('colorModal');
+            modal.classList.remove('hidden');
+            feather.replace();
+        }
+
+        function closeColorModal() {
+            document.getElementById('colorModal').classList.add('hidden');
+            activeColorTargetId = null;
+        }
+
+        function switchModalTab(tab) {
+            const manualBtn = document.getElementById('tabModalManual');
+            const imageBtn = document.getElementById('tabModalImage');
+            const manualContent = document.getElementById('modalContentManual');
+            const imageContent = document.getElementById('modalContentImage');
+
+            if (tab === 'manual') {
+                manualBtn.classList.add('tab-active'); manualBtn.classList.remove('tab-inactive');
+                imageBtn.classList.add('tab-inactive'); imageBtn.classList.remove('tab-active');
+                manualContent.classList.remove('hidden');
+                imageContent.classList.add('hidden');
+            } else {
+                imageBtn.classList.add('tab-active'); imageBtn.classList.remove('tab-inactive');
+                manualBtn.classList.add('tab-inactive'); manualBtn.classList.remove('tab-active');
+                imageContent.classList.remove('hidden');
+                manualContent.classList.add('hidden');
+            }
+        }
+
+        function updateModalManual(val) {
+            currentModalColor = val;
+            document.getElementById('modalColorPreview').style.backgroundColor = val;
+            document.getElementById('modalHexInput').value = val.replace('#', '').toUpperCase();
+        }
+
+        function updateModalFromHex(val) {
+            if (val.length === 6) {
+                const hex = '#' + val;
+                // Simple regex check
+                if (/^#[0-9A-F]{6}$/i.test(hex)) {
+                    currentModalColor = hex;
+                    document.getElementById('modalColorInput').value = hex;
+                    document.getElementById('modalColorPreview').style.backgroundColor = hex;
+                }
+            }
+        }
+
+        function selectPaletteColor(hex) {
+            updateModalManual(hex);
+            // Auto switch to manual view to confirm? Or just stay? 
+            // Providing feedback:
+            showToast(`Selected ${hex}`, 'info');
+            // Maybe switch tab to show the selection?
+            switchModalTab('manual');
+        }
+
+        function applyColorFromModal() {
+            if (activeColorTargetId) {
+                const input = document.getElementById(activeColorTargetId);
+                input.value = currentModalColor;
+                // Update text label (hexPrimary etc.)
+                const labelId = input.id.replace('col', 'hex'); // colPrimary -> hexPrimary
+                const label = document.getElementById(labelId);
+                if (label) label.innerText = currentModalColor;
+
+                updatePreview();
+                showToast(`${activeColorTargetName} updated!`, 'success');
+            }
+            closeColorModal();
+        }
+
+        function renderModalPalette() {
+            const grid = document.getElementById('modalPaletteGrid');
+            grid.innerHTML = '';
+
+            if (!window.extractedPalette || window.extractedPalette.length === 0) {
+                grid.innerHTML = '<div class="col-span-5 text-center py-8 text-gray-600 italic text-xs">No image uploaded or extracted colors found.</div>';
+                return;
+            }
+
+            window.extractedPalette.forEach(rgb => {
+                const hex = rgbToHex(...rgb);
+                const btn = document.createElement('button');
+                btn.className = "w-10 h-10 rounded-full border border-white/20 hover:scale-110 transition shadow-sm relative group bg-cover";
+                btn.style.backgroundColor = hex;
+                btn.onclick = () => selectPaletteColor(hex);
+
+                // Tooltip
+                btn.innerHTML = `<span class="absolute -top-6 left-1/2 -translate-x-1/2 bg-black text-[10px] text-white px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none z-10">${hex}</span>`;
+
+                grid.appendChild(btn);
+            });
+        }
+    </script>
 </body>
 
 </html>
