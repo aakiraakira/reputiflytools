@@ -11,6 +11,9 @@
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/color-thief/2.3.2/color-thief.umd.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- Cropper.js -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lato:wght@400;700&family=Merriweather:wght@400;700&family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&family=Oswald:wght@500;700&family=Playfair+Display:wght@700&family=Poppins:wght@400;600;700&family=Raleway:wght@400;700&family=Roboto:wght@400;700&family=Source+Sans+3:wght@400;600&family=Space+Grotesk:wght@500;700&family=Work+Sans:wght@400;600&display=swap"
         rel="stylesheet">
@@ -279,17 +282,32 @@
 
                 <!-- TAB CONTENT: LOGO -->
                 <div id="contentLogo">
-                    <div class="upload-zone p-6 text-center relative group mb-4"
+                    <!-- Standard Upload -->
+                    <div class="upload-zone p-6 text-center relative group mb-4" id="uploadZone"
                         onclick="document.getElementById('fileInput').click()">
                         <input type="file" id="fileInput" class="hidden" accept="image/*" onchange="handleImage(this)">
                         <div id="uploadPlaceholder">
                             <i data-feather="image" class="w-8 h-8 mx-auto text-gray-600 mb-2"></i>
                             <p class="text-sm text-gray-400">Drop Logo (Auto-Extract)</p>
                         </div>
+                        <!-- Final Preview Image -->
                         <img id="previewImg" class="hidden max-h-32 mx-auto rounded shadow-lg object-contain">
                         <div
                             class="absolute inset-0 bg-black/50 hidden group-hover:flex items-center justify-center text-xs text-white">
                             Change Image</div>
+                    </div>
+
+                    <!-- Cropper Container (Hidden by default) -->
+                    <div id="cropperContainer" class="hidden flex flex-col gap-2 mb-4">
+                        <div class="h-64 w-full bg-black/50 rounded overflow-hidden">
+                            <img id="cropperImg" class="max-w-full">
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="confirmCrop()" class="btn-primary w-full text-xs py-2">Confirm
+                                Crop</button>
+                            <button onclick="cancelCrop()"
+                                class="btn-secondary w-full text-xs text-red-400 border-red-400/30">Cancel</button>
+                        </div>
                     </div>
                 </div>
 
@@ -649,6 +667,7 @@
         let currentRadius = '8px';
         let isPillMode = false;
         let activeTab = 'logo';
+        let cropper = null; // Store cropper instance
 
         function switchTab(mode) {
             activeTab = mode;
@@ -981,16 +1000,57 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             if (input.files && input.files[0]) {
                 const reader = new FileReader();
                 reader.onload = function (e) {
-                    const img = document.getElementById('previewImg');
-                    img.src = e.target.result;
-                    img.classList.remove('hidden');
-                    document.getElementById('uploadPlaceholder').classList.add('hidden');
+                    // Show Cropper Interface
+                    document.getElementById('uploadZone').classList.add('hidden');
+                    document.getElementById('cropperContainer').classList.remove('hidden');
 
-                    // Wait for image load then extract colors
-                    img.onload = () => extractColorsLocally(img);
+                    const cropImg = document.getElementById('cropperImg');
+                    cropImg.src = e.target.result;
+
+                    // Destroy old if exists
+                    if (cropper) cropper.destroy();
+
+                    // Init Cropper
+                    cropper = new Cropper(cropImg, {
+                        aspectRatio: NaN, // Free crop
+                        viewMode: 1,
+                        autoCropArea: 0.8,
+                    });
                 }
                 reader.readAsDataURL(input.files[0]);
             }
+        }
+
+        function confirmCrop() {
+            if (!cropper) return;
+            // Get cropped canvas
+            const canvas = cropper.getCroppedCanvas();
+            const croppedDataUrl = canvas.toDataURL();
+
+            // Store result in preview
+            const img = document.getElementById('previewImg');
+            img.src = croppedDataUrl;
+            img.classList.remove('hidden');
+            document.getElementById('uploadPlaceholder').classList.add('hidden');
+
+            // Reset UI
+            document.getElementById('cropperContainer').classList.add('hidden');
+            document.getElementById('uploadZone').classList.remove('hidden');
+
+            // Cleanup
+            cropper.destroy();
+            cropper = null;
+
+            // Wait for image load then extract colors
+            img.onload = () => extractColorsLocally(img);
+        }
+
+        function cancelCrop() {
+            if (cropper) cropper.destroy();
+            document.getElementById('cropperContainer').classList.add('hidden');
+            document.getElementById('uploadZone').classList.remove('hidden');
+            // Clear input value to allow re-selecting same file
+            document.getElementById('fileInput').value = '';
         }
 
         function extractColorsLocally(img) {
@@ -1043,19 +1103,33 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             btn.innerHTML = '<i data-feather="loader" class="w-3 h-3 animate-spin"></i> Dreaming...';
             feather.replace();
 
+
             try {
+                // Get Current State for Context
+                const currentState = getProjectState();
+                const colorsContext = JSON.stringify(currentState.colors);
+
                 // Determine Intent from Active Tab
                 let prompt = "";
+
 
                 if (activeTab === 'logo') {
                     if (!img.src || img.classList.contains('hidden')) return showToast("Please upload a logo first.", "error");
                     prompt = `You are a Senior Brand Designer. Analyze this logo. 
                         Extract the TRUE brand colors. Ignore container backgrounds.
+                        
+                        IMPORTANT: The user currently has these colors selected: ${colorsContext}.
+                        If these current colors seem intentional or specific (e.g. a specific shade of Red), prioritize respecting them or finding a harmonious match to them.
+                        
                         Predict the best 'Background' and 'Text' colors for a high-end web design.
                         Return strictly raw JSON (no markdown).`;
                 } else {
                     if (contextText.trim().length === 0) return showToast("Please enter a brand description.", "error");
                     prompt = `You are a Senior Brand Designer. Create a complete brand identity from scratch for this business: "${contextText}".
+                        
+                        IMPORTANT: The user currently has these colors selected: ${colorsContext}.
+                        Use this as a strong hint for their preference. If they selected a specific Red (#FF0000), assume they want Red in the identity.
+                        
                         Generate a color palette, typography and UI vibe that perfectly fits this description.
                         Return strictly raw JSON (no markdown).`;
                 }
@@ -1310,18 +1384,41 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
         function invertTheme() {
             const bg = document.getElementById('colBg').value;
             const tx = document.getElementById('colText').value;
+            let p = document.getElementById('colPrimary').value;
+            let a = document.getElementById('colAccent').value;
 
-            // Simple Swap
-            document.getElementById('colBg').value = tx;
-            document.getElementById('colText').value = bg;
+            // 1. Swap BG and Text
+            const newBg = tx;
+            const newText = bg;
+
+            // 2. Smart Adjust Primary & Accent
+            // Check if Primary contrasts well with NEW BG
+            const pContrast = getContrastRatio(p, newBg);
+            if (pContrast < 3) { // 3:1 is absolute minimum for UI components
+                // It's bad. We need to flip its brightness.
+                const isDark = getLuminance(...hexToRgbVals(newBg)) < 0.5;
+                // If BG is Dark, make Primary Lighter. If Bright, make Darker.
+                // We shift by 40% to be safe.
+                p = adjustBrightness(p, isDark ? 40 : -40);
+            }
+
+            // Check Accent
+            const aContrast = getContrastRatio(a, newBg);
+            if (aContrast < 3) {
+                const isDark = getLuminance(...hexToRgbVals(newBg)) < 0.5;
+                a = adjustBrightness(a, isDark ? 40 : -40);
+            }
+
+            // 3. Apply
+            document.getElementById('colBg').value = newBg;
+            document.getElementById('colText').value = newText;
+            document.getElementById('colPrimary').value = p;
+            document.getElementById('colAccent').value = a;
 
             // Update UI
-            updateColorInputs(
-                document.getElementById('colPrimary').value,
-                document.getElementById('colAccent').value,
-                tx, // New BG is Old Text
-                bg  // New Text is Old BG
-            );
+            updateColorInputs(p, a, newBg, newText);
+
+            showToast("Theme Inverted & Colors Adapted", "success");
         }
 
         function setRadius(r) { currentRadius = r; updatePreview(); }
@@ -1457,7 +1554,7 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             container.style.position = 'absolute';
             container.style.left = '-9999px';
             container.style.top = '0';
-            container.style.width = '800px';
+            container.style.width = '790px'; // Safer A4 width
             document.body.appendChild(container);
 
             const fontHead = d.typography.heading;
@@ -1468,7 +1565,7 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             container.innerHTML = `
                 <!-- Inject Font Link specifically for the export container -->
                 <link href="${fontLink}" rel="stylesheet">
-                <div class="pdf-wrapper" style="font-family: ${d.typography.body}; background: white; color: black; padding: 40px; width: 800px;">
+                <div class="pdf-wrapper" style="font-family: ${d.typography.body}; background: white; color: black; padding: 40px; width: 790px; box-sizing: border-box;">
                     <style>
                         .pdf-page { width: 100%; min-height: 100vh; } 
                         .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 60px; border-bottom: 1px solid #eee; padding-bottom: 40px; }
@@ -1477,13 +1574,14 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
                         h1 { font-size: 36px; line-height: 1.2; }
                         h2 { font-size: 28px; line-height: 1.3; }
                         h3 { font-size: 20px; line-height: 1.4; }
-                        .section-title { font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; color: ${d.colors.accent}; margin-bottom: 30px; border-top: 1px solid #ccc; padding-top: 20px; margin-top: 60px; }
-                        .color-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+                        .section-title { font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; color: ${d.colors.accent}; margin-bottom: 30px; border-top: 1px solid #ccc; padding-top: 20px; margin-top: 60px; page-break-after: avoid; }
+                        .color-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; page-break-inside: avoid; }
+                        .swatch-card { page-break-inside: avoid; }
                         .swatch { height: 100px; border-radius: ${d.ui.radius}; margin-bottom: 15px; border: 1px solid #eee; }
                         .color-meta h3 { font-size: 14px; margin-bottom: 4px; }
                         .color-meta p { font-size: 10px; opacity: 0.5; font-family: monospace; }
-                        .token-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; }
-                        .token-card { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #eee; }
+                        .token-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; page-break-inside: avoid; }
+                        .token-card { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #eee; page-break-inside: avoid; }
                         .token-swatch { width: 30px; height: 30px; border-radius: 50%; margin: 0 auto 8px auto; border: 1px solid #ddd; }
                         .token-name { font-size: 10px; opacity: 0.7; }
                         /* Type */
@@ -1508,7 +1606,7 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
                         /* Force Page Break */
                         .force-break { page-break-before: always; }
 
-                        .mock-card { background: white; border: 1px solid ${d.semantic.border}; border-radius: ${d.ui.radius}; padding: 25px; width: 260px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); display: flex; flex-direction: column; gap: 15px; }
+                        .mock-card { background: white; border: 1px solid ${d.semantic.border}; border-radius: ${d.ui.radius}; padding: 25px; width: 260px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); display: flex; flex-direction: column; gap: 15px; page-break-inside: avoid; }
                         .mock-line { height: 8px; background: #f0f0f0; border-radius: 4px; width: 100%; }
                         
                         .mock-btn { background: ${d.colors.primary}; color: ${d.semantic.onPrimary}; border-radius: ${d.ui.radius === '99px' || isPillMode ? '999px' : d.ui.radius}; padding: 12px 24px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; display: inline-block; text-align: center; width: 100%; }
@@ -1572,7 +1670,7 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
                         <div class="div-spacer" style="margin-bottom: 40px;"></div>
                         
                         <!-- Forced Page Break before UI Elements: html2pdf specific class -->
-                        <div class="html2pdf__page-break"></div>
+                        <div class="html2pdf__page-break" style="height:0; clear:both; display:block;"></div>
                         <div class="section-title" style="margin-top: 0; padding-top: 40px; border-top: none;">04. UI Elements</div>
                         <div class="ui-showcase">
                             <!-- Card 1: App Card -->
@@ -1618,23 +1716,34 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             const opt = {
                 margin: 0,
                 filename: 'Brand_Identity_Kit.pdf',
-                image: { type: 'jpeg', quality: 1.0 },
-                html2canvas: { scale: 4, useCORS: true, logging: false, letterRendering: true, scrollY: 0 },
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: {
+                    scale: 2, // Standard quality is enough, 3 was overkill
+                    useCORS: true,
+                    logging: true,
+                    letterRendering: true,
+                    scrollY: 0,
+                    // Remove windowWidth to let it respect container size
+                },
                 jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
             };
 
-            // Generate
-            html2pdf().from(container.querySelector('.pdf-wrapper')).set(opt).save()
-                .then(() => {
-                    document.body.removeChild(container);
-                    btn.innerHTML = originalText;
-                })
-                .catch(err => {
-                    console.error(err);
-                    showToast("Error generating PDF. Check logo.", "error");
-                    document.body.removeChild(container);
-                    btn.innerHTML = originalText;
-                });
+            // Generate with a slight delay to ensure rendering
+            setTimeout(() => {
+                html2pdf().from(container.querySelector('.pdf-wrapper')).set(opt).save()
+                    .then(() => {
+                        document.body.removeChild(container);
+                        btn.innerHTML = originalText;
+                        showToast("PDF Downloaded Successfully!", "success");
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        showToast("Error generating PDF. Check console.", "error");
+                        // cleanup even on fail
+                        if (document.body.contains(container)) document.body.removeChild(container);
+                        btn.innerHTML = originalText;
+                    });
+            }, 500); // 500ms delay for DOM stabilisation
         }
 
         // --- PRETTIER NOTIFICATIONS ---
