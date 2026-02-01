@@ -94,6 +94,16 @@
             --p-card-bg: rgba(128, 128, 128, 0.05);
         }
 
+        /* MOBILE FIX: Prevent zoom on input focus */
+        @media screen and (max-width: 768px) {
+
+            input,
+            select,
+            textarea {
+                font-size: 16px !important;
+            }
+        }
+
         .glass-panel {
             background: var(--panel-bg);
             backdrop-filter: blur(20px);
@@ -243,6 +253,74 @@
             -webkit-text-fill-color: transparent;
             display: inline-block;
             /* Helps with clipping sometimes */
+        }
+
+        /* UI ANIMATIONS */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideInLeft {
+            from {
+                opacity: 0;
+                transform: translateX(-10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes zoomIn {
+            from {
+                opacity: 0;
+                transform: scale(0.9);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .animate-in {
+            animation-duration: 0.3s;
+            animation-fill-mode: both;
+        }
+
+        .fade-in {
+            animation-name: fadeIn;
+        }
+
+        .slide-in-from-left-2 {
+            animation-name: slideInLeft;
+        }
+
+        .slide-in-from-right-4 {
+            animation-name: slideInRight;
+        }
+
+        .zoom-in {
+            animation-name: zoomIn;
         }
     </style>
 </head>
@@ -877,7 +955,8 @@
                     accent: document.getElementById('colAccent').value,
                     bg: document.getElementById('colBg').value,
                     text: document.getElementById('colText').value,
-                    gradients: gradientMap // Save Gradients
+                    gradients: gradientMap, // Save Gradients
+                    gradientDetails: window.gradientDetails || {} // Save Detail Metadata (Start/End)
                 },
                 typography: {
                     head: document.getElementById('fontHead').value,
@@ -924,8 +1003,14 @@
                     if (state.colors.gradients) {
                         gradientMap = state.colors.gradients;
                     } else {
-                        // Reset if loading old project
                         gradientMap = { primary: null, accent: null, bg: null, text: null };
+                    }
+
+                    // Restore Gradient Details (Start/End)
+                    if (state.colors.gradientDetails) {
+                        window.gradientDetails = state.colors.gradientDetails;
+                    } else {
+                        window.gradientDetails = {};
                     }
 
                     // Restore Type
@@ -1394,14 +1479,22 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
                 }
 
                 // Append Schema
+                // Append Schema with Gradient Support
                 prompt += `
                 Structure:
                 {
                   "colors": { "primary": "#hex", "accent": "#hex", "background": "#hex", "text": "#hex" },
+                  "gradients": {
+                     "primary": { "start": "#hex", "end": "#hex" }, 
+                     "accent": { "start": "#hex", "end": "#hex" } 
+                  },
                   "typography": { "heading": "FontName", "body": "FontName" },
                   "ui": { "radius": "0|2|8|16|24", "shadow": "none|soft|heavy|retro", "glass": "none|blur(12px)" },
                   "reasoning": "One short sentence explaining the design choice."
                 }
+                
+                Note: "gradients" is optional. If a color should be a gradient, provide start/end. If solid, set to null.
+                For "Cyberpunk" or "Modern" styles, use gradients freely. For "Minimalist", avoid them.
                 Valid Fonts: 'Inter', 'Playfair Display', 'Space Grotesk', 'Roboto'.
                 Valid Shadows: 'none' (Flat), 'soft', 'heavy', 'retro'.
                 `;
@@ -1433,6 +1526,28 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
                 document.getElementById('colAccent').value = json.colors.accent;
                 document.getElementById('colBg').value = json.colors.background;
                 document.getElementById('colText').value = json.colors.text;
+
+                // Apply Gradients
+                if (json.gradients) {
+                    ['primary', 'accent'].forEach(key => {
+                        const gradObj = json.gradients[key];
+                        if (gradObj && gradObj.start && gradObj.end) {
+                            // Construct CSS Linear Gradient
+                            const css = `linear-gradient(135deg, ${gradObj.start} 0%, ${gradObj.end} 100%)`;
+
+                            // Save to Global Maps
+                            if (!window.gradientMap) window.gradientMap = {};
+                            if (!window.gradientDetails) window.gradientDetails = {};
+
+                            window.gradientMap[key] = css;
+                            window.gradientDetails[key] = { start: gradObj.start, end: gradObj.end };
+                        } else {
+                            // Clear if previously set but AI says solid
+                            if (window.gradientMap) window.gradientMap[key] = null;
+                            if (window.gradientDetails) delete window.gradientDetails[key];
+                        }
+                    });
+                }
 
                 // Apply Typography
                 const setSelect = (id, val) => {
@@ -1986,10 +2101,17 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
 
             // Create temporary container
             const container = document.createElement('div');
-            container.style.position = 'absolute';
-            container.style.left = '-9999px';
+            // FIX: Use fixed positioning to ensure it starts exactly at 0,0 of the viewport
+            // This prevents scroll offsets or body margins from shifting the capture
+            container.style.position = 'fixed';
             container.style.top = '0';
-            container.style.width = '790px'; // Safer A4 width
+            container.style.left = '0';
+            container.style.margin = '0';
+            container.style.padding = '0';
+            container.style.zIndex = '-9999'; // Hide behind everything
+            container.style.width = '794px'; // A4 Width at 96 DPI
+            container.style.height = 'auto'; // allow expansion
+            container.style.background = '#ffffff';
             document.body.appendChild(container);
 
             const fontHead = d.typography.heading;
@@ -2012,7 +2134,7 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             container.innerHTML = `
                 <!-- Inject Font Link specifically for the export container -->
                 <link href="${fontLink}" rel="stylesheet">
-                <div class="pdf-wrapper" style="font-family: ${d.typography.body}; background: white; color: black; padding: 40px; width: 790px; box-sizing: border-box;">
+                <div class="pdf-wrapper" style="font-family: ${d.typography.body}; background: white; color: black; padding: 40px; width: 100%; box-sizing: border-box;">
                     <style>
                         .pdf-page { width: 100%; min-height: 100vh; } 
                         .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 60px; border-bottom: 1px solid #eee; padding-bottom: 40px; }
@@ -2168,14 +2290,18 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             const opt = {
                 margin: 0,
                 filename: fileName + '.pdf',
-                image: { type: 'jpeg', quality: 0.98 },
+                image: { type: 'jpeg', quality: 1.0 }, // Max quality
                 html2canvas: {
-                    scale: 2, // Standard quality is enough, 3 was overkill
+                    scale: 4, // Higher Scale for crisp text
                     useCORS: true,
+                    // FIX: Explicitly set capture coordinates to 0,0
+                    x: 0,
+                    y: 0,
+                    scrollX: 0,
+                    scrollY: 0,
                     logging: true,
                     letterRendering: true,
-                    scrollY: 0,
-                    // Remove windowWidth to let it respect container size
+                    windowWidth: 794 // Force Desktop width logic even on mobile
                 },
                 jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
             };
@@ -2365,67 +2491,99 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             <div class="p-6 min-h-[250px]">
 
                 <!-- MANUAL TAB -->
+                <!-- MANUAL TAB -->
                 <div id="modalContentManual" class="space-y-6">
-                    <div class="flex flex-col items-center justify-center space-y-4">
-                        <div class="relative group cursor-pointer hover:scale-105 transition-transform duration-300">
-                            <!-- Native Picker (Hidden but clickable) -->
-                            <input type="color" id="modalColorInput"
-                                class="w-32 h-32 rounded-full cursor-pointer opacity-0 absolute inset-0 z-20"
-                                oninput="updateModalManual(this.value)">
 
-                            <!-- Custom Visual -->
-                            <div id="modalColorPreview"
-                                class="w-32 h-32 rounded-full border-[6px] border-white/10 shadow-2xl flex items-center justify-center bg-blue-500 transition-colors z-10">
-                                <i data-feather="edit-2"
-                                    class="w-8 h-8 text-white/50 group-hover:text-white/90 transition"></i>
+                    <!-- VISUALIZER AREA -->
+                    <div id="visualizerContainer"
+                        class="flex items-center justify-center gap-4 min-h-[140px] transition-all duration-300">
+
+                        <!-- START COLOR (Always Visible) -->
+                        <div class="flex flex-col items-center gap-3">
+                            <div
+                                class="relative group cursor-pointer hover:scale-110 transition-transform duration-300 w-20 h-20">
+                                <!-- Ensure Input is top layer and fully covers -->
+                                <input type="color" id="modalColorInput"
+                                    class="w-full h-full rounded-full cursor-pointer opacity-0 absolute inset-0 z-50"
+                                    oninput="updateModalManual(this.value)">
+
+                                <!-- Visual -->
+                                <div id="modalColorPreview"
+                                    class="w-full h-full rounded-full border-[3px] border-white/20 shadow-xl flex items-center justify-center bg-blue-500 transition-colors z-10 pointer-events-none">
+                                    <i data-feather="edit-2"
+                                        class="w-5 h-5 text-white/50 group-hover:text-white/90 transition"></i>
+                                </div>
                             </div>
-                        </div>
-
-                        <!-- GRADIENT TOGGLE -->
-                        <div
-                            class="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-lg border border-white/10 w-full max-w-[200px]">
-                            <label class="text-xs text-gray-300 font-bold flex-1 cursor-pointer select-none"
-                                for="gradientToggle">Make Gradient</label>
-                            <div class="relative inline-block w-10 mr-2 align-middle select-none">
-                                <input type="checkbox" name="toggle" id="gradientToggle"
-                                    class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-300 ease-in-out"
-                                    onchange="toggleModalGradient(this.checked)" />
-                                <label for="gradientToggle"
-                                    class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-700 cursor-pointer"></label>
-                            </div>
-                        </div>
-                        <style>
-                            .toggle-checkbox:checked {
-                                right: 0;
-                                border-color: #E6397F;
-                            }
-
-                            .toggle-checkbox {
-                                right: 50%;
-                                border-color: #ccc;
-                            }
-
-                            .toggle-label {
-                                width: 100%;
-                            }
-
-                            .toggle-checkbox:checked+.toggle-label {
-                                background-color: #E6397F;
-                            }
-                        </style>
-
-                        <div class="w-full relative">
-                            <label
-                                class="text-[10px] text-gray-500 uppercase font-bold mb-1 block text-center tracking-widest">Hex
-                                Code</label>
-                            <div class="relative max-w-[150px] mx-auto">
-                                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-mono">#</span>
+                            <!-- Start Hex Input (Moved Here) -->
+                            <div class="relative w-24">
+                                <span
+                                    class="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 font-mono text-[10px]">#</span>
                                 <input type="text" id="modalHexInput" maxlength="7"
-                                    class="w-full bg-white/5 border border-white/10 rounded-lg py-2 pl-7 pr-2 text-white font-mono text-center focus:border-pink-500 outline-none transition uppercase"
+                                    class="w-full bg-white/5 border border-white/10 rounded-lg py-1.5 pl-5 pr-2 text-white font-mono text-xs text-center focus:border-pink-500 outline-none transition uppercase"
                                     placeholder="FFFFFF" oninput="updateModalFromHex(this.value)">
                             </div>
+                            <p class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Start</p>
+                        </div>
+
+                        <!-- ARROW 1 (Hidden unless gradient) -->
+                        <div id="arrow1" class="hidden text-gray-600 animate-in fade-in slide-in-from-left-2">
+                            <i data-feather="arrow-right" class="w-6 h-6"></i>
+                        </div>
+
+                        <!-- RESULT PREVIEW (Hidden unless gradient) -->
+                        <div id="gradientResultPreview"
+                            class="hidden flex-col items-center gap-2 animate-in fade-in zoom-in duration-300">
+                            <div class="w-16 h-16 rounded-xl shadow-inner border border-white/10"
+                                id="gradientResultBox"></div>
+                            <p class="text-[10px] text-pink-400 font-bold uppercase tracking-wider">Result</p>
+                        </div>
+
+                        <!-- ARROW 2 (Hidden unless gradient) -->
+                        <div id="arrow2" class="hidden text-gray-600 animate-in fade-in slide-in-from-left-2">
+                            <i data-feather="arrow-right" class="w-6 h-6"></i>
+                        </div>
+
+                        <!-- END COLOR (Hidden unless gradient) -->
+                        <div id="endColorGroupName"
+                            class="hidden flex-col items-center gap-3 animate-in fade-in slide-in-from-right-4 duration-300">
+                            <div
+                                class="relative group cursor-pointer hover:scale-110 transition-transform duration-300 w-20 h-20">
+                                <!-- Ensure Input is top layer and fully covers -->
+                                <input type="color" id="modalSecondColorInput"
+                                    class="w-full h-full rounded-full cursor-pointer opacity-0 absolute inset-0 z-50"
+                                    oninput="updateGradientManual(this.value)">
+
+                                <!-- Visual -->
+                                <div id="modalSecondColorPreview"
+                                    class="w-full h-full rounded-full border-[3px] border-white/20 shadow-xl flex items-center justify-center bg-gray-500 transition-colors z-10 pointer-events-none">
+                                    <i data-feather="edit-2"
+                                        class="w-5 h-5 text-white/50 group-hover:text-white/90 transition"></i>
+                                </div>
+                            </div>
+                            <!-- End Hex Input (Moved Here) -->
+                            <div id="modalSecondHexContainer" class="relative w-24">
+                                <span
+                                    class="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 font-mono text-[10px]">#</span>
+                                <input type="text" id="modalSecondHexInput" maxlength="7"
+                                    class="w-full bg-white/5 border border-white/10 rounded-lg py-1.5 pl-5 pr-2 text-white font-mono text-xs text-center focus:border-pink-500 outline-none transition uppercase"
+                                    placeholder="FFFFFF" oninput="updateGradientSecondHex(this.value)">
+                            </div>
+                            <p class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">End</p>
                         </div>
                     </div>
+
+                    <!-- TOGGLE -->
+                    <div class="w-full pt-4 border-t border-white/10 flex items-center justify-between">
+                        <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Enable Gradient</span>
+                        <label class="relative inline-flex items-center cursor-pointer group">
+                            <input type="checkbox" id="gradientToggle" class="sr-only peer"
+                                onchange="toggleModalGradient(this.checked)">
+                            <div
+                                class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-pink-500/50 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-pink-500 shadow-inner">
+                            </div>
+                        </label>
+                    </div>
+
                 </div>
 
                 <!-- IMAGE TAB -->
@@ -2516,7 +2674,27 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
             currentModalGradient = gm[key] || null;
 
             const toggle = document.getElementById('gradientToggle');
-            if (toggle) toggle.checked = !!currentModalGradient;
+            const secondContainer = document.getElementById('gradientSecondColorContainer');
+
+            if (currentModalGradient) {
+                toggle.checked = true;
+
+                // SHOW UI Flow
+                toggleModalGradient(true); // Reuse the logic
+
+                // Load existing end color if available
+                let endColor = '#000000';
+                if (window.gradientDetails && window.gradientDetails[key] && window.gradientDetails[key].end) {
+                    endColor = window.gradientDetails[key].end;
+                } else {
+                    // Fallback parse?
+                    endColor = generateDeepColor(currentModalColor);
+                }
+                updateSecondColorInputs(endColor);
+            } else {
+                toggle.checked = false;
+                toggleModalGradient(false);
+            }
 
             // Prep UI
             document.getElementById('colorModalTitle').innerText = `Edit ${targetName} Color`;
@@ -2547,48 +2725,128 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
 
         // --- GRADIENT GENERATOR ---
         function toggleModalGradient(isActive) {
+            // UI FOR NEW FLOW
+            const arrow1 = document.getElementById('arrow1');
+            const arrow2 = document.getElementById('arrow2');
+            const resultBox = document.getElementById('gradientResultPreview');
+            const endGroup = document.getElementById('endColorGroupName');
+            const secondHexParams = document.getElementById('modalSecondHexContainer');
+            const container = document.getElementById('visualizerContainer');
+
             if (isActive) {
-                // Generate default gradient from current color
-                currentModalGradient = generateGradient(currentModalColor);
+                arrow1.classList.remove('hidden');
+                arrow2.classList.remove('hidden');
+                resultBox.classList.remove('hidden');
+                resultBox.classList.add('flex');
+                endGroup.classList.remove('hidden');
+                endGroup.classList.add('flex');
+                secondHexParams.classList.remove('hidden');
+
+                // Adjust container spacing for flow
+                container.classList.remove('justify-center');
+                container.classList.add('justify-between', 'px-4');
+
+
+                // If no gradient exists, generate default "Deep" gradient
+                if (!currentModalGradient || typeof currentModalGradient !== 'string' || !currentModalGradient.includes('linear-gradient')) {
+                    const defaultEnd = generateDeepColor(currentModalColor);
+                    currentModalGradient = `linear-gradient(135deg, ${currentModalColor} 0%, ${defaultEnd} 100%)`;
+
+                    // Init Second Color Inputs
+                    updateSecondColorInputs(defaultEnd);
+                } else {
+                    // If exists, try to parse end color or just default
+                    // Ideally we'd parse, but for MVP let's just ensure input is synced if we have metadata
+                    if (window.tempGradient && window.tempGradient.end) {
+                        updateSecondColorInputs(window.tempGradient.end);
+                    }
+                }
             } else {
+                arrow1.classList.add('hidden');
+                arrow2.classList.add('hidden');
+                resultBox.classList.add('hidden');
+                resultBox.classList.remove('flex');
+                endGroup.classList.add('hidden');
+                endGroup.classList.remove('flex');
+                secondHexParams.classList.add('hidden');
+
+                // Center the single start element
+                container.classList.add('justify-center');
+                container.classList.remove('justify-between', 'px-4');
+
                 currentModalGradient = null;
                 window.tempGradient = null;
             }
             updateModalPreviewUI();
         }
 
-        function generateGradient(hex) {
+        function generateDeepColor(hex) {
             const rgb = hexToRgbVals(hex);
-            if (!rgb) return `linear-gradient(135deg, ${hex}, ${hex})`;
-
-            // Use HSL for better "Deep" logic
-            const hsl = rgbToHsl(rgb[0], rgb[1], rgb[2]); // [h, s, l]
-
-            // DEEP LOGIC:
-            // 1. Shift Hue slightly (+15deg) to make it dynamic
+            if (!rgb) return hex;
+            const hsl = rgbToHsl(rgb[0], rgb[1], rgb[2]);
             const h2 = (hsl[0] + 15) % 360;
-
-            // 2. Increase Saturation (deep colors are rich)
-            // Cap at 100%
             const s2 = Math.min(100, hsl[1] + 10);
-
-            // 3. Decrease Lightness (create depth/shadow)
-            // "Deep linear gradient" usually implies fading into a richer, darker shade.
-            // General rule: Darken by 25%.
             let l2 = Math.max(5, hsl[2] - 25);
-
-            // Edge case: White/Very Light
-            // If start is White (L=100), we want a soft gray/silver or tinted white?
             if (hsl[2] > 90) l2 = hsl[2] - 10;
-
-            // Convert back
             const rgb2 = hslToRgb(h2, s2, l2);
-            const hex2 = rgbToHex(...rgb2);
+            return rgbToHex(...rgb2);
+        }
 
-            // Store metadata for PDF export
-            window.tempGradient = { start: hex, end: hex2 };
+        // Logic split: generateGradient is now just for automatic "Deep" calc
+        function generateGradient(hex) {
+            const end = generateDeepColor(hex);
+            window.tempGradient = { start: hex, end: end };
+            // Also update UI for second color since start changed
+            updateSecondColorInputs(end);
+            return `linear-gradient(135deg, ${hex} 0%, ${end} 100%)`;
+        }
 
-            return `linear-gradient(135deg, ${hex} 0%, ${hex2} 100%)`;
+        function updateSecondColorInputs(hex) {
+            document.getElementById('modalSecondColorInput').value = hex;
+            document.getElementById('modalSecondColorPreview').style.backgroundColor = hex;
+            document.getElementById('modalSecondHexInput').value = hex.replace('#', '').toUpperCase();
+        }
+
+        function updateGradientManual(val) {
+            // User manually changed the Second Color
+            const endHex = val;
+            const startHex = currentModalColor;
+
+            currentModalGradient = `linear-gradient(135deg, ${startHex} 0%, ${endHex} 100%)`;
+            window.tempGradient = { start: startHex, end: endHex };
+
+            updateSecondColorInputs(endHex);
+            updateModalPreviewUI();
+        }
+
+        function updateGradientSecondHex(val) {
+            if (val.length === 6) {
+                const hex = '#' + val;
+                if (/^#[0-9A-F]{6}$/i.test(hex)) {
+                    updateGradientManual(hex);
+                }
+            }
+        }
+
+        function updateModalManual(val) {
+            currentModalColor = val;
+            document.getElementById('modalHexInput').value = val.replace('#', '').toUpperCase();
+
+            // Regenerate gradient if active
+            const isGradient = document.getElementById('gradientToggle').checked;
+            if (isGradient) {
+                // If user changes Start Color, do we keep End Color or Shift it?
+                // Let's Keep End Color for manual control, OR Shift if they haven't touched it? 
+                // Simple approach: Keep End Color fixed if they set it, but for smooth feel, let's keep the *Relationship*?
+                // Actually user requested "select the other gradient colour". So if they change Start, End should stay as is unless they change it?
+                // existing logic was "Make Gradient" auto-generated.
+                // Let's use the current value of the Second Input as the End Color.
+
+                const currentEnd = document.getElementById('modalSecondColorInput').value;
+                currentModalGradient = `linear-gradient(135deg, ${val} 0%, ${currentEnd} 100%)`;
+                window.tempGradient = { start: val, end: currentEnd };
+            }
+            updateModalPreviewUI();
         }
 
         // --- COLOR UTILS (HSL) ---
@@ -2637,11 +2895,15 @@ HOWEVER: If you detect **obvious visual bugs** (e.g. invalid contrast, 4px illeg
         }
 
         function updateModalPreviewUI() {
-            const el = document.getElementById('modalColorPreview');
+            // 1. Update Start Ring
+            document.getElementById('modalColorPreview').style.background = currentModalColor;
+
+            // 2. Update Result Box (if Gradient)
+            const resultBox = document.getElementById('gradientResultBox');
             if (currentModalGradient) {
-                el.style.background = currentModalGradient;
+                resultBox.style.background = currentModalGradient;
             } else {
-                el.style.background = currentModalColor;
+                resultBox.style.background = currentModalColor;
             }
         }
 
