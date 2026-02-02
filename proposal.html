@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reputifly | Proposal & Library</title>
+
+    <link rel="icon" type="image/png"
+        href="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
+        rel="stylesheet">
+    <script src="https://unpkg.com/feather-icons"></script>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, deleteDoc, updateDoc, getDoc, arrayUnion, arrayRemove, getDocs, where } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDqpzqEVtrEtQvvmcMie_Et7xiNh8QU_Ao",
+            authDomain: "reputifly-editor.firebaseapp.com",
+            projectId: "reputifly-editor",
+            storageBucket: "reputifly-editor.firebasestorage.app",
+            messagingSenderId: "455384979132",
+            appId: "1:455384979132:web:9079ec81182115b16622b9"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // --- GLOBAL VARIABLES ---
+
+        let currentDesignData = null; // For Preview/Edit
+        let currentDesignId = null; // Fix ReferenceError
+
+        // --- DOM ELEMENTS ---
+        const sidebarTitleEl = document.getElementById('sidebarTitle');
+        const sidebarListEl = document.getElementById('sidebarList');
+        const mainToolbarTitle = document.getElementById('mainToolbarTitle');
+        const mainToolbarSubtitle = document.getElementById('mainToolbarSubtitle');
+        const mainActionBtn = document.getElementById('mainActionBtn');
+        const contentArea = document.getElementById('contentArea');
+
+        // --- CUSTOM MODAL UTILITIES ---
+        window.customPrompt = (title, message, defaultValue = "") => {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('customPromptModal');
+                document.getElementById('promptTitle').textContent = title;
+                document.getElementById('promptMessage').textContent = message;
+                const input = document.getElementById('promptInput');
+                input.value = defaultValue;
+
+                modal.classList.add('active');
+                setTimeout(() => input.focus(), 100);
+
+                const handleConfirm = () => { cleanup(); resolve(input.value); };
+                const handleCancel = () => { cleanup(); resolve(null); };
+                const handleKey = (e) => {
+                    if (e.key === 'Enter') handleConfirm();
+                    if (e.key === 'Escape') handleCancel();
+                };
+
+                function cleanup() {
+                    modal.classList.remove('active');
+                    document.getElementById('promptConfirmBtn').removeEventListener('click', handleConfirm);
+                    document.getElementById('promptCancelBtn').removeEventListener('click', handleCancel);
+                    input.removeEventListener('keydown', handleKey);
+                }
+
+                document.getElementById('promptConfirmBtn').addEventListener('click', handleConfirm);
+                document.getElementById('promptCancelBtn').addEventListener('click', handleCancel);
+                input.addEventListener('keydown', handleKey);
+            });
+        };
+
+        window.customConfirm = (title, message) => {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('customConfirmModal');
+                document.getElementById('confirmTitle').textContent = title;
+                document.getElementById('confirmMessage').textContent = message;
+
+                modal.classList.add('active');
+
+                const handleOk = () => { cleanup(); resolve(true); };
+                const handleCancel = () => { cleanup(); resolve(false); };
+
+                function cleanup() {
+                    modal.classList.remove('active');
+                    document.getElementById('confirmOkBtn').removeEventListener('click', handleOk);
+                    document.getElementById('confirmCancelBtn').removeEventListener('click', handleCancel);
+                }
+
+                document.getElementById('confirmOkBtn').addEventListener('click', handleOk);
+                document.getElementById('confirmCancelBtn').addEventListener('click', handleCancel);
+            });
+        };
+
+        window.customAlert = (title, message) => {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('customAlertModal');
+                document.getElementById('alertTitle').textContent = title;
+                document.getElementById('alertMessage').textContent = message;
+
+                modal.classList.add('active');
+
+                const handleOk = () => {
+                    modal.classList.remove('active');
+                    document.getElementById('alertOkBtn').removeEventListener('click', handleOk);
+                    resolve();
+                };
+
+                document.getElementById('alertOkBtn').addEventListener('click', handleOk);
+            });
+        };
+
+
+        // --- MAIN LOGIC ---
+
+        // --- STATE & INIT ---
+        let currentMode = 'library'; // 'library', 'proposal', 'client'
+        let currentLibrarySectionId = null;
+        let currentProposalId = null;
+        let activeProposalSectionId = null;
+
+        let unsubscribeLibrary = null;
+        let unsubscribeDesigns = null;
+        let unsubscribeProposals = null;
+        let unsubscribeProposalSections = null;
+
+        // INIT
+        window.onload = async () => {
+            // Check for Client Mode URL Params
+            const urlParams = new URLSearchParams(window.location.search);
+            const proposalIdParam = urlParams.get('p');
+            const modeParam = urlParams.get('mode');
+
+            if (proposalIdParam && modeParam === 'client') {
+                initClientMode(proposalIdParam);
+            } else {
+                switchTab('library'); // Default Admin Flow
+            }
+        };
+
+        async function initClientMode(proposalId) {
+            currentMode = 'client';
+            document.body.classList.add('client-mode');
+
+            // Hide Admin Elements
+            document.getElementById('adminHeader').style.display = 'none';
+            document.querySelector('aside').style.display = 'none'; // Sidebar
+
+            // Show Client Elements
+            document.getElementById('clientHeader').classList.remove('hidden');
+            document.getElementById('clientHeader').style.display = 'flex';
+
+            // Setup Main Area
+            const contentArea = document.getElementById('contentArea');
+            contentArea.innerHTML = '<div id="clientProposalContainer" class="max-w-5xl mx-auto space-y-12 pb-40"></div>';
+
+            // Load Proposal Data for Name
+            const pDoc = await getDoc(doc(db, "proposals", proposalId));
+            if (pDoc.exists()) {
+                document.getElementById('clientHeaderName').textContent = "Prepared for " + pDoc.data().clientName;
+            }
+
+            // Render Sections (Reuse logic but modified for client)
+            loadClientProposalSections(proposalId);
+        }
+
+        // Separate function to keep logic clean, though mostly duplicates renderProposalSections
+        function loadClientProposalSections(id) {
+            const sectionsRef = collection(db, "proposals", id, "proposal_sections");
+            const q = query(sectionsRef, orderBy("createdAt", "asc"));
+
+            const list = document.getElementById('clientProposalContainer');
+
+            onSnapshot(q, (snapshot) => {
+                list.innerHTML = '';
+                if (snapshot.empty) {
+                    list.innerHTML = `<div class="text-center py-20 opacity-50"><p>This proposal has no content yet.</p></div>`;
+                    return;
+                }
+
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    // Global Data Store for Preview
+                    if (!window.proposalSectionsData) window.proposalSectionsData = {};
+                    window.proposalSectionsData[doc.id] = data;
+
+                    const sectionEl = document.createElement('div');
+                    sectionEl.className = "space-y-6";
+
+                    let designsHtml = '';
+                    if (data.items && data.items.length > 0) {
+                        data.items.forEach((item, index) => {
+                            // Clean preview
+                            const rawCode = (item.previewCode || '').replace(/\\n/g, '\n');
+                            const safePreviewCode = rawCode.replace(/"/g, "&quot;");
+
+                            designsHtml += `
+                                <div class="group/card relative">
+                                    <div class="aspect-[16/9] bg-white rounded-xl overflow-hidden shadow-2xl relative cursor-pointer ring-1 ring-white/10 hover:ring-pink-500 transition-all" onclick="openProposalPreview('${doc.id}', ${index})">
+                                         <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none" srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
+                                         <div class="absolute inset-0 z-10 bg-transparent"></div>
+                                    </div>
+                                    <div class="mt-3 flex justify-between items-start">
+                                         <div>
+                                            <h4 class="font-bold text-white">${item.name}</h4>
+                                            <button class="text-xs text-pink-500 font-bold hover:underline" onclick="openProposalPreview('${doc.id}', ${index})">View Full Preview</button>
+                                         </div>
+                                         <label class="flex items-center space-x-2 cursor-pointer select-none bg-white/5 px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors">
+                                            <input type="checkbox" class="form-checkbox text-pink-500 rounded border-gray-600 bg-black focus:ring-0 w-4 h-4 checkbox-selection" data-section="${doc.id}" data-idx="${index}" onchange="updateSelectionCount()">
+                                            <span class="text-xs font-bold text-gray-300">Select</span>
+                                         </label>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                    }
+
+                    sectionEl.innerHTML = `
+                         <div class="border-b border-white/10 pb-4 mb-6">
+                            <h2 class="text-3xl font-bold font-['Space_Grotesk'] text-white">${data.name}</h2>
+                         </div>
+                         <div class="grid grid-cols-1 md:grid-cols-2 gap-10">
+                            ${designsHtml}
+                         </div>
+                    `;
+                    list.appendChild(sectionEl);
+                });
+            });
+        }
+
+        window.updateSelectionCount = () => {
+            const checkboxes = document.querySelectorAll('.checkbox-selection:checked');
+            document.getElementById('selectionCount').textContent = checkboxes.length;
+        };
+
+        window.switchTab = (tab) => {
+            currentMode = tab;
+            const libBtn = document.getElementById('tabLibrary');
+            const propBtn = document.getElementById('tabProposal');
+
+            if (tab === 'library') {
+                libBtn.className = "text-sm font-bold pb-5 pt-5 border-b-2 border-pink-500 text-white transition-colors cursor-pointer";
+                propBtn.className = "text-sm font-bold pb-5 pt-5 border-b-2 border-transparent text-gray-500 hover:text-white transition-colors cursor-pointer";
+                setupLibraryMode();
+            } else {
+                propBtn.className = "text-sm font-bold pb-5 pt-5 border-b-2 border-pink-500 text-white transition-colors cursor-pointer";
+                libBtn.className = "text-sm font-bold pb-5 pt-5 border-b-2 border-transparent text-gray-500 hover:text-white transition-colors cursor-pointer";
+                setupProposalMode();
+            }
+        };
+
+        // --- LIBRARY MODE LOGIC ---
+        function setupLibraryMode() {
+            sidebarTitleEl.textContent = "Library Sections";
+            document.getElementById('createSidebarItemBtn').onclick = createLibrarySection;
+            mainToolbarTitle.textContent = "Designs";
+            mainToolbarSubtitle.textContent = "Select a section to manage snippets";
+
+            // Main Button: Add Design
+            mainActionBtn.innerHTML = `<i data-feather="plus" class="w-4 h-4"></i> <span class="tracking-wide">Add Design Snippet</span>`;
+            mainActionBtn.onclick = openAddDesignModal;
+            mainActionBtn.classList.remove('hidden');
+
+            const shareBtn = document.getElementById('shareProposalBtn');
+            if (shareBtn) shareBtn.classList.add('hidden');
+
+            // Listen to Library Sections
+            if (unsubscribeProposals) unsubscribeProposals();
+            const sectionsRef = collection(db, "library_sections");
+            const q = query(sectionsRef, orderBy("createdAt", "asc"));
+
+            unsubscribeLibrary = onSnapshot(q, (snapshot) => {
+                renderSidebarList(snapshot, 'library');
+                // Select first if needed
+                if (!currentLibrarySectionId && !snapshot.empty) {
+                    selectLibrarySection(snapshot.docs[0].id, snapshot.docs[0].data().name);
+                }
+            });
+        }
+
+        function renderSidebarList(snapshot, type) {
+            sidebarListEl.innerHTML = '';
+            const currentId = type === 'library' ? currentLibrarySectionId : currentProposalId;
+
+            if (snapshot.empty) {
+                sidebarListEl.innerHTML = `<li class="text-xs text-gray-600 text-center py-4">Nothing here yet</li>`;
+                return;
+            }
+
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                const isActive = currentId === doc.id;
+                const li = document.createElement('li');
+                const name = type === 'library' ? data.name : data.clientName;
+
+                li.setAttribute('data-id', doc.id);
+                li.className = `cursor-pointer px-5 py-3 rounded-full text-sm font-medium transition-all duration-200 flex items-center justify-between group select-none ${isActive ? 'bg-gradient-to-r from-pink-500 to-orange-500 text-white shadow-lg shadow-pink-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`;
+
+                li.onclick = () => {
+                    if (type === 'library') selectLibrarySection(doc.id, name);
+                    else selectProposal(doc.id, name);
+                };
+
+                li.innerHTML = `
+                    <span class="flex items-center gap-3 truncate">
+                        <i data-feather="${type === 'library' ? 'folder' : 'briefcase'}" class="w-4 h-4 ${isActive ? 'text-white' : 'text-gray-500 group-hover:text-white transition-colors'}"></i>
+                        ${name}
+                    </span>
+                    <button onclick="event.stopPropagation(); ${type === 'library' ? `deleteLibrarySection('${doc.id}')` : `deleteProposal('${doc.id}')`}" class="text-white/40 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 rounded-full p-1">
+                        <i data-feather="trash-2" class="w-3 h-3"></i>
+                    </button>
+                 `;
+                sidebarListEl.appendChild(li);
+            });
+            feather.replace();
+        }
+
+        window.selectLibrarySection = (id, name) => {
+            currentLibrarySectionId = id;
+            mainToolbarTitle.textContent = name;
+
+            // Re-render sidebar to update active state
+            // Manual update for responsiveness
+            Array.from(sidebarListEl.children).forEach(li => {
+                const icon = li.querySelector('.feather') || li.querySelector('svg') || li.querySelector('i');
+                if (li.getAttribute('data-id') === id) {
+                    li.className = 'cursor-pointer px-5 py-3 rounded-full text-sm font-medium transition-all duration-200 flex items-center justify-between group select-none bg-gradient-to-r from-pink-500 to-orange-500 text-white shadow-lg shadow-pink-500/20';
+                    if (icon) {
+                        icon.classList.remove('text-gray-500');
+                        icon.classList.add('text-white');
+                    }
+                } else {
+                    li.className = 'cursor-pointer px-5 py-3 rounded-full text-sm font-medium transition-all duration-200 flex items-center justify-between group select-none text-gray-400 hover:bg-white/5 hover:text-white';
+                    if (icon) {
+                        icon.classList.add('text-gray-500');
+                        icon.classList.remove('text-white');
+                    }
+                }
+            });
+
+            if (unsubscribeDesigns) unsubscribeDesigns();
+            const designsRef = collection(db, "library_sections", id, "designs");
+            const q = query(designsRef, orderBy("createdAt", "desc"));
+
+            contentArea.innerHTML = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-8 pb-20" id="designGrid"></div>';
+            const grid = document.getElementById('designGrid');
+
+            unsubscribeDesigns = onSnapshot(q, (snapshot) => {
+                grid.innerHTML = '';
+                if (snapshot.empty) {
+                    grid.innerHTML = `<div class="col-span-full py-20 text-center"><p class="text-gray-500">No designs yet.</p></div>`;
+                    return;
+                }
+
+                snapshot.forEach(doc => {
+                    grid.appendChild(createDesignCard(doc.id, doc.data()));
+                });
+                feather.replace();
+            });
+        };
+
+        function createDesignCard(id, design) {
+            const card = document.createElement('div');
+            card.className = "glass-panel group relative flex flex-col overflow-hidden h-[340px] hover:shadow-2xl hover:shadow-pink-500/10 transition-all duration-300 transform hover:-translate-y-1 cursor-pointer";
+            card.onclick = () => openPreview(id, design);
+            const uniqueId = `frame_${id}`;
+            card.innerHTML = `
+                <div class="absolute top-4 right-4 z-20 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                     <button onclick="event.stopPropagation(); copyCode(null, '${id}')" class="bg-black/60 hover:bg-black/90 text-white p-2.5 rounded-xl backdrop-blur-md border border-white/10 shadow-lg" title="Copy Code">
+                        <i data-feather="copy" class="w-4 h-4"></i>
+                    </button>
+                    <button onclick="event.stopPropagation(); deleteDesign('${id}')" class="bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-white p-2.5 rounded-xl backdrop-blur-md border border-red-500/20 transition-all shadow-lg" title="Delete">
+                        <i data-feather="trash-2" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                <div class="flex-grow bg-white relative w-full overflow-hidden">
+                    <iframe id="${uniqueId}" class="w-[200%] h-[200%] transform scale-50 origin-top-left border-none absolute inset-0 pointer-events-none select-none z-10" scrolling="no"></iframe>
+                    <div class="absolute inset-0 z-10"></div>
+                </div>
+                <div class="p-5 border-t border-white/5 bg-[#0e0e12] z-20 relative">
+                     <h4 class="font-bold text-sm text-white truncate text-base">${design.name}</h4>
+                </div>
+             `;
+            setTimeout(() => {
+                const frame = document.getElementById(uniqueId);
+                if (frame) populateIframe(frame, design.code);
+            }, 50);
+            return card;
+        }
+
+        window.createLibrarySection = async () => {
+            const name = await customPrompt("Create Section", "Enter section name:");
+            if (name) {
+                try {
+                    await addDoc(collection(db, "library_sections"), { name, createdAt: serverTimestamp() });
+                } catch (e) {
+                    customAlert("Error", "Could not save section. Check your connection.");
+                }
+            }
+        };
+        window.deleteLibrarySection = async (id) => {
+            if (await customConfirm("Delete Section?", "Removes all designs inside.")) deleteDoc(doc(db, "library_sections", id));
+        };
+
+        // --- PROPOSAL MODE LOGIC ---
+        function setupProposalMode() {
+            sidebarTitleEl.textContent = "Client Proposals";
+            document.getElementById('createSidebarItemBtn').onclick = createProposal;
+
+            // Listen to Proposals
+            if (unsubscribeLibrary) unsubscribeLibrary();
+            if (unsubscribeDesigns) unsubscribeDesigns();
+
+            const propRef = collection(db, "proposals");
+            const q = query(propRef, orderBy("createdAt", "desc"));
+
+            unsubscribeProposals = onSnapshot(q, (snapshot) => {
+                renderSidebarList(snapshot, 'proposal');
+                if (!currentProposalId && !snapshot.empty) {
+                    selectProposal(snapshot.docs[0].id, snapshot.docs[0].data().clientName);
+                } else if (snapshot.empty) {
+                    mainToolbarTitle.textContent = "Proposals";
+                    mainToolbarSubtitle.textContent = "Create a proposal to get started.";
+                    contentArea.innerHTML = `<div class="flex items-center justify-center h-full text-gray-500">No proposals found. Click '+' to add one.</div>`;
+                    mainActionBtn.classList.add('hidden');
+                    const shareBtn = document.getElementById('shareProposalBtn');
+                    if (shareBtn) shareBtn.classList.add('hidden');
+                }
+            });
+        }
+
+        window.createProposal = async () => {
+            const clientName = await customPrompt("New Proposal", "Enter Client Name:");
+            if (clientName) {
+                try {
+                    await addDoc(collection(db, "proposals"), { clientName, createdAt: serverTimestamp() });
+                } catch (e) {
+                    customAlert("Error", "Could not create proposal.");
+                }
+            }
+        };
+
+        window.deleteProposal = async (id) => {
+            if (await customConfirm("Delete Proposal?", "This cannot be undone.")) deleteDoc(doc(db, "proposals", id));
+        };
+
+        window.copyShareLink = (id) => {
+            const url = window.location.origin + window.location.pathname + "?p=" + id + "&mode=client";
+            navigator.clipboard.writeText(url).then(() => {
+                customAlert("Link Copied", "Share link copied to clipboard!");
+            });
+        };
+
+        window.selectProposal = (id, clientName) => {
+            currentProposalId = id;
+            mainToolbarTitle.textContent = clientName;
+            mainToolbarSubtitle.textContent = "Proposal Builder";
+
+            // Button to Add Proposal Section
+            mainActionBtn.classList.remove('hidden');
+            mainActionBtn.innerHTML = `<i data-feather="plus-square" class="w-4 h-4"></i> <span class="tracking-wide">Add Page Section</span>`;
+            mainActionBtn.onclick = addProposalSection;
+
+            // Show Share Button
+            const shareBtn = document.getElementById('shareProposalBtn');
+            if (shareBtn) {
+                shareBtn.classList.remove('hidden');
+                shareBtn.onclick = () => copyShareLink(id);
+            }
+
+            // Render Sections
+            if (unsubscribeProposalSections) unsubscribeProposalSections();
+            const sectionsRef = collection(db, "proposals", id, "proposal_sections");
+            const q = query(sectionsRef, orderBy("createdAt", "asc"));
+
+            contentArea.innerHTML = '<div id="proposalSectionsList" class="space-y-8 pb-20"></div>';
+            const list = document.getElementById('proposalSectionsList');
+
+            unsubscribeProposalSections = onSnapshot(q, (snapshot) => {
+                list.innerHTML = '';
+                if (snapshot.empty) {
+                    list.innerHTML = `<div class="text-center py-10 opacity-50"><p>No sections added yet.</p></div>`;
+                    return;
+                }
+
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    const sectionEl = document.createElement('div');
+                    sectionEl.className = "bg-white/5 border border-white/5 rounded-2xl p-6 relative group";
+
+                    let designsHtml = '';
+                    if (data.items && data.items.length > 0) {
+                        data.items.forEach((item, index) => {
+                            // Store data globally to avoid inline HTML escaping hell
+                            if (!window.proposalSectionsData) window.proposalSectionsData = {};
+                            window.proposalSectionsData[doc.id] = data;
+
+                            // Clean preview for the iframe locally
+                            const rawCode = (item.previewCode || '').replace(/\\n/g, '\n');
+                            const safePreviewCode = rawCode.replace(/"/g, "&quot;");
+
+                            designsHtml += `
+                                <div class="w-48 bg-black/40 rounded-xl overflow-hidden border border-white/10 shrink-0 relative group/card hover:border-pink-500 transition-colors cursor-pointer" onclick="openProposalPreview('${doc.id}', ${index})">
+                                    <div class="h-24 bg-white relative">
+                                        <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none" srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
+                                        <div class="absolute inset-0 z-10"></div>
+                                    </div>
+                                    <div class="p-2 flex justify-between items-center">
+                                        <span class="text-[10px] text-gray-300 truncate font-medium">${item.name}</span>
+                                        <button onclick="event.stopPropagation(); removeDesignFromProposal('${doc.id}', ${index})" class="text-red-500 hover:text-white bg-black/20 hover:bg-red-500 rounded p-1 transition-colors"><i data-feather="x" class="w-3 h-3"></i></button>
+                                    </div>
+                                </div>
+                             `;
+                        });
+                    } else {
+                        designsHtml = `<div class="text-sm text-gray-600 italic px-2">No designs selected.</div>`;
+                    }
+
+                    sectionEl.innerHTML = `
+                         <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-xl font-bold font-['Space_Grotesk']">${data.name}</h3>
+                            <div class="flex gap-2">
+                                <button onclick="openLibraryPicker('${doc.id}')" class="bg-pink-500/20 hover:bg-pink-500 text-pink-500 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border border-pink-500/20">
+                                    + Select Designs
+                                </button>
+                                <button onclick="deleteProposalSection('${doc.id}')" class="text-gray-600 hover:text-red-500 transition-colors p-1.5"><i data-feather="trash-2" class="w-4 h-4"></i></button>
+                            </div>
+                         </div>
+                         <div class="flex gap-4 overflow-x-auto custom-scrollbar pb-2">
+                            ${designsHtml}
+                         </div>
+                    `;
+                    list.appendChild(sectionEl);
+                });
+                feather.replace();
+            });
+        };
+
+        window.addProposalSection = async () => {
+            const name = await customPrompt("Add Section", "Section Name (e.g. Hero, Teams):");
+            if (name) {
+                await addDoc(collection(db, "proposals", currentProposalId, "proposal_sections"), {
+                    name, createdAt: serverTimestamp(), items: []
+                });
+            }
+        };
+
+        window.deleteProposalSection = async (secId) => {
+            if (await customConfirm("Remove Section?", "Delete this section?")) {
+                deleteDoc(doc(db, "proposals", currentProposalId, "proposal_sections", secId));
+            }
+        };
+
+        window.removeDesignFromProposal = async (secId, index) => {
+            // Need to read, modify, write since it's array index
+            // Actually, we should store objects with ID, but simple array filter works for prototype if we had unique IDs. 
+            // arrayRemove checks value equality. If objects differ slightly, it fails.
+            // Let's just fetch, splice, update.
+            const docRef = doc(db, "proposals", currentProposalId, "proposal_sections", secId);
+            const snap = await getDoc(docRef);
+            if (snap.exists()) {
+                const items = snap.data().items || [];
+                items.splice(index, 1);
+                await updateDoc(docRef, { items });
+            }
+        };
+
+        // --- LIBRARY PICKER LOGIC ---
+        // --- LIBRARY PICKER LOGIC ---
+        let currentProposalSectionItems = []; // Store currently selected items
+
+        window.openLibraryPicker = async (sectionId) => {
+            activeProposalSectionId = sectionId;
+            const modal = document.getElementById('libraryPickerModal');
+            modal.classList.add('active');
+
+            // 1. Fetch current selection
+            const secRef = doc(db, "proposals", currentProposalId, "proposal_sections", sectionId);
+            const secSnap = await getDoc(secRef);
+            currentProposalSectionItems = secSnap.exists() ? (secSnap.data().items || []) : [];
+
+            // 2. Load Sidebar
+            const pickerSidebar = document.getElementById('pickerSidebar');
+            pickerSidebar.innerHTML = '<div class="text-xs p-4">Loading...</div>';
+
+            const snap = await getDocs(query(collection(db, "library_sections"), orderBy("createdAt", "asc")));
+            pickerSidebar.innerHTML = '';
+            snap.forEach(doc => {
+                const btn = document.createElement('button');
+                btn.className = "w-full text-left px-4 py-3 text-sm text-gray-400 hover:bg-white/5 hover:text-white rounded-lg transition-colors mb-1 font-medium flex justify-between items-center group";
+                btn.innerHTML = `<span>${doc.data().name}</span> <i data-feather="chevron-right" class="w-4 h-4 opacity-0 group-hover:opacity-50"></i>`;
+                btn.onclick = () => {
+                    // Active state for sidebar
+                    Array.from(pickerSidebar.children).forEach(c => c.classList.remove('bg-white/10', 'text-white'));
+                    btn.classList.add('bg-white/10', 'text-white');
+                    btn.classList.remove('text-gray-400');
+                    loadPickerDesigns(doc.id);
+                };
+                pickerSidebar.appendChild(btn);
+            });
+            feather.replace();
+
+            if (!snap.empty) {
+                pickerSidebar.firstChild.click(); // Select first automatically
+            }
+        };
+
+        // EDIT DESIGN (Global)
+        window.editCurrentDesign = () => {
+            if (currentMode === 'client') return; // Security Guard
+            if (!currentDesignData) return;
+
+            // Populate modal
+            document.getElementById('designNameInput').value = currentDesignData.name;
+            document.getElementById('designCodeInput').value = currentDesignData.code || currentDesignData.previewCode || "";
+            document.getElementById('addDesignModal').classList.add('active');
+        };
+
+        async function loadPickerDesigns(libSecId) {
+            const grid = document.getElementById('pickerGrid');
+            grid.innerHTML = '<div class="text-center w-full py-10 text-gray-500 col-span-full">Loading...</div>';
+
+            const q = query(collection(db, "library_sections", libSecId, "designs"), orderBy("createdAt", "desc"));
+            const snap = await getDocs(q);
+
+            grid.innerHTML = '';
+            if (snap.empty) {
+                grid.innerHTML = '<div class="text-center w-full py-10 text-gray-500 col-span-full">No designs found.</div>';
+                return;
+            }
+
+            snap.forEach(doc => {
+                const data = doc.data();
+                const isSelected = currentProposalSectionItems.some(item => item.designId === doc.id);
+
+                const card = document.createElement('div');
+                card.className = `border rounded-xl overflow-hidden cursor-pointer transition-all group relative duration-200 ${isSelected ? 'border-green-500 ring-1 ring-green-500 bg-green-500/5' : 'border-white/5 bg-white/5 hover:border-white/20'}`;
+
+                card.innerHTML = `
+                      <div class="absolute top-3 right-3 z-20">
+                           <div class="w-6 h-6 rounded-full border flex items-center justify-center transition-all ${isSelected ? 'bg-green-500 border-green-500' : 'bg-black/50 border-white/30 group-hover:border-white'}">
+                                <i data-feather="${isSelected ? 'check' : 'plus'}" class="w-3.5 h-3.5 text-white transition-transform ${isSelected ? '' : 'rotate-0'}"></i>
+                           </div>
+                      </div>
+                      <div class="h-40 bg-white relative">
+                          <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none" srcdoc="<style>body{margin:0;overflow:hidden}</style>${data.code}"></iframe>
+                          <div class="absolute inset-0 z-10"></div>
+                      </div>
+                      <div class="p-4 border-t border-white/5 bg-[#0e0e12]">
+                            <h4 class="text-sm font-bold ${isSelected ? 'text-green-400' : 'text-gray-200'} truncate">${data.name}</h4>
+                            <p class="text-[10px] text-gray-500 mt-1 uppercase tracking-wider">${isSelected ? 'Added to Section' : 'Click to Add'}</p>
+                      </div>
+                 `;
+                card.onclick = () => toggleDesignInProposal(doc.id, data, card);
+                grid.appendChild(card);
+            });
+            feather.replace();
+        }
+
+        async function toggleDesignInProposal(designId, designData, cardEl) {
+            // Optimistic UI Update first
+            const wasSelected = currentProposalSectionItems.some(item => item.designId === designId);
+            const isSelected = !wasSelected;
+
+            // Re-render card style immediately (Manual DOM manipulation for speed)
+            // Or just reload the list? No, toggle class.
+            // Actually, re-rendering is easier given the complex innerHTML, but let's toggle classes for smoothness.
+            if (isSelected) {
+                cardEl.className = `border rounded-xl overflow-hidden cursor-pointer transition-all group relative duration-200 border-green-500 ring-1 ring-green-500 bg-green-500/5`;
+                cardEl.querySelector('h4').className = "text-sm font-bold text-green-400 truncate";
+                cardEl.querySelector('p').textContent = "Added to Section";
+                const iconContainer = cardEl.querySelector('.absolute .w-6');
+                iconContainer.className = "w-6 h-6 rounded-full border flex items-center justify-center transition-all bg-green-500 border-green-500";
+                iconContainer.innerHTML = '<i data-feather="check" class="w-3.5 h-3.5 text-white"></i>';
+            } else {
+                cardEl.className = `border rounded-xl overflow-hidden cursor-pointer transition-all group relative duration-200 border-white/5 bg-white/5 hover:border-white/20`;
+                cardEl.querySelector('h4').className = "text-sm font-bold text-gray-200 truncate";
+                cardEl.querySelector('p').textContent = "Click to Add";
+                const iconContainer = cardEl.querySelector('.absolute .w-6');
+                iconContainer.className = "w-6 h-6 rounded-full border flex items-center justify-center transition-all bg-black/50 border-white/30 group-hover:border-white";
+                iconContainer.innerHTML = '<i data-feather="plus" class="w-3.5 h-3.5 text-white"></i>';
+            }
+            feather.replace();
+
+            // Store Logic
+            const item = {
+                designId,
+                name: designData.name,
+                previewCode: designData.code,
+                librarySectionId: currentLibrarySectionId
+            };
+
+            const docRef = doc(db, "proposals", currentProposalId, "proposal_sections", activeProposalSectionId);
+
+            try {
+                if (isSelected) {
+                    currentProposalSectionItems.push(item); // Update local cache
+                    await updateDoc(docRef, { items: arrayUnion(item) });
+                } else {
+                    // For removal, we need the exact object or a way to find it. 
+                    // arrayRemove needs EXACT match. 
+                    // Since 'item' is reconstructed, it might differ if previewCode changed? 
+                    // But here we construct 'item' from 'designData' which comes from 'doc.data()'.
+                    // Provided the DB hasn't changed since 'loadPickerDesigns' fetched it, it matches.
+                    // RISK: If previewCode is huge, passing it around is heavy.
+                    // But let's try arrayRemove first. 
+                    // Wait, 'currentProposalSectionItems' has the objects from the DB. 
+                    // We should find the object in 'currentProposalSectionItems' that matches ID and remove THAT specific object.
+                    const objectToRemove = currentProposalSectionItems.find(i => i.designId === designId);
+                    if (objectToRemove) {
+                        // Remove from local cache
+                        currentProposalSectionItems = currentProposalSectionItems.filter(i => i.designId !== designId);
+                        await updateDoc(docRef, { items: arrayRemove(objectToRemove) });
+                    }
+                }
+            } catch (e) {
+                console.error("Toggle error", e);
+                // Revert UI if error? 
+                customAlert("Error", "Failed to update proposal. Check console.");
+            }
+        }
+
+
+        // --- SHARED UTILS (Add Design Modal, etc) ---
+        // Same as before...
+        window.handleFileUpload = (input) => {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                document.getElementById('designCodeInput').value = e.target.result;
+                const nameInput = document.getElementById('designNameInput');
+                if (!nameInput.value) {
+                    nameInput.value = file.name.replace('.html', '').replace('.txt', '');
+                }
+            };
+            reader.readAsText(file);
+        };
+
+        // OPEN PREVIEW (Shared)
+        window.openPreview = (designId, designData) => {
+            document.getElementById('previewTitle').textContent = designData.name;
+            const frame = document.getElementById('previewFrame');
+            frame.srcdoc = designData.code || designData.previewCode || "";
+
+            // Update Edit Button context
+            // Note: Edit button in Preview modal calls editCurrentDesign(), which needs currentDesignId etc.
+            // But editCurrentDesign relies on 'currentLibrarySectionId'. 
+            // If we are in 'proposal' mode, we might not have 'currentLibrarySectionId' set correctly if we just clicked a proposal item.
+            // However, the user task was just to Preview. Editing from Proposal view might be complex if we don't know the library section.
+            // We can disable edit button in Proposal Mode or find the section.
+            // For now, let's just show preview.
+
+            // Disable Edit Button in Client Mode
+            const editBtn = document.getElementById('previewEditBtn');
+            if (editBtn) {
+                if (currentMode === 'client') editBtn.style.display = 'none';
+                else editBtn.style.display = 'block';
+            }
+
+            document.getElementById('previewModal').classList.add('active');
+        };
+
+        window.openProposalPreview = (sectionId, index) => {
+            const data = window.proposalSectionsData[sectionId];
+            if (!data || !data.items || !data.items[index]) return;
+
+            const item = data.items[index];
+            // Clean code for display
+            const rawCode = (item.previewCode || '').replace(/\\n/g, '\n');
+
+            openPreview(item.designId, {
+                name: item.name,
+                code: rawCode
+            });
+        };
+
+        window.openAddDesignModal = () => {
+            if (currentMode === 'library' && !currentLibrarySectionId) {
+                customAlert("Select Section", "Please select a library section first.");
+                return;
+            }
+            // Clear previous data
+            document.getElementById('designNameInput').value = "";
+            document.getElementById('designCodeInput').value = "";
+            currentDesignId = null;
+            currentDesignData = null;
+            document.getElementById('addDesignModal').classList.add('active');
+        };
+
+        window.saveDesign = async () => {
+            if (currentMode === 'client') return; // Security
+            const name = document.getElementById('designNameInput').value.trim();
+            const code = document.getElementById('designCodeInput').value;
+            if (!name || !code) {
+                customAlert("Required Fields", "Please enter a Name and some Code/Content.");
+                return;
+            }
+
+            try {
+                if (currentMode === 'library') {
+                    const ref = collection(db, "library_sections", currentLibrarySectionId, "designs");
+
+                    // Check for duplicates
+                    const q = query(ref, where("name", "==", name));
+                    const snap = await getDocs(q);
+
+                    if (!snap.empty) {
+                        for (const d of snap.docs) {
+                            if (currentDesignId && d.id === currentDesignId) continue;
+                            customAlert("Duplicate Name", "A design with this name already exists in this section.");
+                            return;
+                        }
+                    }
+
+                    if (currentDesignId) {
+                        await updateDoc(doc(ref, currentDesignId), { name, code });
+                    } else {
+                        await addDoc(ref, { name, code, createdAt: serverTimestamp() });
+                    }
+                }
+                document.getElementById('addDesignModal').classList.remove('active');
+            } catch (e) {
+                customAlert("Save Error", "Failed to save design. Please try again.");
+                console.error(e);
+            }
+        };
+
+        window.openPreview = (id, design) => {
+            currentDesignData = design;
+            currentDesignId = id; // Set global for edits
+            const frame = document.getElementById('previewFrame');
+            document.getElementById('previewTitle').textContent = design.name;
+            document.getElementById('previewModal').classList.add('active');
+
+            const d = frame.contentWindow.document;
+            d.open(); d.write(design.code); d.close();
+        };
+
+        window.editCurrentDesign = () => {
+            if (!currentDesignData) return;
+            document.getElementById('previewModal').classList.remove('active');
+            document.getElementById('designNameInput').value = currentDesignData.name;
+            document.getElementById('designCodeInput').value = currentDesignData.code;
+            document.getElementById('addDesignModal').classList.add('active');
+        };
+
+        window.deleteDesign = async (id) => {
+            if (await customConfirm("Delete Design?", "Permanently remove?")) {
+                deleteDoc(doc(db, "library_sections", currentLibrarySectionId, "designs", id));
+            }
+        };
+
+        window.copyCode = (code, id) => { /* Reuse logic */ navigator.clipboard.writeText(currentDesignData?.code || ""); };
+
+        function populateIframe(frame, code) {
+            const d = frame.contentWindow.document; d.open();
+            d.write(`<style>body{margin:0;overflow:hidden;}</style>${code}`); d.close();
+        }
+
+        // Init
+        init();
+
+    </script>
+
+    <!-- Need import getDocs specifically in module -->
+    <script type="module">
+        import { getDocs, query, collection, orderBy } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        // Assign to window for non-module usage (Picker Logic)
+        window.getDocs = getDocs;
+        window.query = query;
+        window.collection = collection;
+        window.orderBy = orderBy;
+    </script>
+
+    <script>
+        function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+    </script>
+
+    <style>
+        :root {
+            --bg-deep: #0B0A14;
+            --glass-bg: rgba(20, 20, 30, 0.6);
+        }
+
+        body {
+            background-color: var(--bg-deep);
+            color: #F0F0F0;
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        h1,
+        h2,
+        h3,
+        .brand-font {
+            font-family: 'Space Grotesk', sans-serif;
+            letter-spacing: -0.02em;
+        }
+
+        .mesh-bg {
+            position: fixed;
+            inset: 0;
+            z-index: -2;
+            background: radial-gradient(at 0% 0%, hsla(336, 83%, 56%, 0.15) 0px, transparent 50%), radial-gradient(at 100% 100%, hsla(240, 100%, 70%, 0.05) 0px, transparent 50%);
+            filter: blur(60px);
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+        }
+
+        .btn-liquid {
+            background: radial-gradient(circle at top, rgba(255, 255, 255, 0.4) 0%, transparent 60%),
+                linear-gradient(90deg, #E6397F, #FF8A00);
+            box-shadow: 0 10px 30px -10px rgba(230, 57, 127, 0.6);
+            border: none;
+            color: white;
+            border-radius: 9999px;
+            padding: 10px 24px;
+            font-weight: 700;
+            font-size: 13px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .btn-liquid:hover {
+            transform: translateY(-2px);
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-card {
+            background: #121218;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 32px;
+            width: 90%;
+            max-width: 500px;
+        }
+
+        .input-dark {
+            background: #050505;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: white;
+            border-radius: 12px;
+            padding: 14px;
+            width: 100%;
+            font-family: monospace;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .input-dark:focus {
+            border-color: #E6397F;
+        }
+
+        /* Client Mode Overrides */
+        body.client-mode #previewEditBtn {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body class="flex flex-col h-screen overflow-hidden">
+    <div class="mesh-bg"></div>
+
+    <!-- ADMIN HEADER -->
+    <header id="adminHeader"
+        class="h-16 border-b border-white/5 bg-[#0B0A14]/80 backdrop-blur-xl flex items-center justify-between px-6 z-20 shrink-0">
+        <div class="flex items-center gap-4">
+            <img src="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug"
+                class="w-8 h-8 rounded-full border border-white/10">
+            <h1 class="text-lg font-bold">Reputifly <span class="opacity-50 font-normal">| Proposal Engine</span></h1>
+        </div>
+        <div class="flex gap-8">
+            <button id="tabLibrary" onclick="switchTab('library')"
+                class="text-sm font-bold pb-5 pt-5 border-b-2 border-pink-500 text-white transition-colors">Design
+                Library</button>
+            <button id="tabProposal" onclick="switchTab('proposal')"
+                class="text-sm font-bold pb-5 pt-5 border-b-2 border-transparent text-gray-500 hover:text-white transition-colors">Proposal
+                Builder</button>
+        </div>
+        <div class="text-xs text-gray-500 font-mono bg-white/5 px-2 py-1 rounded">V 1.0.0 Beta</div>
+    </header>
+
+    <!-- CLIENT HEADER (Hidden by default) -->
+    <header id="clientHeader"
+        class="h-20 border-b border-white/5 bg-[#0B0A14]/90 backdrop-blur-xl flex items-center justify-between px-10 z-20 shrink-0 sticky top-0 hidden">
+        <div class="flex items-center gap-4">
+            <div class="w-10 h-10 rounded-full bg-pink-500/20 flex items-center justify-center">
+                <i data-feather="briefcase" class="w-5 h-5 text-pink-500"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-bold font-['Space_Grotesk']">Project Proposal</h1>
+                <p id="clientHeaderName" class="text-sm text-gray-400">Prepared for Client</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="text-right mr-4">
+                <div class="text-xs text-gray-500 uppercase tracking-widest font-bold mb-1">Selections</div>
+                <p class="text-white font-bold"><span id="selectionCount">0</span> Designs Selected</p>
+            </div>
+            <!-- Future: Submit Selection Logic -->
+        </div>
+    </header>
+
+    <div class="flex-grow flex overflow-hidden">
+        <!-- SIDEBAR -->
+        <aside class="w-72 bg-[#08080C] border-r border-white/5 flex flex-col shrink-0">
+            <div class="p-6 pb-2 flex justify-between items-center">
+                <span id="sidebarTitle" class="text-xs font-bold text-gray-500 uppercase tracking-widest">Library
+                    Sections</span>
+                <button id="createSidebarItemBtn"
+                    class="bg-white/5 hover:bg-white/10 text-white w-7 h-7 flex items-center justify-center rounded-full transition-colors border border-white/5">
+                    <i data-feather="plus" class="w-3.5 h-3.5"></i>
+                </button>
+            </div>
+            <div class="flex-grow overflow-y-auto p-4 custom-scrollbar">
+                <ul id="sidebarList" class="space-y-2"></ul>
+            </div>
+        </aside>
+
+        <!-- MAIN -->
+        <main class="flex-grow bg-[#0B0A14] flex flex-col relative overflow-hidden">
+            <div
+                class="h-20 border-b border-white/5 flex items-center justify-between px-10 shrink-0 bg-[#0B0A14]/50 backdrop-blur-sm">
+                <div class="flex items-center gap-4">
+                    <div
+                        class="w-10 h-10 rounded-full bg-gradient-to-br from-pink-500/20 to-orange-500/20 flex items-center justify-center border border-white/10">
+                        <i data-feather="grid" class="w-5 h-5 text-white"></i>
+                    </div>
+                    <div>
+                        <h2 id="mainToolbarTitle" class="text-xl font-bold font-['Space_Grotesk'] leading-tight">
+                            Loading...</h2>
+                        <p id="mainToolbarSubtitle" class="text-xs text-gray-500 font-medium">...</p>
+                    </div>
+                </div>
+                <div class="flex gap-3">
+                    <button id="shareProposalBtn" class="btn-liquid bg-transparent border border-white/10 hidden"
+                        style="background: rgba(255,255,255,0.05); box-shadow: none;">
+                        <i data-feather="share-2" class="w-4 h-4"></i> Share
+                    </button>
+                    <button id="mainActionBtn" class="btn-liquid shadow-lg shadow-pink-500/10"></button>
+                </div>
+            </div>
+            <div id="contentArea" class="flex-grow overflow-y-auto p-10 relative custom-scrollbar"></div>
+        </main>
+    </div>
+
+    <!-- MODAL: ADD/EDIT -->
+    <div id="addDesignModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="flex justify-between items-center mb-8">
+                <h3 class="text-xl font-bold">Design Snippet</h3>
+                <button onclick="closeModal('addDesignModal')"
+                    class="bg-white/5 p-2 rounded-full text-gray-500 hover:text-white"><i data-feather="x"
+                        class="w-4 h-4"></i></button>
+            </div>
+            <div class="space-y-6">
+                <div>
+                    <label class="text-[10px] uppercase font-bold text-gray-500 mb-2">Name</label>
+                    <input id="designNameInput" type="text" class="input-dark">
+                </div>
+                <div>
+                    <label class="text-[10px] uppercase font-bold text-gray-500 mb-2">Code</label>
+                    <textarea id="designCodeInput" class="input-dark h-48 resize-none"></textarea>
+                    <!-- UPLOAD LINK FIX -->
+                    <div class="mt-2 text-right">
+                        <span class="text-[10px] text-gray-500">Or </span>
+                        <input type="file" id="htmlUpload" accept=".html,.txt" class="hidden"
+                            onchange="handleFileUpload(this)">
+                        <button onclick="document.getElementById('htmlUpload').click()"
+                            class="text-[10px] font-bold text-gray-400 hover:text-white border-b border-gray-600 hover:border-white transition-colors pb-0.5">
+                            Upload HTML File
+                        </button>
+                    </div>
+                </div>
+                <button onclick="saveDesign()" class="btn-liquid w-full justify-center">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: PREVIEW -->
+    <div id="previewModal" class="modal-overlay" style="z-index: 150;">
+        <div
+            class="bg-[#0B0A14] w-[95vw] h-[90vh] rounded-2xl border border-white/10 shadow-2xl flex flex-col relative overflow-hidden">
+            <div class="h-16 flex items-center justify-between px-6 border-b border-white/5 bg-[#0B0A14]">
+                <div class="flex items-center gap-4">
+                    <button onclick="closeModal('previewModal')"
+                        class="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white flex items-center justify-center"><i
+                            data-feather="arrow-left" class="w-4 h-4"></i></button>
+                    <h3 id="previewTitle" class="text-lg font-bold">Start Preview</h3>
+                </div>
+                <div class="flex gap-2">
+                    <button id="previewEditBtn" onclick="editCurrentDesign()"
+                        class="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold border border-white/10">Edit</button>
+                </div>
+            </div>
+            <div class="flex-grow bg-white/5 relative"><iframe id="previewFrame"
+                    class="w-full h-full border-none bg-white"></iframe></div>
+        </div>
+    </div>
+
+    <!-- MODAL: LIBRARY PICKER -->
+    <div id="libraryPickerModal" class="modal-overlay" style="z-index: 160;">
+        <div class="bg-[#121218] border-0 w-full h-full m-0 flex overflow-hidden shadow-none fixed inset-0">
+            <!-- Sidebar -->
+            <div class="w-72 bg-black/20 border-r border-white/5 flex flex-col shrink-0">
+                <div class="p-5 border-b border-white/5 font-bold text-sm tracking-wide uppercase text-gray-500">
+                    Resource Library</div>
+                <div id="pickerSidebar" class="flex-grow overflow-y-auto p-3 space-y-1 custom-scrollbar"></div>
+            </div>
+            <!-- Grid -->
+            <div class="flex-grow flex flex-col h-full overflow-hidden">
+                <div
+                    class="h-20 border-b border-white/5 flex justify-between items-center px-8 shrink-0 bg-[#121218] z-10">
+                    <div>
+                        <h3 class="font-bold text-xl text-white">Select Designs</h3>
+                        <p class="text-sm text-gray-400">Select the designs you want to include in this section.</p>
+                    </div>
+                    <button onclick="closeModal('libraryPickerModal')"
+                        class="btn-liquid px-8 shadow-lg shadow-pink-500/10">
+                        Confirm & Close
+                    </button>
+                </div>
+                <div id="pickerGrid"
+                    class="flex-grow overflow-y-auto p-10 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-8 align-content-start pb-10 custom-scrollbar">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- UTILITY MODALS -->
+    <div id="customPromptModal" class="modal-overlay" style="z-index: 200;">
+        <div class="modal-card">
+            <h3 id="promptTitle" class="text-lg font-bold mb-2">Input</h3>
+            <p id="promptMessage" class="text-sm text-gray-400 mb-6">-</p>
+            <input id="promptInput" type="text" class="input-dark mb-6">
+            <div class="flex gap-3">
+                <button id="promptCancelBtn"
+                    class="flex-1 py-3 rounded-full bg-white/5 text-xs font-bold">Cancel</button>
+                <button id="promptConfirmBtn"
+                    class="flex-1 py-3 rounded-full btn-liquid justify-center text-xs font-bold">Confirm</button>
+            </div>
+        </div>
+    </div>
+    <div id="customConfirmModal" class="modal-overlay" style="z-index: 205;">
+        <div class="modal-card text-center">
+            <div
+                class="w-16 h-16 rounded-full bg-red-500/10 mx-auto mb-4 flex items-center justify-center border border-red-500/20">
+                <i data-feather="alert-triangle" class="w-8 h-8 text-red-500"></i>
+            </div>
+            <h3 id="confirmTitle" class="text-lg font-bold mb-2">Confirm</h3>
+            <p id="confirmMessage" class="text-sm text-gray-400 mb-6">-</p>
+            <div class="flex gap-3">
+                <button id="confirmCancelBtn"
+                    class="flex-1 py-3 rounded-full bg-white/5 text-xs font-bold">Cancel</button>
+                <button id="confirmOkBtn"
+                    class="flex-1 py-3 rounded-full bg-red-500 hover:bg-red-600 text-white text-xs font-bold">Yes</button>
+            </div>
+        </div>
+    </div>
+    <div id="customAlertModal" class="modal-overlay" style="z-index: 210;">
+        <div class="modal-card text-center">
+            <i data-feather="info" class="w-10 h-10 text-white mb-4 mx-auto"></i>
+            <h3 id="alertTitle" class="text-lg font-bold mb-2">Alert</h3>
+            <p id="alertMessage" class="text-sm text-gray-400 mb-6">-</p>
+            <button id="alertOkBtn" class="btn-liquid w-full justify-center">Okay</button>
+        </div>
+    </div>
+
+    <script>feather.replace();</script>
+</body>
+
+</html>
