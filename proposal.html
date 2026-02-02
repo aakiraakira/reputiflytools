@@ -143,6 +143,9 @@
             }
         };
 
+        // --- CLIENT MODE VARIABLES ---
+        window.clientSelections = {}; // stores { sectionId: { html: "...", name: "..." } }
+
         async function initClientMode(proposalId) {
             currentMode = 'client';
             document.body.classList.add('client-mode');
@@ -157,7 +160,7 @@
 
             // Setup Main Area
             const contentArea = document.getElementById('contentArea');
-            contentArea.innerHTML = '<div id="clientProposalContainer" class="max-w-5xl mx-auto space-y-12 pb-40"></div>';
+            contentArea.innerHTML = '<div id="clientProposalContainer" class="max-w-6xl mx-auto space-y-16 pb-40"></div>';
 
             // Load Proposal Data for Name
             const pDoc = await getDoc(doc(db, "proposals", proposalId));
@@ -177,65 +180,281 @@
             const list = document.getElementById('clientProposalContainer');
 
             onSnapshot(q, (snapshot) => {
-                list.innerHTML = '';
-                if (snapshot.empty) {
+                if (snapshot.empty && list.children.length === 0) {
                     list.innerHTML = `<div class="text-center py-20 opacity-50"><p>This proposal has no content yet.</p></div>`;
                     return;
                 }
 
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    // Global Data Store for Preview
-                    if (!window.proposalSectionsData) window.proposalSectionsData = {};
-                    window.proposalSectionsData[doc.id] = data;
+                if (!snapshot.empty && list.querySelector('div.text-center')) {
+                    list.innerHTML = ''; // Remove empty state
+                }
 
-                    const sectionEl = document.createElement('div');
-                    sectionEl.className = "space-y-6";
+                snapshot.docChanges().forEach((change) => {
+                    const docSnap = change.doc;
+                    const data = docSnap.data();
+                    const sectionId = docSnap.id;
+                    const scrollContainerId = `scroll_container_${sectionId}`;
 
-                    let designsHtml = '';
-                    if (data.items && data.items.length > 0) {
-                        data.items.forEach((item, index) => {
-                            // Clean preview
-                            const rawCode = (item.previewCode || '').replace(/\\n/g, '\n');
-                            const safePreviewCode = rawCode.replace(/"/g, "&quot;");
+                    if (change.type === "added") {
+                        if (!window.proposalSectionsData) window.proposalSectionsData = {};
+                        window.proposalSectionsData[sectionId] = data;
 
-                            designsHtml += `
-                                <div class="group/card relative">
-                                    <div class="aspect-[16/9] bg-white rounded-xl overflow-hidden shadow-2xl relative cursor-pointer ring-1 ring-white/10 hover:ring-pink-500 transition-all" onclick="openProposalPreview('${doc.id}', ${index})">
-                                         <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none" srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
-                                         <div class="absolute inset-0 z-10 bg-transparent"></div>
-                                    </div>
-                                    <div class="mt-3 flex justify-between items-start">
-                                         <div>
-                                            <h4 class="font-bold text-white">${item.name}</h4>
-                                            <button class="text-xs text-pink-500 font-bold hover:underline" onclick="openProposalPreview('${doc.id}', ${index})">View Full Preview</button>
-                                         </div>
-                                         <label class="flex items-center space-x-2 cursor-pointer select-none bg-white/5 px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors">
-                                            <input type="checkbox" class="form-checkbox text-pink-500 rounded border-gray-600 bg-black focus:ring-0 w-4 h-4 checkbox-selection" data-section="${doc.id}" data-idx="${index}" onchange="updateSelectionCount()">
-                                            <span class="text-xs font-bold text-gray-300">Select</span>
-                                         </label>
-                                    </div>
-                                </div>
-                            `;
-                        });
+                        const sectionEl = document.createElement('div');
+                        sectionEl.className = "space-y-6";
+                        sectionEl.id = `section_wrapper_${sectionId}`;
+
+                        renderSectionContent(sectionEl, data, sectionId, scrollContainerId);
+                        list.appendChild(sectionEl);
                     }
-
-                    sectionEl.innerHTML = `
-                         <div class="border-b border-white/10 pb-4 mb-6">
-                            <h2 class="text-3xl font-bold font-['Space_Grotesk'] text-white">${data.name}</h2>
-                         </div>
-                         <div class="grid grid-cols-1 md:grid-cols-2 gap-10">
-                            ${designsHtml}
-                         </div>
-                    `;
-                    list.appendChild(sectionEl);
+                    if (change.type === "modified") {
+                        window.proposalSectionsData[sectionId] = data;
+                        const sectionEl = document.getElementById(`section_wrapper_${sectionId}`);
+                        if (sectionEl) {
+                            renderSectionContent(sectionEl, data, sectionId, scrollContainerId);
+                        }
+                    }
+                    if (change.type === "removed") {
+                        const sectionEl = document.getElementById(`section_wrapper_${sectionId}`);
+                        if (sectionEl) sectionEl.remove();
+                        delete window.proposalSectionsData[sectionId];
+                    }
                 });
+                feather.replace();
             });
         }
 
+        // Helper for Scalable Rendering
+        function renderSectionContent(container, data, sectionId, scrollContainerId) {
+            let designsHtml = '';
+            if (data.items && data.items.length > 0) {
+                data.items.forEach((item, index) => {
+                    const rawCode = (item.previewCode || '').replace(/\\n/g, '\n');
+                    const safePreviewCode = rawCode.replace(/"/g, "&quot;");
+                    const radioId = `sel_${sectionId}_${index}`;
+                    designsHtml += `
+                        <div class="relative client-card snap-center shrink-0 w-[85vw] md:w-[600px]" id="card_${sectionId}_${index}">
+                             <div class="aspect-[16/9] bg-[#0B0A14] rounded-2xl overflow-hidden relative cursor-pointer group transition-all duration-500 border border-white/10 hover:border-pink-500/50"
+                                  onclick="document.getElementById('${radioId}').click()">
+                                  <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity duration-500" 
+                                          srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
+                                  <div class="absolute inset-0 bg-gradient-to-t from-[#0B0A14] via-transparent to-transparent opacity-60"></div>
+                                  <div class="selection-ring absolute inset-0 border-2 border-transparent transition-all duration-300 rounded-2xl pointer-events-none"></div>
+                                  <div class="selection-tick absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-20 h-20 bg-gradient-to-br from-pink-500 to-orange-500 rounded-full flex items-center justify-center shadow-2xl scale-0 transition-all duration-500 cubic-bezier(0.34, 1.56, 0.64, 1) z-20">
+                                     <i data-feather="check" class="w-10 h-10 text-white"></i>
+                                  </div>
+                             </div>
+                             <div class="mt-5 flex justify-between items-center px-2">
+                                  <div>
+                                     <h4 class="font-bold text-white text-lg tracking-tight">${item.name}</h4>
+                                     <button class="text-xs text-pink-500 font-medium hover:text-pink-400 transition-colors mt-1 flex items-center gap-1" onclick="event.stopPropagation(); openProposalPreview('${sectionId}', ${index})">
+                                         <i data-feather="eye" class="w-3 h-3"></i> View Live Preview
+                                     </button>
+                                  </div>
+                                  <div class="flex items-center">
+                                     <input type="radio" name="section_${sectionId}" id="${radioId}" class="hidden" onchange="handleClientSelection('${sectionId}', ${index}, '${sectionId}')">
+                                     <label for="${radioId}" class="select-btn cursor-pointer select-none bg-white/5 border border-white/10 px-6 py-3 rounded-full hover:bg-white/10 transition-all text-sm font-bold text-gray-400 flex items-center gap-2 group/btn">
+                                         <span class="btn-text">Select Option</span>
+                                         <i data-feather="arrow-right" class="w-4 h-4 group-hover/btn:translate-x-1 transition-transform"></i>
+                                     </label>
+                                  </div>
+                             </div>
+                        </div>`;
+                });
+            }
+            container.innerHTML = `
+                 <div class="border-b border-white/10 pb-6 mb-8 flex items-end justify-between px-2">
+                    <div class="max-w-[70%]">
+                        <h2 class="text-2xl md:text-4xl font-bold font-['Space_Grotesk'] text-white mb-2 leading-tight">${data.name}</h2>
+                        <p class="text-sm text-gray-500">Swipe to view options • Select 1</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="scrollCarousel('${scrollContainerId}', -1)" class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors text-white border border-white/10 hover:border-white/30">
+                            <i data-feather="arrow-left" class="w-5 h-5"></i>
+                        </button>
+                        <button onclick="scrollCarousel('${scrollContainerId}', 1)" class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors text-white border border-white/10 hover:border-white/30">
+                            <i data-feather="arrow-right" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                 </div>
+                 <div id="${scrollContainerId}" class="flex gap-10 overflow-x-auto pb-12 snap-x snap-mandatory hide-scrollbar -mx-[5vw] px-[5vw] scroll-smooth">
+                    ${designsHtml}
+                    <div class="shrink-0 w-1"></div>
+                 </div>
+             `;
+        }
+
+        window.scrollCarousel = (containerId, direction) => {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            // Calculate scroll amount (Approx Card Width + Gap)
+            // Mobile: 85vw, Desktop: 600px. Gap: 40px (gap-10)
+            const cardWidth = window.innerWidth < 768 ? (window.innerWidth * 0.85) : 600;
+            const scrollAmount = cardWidth + 40;
+
+            container.scrollBy({ left: direction * scrollAmount, behavior: 'smooth' });
+        };
+
+        window.handleClientSelection = (sectionId, index, groupName) => {
+            // 1. Update Data Model
+            const data = window.proposalSectionsData[sectionId];
+            if (data && data.items && data.items[index]) {
+                const item = data.items[index];
+                window.clientSelections[sectionId] = {
+                    html: item.previewCode || item.code || "",
+                    name: item.name
+                };
+            }
+
+            // 2. Update UI (Visual Selection State for Cards)
+            const allCards = document.querySelectorAll(`[id^="card_${sectionId}_"]`);
+            allCards.forEach(card => {
+                // Reset Styles
+                const ring = card.querySelector('.selection-ring');
+                const tick = card.querySelector('.selection-tick');
+                const btn = card.querySelector('.select-btn');
+                const iframe = card.querySelector('iframe');
+
+                if (ring) {
+                    ring.classList.remove('border-pink-500', 'shadow-[0_0_50px_-12px_rgba(236,72,153,0.5)]');
+                    ring.classList.add('border-transparent');
+                }
+
+                if (tick) {
+                    tick.classList.remove('scale-100');
+                    tick.classList.add('scale-0');
+                }
+
+                if (btn) {
+                    btn.className = "select-btn cursor-pointer select-none bg-white/5 border border-white/10 px-6 py-3 rounded-full hover:bg-white/10 transition-all text-sm font-bold text-gray-400 flex items-center gap-2 group/btn";
+                    btn.innerHTML = `<span class="btn-text">Select Option</span> <i data-feather="arrow-right" class="w-4 h-4 group-hover/btn:translate-x-1 transition-transform"></i>`;
+                }
+
+                if (iframe) {
+                    iframe.classList.add('opacity-80');
+                    iframe.classList.remove('opacity-40');
+                }
+            });
+
+            // Active Style
+            const selectedCard = document.getElementById(`card_${sectionId}_${index}`);
+            if (selectedCard) {
+                const ring = selectedCard.querySelector('.selection-ring');
+                const tick = selectedCard.querySelector('.selection-tick');
+                const btn = selectedCard.querySelector('.select-btn');
+                const iframe = selectedCard.querySelector('iframe');
+
+                // Add Glow Ring
+                if (ring) {
+                    ring.classList.remove('border-transparent');
+                    ring.classList.add('border-pink-500', 'shadow-[0_0_50px_-12px_rgba(236,72,153,0.5)]');
+                }
+
+                // Pop Tick
+                if (tick) {
+                    tick.classList.remove('scale-0');
+                    tick.classList.add('scale-100');
+                }
+
+                // Active Button State
+                if (btn) {
+                    btn.className = "select-btn cursor-pointer select-none bg-gradient-to-r from-pink-500 to-orange-500 border border-transparent px-6 py-3 rounded-full shadow-lg shadow-pink-500/20 transition-all text-sm font-bold text-white flex items-center gap-2";
+                    btn.innerHTML = `<span>Selected</span> <i data-feather="check" class="w-4 h-4"></i>`;
+                }
+
+                if (iframe) {
+                    iframe.classList.remove('opacity-80');
+                    iframe.classList.add('opacity-40');
+                }
+            }
+
+            updateSelectionCount();
+            feather.replace();
+        };
+
+        window.openOverallPreview = () => {
+            const sectionIds = Object.keys(window.clientSelections);
+            if (sectionIds.length === 0) {
+                customAlert("No Selections", "Please select at least one design option to preview.");
+                return;
+            }
+
+            // Prepare the combined HTML
+            // We need to order them based on the DOM order to ensure Hero is top, etc.
+            // Since `clientSelections` is an object, order isn't guaranteed.
+            // We can rely on the `proposalSectionsData` keys or just query the DOM for order.
+            // Let's rely on the snapshot order logic by checking `proposalSectionsData`? 
+            // Better: Iterate through the rendered DOM sections to preserve order.
+
+            const orderedHtmlParts = [];
+            const container = document.getElementById('clientProposalContainer');
+            // Assuming we can map DOM elements back to IDs? 
+            // Actually, we can just fetch sections from Firestore again or store order. 
+            // Simplest: `window.proposalSectionsData` keys are not ordered.
+            // Let's just use `clientSelections` keys and hope? No.
+
+            // Re-fetch logic? Too slow.
+            // Let's use the DOM `card_SECTIONID_INDEX` to find order.
+            // We can iterate over the keys of `window.proposalSectionsData` if we saved index?
+            // Let's just create an ordered list when loading `onSnapshot`.
+
+            // Hacky but works: select all potential radio inputs to find order of sections
+            // All radio groups: names are `section_ID`.
+            // We can find all `h2` or wrapper divs.
+
+            // Re-implementation: `loadClientProposalSections` renders in order.
+            // We can maintain an array `orderedSectionIds` in that function scope or global.
+            // BUT `onSnapshot` might fire multiple times.
+            // Let's just grab the HTML from the DOM order.
+
+            let combinedHtml = "";
+
+            // Iterate over the section containers in the DOM
+            const sectionDivs = container.children;
+            for (let div of sectionDivs) {
+                // Find any radio button in this div to get the section ID
+                const radio = div.querySelector('input[type="radio"]');
+                if (radio) {
+                    const nameAttr = radio.name; // section_ID
+                    const secId = nameAttr.replace('section_', '');
+
+                    if (window.clientSelections[secId]) {
+                        // Wrap each section to prevent height collapse if float is used (rare but possible)
+                        combinedHtml += `<div class="preview-section-wrapper" style="position:relative; width:100%;">`;
+                        combinedHtml += window.clientSelections[secId].html;
+                        combinedHtml += `</div>`;
+                    }
+                }
+            }
+
+            const frame = document.getElementById('previewFrame');
+            // Add some base styles to reset any body margin issues in the combined view
+            const finalHtml = `
+                <style>
+                    body { margin: 0; padding: 0; box-sizing: border-box; overflow-x: hidden; }
+                    .preview-section-wrapper { display: block; }
+                    ::-webkit-scrollbar { width: 0px; background: transparent; }
+                </style>
+                ${combinedHtml}
+            `;
+
+            document.getElementById('previewTitle').textContent = "Full Proposal Preview";
+            document.getElementById('previewModal').classList.add('active');
+
+            // Hide edit button for this view
+            const editBtn = document.getElementById('previewEditBtn');
+            if (editBtn) editBtn.style.display = 'none';
+
+            const d = frame.contentWindow.document;
+            d.open();
+            d.write(finalHtml);
+            d.close();
+        };
+
         window.updateSelectionCount = () => {
-            const checkboxes = document.querySelectorAll('.checkbox-selection:checked');
-            document.getElementById('selectionCount').textContent = checkboxes.length;
+            // Count keys in clientSelections
+            const count = Object.keys(window.clientSelections).length;
+            document.getElementById('selectionCount').textContent = count;
         };
 
         window.switchTab = (tab) => {
@@ -276,8 +495,12 @@
 
             unsubscribeLibrary = onSnapshot(q, (snapshot) => {
                 renderSidebarList(snapshot, 'library');
-                // Select first if needed
-                if (!currentLibrarySectionId && !snapshot.empty) {
+                // Auto-select logic
+                if (currentLibrarySectionId) {
+                    const doc = snapshot.docs.find(d => d.id === currentLibrarySectionId);
+                    if (doc) selectLibrarySection(doc.id, doc.data().name);
+                    else if (!snapshot.empty) selectLibrarySection(snapshot.docs[0].id, snapshot.docs[0].data().name);
+                } else if (!snapshot.empty) {
                     selectLibrarySection(snapshot.docs[0].id, snapshot.docs[0].data().name);
                 }
             });
@@ -397,7 +620,8 @@
             const name = await customPrompt("Create Section", "Enter section name:");
             if (name) {
                 try {
-                    await addDoc(collection(db, "library_sections"), { name, createdAt: serverTimestamp() });
+                    const docRef = await addDoc(collection(db, "library_sections"), { name, createdAt: serverTimestamp() });
+                    selectLibrarySection(docRef.id, name);
                 } catch (e) {
                     customAlert("Error", "Could not save section. Check your connection.");
                 }
@@ -421,9 +645,16 @@
 
             unsubscribeProposals = onSnapshot(q, (snapshot) => {
                 renderSidebarList(snapshot, 'proposal');
-                if (!currentProposalId && !snapshot.empty) {
+
+                if (currentProposalId) {
+                    const doc = snapshot.docs.find(d => d.id === currentProposalId);
+                    if (doc) selectProposal(doc.id, doc.data().clientName);
+                    else if (!snapshot.empty) selectProposal(snapshot.docs[0].id, snapshot.docs[0].data().clientName);
+                } else if (!snapshot.empty) {
                     selectProposal(snapshot.docs[0].id, snapshot.docs[0].data().clientName);
-                } else if (snapshot.empty) {
+                } else {
+                    // Empty state
+                    currentProposalId = null;
                     mainToolbarTitle.textContent = "Proposals";
                     mainToolbarSubtitle.textContent = "Create a proposal to get started.";
                     contentArea.innerHTML = `<div class="flex items-center justify-center h-full text-gray-500">No proposals found. Click '+' to add one.</div>`;
@@ -438,7 +669,8 @@
             const clientName = await customPrompt("New Proposal", "Enter Client Name:");
             if (clientName) {
                 try {
-                    await addDoc(collection(db, "proposals"), { clientName, createdAt: serverTimestamp() });
+                    const docRef = await addDoc(collection(db, "proposals"), { clientName, createdAt: serverTimestamp() });
+                    selectProposal(docRef.id, clientName);
                 } catch (e) {
                     customAlert("Error", "Could not create proposal.");
                 }
@@ -470,7 +702,7 @@
             const shareBtn = document.getElementById('shareProposalBtn');
             if (shareBtn) {
                 shareBtn.classList.remove('hidden');
-                shareBtn.onclick = () => copyShareLink(id);
+                shareBtn.onclick = () => openShareModal(id);
             }
 
             // Render Sections
@@ -922,6 +1154,18 @@
             border-radius: 10px;
         }
 
+        /* Hide scrollbar for carousel but keep functionality */
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            /* IE and Edge */
+            scrollbar-width: none;
+            /* Firefox */
+        }
+
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
         .glass-panel {
             background: var(--glass-bg);
             backdrop-filter: blur(24px);
@@ -995,8 +1239,33 @@
         }
 
         /* Client Mode Overrides */
+        /* Client Mode Overrides */
         body.client-mode #previewEditBtn {
             display: none !important;
+        }
+
+        body.client-mode #adminToolbar {
+            display: none !important;
+        }
+
+        body.client-mode aside {
+            display: none !important;
+        }
+
+        body.client-mode .custom-scrollbar::-webkit-scrollbar {
+            height: 8px;
+            /* Horizontal Scroll Height */
+            width: 8px;
+        }
+
+        body.client-mode .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 99px;
+            cursor: move;
+        }
+
+        body.client-mode .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
         }
     </style>
 </head>
@@ -1008,11 +1277,12 @@
     <header id="adminHeader"
         class="h-16 border-b border-white/5 bg-[#0B0A14]/80 backdrop-blur-xl flex items-center justify-between px-6 z-20 shrink-0">
         <div class="flex items-center gap-4">
-            <img src="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug"
-                class="w-8 h-8 rounded-full border border-white/10">
-            <h1 class="text-lg font-bold">Reputifly <span class="opacity-50 font-normal">| Proposal Engine</span></h1>
+            <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png"
+                class="h-8 w-auto">
+            <h1 class="text-lg font-bold hidden md:block">Reputifly <span class="opacity-50 font-normal">| Proposal
+                    Engine</span></h1>
         </div>
-        <div class="flex gap-8">
+        <div class="flex gap-4 md:gap-8">
             <button id="tabLibrary" onclick="switchTab('library')"
                 class="text-sm font-bold pb-5 pt-5 border-b-2 border-pink-500 text-white transition-colors">Design
                 Library</button>
@@ -1020,27 +1290,39 @@
                 class="text-sm font-bold pb-5 pt-5 border-b-2 border-transparent text-gray-500 hover:text-white transition-colors">Proposal
                 Builder</button>
         </div>
-        <div class="text-xs text-gray-500 font-mono bg-white/5 px-2 py-1 rounded">V 1.0.0 Beta</div>
+        <div class="text-xs text-gray-500 font-mono bg-white/5 px-2 py-1 rounded hidden md:block">V 1.0.0 Beta</div>
     </header>
 
     <!-- CLIENT HEADER (Hidden by default) -->
     <header id="clientHeader"
-        class="h-20 border-b border-white/5 bg-[#0B0A14]/90 backdrop-blur-xl flex items-center justify-between px-10 z-20 shrink-0 sticky top-0 hidden">
+        class="h-16 md:h-20 border-b border-white/5 bg-[#0B0A14]/90 backdrop-blur-xl flex items-center justify-between px-4 md:px-10 z-20 shrink-0 sticky top-0 hidden">
         <div class="flex items-center gap-4">
-            <div class="w-10 h-10 rounded-full bg-pink-500/20 flex items-center justify-center">
-                <i data-feather="briefcase" class="w-5 h-5 text-pink-500"></i>
-            </div>
-            <div>
-                <h1 class="text-xl font-bold font-['Space_Grotesk']">Project Proposal</h1>
-                <p id="clientHeaderName" class="text-sm text-gray-400">Prepared for Client</p>
+            <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png"
+                class="h-8 md:h-10 w-auto">
+
+            <!-- Vertical Divider -->
+            <div class="h-8 w-px bg-white/10 hidden sm:block"></div>
+
+            <div class="hidden sm:block">
+                <h1 class="text-sm md:text-xl font-bold font-['Space_Grotesk']">Project Proposal</h1>
+                <p id="clientHeaderName" class="text-xs md:text-sm text-gray-400">Prepared for Client</p>
             </div>
         </div>
-        <div class="flex items-center gap-4">
-            <div class="text-right mr-4">
-                <div class="text-xs text-gray-500 uppercase tracking-widest font-bold mb-1">Selections</div>
-                <p class="text-white font-bold"><span id="selectionCount">0</span> Designs Selected</p>
+        <div class="flex items-center gap-3 md:gap-6">
+            <button onclick="openOverallPreview()"
+                class="btn-liquid px-4 py-2 md:px-6 md:py-2.5 text-[10px] md:text-xs font-bold shadow-lg shadow-pink-500/20 group whitespace-nowrap">
+                <i data-feather="layout" class="w-3.5 h-3.5 md:w-4 md:h-4"></i>
+                <span class="group-hover:translate-x-0.5 transition-transform ml-1">Preview</span>
+            </button>
+            <div class="text-right border-l border-white/20 pl-3 md:pl-6 h-8 md:h-10 flex flex-col justify-center">
+                <div
+                    class="text-[10px] text-gray-400 uppercase tracking-widest font-bold leading-tight hidden md:block">
+                    Your Selections
+                </div>
+                <div class="text-white font-bold text-xs md:text-sm leading-tight"><span id="selectionCount"
+                        class="text-pink-500">0</span> <span class="hidden md:inline">Sections Ready</span><span
+                        class="md:hidden"> Ready</span></div>
             </div>
-            <!-- Future: Submit Selection Logic -->
         </div>
     </header>
 
@@ -1062,7 +1344,7 @@
 
         <!-- MAIN -->
         <main class="flex-grow bg-[#0B0A14] flex flex-col relative overflow-hidden">
-            <div
+            <div id="adminToolbar"
                 class="h-20 border-b border-white/5 flex items-center justify-between px-10 shrink-0 bg-[#0B0A14]/50 backdrop-blur-sm">
                 <div class="flex items-center gap-4">
                     <div
@@ -1200,6 +1482,55 @@
             </div>
         </div>
     </div>
+
+    <!-- SHARE MODAL -->
+    <div id="shareModal" class="modal-overlay" style="z-index: 210;">
+        <div class="modal-card">
+            <h3 class="text-lg font-bold mb-2">Share Proposal</h3>
+            <p class="text-sm text-gray-400 mb-6">Clients can view this proposal with the link below.</p>
+
+            <div class="relative mb-6">
+                <input id="shareLinkInput" type="text" readonly
+                    class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-gray-300 font-mono focus:outline-none focus:border-pink-500/50 transition-colors">
+            </div>
+
+            <button onclick="copyShareInput()" id="shareMainBtn"
+                class="w-full py-3 rounded-full btn-liquid justify-center text-xs font-bold transition-all shadow-lg shadow-pink-500/20">
+                Copy Link
+            </button>
+        </div>
+    </div>
+
+    <script>
+        function openShareModal(id) {
+            const url = window.location.origin + window.location.pathname + "?p=" + id + "&mode=client";
+            const input = document.getElementById('shareLinkInput');
+            const btn = document.getElementById('shareMainBtn');
+
+            input.value = url;
+            btn.innerHTML = 'Copy Link';
+            btn.classList.remove('bg-green-500', 'border-green-500');
+
+            document.getElementById('shareModal').classList.add('active');
+            input.select();
+        }
+
+        function copyShareInput() {
+            const input = document.getElementById('shareLinkInput');
+            input.select();
+            navigator.clipboard.writeText(input.value).then(() => {
+                const btn = document.getElementById('shareMainBtn');
+
+                btn.innerHTML = `<i data-feather="check" class="w-4 h-4 mr-2"></i> Copied!`;
+                feather.replace();
+
+                setTimeout(() => {
+                    document.getElementById('shareModal').classList.remove('active');
+                    btn.innerHTML = 'Copy Link'; // Reset for next time
+                }, 1000); // 1 second delay
+            });
+        }
+    </script>
     <div id="customAlertModal" class="modal-overlay" style="z-index: 210;">
         <div class="modal-card text-center">
             <i data-feather="info" class="w-10 h-10 text-white mb-4 mx-auto"></i>
