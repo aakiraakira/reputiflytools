@@ -38,6 +38,27 @@
         let currentDesignId = null; // Fix ReferenceError
         window.proposalSectionsData = {}; // Ensure global availability
 
+        // --- PERFORMANCE: LAZY LOADING ---
+        window.lazyIframeObserver = new IntersectionObserver((entries, observer) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const iframe = entry.target;
+                    const src = iframe.getAttribute('data-srcdoc');
+                    if (src) {
+                        iframe.setAttribute('srcdoc', src);
+                        iframe.removeAttribute('data-srcdoc');
+                        observer.unobserve(iframe);
+                    }
+                }
+            });
+        }, { rootMargin: "400px" });
+
+        window.observeLazyFrames = (container) => {
+            if (!container) return;
+            const frames = container.querySelectorAll('iframe.lazy-load');
+            frames.forEach(f => window.lazyIframeObserver.observe(f));
+        };
+
         // --- DOM ELEMENTS ---
         const sidebarTitleEl = document.getElementById('sidebarTitle');
         const sidebarListEl = document.getElementById('sidebarList');
@@ -142,6 +163,8 @@
             if (proposalIdParam && modeParam === 'client') {
                 initClientMode(proposalIdParam);
             } else {
+                // Ensure Admin Layout Classes are present (Reload safety)
+                document.body.classList.add('flex', 'flex-col', 'h-screen', 'overflow-hidden');
                 switchTab('library'); // Default Admin Flow
             }
         };
@@ -173,6 +196,14 @@
 
             // Render Sections (Reuse logic but modified for client)
             loadClientProposalSections(proposalId);
+
+            // FORCE LAYOUT UNLOCK FOR MOBILE SCROLLING
+            document.body.classList.remove('h-screen', 'overflow-hidden');
+            const wrapper = document.getElementById('appLayoutWrapper');
+            if (wrapper) wrapper.classList.remove('overflow-hidden');
+            const main = document.querySelector('main');
+            if (main) main.classList.remove('overflow-hidden');
+            contentArea.classList.remove('overflow-y-auto', 'custom-scrollbar');
         }
 
         // Separate function to keep logic clean, though mostly duplicates renderProposalSections
@@ -238,8 +269,8 @@
                         <div class="relative client-card snap-center shrink-0 w-[85vw] md:w-[600px]" id="card_${sectionId}_${index}">
                              <div class="aspect-[16/9] bg-[#0B0A14] rounded-2xl overflow-hidden relative cursor-pointer group transition-all duration-500 border border-white/10 hover:border-pink-500/50"
                                   onclick="document.getElementById('${radioId}').click()">
-                                  <iframe loading="lazy" class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity duration-500" 
-                                          srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
+                                  <iframe loading="lazy" class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity duration-500 lazy-load" 
+                                          data-srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
                                   <div class="absolute inset-0 bg-gradient-to-t from-[#0B0A14] via-transparent to-transparent opacity-60"></div>
                                   <div class="selection-ring absolute inset-0 border-2 border-transparent transition-all duration-300 rounded-2xl pointer-events-none"></div>
                                   <div class="selection-tick absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-20 h-20 bg-gradient-to-br from-pink-500 to-orange-500 rounded-full flex items-center justify-center shadow-2xl scale-0 transition-all duration-500 cubic-bezier(0.34, 1.56, 0.64, 1) z-20">
@@ -270,7 +301,7 @@
                         <h2 class="text-2xl md:text-4xl font-bold font-['Space_Grotesk'] text-white mb-2 leading-tight">${data.name}</h2>
                         <p class="text-sm text-gray-500">Swipe to view options • Select 1</p>
                     </div>
-                    <div class="flex gap-2">
+                    <div class="flex gap-2 hidden md:flex">
                         <button onclick="scrollCarousel('${scrollContainerId}', -1)" class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors text-white border border-white/10 hover:border-white/30">
                             <i data-feather="arrow-left" class="w-5 h-5"></i>
                         </button>
@@ -284,6 +315,8 @@
                     <div class="shrink-0 w-1"></div>
                  </div>
              `;
+            // Activate Lazy Load for this section
+            observeLazyFrames(container);
         }
 
         window.scrollCarousel = (containerId, direction) => {
@@ -648,6 +681,8 @@
             mainToolbarTitle.textContent = "Client Submissions";
             mainToolbarSubtitle.textContent = "Latest proposals submitted by clients";
             mainActionBtn.classList.add('hidden');
+            const shareBtn = document.getElementById('shareProposalBtn');
+            if (shareBtn) shareBtn.classList.add('hidden');
 
             // Clean up other listeners
             if (unsubscribeLibrary) unsubscribeLibrary();
@@ -871,17 +906,18 @@
 </div>
 <div class="flex-grow bg-white relative w-full overflow-hidden">
     <iframe id="${uniqueId}"
-        class="w-[200%] h-[200%] transform scale-50 origin-top-left border-none absolute inset-0 pointer-events-none select-none z-10"
-        scrolling="no"></iframe>
+        class="w-[200%] h-[200%] transform scale-50 origin-top-left border-none absolute inset-0 pointer-events-none select-none z-10 lazy-load"
+        data-srcdoc="<style>body{margin:0;overflow:hidden}</style>${design.code}" scrolling="no"></iframe>
     <div class="absolute inset-0 z-10"></div>
 </div>
 <div class="p-5 border-t border-white/5 bg-[#0e0e12] z-20 relative">
     <h4 class="font-bold text-sm text-white truncate text-base">${design.name}</h4>
 </div>
 `;
+            // Observe immediately
             setTimeout(() => {
                 const frame = document.getElementById(uniqueId);
-                if (frame) populateIframe(frame, design.code);
+                if (frame) window.lazyIframeObserver.observe(frame);
             }, 50);
             return card;
         }
@@ -1049,8 +1085,8 @@
 <div class="w-48 bg-black/40 rounded-xl overflow-hidden border shrink-0 relative group/card hover:border-pink-500 transition-colors cursor-pointer ${isClientSelected ? 'border-green-500 ring-2 ring-green-500/50' : 'border-white/10'}"
     onclick="openProposalPreview('${doc.id}', ${index})">
     <div class="h-24 bg-white relative">
-        <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none"
-            srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
+        <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none lazy-load"
+            data-srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
         <div class="absolute inset-0 z-10"></div>
     </div>
     <div class="p-2 flex justify-between items-center">
@@ -1092,6 +1128,7 @@
                     list.appendChild(sectionEl);
                 });
                 feather.replace();
+                observeLazyFrames(list);
             });
         };
 
@@ -1205,8 +1242,8 @@
     </div>
 </div>
 <div class="h-40 bg-white relative">
-    <iframe loading="lazy" class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none"
-        srcdoc="<style>body{margin:0;overflow:hidden}</style>${data.code}"></iframe>
+    <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none lazy-load"
+        data-srcdoc="<style>body{margin:0;overflow:hidden}</style>${data.code}"></iframe>
     <div class="absolute inset-0 z-10"></div>
 </div>
 <div class="p-4 border-t border-white/5 bg-[#0e0e12]">
@@ -1218,6 +1255,7 @@
                 grid.appendChild(card);
             });
             feather.replace();
+            observeLazyFrames(grid);
         }
 
         async function toggleDesignInProposal(designId, designData, cardEl) {
@@ -1611,6 +1649,13 @@
         body.client-mode #contentArea {
             overflow: visible !important;
             height: auto !important;
+            padding-bottom: 10rem !important;
+            /* Space for footer/overscroll */
+        }
+
+        body.client-mode #appLayoutWrapper {
+            overflow: visible !important;
+            height: auto !important;
         }
     </style>
 </head>
@@ -1672,7 +1717,7 @@
         </div>
     </header>
 
-    <div class="flex-grow flex overflow-hidden">
+    <div id="appLayoutWrapper" class="flex-grow flex overflow-hidden">
         <!-- SIDEBAR -->
         <aside class="w-72 bg-[#08080C] border-r border-white/5 flex flex-col shrink-0">
             <div class="p-6 pb-2 flex justify-between items-center">
