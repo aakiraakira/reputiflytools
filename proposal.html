@@ -36,6 +36,7 @@
 
         let currentDesignData = null; // For Preview/Edit
         let currentDesignId = null; // Fix ReferenceError
+        window.proposalSectionsData = {}; // Ensure global availability
 
         // --- DOM ELEMENTS ---
         const sidebarTitleEl = document.getElementById('sidebarTitle');
@@ -300,11 +301,45 @@
         window.handleClientSelection = (sectionId, index, groupName) => {
             // 1. Update Data Model
             const data = window.proposalSectionsData[sectionId];
+
+            // Fallback: Try to find data from the rendered card if global data is missing
+            let htmlContent = "";
+            let designName = "Selection";
+
             if (data && data.items && data.items[index]) {
                 const item = data.items[index];
+                htmlContent = item.previewCode || item.code || "";
+                designName = item.name;
+            } else {
+                // DOM Fallback
+                console.warn(`Data missing for selection ${sectionId}:${index}. Using DOM fallback.`);
+                const card = document.getElementById(`card_${sectionId}_${index}`);
+                if (card) {
+                    const iframe = card.querySelector('iframe');
+                    const nameEl = card.querySelector('h4');
+
+                    if (iframe && iframe.srcdoc) {
+                        // Extract content from srcdoc (remove style tag wrapper if possible or keep it)
+                        // srcdoc format: <style>...</style>${code}
+                        // We'll just take the whole srcdoc for now to be safe, or try to strip the style prefix safely
+                        let src = iframe.srcdoc;
+                        if (src.startsWith('<style>body{margin:0;overflow:hidden}</style>')) {
+                            src = src.replace('<style>body{margin:0;overflow:hidden}</style>', '');
+                        }
+                        htmlContent = src;
+                    }
+                    if (nameEl) designName = nameEl.textContent;
+                }
+            }
+
+            let sectionName = "Section";
+            if (data && data.name) sectionName = data.name;
+
+            if (htmlContent) {
                 window.clientSelections[sectionId] = {
-                    html: item.previewCode || item.code || "",
-                    name: item.name
+                    html: htmlContent,
+                    name: designName,
+                    sectionName: sectionName
                 };
             }
 
@@ -389,75 +424,76 @@
                 return;
             }
 
-            // Prepare the combined HTML
-            // We need to order them based on the DOM order to ensure Hero is top, etc.
-            // Since `clientSelections` is an object, order isn't guaranteed.
-            // We can rely on the `proposalSectionsData` keys or just query the DOM for order.
-            // Let's rely on the snapshot order logic by checking `proposalSectionsData`? 
-            // Better: Iterate through the rendered DOM sections to preserve order.
-
-            const orderedHtmlParts = [];
+            // Get Ordered Data
             const container = document.getElementById('clientProposalContainer');
-            // Assuming we can map DOM elements back to IDs? 
-            // Actually, we can just fetch sections from Firestore again or store order. 
-            // Simplest: `window.proposalSectionsData` keys are not ordered.
-            // Let's just use `clientSelections` keys and hope? No.
+            const orderedContent = [];
 
-            // Re-fetch logic? Too slow.
-            // Let's use the DOM `card_SECTIONID_INDEX` to find order.
-            // We can iterate over the keys of `window.proposalSectionsData` if we saved index?
-            // Let's just create an ordered list when loading `onSnapshot`.
-
-            // Hacky but works: select all potential radio inputs to find order of sections
-            // All radio groups: names are `section_ID`.
-            // We can find all `h2` or wrapper divs.
-
-            // Re-implementation: `loadClientProposalSections` renders in order.
-            // We can maintain an array `orderedSectionIds` in that function scope or global.
-            // BUT `onSnapshot` might fire multiple times.
-            // Let's just grab the HTML from the DOM order.
-
-            let combinedHtml = "";
-
-            // Iterate over the section containers in the DOM
+            // Iterate DOM to maintain order
             const sectionDivs = container.children;
             for (let div of sectionDivs) {
-                // Find any radio button in this div to get the section ID
                 const radio = div.querySelector('input[type="radio"]');
                 if (radio) {
-                    const nameAttr = radio.name; // section_ID
-                    const secId = nameAttr.replace('section_', '');
-
+                    const secId = radio.name.replace('section_', '');
                     if (window.clientSelections[secId]) {
-                        // Wrap each section to prevent height collapse if float is used (rare but possible)
-                        combinedHtml += `<div class="preview-section-wrapper" style="position:relative; width:100%;">`;
-                        combinedHtml += window.clientSelections[secId].html;
-                        combinedHtml += `</div>`;
+                        orderedContent.push(window.clientSelections[secId]);
                     }
                 }
             }
 
             const frame = document.getElementById('previewFrame');
-            // Add some base styles to reset any body margin issues in the combined view
-            const finalHtml = `
-                <style>
-                    body { margin: 0; padding: 0; box-sizing: border-box; overflow-x: hidden; }
-                    .preview-section-wrapper { display: block; }
-                    ::-webkit-scrollbar { width: 0px; background: transparent; }
-                </style>
-                ${combinedHtml}
+            const d = frame.contentWindow.document;
+
+            // Generate a page that contains multiple iframes
+            // We use a script to auto-resize them
+            const combinedHtml = `
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <style>
+                        body { margin: 0; padding: 0; background: #fff; overflow-x: hidden; }
+                        iframe { 
+                            width: 100%; 
+                            border: none; 
+                            display: block; 
+                            overflow: hidden; 
+                            /* Maintain generic min-height to avoid flicker, but resizing script handles it */
+                        }
+                    </style>
+                    <script>
+                        // Auto-resize iframes
+                        function resizeIframe(obj) {
+                            try {
+                                obj.style.height = obj.contentWindow.document.documentElement.scrollHeight + 'px';
+                                // Add observer for dynamic content changes inside the iframe
+                                const resizeObserver = new ResizeObserver(() => {
+                                      obj.style.height = obj.contentWindow.document.documentElement.scrollHeight + 'px';
+                                });
+                                resizeObserver.observe(obj.contentWindow.document.body);
+                            } catch(e) {
+                                console.warn('Cross-origin or error resizing iframe');
+                            }
+                        }
+                    <\/script>
+                </head>
+                <body>
+                    ${orderedContent.map((item, index) => {
+                const safeHtml = item.html.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+                return `<iframe srcdoc="${safeHtml}" scrolling="no" onload="resizeIframe(this)"></iframe>`;
+            }).join('')}
+                </body>
+                </html>
             `;
 
             document.getElementById('previewTitle').textContent = "Full Proposal Preview";
             document.getElementById('previewModal').classList.add('active');
 
-            // Hide edit button for this view
             const editBtn = document.getElementById('previewEditBtn');
             if (editBtn) editBtn.style.display = 'none';
 
-            const d = frame.contentWindow.document;
             d.open();
-            d.write(finalHtml);
+            d.write(combinedHtml);
             d.close();
         };
 
@@ -516,26 +552,42 @@
                 Object.keys(selections).forEach(key => {
                     const item = selections[key];
                     const niceName = item.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-                    // Wrap in a basic HTML structure
+                    const niceSection = item.sectionName ? item.sectionName.replace(/[^a-z0-9]/gi, '_').toLowerCase() : `section_${key}`;
+
                     const fileContent = `
-                        <!DOCTYPE html>
-                        <html>
-                        <head><title>${item.name}</title></head>
-                        <body>
-                            ${item.html}
-                        </body>
-                        </html>
-                     `;
-                    zip.file(`${niceName}.html`, fileContent);
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>${item.name}</title>
+</head>
+
+<body>
+    ${item.html}
+</body>
+
+</html>
+`;
+                    zip.file(`${niceSection}_${niceName}.html`, fileContent);
                 });
 
                 // Also create a combined 'index.html'
-                let indexHtml = `<!DOCTYPE html><html><head><title>Full Proposal</title></head><body>`;
+                let indexHtml = `
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Full Proposal</title>
+</head>
+
+<body>`;
                 // Note: Order isn't guaranteed in object keys, but for assets dump it's fine.
                 Object.values(selections).forEach(item => {
                     indexHtml += `<section>${item.html}</section>`;
                 });
-                indexHtml += `</body></html>`;
+                indexHtml += `</body>
+
+</html>`;
                 zip.file("index.html", indexHtml);
 
                 const content = await zip.generateAsync({ type: "blob" });
@@ -556,7 +608,12 @@
         window.updateSelectionCount = () => {
             // Count keys in clientSelections
             const count = Object.keys(window.clientSelections).length;
-            document.getElementById('selectionCount').textContent = count;
+            const countEl = document.getElementById('selectionCount');
+            if (countEl) {
+                countEl.textContent = count;
+                countEl.classList.remove('hidden');
+                if (count === 0) countEl.classList.add('hidden');
+            }
         };
 
         window.switchTab = (tab) => {
@@ -599,7 +656,8 @@
 
             // Query Submitted Proposals
             // Only 'submitted' status
-            const q = query(collection(db, "proposals"), where("status", "==", "submitted"), orderBy("submittedAt", "desc"), limit(50));
+            const q = query(collection(db, "proposals"), where("status", "==", "submitted"), orderBy("submittedAt", "desc"),
+                limit(50));
 
             contentArea.innerHTML = '<div id="submissionsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-20"></div>';
             const grid = document.getElementById('submissionsGrid');
@@ -608,9 +666,9 @@
                 grid.innerHTML = '';
                 if (snapshot.empty) {
                     grid.innerHTML = `<div class="col-span-full flex flex-col items-center justify-center py-20 opacity-50">
-                        <i data-feather="inbox" class="w-12 h-12 mb-4 text-gray-600"></i>
-                        <p>No submissions yet.</p>
-                    </div>`;
+    <i data-feather="inbox" class="w-12 h-12 mb-4 text-gray-600"></i>
+    <p>No submissions yet.</p>
+</div>`;
                     feather.replace();
                     return;
                 }
@@ -618,33 +676,40 @@
                 snapshot.forEach(doc => {
                     const data = doc.data();
                     const date = data.submittedAt ? new Date(data.submittedAt.seconds * 1000).toLocaleDateString() : 'N/A';
-                    const time = data.submittedAt ? new Date(data.submittedAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                    const time = data.submittedAt ? new Date(data.submittedAt.seconds * 1000).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }) : '';
 
                     const card = document.createElement('div');
                     card.className = "glass-panel p-6 flex flex-col justify-between hover:border-pink-500/50 transition-colors group";
                     card.innerHTML = `
-                        <div>
-                            <div class="flex justify-between items-start mb-4">
-                                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-pink-500 to-orange-500 flex items-center justify-center text-white font-bold shadow-lg shadow-pink-500/20">
-                                    ${data.clientName.charAt(0)}
-                                </div>
-                                <div class="px-3 py-1 bg-green-500/10 text-green-400 text-[10px] font-bold uppercase rounded-full border border-green-500/20">
-                                    Submitted
-                                </div>
-                            </div>
-                            <h3 class="text-xl font-bold text-white mb-1">${data.clientName}</h3>
-                            <p class="text-xs text-gray-400 font-mono mb-6">${date} at ${time}</p>
-                        </div>
-                        <div class="space-y-3">
-                            <button onclick="downloadAssets('${doc.id}')" class="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-bold text-white transition-all flex items-center justify-center gap-2 group/btn">
-                                <i data-feather="download" class="w-4 h-4 text-gray-400 group-hover/btn:text-white transition-colors"></i>
-                                Download Assets
-                            </button>
-                            <button onclick="switchTab('proposal'); selectProposal('${doc.id}', '${data.clientName}')" class="w-full py-3 hover:bg-white/5 border border-transparent hover:border-white/5 rounded-xl text-xs font-bold text-gray-500 hover:text-white transition-all">
-                                View Selection
-                            </button>
-                        </div>
-                    `;
+<div>
+    <div class="flex justify-between items-start mb-4">
+        <div
+            class="w-10 h-10 rounded-full bg-gradient-to-br from-pink-500 to-orange-500 flex items-center justify-center text-white font-bold shadow-lg shadow-pink-500/20">
+            ${data.clientName.charAt(0)}
+        </div>
+        <div
+            class="px-3 py-1 bg-green-500/10 text-green-400 text-[10px] font-bold uppercase rounded-full border border-green-500/20">
+            Submitted
+        </div>
+    </div>
+    <h3 class="text-xl font-bold text-white mb-1">${data.clientName}</h3>
+    <p class="text-xs text-gray-400 font-mono mb-6">${date} at ${time}</p>
+</div>
+<div class="space-y-3">
+    <button onclick="downloadAssets('${doc.id}')"
+        class="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-bold text-white transition-all flex items-center justify-center gap-2 group/btn">
+        <i data-feather="download" class="w-4 h-4 text-gray-400 group-hover/btn:text-white transition-colors"></i>
+        Download Assets
+    </button>
+    <button onclick="switchTab('proposal'); selectProposal('${doc.id}', '${data.clientName}')"
+        class="w-full py-3 hover:bg-white/5 border border-transparent hover:border-white/5 rounded-xl text-xs font-bold text-gray-500 hover:text-white transition-all">
+        View Selection
+    </button>
+</div>
+`;
                     grid.appendChild(card);
                 });
                 feather.replace();
@@ -664,7 +729,8 @@
             mainToolbarSubtitle.textContent = "Select a section to manage snippets";
 
             // Main Button: Add Design
-            mainActionBtn.innerHTML = `<i data-feather="plus" class="w-4 h-4"></i> <span class="tracking-wide">Add Design Snippet</span>`;
+            mainActionBtn.innerHTML = `<i data-feather="plus" class="w-4 h-4"></i> <span class="tracking-wide">Add Design
+    Snippet</span>`;
             mainActionBtn.onclick = openAddDesignModal;
             mainActionBtn.classList.remove('hidden');
 
@@ -709,7 +775,8 @@
                 if (type === 'proposal') {
                     const isSubmitted = data.status === 'submitted';
                     const dotColor = isSubmitted ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-gray-600';
-                    statusHtml = `<div class="w-2 h-2 rounded-full ${dotColor} mr-3 shrink-0" title="${isSubmitted ? 'Submitted' : 'Draft'}"></div>`;
+                    statusHtml = `<div class="w-2 h-2 rounded-full ${dotColor} mr-3 shrink-0"
+    title="${isSubmitted ? 'Submitted' : 'Draft'}"></div>`;
                 }
 
                 li.setAttribute('data-id', doc.id);
@@ -721,15 +788,18 @@
                 };
 
                 li.innerHTML = `
-                    <span class="flex items-center gap-3 truncate overflow-hidden">
-                        ${statusHtml}
-                        <i data-feather="${type === 'library' ? 'folder' : 'briefcase'}" class="w-4 h-4 ${isActive ? 'text-white' : 'text-gray-500 group-hover:text-white transition-colors'}"></i>
-                        ${name}
-                    </span>
-                    <button onclick="event.stopPropagation(); ${type === 'library' ? `deleteLibrarySection('${doc.id}')` : `deleteProposal('${doc.id}')`}" class="text-white/40 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 rounded-full p-1">
-                        <i data-feather="trash-2" class="w-3 h-3"></i>
-                    </button>
-                 `;
+<span class="flex items-center gap-3 truncate overflow-hidden">
+    ${statusHtml}
+    <i data-feather="${type === 'library' ? 'folder' : 'briefcase'}"
+        class="w-4 h-4 ${isActive ? 'text-white' : 'text-gray-500 group-hover:text-white transition-colors'}"></i>
+    ${name}
+</span>
+<button
+    onclick="event.stopPropagation(); ${type === 'library' ? `deleteLibrarySection('${doc.id}')` : `deleteProposal('${doc.id}')`}"
+    class="text-white/40 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 rounded-full p-1">
+    <i data-feather="trash-2" class="w-3 h-3"></i>
+</button>
+`;
                 sidebarListEl.appendChild(li);
             });
             feather.replace();
@@ -768,7 +838,9 @@
             unsubscribeDesigns = onSnapshot(q, (snapshot) => {
                 grid.innerHTML = '';
                 if (snapshot.empty) {
-                    grid.innerHTML = `<div class="col-span-full py-20 text-center"><p class="text-gray-500">No designs yet.</p></div>`;
+                    grid.innerHTML = `<div class="col-span-full py-20 text-center">
+    <p class="text-gray-500">No designs yet.</p>
+</div>`;
                     return;
                 }
 
@@ -785,22 +857,28 @@
             card.onclick = () => openPreview(id, design);
             const uniqueId = `frame_${id}`;
             card.innerHTML = `
-                <div class="absolute top-4 right-4 z-20 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                     <button onclick="event.stopPropagation(); copyCode(null, '${id}')" class="bg-black/60 hover:bg-black/90 text-white p-2.5 rounded-xl backdrop-blur-md border border-white/10 shadow-lg" title="Copy Code">
-                        <i data-feather="copy" class="w-4 h-4"></i>
-                    </button>
-                    <button onclick="event.stopPropagation(); deleteDesign('${id}')" class="bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-white p-2.5 rounded-xl backdrop-blur-md border border-red-500/20 transition-all shadow-lg" title="Delete">
-                        <i data-feather="trash-2" class="w-4 h-4"></i>
-                    </button>
-                </div>
-                <div class="flex-grow bg-white relative w-full overflow-hidden">
-                    <iframe id="${uniqueId}" class="w-[200%] h-[200%] transform scale-50 origin-top-left border-none absolute inset-0 pointer-events-none select-none z-10" scrolling="no"></iframe>
-                    <div class="absolute inset-0 z-10"></div>
-                </div>
-                <div class="p-5 border-t border-white/5 bg-[#0e0e12] z-20 relative">
-                     <h4 class="font-bold text-sm text-white truncate text-base">${design.name}</h4>
-                </div>
-             `;
+<div class="absolute top-4 right-4 z-20 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+    <button onclick="event.stopPropagation(); copyCode(null, '${id}')"
+        class="bg-black/60 hover:bg-black/90 text-white p-2.5 rounded-xl backdrop-blur-md border border-white/10 shadow-lg"
+        title="Copy Code">
+        <i data-feather="copy" class="w-4 h-4"></i>
+    </button>
+    <button onclick="event.stopPropagation(); deleteDesign('${id}')"
+        class="bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-white p-2.5 rounded-xl backdrop-blur-md border border-red-500/20 transition-all shadow-lg"
+        title="Delete">
+        <i data-feather="trash-2" class="w-4 h-4"></i>
+    </button>
+</div>
+<div class="flex-grow bg-white relative w-full overflow-hidden">
+    <iframe id="${uniqueId}"
+        class="w-[200%] h-[200%] transform scale-50 origin-top-left border-none absolute inset-0 pointer-events-none select-none z-10"
+        scrolling="no"></iframe>
+    <div class="absolute inset-0 z-10"></div>
+</div>
+<div class="p-5 border-t border-white/5 bg-[#0e0e12] z-20 relative">
+    <h4 class="font-bold text-sm text-white truncate text-base">${design.name}</h4>
+</div>
+`;
             setTimeout(() => {
                 const frame = document.getElementById(uniqueId);
                 if (frame) populateIframe(frame, design.code);
@@ -854,7 +932,8 @@
                     currentProposalId = null;
                     mainToolbarTitle.textContent = "Proposals";
                     mainToolbarSubtitle.textContent = "Create a proposal to get started.";
-                    contentArea.innerHTML = `<div class="flex items-center justify-center h-full text-gray-500">No proposals found. Click '+' to add one.</div>`;
+                    contentArea.innerHTML = `<div class="flex items-center justify-center h-full text-gray-500">No proposals found. Click
+    '+' to add one.</div>`;
                     mainActionBtn.classList.add('hidden');
                     const shareBtn = document.getElementById('shareProposalBtn');
                     if (shareBtn) shareBtn.classList.add('hidden');
@@ -892,7 +971,8 @@
 
             // Button to Add Proposal Section
             mainActionBtn.classList.remove('hidden');
-            mainActionBtn.innerHTML = `<i data-feather="plus-square" class="w-4 h-4"></i> <span class="tracking-wide">Add Page Section</span>`;
+            mainActionBtn.innerHTML = `<i data-feather="plus-square" class="w-4 h-4"></i> <span class="tracking-wide">Add Page
+    Section</span>`;
             mainActionBtn.onclick = addProposalSection;
 
             // Show Share & Download Buttons
@@ -934,7 +1014,9 @@
             unsubscribeProposalSections = onSnapshot(q, (snapshot) => {
                 list.innerHTML = '';
                 if (snapshot.empty) {
-                    list.innerHTML = `<div class="text-center py-10 opacity-50"><p>No sections added yet.</p></div>`;
+                    list.innerHTML = `<div class="text-center py-10 opacity-50">
+    <p>No sections added yet.</p>
+</div>`;
                     return;
                 }
 
@@ -964,41 +1046,49 @@
                             const isClientSelected = selectedForThisSection && selectedForThisSection.name === item.name;
 
                             designsHtml += `
-                                <div class="w-48 bg-black/40 rounded-xl overflow-hidden border shrink-0 relative group/card hover:border-pink-500 transition-colors cursor-pointer ${isClientSelected ? 'border-green-500 ring-2 ring-green-500/50' : 'border-white/10'}" onclick="openProposalPreview('${doc.id}', ${index})">
-                                    <div class="h-24 bg-white relative">
-                                        <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none" srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
-                                        <div class="absolute inset-0 z-10"></div>
-                                    </div>
-                                    <div class="p-2 flex justify-between items-center">
-                                        <span class="text-[10px] text-gray-300 truncate font-medium">${item.name}</span>
-                                        <button onclick="event.stopPropagation(); removeDesignFromProposal('${doc.id}', ${index})" class="text-red-500 hover:text-white bg-black/20 hover:bg-red-500 rounded p-1 transition-colors"><i data-feather="x" class="w-3 h-3"></i></button>
-                                    </div>
-                                    ${isClientSelected ? `
-                                    <div class="absolute top-2 right-2 bg-green-500 text-white text-[9px] font-bold px-2 py-0.5 rounded shadow-lg z-20 flex items-center gap-1">
-                                        <i data-feather="check" class="w-3 h-3"></i> SELECTED
-                                    </div>
-                                    ` : ''}
-                                </div>
-                             `;
+<div class="w-48 bg-black/40 rounded-xl overflow-hidden border shrink-0 relative group/card hover:border-pink-500 transition-colors cursor-pointer ${isClientSelected ? 'border-green-500 ring-2 ring-green-500/50' : 'border-white/10'}"
+    onclick="openProposalPreview('${doc.id}', ${index})">
+    <div class="h-24 bg-white relative">
+        <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none"
+            srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
+        <div class="absolute inset-0 z-10"></div>
+    </div>
+    <div class="p-2 flex justify-between items-center">
+        <span class="text-[10px] text-gray-300 truncate font-medium">${item.name}</span>
+        <button onclick="event.stopPropagation(); removeDesignFromProposal('${doc.id}', ${index})"
+            class="text-red-500 hover:text-white bg-black/20 hover:bg-red-500 rounded p-1 transition-colors"><i
+                data-feather="x" class="w-3 h-3"></i></button>
+    </div>
+    ${isClientSelected ? `
+    <div
+        class="absolute top-2 right-2 bg-green-500 text-white text-[9px] font-bold px-2 py-0.5 rounded shadow-lg z-20 flex items-center gap-1">
+        <i data-feather="check" class="w-3 h-3"></i> SELECTED
+    </div>
+    ` : ''}
+</div>
+`;
                         });
                     } else {
                         designsHtml = `<div class="text-sm text-gray-600 italic px-2">No designs selected.</div>`;
                     }
 
                     sectionEl.innerHTML = `
-                         <div class="flex justify-between items-center mb-4">
-                            <h3 class="text-xl font-bold font-['Space_Grotesk']">${data.name}</h3>
-                            <div class="flex gap-2">
-                                <button onclick="openLibraryPicker('${doc.id}')" class="bg-pink-500/20 hover:bg-pink-500 text-pink-500 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border border-pink-500/20">
-                                    + Select Designs
-                                </button>
-                                <button onclick="deleteProposalSection('${doc.id}')" class="text-gray-600 hover:text-red-500 transition-colors p-1.5"><i data-feather="trash-2" class="w-4 h-4"></i></button>
-                            </div>
-                         </div>
-                         <div class="flex gap-4 overflow-x-auto custom-scrollbar pb-2">
-                            ${designsHtml}
-                         </div>
-                    `;
+<div class="flex justify-between items-center mb-4">
+    <h3 class="text-xl font-bold font-['Space_Grotesk']">${data.name}</h3>
+    <div class="flex gap-2">
+        <button onclick="openLibraryPicker('${doc.id}')"
+            class="bg-pink-500/20 hover:bg-pink-500 text-pink-500 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border border-pink-500/20">
+            + Select Designs
+        </button>
+        <button onclick="deleteProposalSection('${doc.id}')"
+            class="text-gray-600 hover:text-red-500 transition-colors p-1.5"><i data-feather="trash-2"
+                class="w-4 h-4"></i></button>
+    </div>
+</div>
+<div class="flex gap-4 overflow-x-auto custom-scrollbar pb-2">
+    ${designsHtml}
+</div>
+`;
                     list.appendChild(sectionEl);
                 });
                 feather.replace();
@@ -1022,7 +1112,7 @@
 
         window.removeDesignFromProposal = async (secId, index) => {
             // Need to read, modify, write since it's array index
-            // Actually, we should store objects with ID, but simple array filter works for prototype if we had unique IDs. 
+            // Actually, we should store objects with ID, but simple array filter works for prototype if we had unique IDs.
             // arrayRemove checks value equality. If objects differ slightly, it fails.
             // Let's just fetch, splice, update.
             const docRef = doc(db, "proposals", currentProposalId, "proposal_sections", secId);
@@ -1057,7 +1147,8 @@
             snap.forEach(doc => {
                 const btn = document.createElement('button');
                 btn.className = "w-full text-left px-4 py-3 text-sm text-gray-400 hover:bg-white/5 hover:text-white rounded-lg transition-colors mb-1 font-medium flex justify-between items-center group";
-                btn.innerHTML = `<span>${doc.data().name}</span> <i data-feather="chevron-right" class="w-4 h-4 opacity-0 group-hover:opacity-50"></i>`;
+                btn.innerHTML = `<span>${doc.data().name}</span> <i data-feather="chevron-right"
+    class="w-4 h-4 opacity-0 group-hover:opacity-50"></i>`;
                 btn.onclick = () => {
                     // Active state for sidebar
                     Array.from(pickerSidebar.children).forEach(c => c.classList.remove('bg-white/10', 'text-white'));
@@ -1106,20 +1197,23 @@
                 card.className = `border rounded-xl overflow-hidden cursor-pointer transition-all group relative duration-200 ${isSelected ? 'border-green-500 ring-1 ring-green-500 bg-green-500/5' : 'border-white/5 bg-white/5 hover:border-white/20'}`;
 
                 card.innerHTML = `
-                      <div class="absolute top-3 right-3 z-20">
-                           <div class="w-6 h-6 rounded-full border flex items-center justify-center transition-all ${isSelected ? 'bg-green-500 border-green-500' : 'bg-black/50 border-white/30 group-hover:border-white'}">
-                                <i data-feather="${isSelected ? 'check' : 'plus'}" class="w-3.5 h-3.5 text-white transition-transform ${isSelected ? '' : 'rotate-0'}"></i>
-                           </div>
-                      </div>
-                      <div class="h-40 bg-white relative">
-                          <iframe loading="lazy" class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none" srcdoc="<style>body{margin:0;overflow:hidden}</style>${data.code}"></iframe>
-                          <div class="absolute inset-0 z-10"></div>
-                      </div>
-                      <div class="p-4 border-t border-white/5 bg-[#0e0e12]">
-                            <h4 class="text-sm font-bold ${isSelected ? 'text-green-400' : 'text-gray-200'} truncate">${data.name}</h4>
-                            <p class="text-[10px] text-gray-500 mt-1 uppercase tracking-wider">${isSelected ? 'Added to Section' : 'Click to Add'}</p>
-                      </div>
-                 `;
+<div class="absolute top-3 right-3 z-20">
+    <div
+        class="w-6 h-6 rounded-full border flex items-center justify-center transition-all ${isSelected ? 'bg-green-500 border-green-500' : 'bg-black/50 border-white/30 group-hover:border-white'}">
+        <i data-feather="${isSelected ? 'check' : 'plus'}"
+            class="w-3.5 h-3.5 text-white transition-transform ${isSelected ? '' : 'rotate-0'}"></i>
+    </div>
+</div>
+<div class="h-40 bg-white relative">
+    <iframe loading="lazy" class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none"
+        srcdoc="<style>body{margin:0;overflow:hidden}</style>${data.code}"></iframe>
+    <div class="absolute inset-0 z-10"></div>
+</div>
+<div class="p-4 border-t border-white/5 bg-[#0e0e12]">
+    <h4 class="text-sm font-bold ${isSelected ? 'text-green-400' : 'text-gray-200'} truncate">${data.name}</h4>
+    <p class="text-[10px] text-gray-500 mt-1 uppercase tracking-wider">${isSelected ? 'Added to Section' : 'Click to Add'}</p>
+</div >
+                    `;
                 card.onclick = () => toggleDesignInProposal(doc.id, data, card);
                 grid.appendChild(card);
             });
@@ -1166,14 +1260,14 @@
                     currentProposalSectionItems.push(item); // Update local cache
                     await updateDoc(docRef, { items: arrayUnion(item) });
                 } else {
-                    // For removal, we need the exact object or a way to find it. 
-                    // arrayRemove needs EXACT match. 
-                    // Since 'item' is reconstructed, it might differ if previewCode changed? 
+                    // For removal, we need the exact object or a way to find it.
+                    // arrayRemove needs EXACT match.
+                    // Since 'item' is reconstructed, it might differ if previewCode changed?
                     // But here we construct 'item' from 'designData' which comes from 'doc.data()'.
                     // Provided the DB hasn't changed since 'loadPickerDesigns' fetched it, it matches.
                     // RISK: If previewCode is huge, passing it around is heavy.
-                    // But let's try arrayRemove first. 
-                    // Wait, 'currentProposalSectionItems' has the objects from the DB. 
+                    // But let's try arrayRemove first.
+                    // Wait, 'currentProposalSectionItems' has the objects from the DB.
                     // We should find the object in 'currentProposalSectionItems' that matches ID and remove THAT specific object.
                     const objectToRemove = currentProposalSectionItems.find(i => i.designId === designId);
                     if (objectToRemove) {
@@ -1184,7 +1278,7 @@
                 }
             } catch (e) {
                 console.error("Toggle error", e);
-                // Revert UI if error? 
+                // Revert UI if error?
                 customAlert("Error", "Failed to update proposal. Check console.");
             }
         }
@@ -1215,11 +1309,9 @@
 
             // Update Edit Button context
             // Note: Edit button in Preview modal calls editCurrentDesign(), which needs currentDesignId etc.
-            // But editCurrentDesign relies on 'currentLibrarySectionId'. 
-            // If we are in 'proposal' mode, we might not have 'currentLibrarySectionId' set correctly if we just clicked a proposal item.
-            // However, the user task was just to Preview. Editing from Proposal view might be complex if we don't know the library section.
-            // We can disable edit button in Proposal Mode or find the section.
-            // For now, let's just show preview.
+            // But editCurrentDesign relies on 'currentLibrarySectionId'.
+            // If we are in 'proposal' mode, we might not have 'currentLibrarySectionId' set correctly if we just clicked a proposal
+            // Disable Edit Button in Client Mode
 
             // Disable Edit Button in Client Mode
             const editBtn = document.getElementById('previewEditBtn');
@@ -1325,7 +1417,7 @@
 
         function populateIframe(frame, code) {
             const d = frame.contentWindow.document; d.open();
-            d.write(`<style>body{margin:0;overflow:hidden;}</style>${code}`); d.close();
+            d.write(`<style>body{margin:0;overflow:hidden}</style>${code}`); d.close();
         }
 
         // Init
@@ -1500,6 +1592,27 @@
             background: transparent;
         }
     </style>
+    <!-- CLIENT MODE SCROLL FIX -->
+    <style>
+        body.client-mode {
+            overflow-y: auto !important;
+            height: auto !important;
+        }
+
+        body.client-mode .mesh-bg {
+            position: fixed;
+            /* Keep background fixed */
+        }
+
+        body.client-mode main {
+            overflow: visible !important;
+        }
+
+        body.client-mode #contentArea {
+            overflow: visible !important;
+            height: auto !important;
+        }
+    </style>
 </head>
 
 <body class="flex flex-col h-screen overflow-hidden">
@@ -1544,22 +1657,14 @@
                 <p id="clientHeaderName" class="text-xs md:text-sm text-gray-400">Prepared for Client</p>
             </div>
         </div>
-        <div class="flex items-center gap-3 md:gap-6">
+        <div class="flex items-center gap-4">
             <button onclick="openOverallPreview()"
-                class="btn-liquid px-4 py-2 md:px-6 md:py-2.5 text-[10px] md:text-xs font-bold shadow-lg shadow-pink-500/20 group whitespace-nowrap">
-                <i data-feather="layout" class="w-3.5 h-3.5 md:w-4 md:h-4"></i>
-                <span class="group-hover:translate-x-0.5 transition-transform ml-1">Preview</span>
+                class="btn-liquid w-10 h-10 p-0 flex items-center justify-center rounded-full text-white shadow-lg shadow-pink-500/20 group relative">
+                <i data-feather="eye" class="w-5 h-5"></i>
+                <div id="selectionCount"
+                    class="absolute -top-1 -right-1 w-4 h-4 bg-pink-500 rounded-full text-[10px] flex items-center justify-center font-bold hidden border border-[#0B0A14]">
+                    0</div>
             </button>
-            <div class="text-right border-l border-white/20 pl-3 md:pl-6 h-8 md:h-10 flex flex-col justify-center">
-                <div
-                    class="text-[10px] text-gray-400 uppercase tracking-widest font-bold leading-tight hidden md:block">
-                    Your Selections
-                </div>
-                <div class="text-white font-bold text-xs md:text-sm leading-tight"><span id="selectionCount"
-                        class="text-pink-500">0</span> <span class="hidden md:inline">Sections Ready</span><span
-                        class="md:hidden"> Ready</span></div>
-            </div>
-
             <button onclick="submitProposal()" id="clientSubmitBtn"
                 class="btn-liquid px-6 py-2.5 text-xs font-bold shadow-lg shadow-green-500/20 hidden">
                 Submit <i data-feather="send" class="w-4 h-4 ml-2"></i>
@@ -1676,13 +1781,13 @@
             <!-- Grid -->
             <div class="flex-grow flex flex-col h-full overflow-hidden">
                 <div
-                    class="h-20 border-b border-white/5 flex justify-between items-center px-8 shrink-0 bg-[#121218] z-10">
-                    <div>
-                        <h3 class="font-bold text-xl text-white">Select Designs</h3>
-                        <p class="text-sm text-gray-400">Select the designs you want to include in this section.</p>
+                    class="min-h-[5rem] border-b border-white/5 flex flex-wrap justify-between items-center px-4 md:px-8 py-4 shrink-0 bg-[#121218] z-10 gap-4">
+                    <div class="flex-1 min-w-[200px]">
+                        <h3 class="font-bold text-lg md:text-xl text-white leading-tight">Select Designs</h3>
+                        <p class="text-xs md:text-sm text-gray-400">Select the designs you want to include.</p>
                     </div>
                     <button onclick="closeModal('libraryPickerModal')"
-                        class="btn-liquid px-8 shadow-lg shadow-pink-500/10">
+                        class="btn-liquid px-6 md:px-8 py-2 text-xs md:text-sm shadow-lg shadow-pink-500/10 whitespace-nowrap">
                         Confirm & Close
                     </button>
                 </div>
