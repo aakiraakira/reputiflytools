@@ -33,6 +33,9 @@
         const db = getFirestore(app);
 
         // --- GLOBAL VARIABLES ---
+        
+        // ADDED: Global Font Tag for injection
+        const INTER_FONT_TAG = "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap' rel='stylesheet'>";
 
         let currentDesignData = null; // For Preview/Edit
         let currentDesignId = null; // Fix ReferenceError
@@ -305,7 +308,7 @@
                              <div class="aspect-[16/9] bg-[#0B0A14] rounded-2xl overflow-hidden relative cursor-pointer group transition-all duration-500 border border-white/10 hover:border-pink-500/50"
                                   onclick="document.getElementById('${radioId}').click()">
                                   <iframe loading="lazy" class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity duration-500 lazy-load" 
-                                          data-srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
+                                          data-srcdoc="${INTER_FONT_TAG}<style>body{margin:0;overflow:hidden;font-family:'Inter',sans-serif}</style>${safePreviewCode}"></iframe>
                                   <div class="absolute inset-0 bg-gradient-to-t from-[#0B0A14] via-transparent to-transparent opacity-60"></div>
                                   <div class="selection-ring absolute inset-0 border-2 border-transparent transition-all duration-300 rounded-2xl pointer-events-none"></div>
                                   <div class="selection-tick absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-20 h-20 bg-gradient-to-br from-pink-500 to-orange-500 rounded-full flex items-center justify-center shadow-2xl scale-0 transition-all duration-500 cubic-bezier(0.34, 1.56, 0.64, 1) z-20 pointer-events-none">
@@ -521,8 +524,9 @@
                 <head>
                     <meta charset="UTF-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    ${INTER_FONT_TAG}
                     <style>
-                        body { margin: 0; padding: 0; background: #fff; overflow-x: hidden; }
+                        body { margin: 0; padding: 0; background: #fff; overflow-x: hidden; font-family: 'Inter', sans-serif; }
                         iframe { 
                             width: 100%; 
                             border: none; 
@@ -549,9 +553,14 @@
                 </head>
                 <body>
                     ${orderedContent.map((item, index) => {
-                const safeHtml = item.html.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-                return `<iframe srcdoc="${safeHtml}" scrolling="no" onload="resizeIframe(this)"></iframe>`;
-            }).join('')}
+    // FIX: Inject Font and Body Style into the individual iframe content
+    const contentWithFont = INTER_FONT_TAG + 
+        "<style>body{margin:0; font-family:'Inter',sans-serif; overflow:hidden;}</style>" + 
+        item.html;
+
+    const safeHtml = contentWithFont.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    return `<iframe srcdoc="${safeHtml}" scrolling="no" onload="resizeIframe(this)"></iframe>`;
+}).join('')}
                 </body>
                 </html>
             `;
@@ -973,7 +982,7 @@
 <div class="flex-grow bg-white relative w-full overflow-hidden">
     <iframe id="${uniqueId}"
         class="w-[200%] h-[200%] transform scale-50 origin-top-left border-none absolute inset-0 pointer-events-none select-none z-10 lazy-load"
-        data-srcdoc="<style>body{margin:0;overflow:hidden}</style>${(design.code || '').replace(/\\n/g, '\n').replace(/"/g, "&quot;")}" scrolling="no"></iframe>
+        data-srcdoc="${INTER_FONT_TAG}<style>body{margin:0;overflow:hidden;font-family:'Inter',sans-serif}</style>${(design.code || '').replace(/\\n/g, '\n').replace(/"/g, "&quot;")}" scrolling="no"></iframe>
     <div class="absolute inset-0 z-10"></div>
 </div>
 <div class="p-5 border-t border-white/5 bg-[#0e0e12] z-20 relative">
@@ -1159,7 +1168,7 @@
     onclick="openProposalPreview('${doc.id}', ${index})">
     <div class="h-24 bg-white relative">
         <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none lazy-load"
-            data-srcdoc="<style>body{margin:0;overflow:hidden}</style>${safePreviewCode}"></iframe>
+            data-srcdoc="${INTER_FONT_TAG}<style>body{margin:0;overflow:hidden;font-family:'Inter',sans-serif}</style>${safePreviewCode}"></iframe>
         <div class="absolute inset-0 z-10"></div>
     </div>
     <div class="p-2 flex justify-between items-center">
@@ -1577,15 +1586,18 @@
         };
 
         window.openPreview = (id, design) => {
-            currentDesignData = design;
-            currentDesignId = id; // Set global for edits
-            const frame = document.getElementById('previewFrame');
-            document.getElementById('previewTitle').textContent = design.name;
-            document.getElementById('previewModal').classList.add('active');
+    currentDesignData = design;
+    currentDesignId = id; // Set global for edits
+    const frame = document.getElementById('previewFrame');
+    document.getElementById('previewTitle').textContent = design.name;
+    document.getElementById('previewModal').classList.add('active');
 
-            const d = frame.contentWindow.document;
-            d.open(); d.write(design.code); d.close();
-        };
+    const d = frame.contentWindow.document;
+    d.open();
+    // FIX: Inject Font Tag + Basic Body Style + Design Code
+    d.write(INTER_FONT_TAG + "<style>body{font-family:'Inter',sans-serif; margin:0;}</style>" + design.code); 
+    d.close();
+};
 
         window.editCurrentDesign = () => {
             // Check if we are editing merged content (checking title or a flag)
@@ -2065,13 +2077,15 @@ Return your response as valid JSON.`;
         }
 
         function generateFontImports(dna) {
+            // Default to Inter if no Brand DNA overrides are found, or append it as a safety fallback
+            let imports = "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap' rel='stylesheet'>\n";
+
             const heading = dna.typography?.heading;
             const body = dna.typography?.body;
-            let imports = '';
 
-            // Simple Google Fonts Logic
-            if (heading) imports += `<link href="https://fonts.googleapis.com/css2?family=${heading.replace(/ /g, '+')}:wght@400;700&display=swap" rel="stylesheet">\n`;
-            if (body && body !== heading) imports += `<link href="https://fonts.googleapis.com/css2?family=${body.replace(/ /g, '+')}:wght@300;400;500;600&display=swap" rel="stylesheet">\n`;
+            // Simple Google Fonts Logic (Only add if they aren't Inter to avoid duplicates)
+            if (heading && heading !== 'Inter') imports += `<link href="https://fonts.googleapis.com/css2?family=${heading.replace(/ /g, '+')}:wght@400;700&display=swap" rel="stylesheet">\n`;
+            if (body && body !== heading && body !== 'Inter') imports += `<link href="https://fonts.googleapis.com/css2?family=${body.replace(/ /g, '+')}:wght@300;400;500;600&display=swap" rel="stylesheet">\n`;
 
             return imports;
         }
@@ -2744,20 +2758,25 @@ Return your response as valid JSON.`;
         }
 
         function copyShareInput() {
-            const input = document.getElementById('shareLinkInput');
-            input.select();
-            navigator.clipboard.writeText(input.value).then(() => {
-                const btn = document.getElementById('shareMainBtn');
+    const input = document.getElementById('shareLinkInput');
+    input.select();
+    navigator.clipboard.writeText(input.value).then(() => {
+        const btn = document.getElementById('shareMainBtn');
+        
+        // OLD (BROKEN): 
+        // btn.innerHTML = `< i data-feather="check" class="w-4 h-4 mr-2" ></i > Copied!`;
+        
+        // NEW (FIXED):
+        btn.innerHTML = `<i data-feather="check" class="w-4 h-4 mr-2"></i> Copied!`;
+        
+        feather.replace();
 
-                btn.innerHTML = `< i data-feather="check" class="w-4 h-4 mr-2" ></i > Copied!`;
-                feather.replace();
-
-                setTimeout(() => {
-                    document.getElementById('shareModal').classList.remove('active');
-                    btn.innerHTML = 'Copy Link'; // Reset for next time
-                }, 1000); // 1 second delay
-            });
-        }
+        setTimeout(() => {
+            document.getElementById('shareModal').classList.remove('active');
+            btn.innerHTML = 'Copy Link'; 
+        }, 1000); 
+    });
+}
     </script>
     <div id="customAlertModal" class="modal-overlay" style="z-index: 210;">
         <div class="modal-card text-center">
