@@ -895,8 +895,20 @@
         }
 
         window.selectLibrarySection = (id, name) => {
+            currentMode = 'library'; // Ensure mode is set
             currentLibrarySectionId = id;
             mainToolbarTitle.textContent = name;
+
+            // CONFIGURE ACTION BUTTON FOR LIBRARY
+            mainActionBtn.classList.remove('hidden');
+            mainActionBtn.innerHTML = `<i data-feather="plus" class="w-4 h-4"></i> <span class="tracking-wide">Add Design Snippet</span>`;
+            mainActionBtn.onclick = openAddDesignModal;
+
+            // Hide Proposal-specific buttons
+            const shareBtn = document.getElementById('shareProposalBtn');
+            if (shareBtn) shareBtn.classList.add('hidden');
+            const downloadBtn = document.getElementById('downloadAssetsBtn');
+            if (downloadBtn) downloadBtn.classList.add('hidden');
 
             // Re-render sidebar to update active state
             // Manual update for responsiveness
@@ -961,7 +973,7 @@
 <div class="flex-grow bg-white relative w-full overflow-hidden">
     <iframe id="${uniqueId}"
         class="w-[200%] h-[200%] transform scale-50 origin-top-left border-none absolute inset-0 pointer-events-none select-none z-10 lazy-load"
-        data-srcdoc="<style>body{margin:0;overflow:hidden}</style>${design.code}" scrolling="no"></iframe>
+        data-srcdoc="<style>body{margin:0;overflow:hidden}</style>${(design.code || '').replace(/\\n/g, '\n').replace(/"/g, "&quot;")}" scrolling="no"></iframe>
     <div class="absolute inset-0 z-10"></div>
 </div>
 <div class="p-5 border-t border-white/5 bg-[#0e0e12] z-20 relative">
@@ -1305,7 +1317,7 @@
 </div>
 <div class="h-40 bg-white relative">
     <iframe class="w-[200%] h-[200%] transform scale-50 origin-top-left pointer-events-none lazy-load"
-        data-srcdoc="<style>body{margin:0;overflow:hidden}</style>${data.code}"></iframe>
+        data-srcdoc="<style>body{margin:0;overflow:hidden}</style>${(data.code || '').replace(/\\n/g, '\n').replace(/"/g, "&quot;")}"></iframe>
     <div class="absolute inset-0 z-10"></div>
 </div>
 <div class="p-4 border-t border-white/5 bg-[#0e0e12]">
@@ -1315,10 +1327,27 @@
                     `;
                 card.onclick = () => toggleDesignInProposal(doc.id, data, card);
                 grid.appendChild(card);
+                // Observe immediately
+                observeLazyFrames(card);
             });
             feather.replace();
-            observeLazyFrames(grid);
         }
+
+        window.loadAllPreviews = () => {
+            const frames = document.querySelectorAll('#pickerGrid iframe.lazy-load');
+            let count = 0;
+            frames.forEach(f => {
+                const src = f.getAttribute('data-srcdoc');
+                if (src) {
+                    f.setAttribute('srcdoc', src);
+                    f.removeAttribute('data-srcdoc');
+                    f.classList.remove('lazy-load');
+                    count++;
+                }
+            });
+            if (count > 0) customAlert("Success", `Forced loading of ${count} previews.`);
+            else customAlert("Info", "All previews already loaded.");
+        };
 
         async function toggleDesignInProposal(designId, designData, cardEl) {
             // Optimistic UI Update first
@@ -1433,7 +1462,10 @@
 
             openPreview(item.designId, {
                 name: item.name,
-                code: rawCode
+                code: rawCode,
+                // Add context for saving
+                proposalSectionId: sectionId,
+                itemIndex: index
             });
         };
 
@@ -1452,6 +1484,28 @@
 
         window.saveDesign = async () => {
             if (currentMode === 'client') return; // Security
+
+            // --- MERGED EDITING LOGIC ---
+            if (window.isEditingMerged) {
+                const newCode = document.getElementById('designCodeInput').value;
+                currentMergedHtmlContent = newCode;
+
+                // Update Preview immediately 
+                const frame = document.getElementById('previewFrame');
+                const d = frame.contentWindow.document;
+                d.open(); d.write(newCode); d.close();
+
+                customAlert("Updated", "Preview updated with your changes.");
+                document.getElementById('addDesignModal').classList.remove('active');
+
+                // Re-open preview to show changes? Or just leave it closed? 
+                // Let's re-open it to match user expectation of "updating preview"
+                document.getElementById('previewModal').classList.add('active');
+
+                window.isEditingMerged = false;
+                return;
+            }
+
             const name = document.getElementById('designNameInput').value.trim();
             const code = document.getElementById('designCodeInput').value;
             if (!name || !code) {
@@ -1480,6 +1534,40 @@
                     } else {
                         await addDoc(ref, { name, code, createdAt: serverTimestamp() });
                     }
+                    customAlert("Success", "Design saved to library.");
+                } else if (currentMode === 'proposal') {
+                    // PROPOSAL MODE SAVE LOGIC
+                    if (!currentDesignData || !currentDesignData.proposalSectionId) {
+                        customAlert("Error", "Missing proposal context for saving.");
+                        return;
+                    }
+
+                    const secId = currentDesignData.proposalSectionId;
+                    const idx = currentDesignData.itemIndex;
+                    const docRef = doc(db, "proposals", currentProposalId, "proposal_sections", secId);
+
+                    const snap = await getDoc(docRef);
+                    if (!snap.exists()) {
+                        customAlert("Error", "Section not found.");
+                        return;
+                    }
+
+                    const items = snap.data().items || [];
+                    if (!items[idx]) {
+                        customAlert("Error", "Item not found.");
+                        return;
+                    }
+
+                    // Update local item
+                    items[idx].name = name;
+                    items[idx].previewCode = code;
+                    if (items[idx].code) items[idx].code = code; // Update code if present
+
+                    await updateDoc(docRef, { items });
+                    customAlert("Success", "Design updated in proposal.");
+                } else {
+                    customAlert("Error", "Cannot save in this mode: " + currentMode);
+                    return;
                 }
                 document.getElementById('addDesignModal').classList.remove('active');
             } catch (e) {
@@ -1500,11 +1588,23 @@
         };
 
         window.editCurrentDesign = () => {
+            // Check if we are editing merged content (checking title or a flag)
+            const title = document.getElementById('previewTitle').textContent;
+            if (title && title.startsWith('Merged:')) {
+                document.getElementById('designCodeInput').value = currentMergedHtmlContent;
+                document.getElementById('designNameInput').value = "Merged Proposal (Manual Edit)";
+                document.getElementById('previewModal').classList.remove('active');
+                document.getElementById('addDesignModal').classList.add('active');
+                window.isEditingMerged = true;
+                return;
+            }
+
             if (!currentDesignData) return;
             document.getElementById('previewModal').classList.remove('active');
             document.getElementById('designNameInput').value = currentDesignData.name;
-            document.getElementById('designCodeInput').value = currentDesignData.code;
+            document.getElementById('designCodeInput').value = currentDesignData.code || currentDesignData.previewCode || "";
             document.getElementById('addDesignModal').classList.add('active');
+            window.isEditingMerged = false;
         };
 
         window.deleteDesign = async (id) => {
@@ -1581,11 +1681,9 @@
 
         // Init
         // Call init LAST to ensure global functions are registered
-        try {
-            init();
-        } catch (e) {
-            console.error("Init failed:", e);
-        }
+        // Init
+        // Call init LAST to ensure global functions are registered
+        // init(); // Removed as it is undefined
 
 
 
@@ -2046,58 +2144,7 @@ Return your response as valid JSON.`;
             closeModal('settingsModal');
         };
 
-        /* --- EDITING LOGIC (New) --- */
-        window.editCurrentDesign = function () {
-            const title = document.getElementById('previewTitle').textContent;
 
-            if (title.startsWith('Merged:')) {
-                // Editing merged content
-                document.getElementById('designCodeInput').value = currentMergedHtmlContent;
-                document.getElementById('designNameInput').value = "Merged Proposal (Manual Edit)";
-
-                // Show modal
-                document.getElementById('addDesignModal').classList.add('active');
-
-                // IMPORTANT: Override save function temporarily or handle check inside saveDesign
-                window.isEditingMerged = true;
-            } else {
-                // Existing logic for library items (not fully implemented in this extraction but assume needed)
-                customAlert("Info", "Can only edit merged designs in this view.");
-            }
-        };
-
-        window.saveDesign = function () {
-            if (window.isEditingMerged) {
-                // Update the preview and download, do NOT save to library
-                const newCode = document.getElementById('designCodeInput').value;
-                currentMergedHtmlContent = newCode;
-
-                // Update Preview
-                const frame = document.getElementById('previewFrame');
-                const d = frame.contentWindow.document;
-                d.open();
-                d.write(newCode);
-                d.close();
-
-                // Re-trigger download? Or let them click a button?
-                // Since there is no "Download Again" button in preview, let's auto-download to be helpful
-                // downloadHtml(newCode, "Edited_Proposal"); // Maybe too aggressive?
-
-                customAlert("Updated", "Preview updated with your changes.");
-                closeModal('addDesignModal');
-                window.isEditingMerged = false;
-                return;
-            }
-
-            // ... Original save logic would go here if we were preserving it ...
-            // Since we are replacing the block, we should ideally keep the original saveDesign if it existed.
-            // But based on grep, saveDesign didn't seem to exist nearby?
-            // Actually, I should have checked if saveDesign existed before.
-            // The user says "wtf so i can click in and edit".
-
-            customAlert("Saved", "Design saved (mock).");
-            closeModal('addDesignModal');
-        };
     </script>
 
     <!-- Need import getDocs specifically in module -->
@@ -2589,10 +2636,16 @@ Return your response as valid JSON.`;
                         <h3 class="font-bold text-lg md:text-xl text-white leading-tight">Select Designs</h3>
                         <p class="text-xs md:text-sm text-gray-400">Select the designs you want to include.</p>
                     </div>
-                    <button onclick="closeModal('libraryPickerModal')"
-                        class="btn-liquid px-6 md:px-8 py-2 text-xs md:text-sm shadow-lg shadow-pink-500/10 whitespace-nowrap">
-                        Confirm & Close
-                    </button>
+                    <div class="flex gap-2">
+                        <button onclick="loadAllPreviews()"
+                            class="px-4 py-2 text-xs font-bold text-gray-400 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors whitespace-nowrap">
+                            Load All
+                        </button>
+                        <button onclick="closeModal('libraryPickerModal')"
+                            class="btn-liquid px-6 md:px-8 py-2 text-xs md:text-sm shadow-lg shadow-pink-500/10 whitespace-nowrap">
+                            Confirm & Close
+                        </button>
+                    </div>
                 </div>
                 <div id="pickerGrid"
                     class="flex-grow overflow-y-auto p-10 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-8 align-content-start pb-10 custom-scrollbar">
