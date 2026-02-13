@@ -397,6 +397,35 @@
             display: block;
         }
 
+        
+        .blur-content {
+            filter: blur(5px);
+            pointer-events: none;
+            user-select: none;
+            opacity: 0.6;
+        }
+        .paywall-overlay {
+            position: absolute;
+            inset: 0;
+            display: none; /* Hidden by default */
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            background: rgba(5, 5, 10, 0.3);
+            backdrop-filter: grayscale(100%);
+        }
+        .paywall-card {
+            background: rgba(11, 10, 20, 0.95);
+            border: 1px solid rgba(255, 50, 50, 0.2);
+            padding: 30px;
+            border-radius: 16px;
+            text-align: center;
+            max-width: 320px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9);
+            animation: slideUp 0.3s ease-out;
+        }
+        @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
         @keyframes spin {
             to {
                 transform: rotate(360deg);
@@ -475,7 +504,24 @@
             </div>
 
             <!-- FILTER BAR + TABLE -->
-            <div class="glass-panel overflow-hidden flex flex-col">
+            <div class="glass-panel overflow-hidden flex flex-col relative">
+                
+                <div id="paywall-overlay" class="paywall-overlay">
+                    <div class="paywall-card">
+                        <div class="mx-auto w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mb-4 border border-red-500/20">
+                            <i data-feather="lock" class="w-5 h-5 text-red-400"></i>
+                        </div>
+                        <h3 class="text-white font-bold text-lg mb-2">Account Paused</h3>
+                        <p class="text-gray-400 text-xs mb-5 leading-relaxed">
+                            Your lead access is temporarily suspended.<br>
+                            You have <span class="text-white font-bold" id="hidden-lead-count">incoming</span> leads waiting.
+                        </p>
+                        <div class="text-[10px] text-gray-600 font-mono bg-black/30 p-2 rounded">
+                            STATUS: RESTRICTED
+                        </div>
+                    </div>
+                </div>
+
                 <div
                     class="px-5 py-3 border-b border-white/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div class="flex items-center gap-2 flex-wrap">
@@ -633,6 +679,7 @@
                 name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') + "'s Leads";
 
             startLeadsListener();
+            startClientStatusListener(user.uid); // <--- Listen for Pause Status
             initFilterPills();
             feather.replace();
         });
@@ -680,6 +727,44 @@
         // ==========================================
         // LEADS LISTENER
         // ==========================================
+        // ==========================================
+        // STATUS LISTENER (MINDFUCK LOGIC)
+        // ==========================================
+        function startClientStatusListener(uid) {
+            onSnapshot(doc(db, "clients", uid), (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    const status = data.status || 'active';
+                    toggleMindfuck(status === 'paused');
+                }
+            });
+        }
+
+        function toggleMindfuck(isPaused) {
+            const overlay = document.getElementById('paywall-overlay');
+            const tableBody = document.getElementById('leads-table-body');
+            const exportBtn = document.getElementById('btn-export');
+            const hiddenCount = document.getElementById('hidden-lead-count');
+            
+            if (isPaused) {
+                overlay.style.display = 'flex';
+                tableBody.classList.add('blur-content');
+                exportBtn.disabled = true;
+                exportBtn.style.opacity = '0.3';
+                exportBtn.innerHTML = '<i data-feather="lock" class="w-3.5 h-3.5"></i> Locked';
+                
+                // Show them what they are missing
+                hiddenCount.textContent = clientLeads.length + " unread";
+                feather.replace();
+            } else {
+                overlay.style.display = 'none';
+                tableBody.classList.remove('blur-content');
+                exportBtn.disabled = false;
+                exportBtn.style.opacity = '1';
+                exportBtn.innerHTML = '<i data-feather="download" class="w-3.5 h-3.5"></i> Export CSV';
+                feather.replace();
+            }
+        }
         function startLeadsListener() {
             const q = query(
                 collection(db, "leads"),
