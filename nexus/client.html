@@ -490,17 +490,32 @@
                     <p class="text-gray-500 text-sm mt-1">Real-time view of all your incoming leads.</p>
                 </div>
                 <div class="flex items-center gap-5">
-                    <div class="text-center">
-                        <div class="stat-mini-value text-white" id="stat-total">0</div>
-                        <div class="stat-mini-label">Total</div>
-                    </div>
-                    <div class="h-6 w-px bg-white/10 hidden sm:block"></div>
-                    <div class="text-center hidden sm:block">
-                        <div class="stat-mini-value text-sm text-gray-400" id="stat-last-active" style="font-size:15px">
-                            —</div>
-                        <div class="stat-mini-label">Latest</div>
-                    </div>
-                </div>
+    <div class="text-center">
+        <div class="stat-mini-value text-white" id="stat-total">0</div>
+        <div class="stat-mini-label">Total</div>
+    </div>
+
+    <div class="h-6 w-px bg-white/10 hidden sm:block"></div>
+
+    <div class="flex flex-col items-center">
+        <div class="flex items-baseline gap-1">
+            <span id="stat-usage-current" class="stat-mini-value text-white" style="font-size:28px">0</span>
+            <span class="text-gray-600 text-xs">/</span>
+            <span id="stat-usage-limit" class="text-gray-500 font-bold text-sm">50</span>
+        </div>
+        <div class="stat-mini-label mb-1">Daily Cap</div>
+        <div class="w-16 h-1 bg-white/5 rounded-full overflow-hidden border border-white/5">
+            <div id="usage-progress-bar" class="h-full bg-purple-500 transition-all duration-500" style="width: 0%"></div>
+        </div>
+    </div>
+
+    <div class="h-6 w-px bg-white/10 hidden sm:block"></div>
+
+    <div class="text-center hidden sm:block">
+        <div class="stat-mini-value text-sm text-gray-400" id="stat-last-active" style="font-size:15px">—</div>
+        <div class="stat-mini-label">Latest</div>
+    </div>
+</div>
             </div>
 
             <!-- FILTER BAR + TABLE -->
@@ -731,14 +746,46 @@
         // STATUS LISTENER (MINDFUCK LOGIC)
         // ==========================================
         function startClientStatusListener(uid) {
-            onSnapshot(doc(db, "clients", uid), (docSnap) => {
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    const status = data.status || 'active';
-                    toggleMindfuck(status === 'paused');
+    onSnapshot(doc(db, "clients", uid), (docSnap) => {
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            
+            // 1. Handle Pause Status
+            const status = data.status || 'active';
+            toggleMindfuck(status === 'paused');
+
+            // 2. Daily Usage Logic (Singapore Time)
+            const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
+            const currentUsage = (data.usageStats && data.usageStats.date === today) ? data.usageStats.count : 0;
+            const limit = data.customDailyLimit || 50; 
+            const percent = Math.min(100, Math.round((currentUsage / limit) * 100));
+
+            // 3. Update the UI Elements
+            const currentEl = document.getElementById('stat-usage-current');
+            const limitEl = document.getElementById('stat-usage-limit');
+            const progressEl = document.getElementById('usage-progress-bar');
+
+            if (currentEl) currentEl.textContent = currentUsage;
+            if (limitEl) limitEl.textContent = limit;
+            
+            if (progressEl) {
+                progressEl.style.width = percent + '%';
+                
+                // Visual Alert Colors
+                if (percent >= 100) {
+                    progressEl.className = "h-full bg-red-500 transition-all duration-500";
+                    if (currentEl) currentEl.className = "stat-mini-value text-red-500";
+                } else if (percent >= 80) {
+                    progressEl.className = "h-full bg-orange-500 transition-all duration-500";
+                    if (currentEl) currentEl.className = "stat-mini-value text-orange-400";
+                } else {
+                    progressEl.className = "h-full bg-purple-500 transition-all duration-500";
+                    if (currentEl) currentEl.className = "stat-mini-value text-white";
                 }
-            });
+            }
         }
+    });
+}
 
         function toggleMindfuck(isPaused) {
             const overlay = document.getElementById('paywall-overlay');
