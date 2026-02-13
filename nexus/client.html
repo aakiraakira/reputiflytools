@@ -590,6 +590,9 @@
                         <button class="filter-btn flex-shrink-0" id="btn-junk" onclick="setFilter('junk')">
                             <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Junk <span class="count-badge"
                                 id="count-junk">0</span></button>
+                        <button class="filter-btn flex-shrink-0" id="btn-archived" onclick="setFilter('archived')">
+                            <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span> Archived <span
+                                class="count-badge" id="count-archived">0</span></button>
 
                         <!-- Dynamic Filter Add Button -->
                         <div class="relative inline-block ml-2 flex-shrink-0">
@@ -925,18 +928,24 @@
         // ==========================================
         // COUNTS (Reduced logic for simplified UI)
         // ==========================================
+        // ==========================================
+        // COUNTS (Reduced logic for simplified UI)
+        // ==========================================
         function updateCounts() {
-            const total = clientLeads.length;
-            const newCount = clientLeads.filter(l => l.status === 'new' || !l.status).length;
+            // Count active (non-archived) for "All"
+            const allActive = clientLeads.filter(l => l.status !== 'archived').length;
+            const newCount = clientLeads.filter(l => (l.status === 'new' || !l.status)).length;
             const contacted = clientLeads.filter(l => l.status === 'contacted').length;
             const junk = clientLeads.filter(l => l.status === 'junk').length;
+            const archived = clientLeads.filter(l => l.status === 'archived').length;
 
-            document.getElementById('count-all').textContent = total;
+            document.getElementById('count-all').textContent = allActive;
             document.getElementById('count-new').textContent = newCount;
             document.getElementById('count-contacted').textContent = contacted;
             document.getElementById('count-junk').textContent = junk;
+            if (document.getElementById('count-archived')) document.getElementById('count-archived').textContent = archived;
 
-            if (total > 0 && clientLeads[0].createdAt) {
+            if (clientLeads.length > 0 && clientLeads[0].createdAt) {
                 const d = new Date(clientLeads[0].createdAt.seconds * 1000);
                 // Last active: "Oct 24, 2:30 PM"
                 document.getElementById('stat-last-active').textContent = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
@@ -950,7 +959,7 @@
             activeFilter = status;
             document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
             // Keep the custom filter active visually if distinct
-            if (['all', 'new', 'contacted', 'junk'].includes(status)) {
+            if (['all', 'new', 'contacted', 'junk', 'archived'].includes(status)) {
                 document.getElementById(`btn-${status}`).classList.add('active');
             }
             renderTable();
@@ -960,7 +969,10 @@
             let filtered = clientLeads;
 
             // 1. Status Filter
-            if (activeFilter !== 'all') {
+            // 1. Status Filter
+            if (activeFilter === 'all') {
+                filtered = filtered.filter(l => l.status !== 'archived' && l.status !== 'junk');
+            } else {
                 filtered = filtered.filter(l => (l.status || 'new') === activeFilter);
             }
 
@@ -1011,7 +1023,7 @@
             const arrow = sortOrder === 'desc' ? '<i data-feather="arrow-down" class="w-3 h-3 ml-1 inline text-gray-400"></i>' : '<i data-feather="arrow-up" class="w-3 h-3 ml-1 inline text-gray-400"></i>';
             let headerHTML = `<tr><th onclick="window.toggleSort()" class="cursor-pointer hover:text-white transition select-none flex items-center gap-1 group">Date ${arrow}</th>`;
             colArray.forEach(col => { headerHTML += `<th>${col.charAt(0).toUpperCase() + col.slice(1)}</th>`; });
-            headerHTML += `<th>Status</th><th>Notes</th></tr>`;
+            headerHTML += `<th>Status</th><th>Notes</th><th class="text-center">Actions</th></tr>`;
             thead.innerHTML = headerHTML;
 
             filtered.forEach(item => {
@@ -1026,6 +1038,10 @@
                 let rowHTML = `<td>${dateStr}</td>`;
                 colArray.forEach(col => {
                     let val = item.lead ? (item.lead[col] || '-') : '-';
+                    // Escape HTML first to prevent XSS, then linkify
+                    val = val.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+                    val = linkify(val);
+
                     if (col.toLowerCase() === 'email') val = `<span class="text-white">${val}</span>`;
                     if (col.toLowerCase() === 'name') val = `<span class="font-semibold text-white">${val}</span>`;
                     rowHTML += `<td class="text-sm text-gray-400">${val}</td>`;
@@ -1037,6 +1053,7 @@
 
                 if (currentStatus === 'CONTACTED') { badgeClass = 'badge-contacted'; nextStatus = 'junk'; }
                 else if (currentStatus === 'JUNK') { badgeClass = 'badge-junk'; nextStatus = 'new'; }
+                else if (currentStatus === 'ARCHIVED') { badgeClass = 'bg-gray-700 text-gray-300'; nextStatus = 'new'; }
 
                 // Auto-Reply Indicator (Subtle Green Dot)
                 let autoReplyIcon = '';
@@ -1048,8 +1065,27 @@
                         </span>`;
                 }
 
-                rowHTML += `<td><span class="badge badge-click ${badgeClass}" onclick="window.updateStatus('${item.id}', '${nextStatus}')" title="Click to mark as ${nextStatus}">${currentStatus}</span>${autoReplyIcon}</td>`;
+                // Badge Click Action
+                let badgeAction = `onclick="window.updateStatus('${item.id}', '${nextStatus}')" title="Click to mark as ${nextStatus}"`;
+                if (currentStatus === 'ARCHIVED') {
+                    // If archived, maybe clicking badge just does nothing or restores? 
+                    // Let's make it intuitive: clicking 'ARCHIVED' badge could prompt to restore or do nothing.
+                    // For now, let's leave it as is, or maybe make it non-clickable?
+                    // User asked for specific "Archive" function.
+                    badgeAction = `style="cursor: default;"`;
+                }
+
+                rowHTML += `<td><span class="badge badge-click ${badgeClass}" ${badgeAction}>${currentStatus}</span>${autoReplyIcon}</td>`;
                 rowHTML += `<td><input type="text" class="note-input" placeholder="Add note..." value="${(item.note || '').replace(/"/g, '&quot;')}" onblur="window.saveNote('${item.id}', this.value)" /></td>`;
+
+                // Actions Column
+                let actionBtn = '';
+                if (item.status === 'archived') {
+                    actionBtn = `<button onclick="window.restoreLead('${item.id}')" class="p-1 text-gray-500 hover:text-emerald-400 transition" title="Restore"><i data-feather="refresh-cw" class="w-4 h-4"></i></button>`;
+                } else {
+                    actionBtn = `<button onclick="window.archiveLead('${item.id}')" class="p-1 text-gray-500 hover:text-red-400 transition" title="Archive"><i data-feather="trash-2" class="w-4 h-4"></i></button>`;
+                }
+                rowHTML += `<td class="text-center">${actionBtn}</td>`;
 
                 tr.innerHTML = rowHTML;
                 tbody.appendChild(tr);
@@ -1064,6 +1100,18 @@
             const row = document.querySelector(`span[onclick*="${id}"]`).closest('tr');
             row.style.opacity = '0.5';
             await updateDoc(doc(db, "leads", id), { status: status });
+        };
+
+        window.archiveLead = async (id) => {
+            const btn = document.querySelector(`button[onclick*="archiveLead('${id}')"]`);
+            if (btn) btn.closest('tr').style.opacity = '0.5';
+            await updateDoc(doc(db, "leads", id), { status: 'archived' });
+        };
+
+        window.restoreLead = async (id) => {
+            const btn = document.querySelector(`button[onclick*="restoreLead('${id}')"]`);
+            if (btn) btn.closest('tr').style.opacity = '0.5';
+            await updateDoc(doc(db, "leads", id), { status: 'new' });
         };
 
         window.saveNote = async (id, note) => {
@@ -1370,6 +1418,17 @@
                 div.innerHTML = `<div>${d}</div>${count > 0 ? `<div class="cal-count">${count}</div>` : ''}`;
                 container.appendChild(div);
             }
+        }
+
+        // ==========================================
+        // HELPERS
+        // ==========================================
+        function linkify(text) {
+            if (!text) return text;
+            var urlRegex = /(https?:\/\/[^\s]+)/g;
+            return text.replace(urlRegex, function (url) {
+                return '<a href="' + url + '" target="_blank" class="text-blue-400 hover:text-blue-300 underline">' + url + '</a>';
+            });
         }
 
     </script>
