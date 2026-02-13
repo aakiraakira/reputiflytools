@@ -765,6 +765,38 @@
                     class="gradient-text font-bold">Reputifly</span></p>
         </div>
     </main>
+    <div id="confirmModal" class="fixed inset-0 z-[9999] hidden items-center justify-center bg-black/80 backdrop-blur-sm transition-opacity" onclick="closeConfirmModal(event)">
+        <div class="bg-[#111018] rounded-2xl max-w-sm w-full mx-4 border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-6 transform transition-all" onclick="event.stopPropagation()">
+            <div class="text-center">
+                <div class="w-16 h-16 rounded-full bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center mx-auto mb-4 shadow-[0_0_20px_rgba(234,179,8,0.2)]">
+                    <i data-feather="star" class="w-8 h-8 text-yellow-400 fill-current"></i>
+                </div>
+                <h3 id="confirmTitle" class="text-xl font-bold text-white mb-2 font-['Space_Grotesk']">Send Review Request?</h3>
+                <p id="confirmMessage" class="text-sm text-gray-400 mb-6 leading-relaxed">Are you sure?</p>
+                <div class="flex gap-3">
+                    <button id="confirmCancelBtn" class="flex-1 py-3 px-4 bg-white/5 hover:bg-white/10 text-white text-sm font-bold rounded-xl transition border border-white/5">Cancel</button>
+                    <button id="confirmProceedBtn" class="flex-1 py-3 px-4 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 text-white text-sm font-bold rounded-xl shadow-lg transition transform hover:-translate-y-0.5">Send Request</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="feedbackModal" class="fixed inset-0 z-[9999] hidden items-center justify-center bg-black/80 backdrop-blur-sm transition-opacity" onclick="closeFeedbackModal(event)">
+        <div class="bg-[#111018] rounded-2xl max-w-md w-full mx-4 border border-red-500/20 shadow-[0_20px_50px_rgba(239,68,68,0.15)] p-6 transform transition-all" onclick="event.stopPropagation()">
+            <div class="flex items-center gap-3 mb-4 pb-4 border-b border-white/5">
+                <div class="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                    <i data-feather="alert-triangle" class="w-5 h-5 text-red-400"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-white font-['Space_Grotesk']">Private Feedback</h3>
+                    <p class="text-xs text-gray-500" id="feedbackDate">Submitted recently</p>
+                </div>
+            </div>
+            <div class="bg-black/30 rounded-xl p-4 border border-white/5 mb-6">
+                <p id="feedbackContent" class="text-sm text-gray-300 leading-relaxed italic">"..."</p>
+            </div>
+            <button onclick="closeFeedbackModal()" class="w-full py-3 bg-white/5 hover:bg-white/10 text-white text-sm font-bold rounded-xl transition border border-white/5">Close</button>
+        </div>
+    </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
@@ -785,11 +817,13 @@
         const db = getFirestore(app);
 
         const SUPER_ADMIN_EMAIL = "realjuliantung@gmail.com";
+        const API_BASE = "https://asia-southeast1-b2b-software.cloudfunctions.net"; // Added API Base
         let clientEmail = null;
         let clientLeads = [];
         let activeFilter = 'all'; // all, new, contacted, junk
         let customFilter = null; // { field: 'Source', value: 'Footer' }
         let sortOrder = 'desc'; // desc or asc
+        let reviewFeatureEnabled = false; // Added Review State
         let volumeChart = null;
         let statusChart = null;
         let chartRange = '7d';
@@ -870,6 +904,14 @@
                     }
 
                     const limit = data.customDailyLimit || 50;
+                    
+                    // 3. REVIEW FEATURE CHECK
+                    reviewFeatureEnabled = !!data.reviewFeatureEnabled;
+                    
+                    // CRITICAL FIX: Force the table to re-draw now that it knows the feature is enabled!
+                    if (typeof renderTable === 'function') {
+                        renderTable();
+                    }
 
                     // Update UI
                     const currentEl = document.getElementById('stat-usage-current');
@@ -1042,9 +1084,18 @@
                     val = val.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
                     val = linkify(val);
 
-                    if (col.toLowerCase() === 'email') val = `<span class="text-white">${val}</span>`;
-                    if (col.toLowerCase() === 'name') val = `<span class="font-semibold text-white">${val}</span>`;
-                    rowHTML += `<td class="text-sm text-gray-400">${val}</td>`;
+                    if (col.toLowerCase() === 'email') {
+                    val = `<span class="text-white block min-w-[120px]">${val}</span>`;
+                }
+                if (col.toLowerCase() === 'name') {
+                    let nameHtml = `<span class="font-semibold text-white whitespace-nowrap">${val}</span>`;
+                    if (item.negativeFeedback) {
+                        nameHtml += `<button onclick="window.viewFeedback('${item.id}')" class="flex-shrink-0 inline-flex items-center justify-center w-6 h-6 bg-red-500/10 border border-red-500/20 text-red-400 rounded-md hover:bg-red-500/20 transition animate-pulse" title="View Negative Feedback"><i data-feather="alert-triangle" class="w-3 h-3"></i></button>`;
+                    }
+                    // Wrap in a flex container with a min-width to prevent mobile squishing
+                    val = `<div class="flex items-center gap-2 min-w-[140px]">${nameHtml}</div>`;
+                }
+                rowHTML += `<td class="text-sm text-gray-400">${val}</td>`;
                 });
 
                 let currentStatus = (item.status || 'new').toUpperCase();
@@ -1054,6 +1105,7 @@
                 if (currentStatus === 'CONTACTED') { badgeClass = 'badge-contacted'; nextStatus = 'junk'; }
                 else if (currentStatus === 'JUNK') { badgeClass = 'badge-junk'; nextStatus = 'new'; }
                 else if (currentStatus === 'ARCHIVED') { badgeClass = 'bg-gray-700 text-gray-300'; nextStatus = 'new'; }
+                else if (currentStatus === 'REVIEW_SENT') { badgeClass = 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'; nextStatus = 'contacted'; }
 
                 // Auto-Reply Indicator (Subtle Green Dot)
                 let autoReplyIcon = '';
@@ -1080,12 +1132,23 @@
 
                 // Actions Column
                 let actionBtn = '';
-                if (item.status === 'archived') {
-                    actionBtn = `<button onclick="window.restoreLead('${item.id}')" class="p-1 text-gray-500 hover:text-emerald-400 transition" title="Restore"><i data-feather="refresh-cw" class="w-4 h-4"></i></button>`;
-                } else {
-                    actionBtn = `<button onclick="window.archiveLead('${item.id}')" class="p-1 text-gray-500 hover:text-red-400 transition" title="Archive"><i data-feather="trash-2" class="w-4 h-4"></i></button>`;
+                
+                if (reviewFeatureEnabled && item.status !== 'archived') {
+                    if (currentStatus === 'REVIEW_SENT') {
+                         actionBtn += `<button class="p-1 text-yellow-500/50 cursor-not-allowed transition" title="Review Already Sent"><i data-feather="star" class="w-4 h-4 fill-current"></i></button>`;
+                    } else {
+                         actionBtn += `<button onclick="window.triggerReviewRequest('${item.id}')" class="p-1 text-gray-500 hover:text-yellow-400 transition" title="Send 5-Star Review Request"><i data-feather="star" class="w-4 h-4"></i></button>`;
+                    }
                 }
-                rowHTML += `<td class="text-center">${actionBtn}</td>`;
+
+                if (item.status === 'archived') {
+                    actionBtn += `<button onclick="window.restoreLead('${item.id}')" class="p-1 text-gray-500 hover:text-emerald-400 transition" title="Restore"><i data-feather="refresh-cw" class="w-4 h-4"></i></button>`;
+                } else {
+                    actionBtn += `<button onclick="window.archiveLead('${item.id}')" class="p-1 text-gray-500 hover:text-red-400 transition" title="Archive"><i data-feather="trash-2" class="w-4 h-4"></i></button>`;
+                }
+                
+                // CRITICAL FIX: Wrap in a flex row to guarantee side-by-side on mobile
+                rowHTML += `<td><div class="flex flex-row items-center justify-end md:justify-center gap-3">${actionBtn}</div></td>`;
 
                 tr.innerHTML = rowHTML;
                 tbody.appendChild(tr);
@@ -1116,6 +1179,109 @@
 
         window.saveNote = async (id, note) => {
             await updateDoc(doc(db, "leads", id), { note: note });
+        };
+
+        // --- VIEW NEGATIVE FEEDBACK ---
+        window.viewFeedback = (id) => {
+            const leadObj = clientLeads.find(l => l.id === id);
+            if (!leadObj || !leadObj.negativeFeedback) return;
+            
+            // Insert text
+            document.getElementById('feedbackContent').textContent = `"${leadObj.negativeFeedback}"`;
+            
+            // Format Date
+            let dateStr = "Recently";
+            if (leadObj.feedbackSubmittedAt) {
+                const d = new Date(leadObj.feedbackSubmittedAt.seconds * 1000);
+                dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+            }
+            document.getElementById('feedbackDate').textContent = dateStr;
+            
+            // Open Modal
+            const modal = document.getElementById('feedbackModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            feather.replace();
+        };
+
+        window.closeFeedbackModal = (e) => {
+            const modal = document.getElementById('feedbackModal');
+            if (!e || e.target === modal) {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+        };
+
+        // --- TRIGGER REVIEW REQUEST ---
+        window.triggerReviewRequest = async (id) => {
+            // Find the lead data
+            const leadObj = clientLeads.find(l => l.id === id);
+            if (!leadObj || !leadObj.lead) return;
+
+            // Extract Email (case-insensitive check)
+            const emailKey = Object.keys(leadObj.lead).find(k => k.toLowerCase() === 'email');
+            const leadEmail = emailKey ? leadObj.lead[emailKey] : null;
+
+            if (!leadEmail) {
+                // We don't have an email to send it to. Show a custom alert using your existing modal.
+                window.customAlert ? window.customAlert("Cannot send review request: This lead did not provide an email address.", "No Email Found") : alert("No email provided by this lead.");
+                return;
+            }
+
+            // Extract Name (for personalization)
+            const nameKey = Object.keys(leadObj.lead).find(k => k.toLowerCase() === 'name');
+            const leadName = nameKey ? leadObj.lead[nameKey] : 'Valued Customer';
+            
+            // Extract Page Source (for internal feedback routing)
+            const pageSource = leadObj.lead['_page_source'] || leadObj.lead['source'] || 'Website';
+
+            // Confirm Action
+            const confirmed = window.customConfirm ? 
+                await window.customConfirm(`Send a 5-Star Review Request to <br><b class="text-white">${leadEmail}</b>?<br><br><span class="text-xs text-gray-500">This will deduct 1 email credit from your daily limit.</span>`, "Send Review Request") : 
+                confirm("Send review request to " + leadEmail + "?");
+            
+            if (!confirmed) return;
+
+            // Visual Loading State
+            const row = document.querySelector(`button[onclick*="triggerReviewRequest('${id}')"]`).closest('tr');
+            row.style.opacity = '0.5';
+            row.style.pointerEvents = 'none';
+
+            try {
+                // Get Auth Token
+                const idToken = await authInstance.currentUser.getIdToken(true);
+
+                // Hit the Backend
+                const response = await fetch(`${API_BASE}/sendReviewRequest`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${idToken}`
+                    },
+                    body: JSON.stringify({
+                        leadId: id,
+                        leadEmail: leadEmail,
+                        leadName: leadName,
+                        pageSource: pageSource
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    // Success! Firestore listener will automatically update the row to REVIEW_SENT and restore opacity.
+                    // We can show a toast here if you have a toast function, or just let the UI update silently.
+                } else {
+                    // Revert opacity on failure
+                    row.style.opacity = '1';
+                    row.style.pointerEvents = 'auto';
+                    window.customAlert ? window.customAlert(data.error || "Failed to send request.", "Error") : alert(data.error);
+                }
+            } catch (error) {
+                row.style.opacity = '1';
+                row.style.pointerEvents = 'auto';
+                window.customAlert ? window.customAlert("Network error: " + error.message, "Error") : alert(error.message);
+            }
         };
 
         // Sorting
@@ -1423,6 +1589,47 @@
         // ==========================================
         // HELPERS
         // ==========================================
+        
+        // Custom Confirmation Promise Modal
+        window.customConfirm = (message, title) => {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('confirmModal');
+                const titleEl = document.getElementById('confirmTitle');
+                const msgEl = document.getElementById('confirmMessage');
+                const btnCancel = document.getElementById('confirmCancelBtn');
+                const btnProceed = document.getElementById('confirmProceedBtn');
+
+                if (title) titleEl.innerHTML = title;
+                if (message) msgEl.innerHTML = message;
+
+                // Toggles Tailwind classes instead of missing CSS
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+
+                // Cleanup and resolve
+                const cleanup = (result) => {
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                    btnCancel.removeEventListener('click', onCancel);
+                    btnProceed.removeEventListener('click', onProceed);
+                    resolve(result);
+                };
+
+                const onCancel = () => cleanup(false);
+                const onProceed = () => cleanup(true);
+
+                btnCancel.addEventListener('click', onCancel);
+                btnProceed.addEventListener('click', onProceed);
+                
+                // Allow clicking outside to cancel
+                window.closeConfirmModal = (e) => {
+                    if (e.target === modal) cleanup(false);
+                };
+                
+                feather.replace();
+            });
+        };
+
         function linkify(text) {
             if (!text) return text;
             var urlRegex = /(https?:\/\/[^\s]+)/g;
