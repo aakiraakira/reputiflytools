@@ -1197,6 +1197,19 @@
         // ==========================================
         // LEADS: REALTIME LISTENER
         // ==========================================
+
+
+        // ==========================================
+        // UTILS
+        // ==========================================
+        function linkify(text) {
+            if (!text) return '';
+            const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+            return text.replace(urlRegex, function (url) {
+                return '<a href="' + url + '" target="_blank" class="text-blue-400 hover:underline" onclick="event.stopPropagation()">' + url + '</a>';
+            });
+        }
+
         function startLeadsListener() {
             const q = query(collection(db, "leads"), orderBy("createdAt", "desc"));
             onSnapshot(q, (snapshot) => {
@@ -1412,22 +1425,33 @@
                 let badgeClass = 'badge-new';
                 if (item.status === 'junk') badgeClass = 'badge-junk';
                 if (item.status === 'contacted') badgeClass = 'badge-contacted';
+                if (item.status === 'archived') badgeClass = 'bg-gray-700 text-gray-300 border border-gray-600'; // Custom grey style
 
                 let rowHTML = `<td class="font-mono text-[11px] text-gray-500">${dateStr}</td>`;
                 colArray.forEach(col => {
                     let val = item.lead ? (item.lead[col] || '-') : '-';
+                    // Escape HTML first
+                    val = val.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+                    // Linkify
+                    val = linkify(val);
+
                     if (col.toLowerCase() === 'email') val = `<span class="text-white">${val}</span>`;
                     if (col.toLowerCase() === 'name') val = `<span class="font-bold text-white">${val}</span>`;
                     rowHTML += `<td class="text-sm text-gray-400">${val}</td>`;
                 });
 
                 const currentStatus = item.status || 'new';
-                const nextStatusMap = { 'new': 'contacted', 'contacted': 'junk', 'junk': 'new' };
+                const nextStatusMap = { 'new': 'contacted', 'contacted': 'junk', 'junk': 'new', 'archived': 'new' };
                 const nextStatus = nextStatusMap[currentStatus] || 'new';
+
+                // For archived in admin view, maybe just let them toggle it back to new?
+                // Or if it's archived, maybe it shouldn't be easily toggleable via badge click?
+                // User asked for "Gray badge", didn't specify interaction. 
+                // Ensuring it has a valid class (badge-click is generic)
 
                 rowHTML += `
                     <td>
-                        <span class="badge badge-click ${badgeClass}" onclick="window.updateStatus('${item.id}', '${nextStatus}')" title="Click to mark as ${nextStatus}">${currentStatus}</span>
+                        <span class="badge badge-click ${badgeClass}" onclick="window.updateStatus('${item.id}', '${nextStatus}')" title="Click to mark as ${nextStatus}">${currentStatus.toUpperCase()}</span>
                     </td>
                     <td>
                         <input type="text" class="note-input" placeholder="Add note..."
