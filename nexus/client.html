@@ -14,6 +14,7 @@
         rel="stylesheet">
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
 
     <style>
         :root {
@@ -82,6 +83,16 @@
             white-space: nowrap;
             pointer-events: none;
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+        select.form-input option, select#tabs-dropdown option, optgroup {
+            background-color: #111018; /* Deep dark bg */
+            color: #ffffff;
+            padding: 10px;
+        }
+        
+        /* Fix for Table Visibility - ensure empty cells don't collapse */
+        .data-table td {
+             min-height: 40px;
         }
 
         .has-tooltip:hover .tooltip-content {
@@ -510,11 +521,31 @@
                 <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png"
                     class="h-6 w-auto brightness-125" alt="Reputifly">
                 <div class="h-5 w-px bg-white/10"></div>
-                <div class="flex items-center gap-1.5">
-                    <button id="tab-leads" class="nav-tab active" onclick="window.switchTab('leads')">
-                        <i data-feather="inbox" class="w-3.5 h-3.5 inline -mt-0.5 md:mr-1"></i><span
-                            class="hidden sm:inline">Leads</span>
+                
+                <div class="flex items-center gap-2 relative">
+                    <button onclick="window.toggleTabsPopup()" 
+                        class="flex items-center gap-3 bg-[#0B0A14] hover:bg-[#1A1A24] border border-white/20 text-white text-sm font-bold py-2.5 px-5 rounded-full shadow-lg transition group min-w-[200px] justify-between">
+                        <span id="current-tab-label" class="truncate">Select Data Source</span>
+                        <i data-feather="chevron-down" class="w-4 h-4 text-gray-500 group-hover:text-purple-400 transition"></i>
                     </button>
+
+                    <div id="tabs-popup" class="hidden absolute top-full left-0 mt-3 w-72 bg-[#111018] border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] backdrop-blur-xl z-50 overflow-hidden transform origin-top-left transition-all duration-200">
+                        
+                        <div class="p-3 border-b border-white/5 bg-white/5 flex items-center justify-between">
+                            <span class="text-[10px] uppercase font-bold text-gray-500 tracking-wider pl-2">Data Sources</span>
+                            <button onclick="window.promptNewTab()" class="p-1.5 rounded-lg hover:bg-purple-500/20 text-purple-400 transition" title="New Folder">
+                                <i data-feather="plus" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+
+                        <div id="tabs-popup-list" class="max-h-[300px] overflow-y-auto p-2 space-y-1">
+                            </div>
+                    </div>
+                </div>
+
+                <div class="h-5 w-px bg-white/10 mx-3"></div>
+
+                <div class="flex items-center gap-1.5">
                     <button id="tab-analytics" class="nav-tab" onclick="window.switchTab('analytics')">
                         <i data-feather="bar-chart-2" class="w-3.5 h-3.5 inline -mt-0.5 md:mr-1"></i><span
                             class="hidden sm:inline">Analytics</span>
@@ -541,16 +572,15 @@
         <div id="view-leads" class="view-section active">
 
             <!-- HEADER -->
-            <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-5">
-                <div>
-                    <h1 id="welcome-name" class="text-2xl font-bold text-white brand-font">Your Leads</h1>
-                    <p class="text-gray-500 text-sm mt-1">Real-time view of all your incoming leads.</p>
-                </div>
-                <div class="flex items-center gap-5">
-                    <div class="hidden sm:block">
-                        <div class="stat-mini-value text-sm text-gray-400" id="stat-last-active" style="font-size:15px">
-                            —</div>
-                        <div class="stat-mini-label">Recent Activity</div>
+            <div class="flex flex-col gap-6 mb-6">
+                <div class="flex items-center gap-3">
+                    <div id="folder-icon-container" class="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center flex-shrink-0">
+                        <i data-feather="inbox" class="w-5 h-5 text-purple-400"></i>
+                    </div>
+                    <div class="min-w-0 flex-1"> <h1 id="current-tab-title" class="text-2xl font-bold text-white brand-font truncate">All Leads</h1>
+                        <div class="flex items-center gap-2 text-sm text-gray-500">
+                            <span id="current-tab-desc" class="truncate max-w-[280px] sm:max-w-xl block">Master view of all data sources</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -576,45 +606,54 @@
                     </div>
                 </div>
 
-                <div class="px-5 py-3 border-b border-white/5">
-                    <!-- Filter Scroll Container -->
-                    <div class="flex items-center gap-2 overflow-x-auto no-scrollbar w-full pb-1">
-                        <button class="filter-btn active flex-shrink-0" id="btn-all" onclick="setFilter('all')">All
-                            <span class="count-badge" id="count-all">0</span></button>
-                        <button class="filter-btn flex-shrink-0" id="btn-new" onclick="setFilter('new')">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> New <span class="count-badge"
-                                id="count-new">0</span></button>
-                        <button class="filter-btn flex-shrink-0" id="btn-contacted" onclick="setFilter('contacted')">
-                            <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span> Contacted <span
-                                class="count-badge" id="count-contacted">0</span></button>
-                        <button class="filter-btn flex-shrink-0" id="btn-junk" onclick="setFilter('junk')">
-                            <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Junk <span class="count-badge"
-                                id="count-junk">0</span></button>
-                        <button class="filter-btn flex-shrink-0" id="btn-archived" onclick="setFilter('archived')">
-                            <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span> Archived <span
-                                class="count-badge" id="count-archived">0</span></button>
+                <div class="px-6 py-4 border-b border-white/5 flex items-center justify-between gap-4 overflow-visible relative z-30 flex-wrap sm:flex-nowrap">
+                    
+                    <div class="flex items-center gap-3 flex-shrink-0">
+                        <button class="filter-btn gap-2" id="btn-add-filter" onclick="openFilterModal()">
+                            <i data-feather="filter" class="w-3 h-3"></i> Filter
+                        </button>
 
-                        <!-- Dynamic Filter Add Button -->
-                        <div class="relative inline-block ml-2 flex-shrink-0">
-                            <button class="filter-btn" id="btn-add-filter" onclick="openFilterModal()"
-                                style="padding: 6px 10px;">
-                                <i data-feather="plus" class="w-4 h-4"></i>
+                        <div id="active-filter-pill"
+                            class="hidden flex items-center gap-2 bg-purple-500/20 text-purple-300 px-3 py-1 rounded-full text-xs border border-purple-500/30 animate-fade-in whitespace-nowrap">
+                            <span id="active-filter-text" class="font-medium max-w-[100px] truncate"></span>
+                            <button onclick="clearCustomFilter()" class="hover:text-white flex items-center justify-center p-0.5 rounded-full hover:bg-white/10 transition">
+                                <i data-feather="x" class="w-3 h-3"></i>
                             </button>
                         </div>
+                    </div>
 
-                        <!-- Active Filter Pill (Hidden by default) -->
-                        <div id="active-filter-pill"
-                            class="hidden flex items-center gap-2 bg-purple-500/20 text-purple-300 px-3 py-1 rounded-full text-xs border border-purple-500/30 ml-2 flex-shrink-0">
-                            <span id="active-filter-text"></span>
-                            <button onclick="clearCustomFilter()" class="hover:text-white"><i data-feather="x"
-                                    class="w-3 h-3"></i></button>
-                        </div>
-
-                        <!-- Export Button (Now Scrollable) -->
-                        <button id="btn-export"
-                            class="btn-hero-glass text-xs py-1.5 px-4 flex-shrink-0 ml-auto sm:ml-2">
-                            <i data-feather="download" class="w-3 h-3 mr-1 inline"></i> Export CSV
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        
+                        <button id="btn-archive-toggle" onclick="window.toggleArchiveMode()" 
+                            class="btn-hero-glass px-3 bg-white/5 hover:bg-white/10 border-white/10 text-gray-400 hover:text-white relative" 
+                            title="View Archive">
+                            <i data-feather="archive" class="w-4 h-4"></i>
+                            <div id="archive-indicator" class="hidden absolute top-2 right-2 w-1.5 h-1.5 bg-red-500 rounded-full ring-2 ring-[#111018]"></div>
                         </button>
+
+                        <div class="relative">
+                            <button onclick="document.getElementById('settings-dropdown').classList.toggle('hidden')" 
+                                class="btn-hero-glass px-3 bg-white/5 hover:bg-white/10 border-white/10 text-gray-400 hover:text-white"
+                                title="Data Settings">
+                                <i data-feather="settings" class="w-4 h-4"></i>
+                            </button>
+                            
+                            <div id="settings-dropdown" class="hidden absolute right-0 top-full mt-2 w-48 bg-[#111018] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] backdrop-blur-xl z-50 overflow-hidden py-1">
+                                <button onclick="window.exportCSV(); document.getElementById('settings-dropdown').classList.add('hidden')" 
+                                    class="w-full text-left px-4 py-2.5 text-xs font-medium text-gray-300 hover:text-white hover:bg-white/5 flex items-center gap-2 transition">
+                                    <i data-feather="download" class="w-3.5 h-3.5"></i> Export CSV
+                                </button>
+                                <button onclick="window.openImportModal(); document.getElementById('settings-dropdown').classList.add('hidden')" 
+                                    class="w-full text-left px-4 py-2.5 text-xs font-medium text-gray-300 hover:text-white hover:bg-white/5 flex items-center gap-2 transition">
+                                    <i data-feather="upload" class="w-3.5 h-3.5"></i> Import CSV
+                                </button>
+                                <div class="h-px bg-white/10 my-1 mx-2"></div>
+                                <button onclick="window.clearCurrentTab(); document.getElementById('settings-dropdown').classList.add('hidden')" 
+                                    class="w-full text-left px-4 py-2.5 text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 flex items-center gap-2 transition">
+                                    <i data-feather="trash-2" class="w-3.5 h-3.5"></i> Clear Current Tab
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -765,25 +804,37 @@
                     class="gradient-text font-bold">Reputifly</span></p>
         </div>
     </main>
-    <div id="confirmModal" class="fixed inset-0 z-[9999] hidden items-center justify-center bg-black/80 backdrop-blur-sm transition-opacity" onclick="closeConfirmModal(event)">
-        <div class="bg-[#111018] rounded-2xl max-w-sm w-full mx-4 border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-6 transform transition-all" onclick="event.stopPropagation()">
+    <div id="confirmModal"
+        class="fixed inset-0 z-[9999] hidden items-center justify-center bg-black/80 backdrop-blur-sm transition-opacity"
+        onclick="closeConfirmModal(event)">
+        <div class="bg-[#111018] rounded-2xl max-w-sm w-full mx-4 border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-6 transform transition-all"
+            onclick="event.stopPropagation()">
             <div class="text-center">
-                <div class="w-16 h-16 rounded-full bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center mx-auto mb-4 shadow-[0_0_20px_rgba(234,179,8,0.2)]">
+                <div
+                    class="w-16 h-16 rounded-full bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center mx-auto mb-4 shadow-[0_0_20px_rgba(234,179,8,0.2)]">
                     <i data-feather="star" class="w-8 h-8 text-yellow-400 fill-current"></i>
                 </div>
-                <h3 id="confirmTitle" class="text-xl font-bold text-white mb-2 font-['Space_Grotesk']">Send Review Request?</h3>
+                <h3 id="confirmTitle" class="text-xl font-bold text-white mb-2 font-['Space_Grotesk']">Send Review
+                    Request?</h3>
                 <p id="confirmMessage" class="text-sm text-gray-400 mb-6 leading-relaxed">Are you sure?</p>
                 <div class="flex gap-3">
-                    <button id="confirmCancelBtn" class="flex-1 py-3 px-4 bg-white/5 hover:bg-white/10 text-white text-sm font-bold rounded-xl transition border border-white/5">Cancel</button>
-                    <button id="confirmProceedBtn" class="flex-1 py-3 px-4 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 text-white text-sm font-bold rounded-xl shadow-lg transition transform hover:-translate-y-0.5">Send Request</button>
+                    <button id="confirmCancelBtn"
+                        class="flex-1 py-3 px-4 bg-white/5 hover:bg-white/10 text-white text-sm font-bold rounded-xl transition border border-white/5">Cancel</button>
+                    <button id="confirmProceedBtn"
+                        class="flex-1 py-3 px-4 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 text-white text-sm font-bold rounded-xl shadow-lg transition transform hover:-translate-y-0.5">Send
+                        Request</button>
                 </div>
             </div>
         </div>
     </div>
-    <div id="feedbackModal" class="fixed inset-0 z-[9999] hidden items-center justify-center bg-black/80 backdrop-blur-sm transition-opacity" onclick="closeFeedbackModal(event)">
-        <div class="bg-[#111018] rounded-2xl max-w-md w-full mx-4 border border-red-500/20 shadow-[0_20px_50px_rgba(239,68,68,0.15)] p-6 transform transition-all" onclick="event.stopPropagation()">
+    <div id="feedbackModal"
+        class="fixed inset-0 z-[9999] hidden items-center justify-center bg-black/80 backdrop-blur-sm transition-opacity"
+        onclick="closeFeedbackModal(event)">
+        <div class="bg-[#111018] rounded-2xl max-w-md w-full mx-4 border border-red-500/20 shadow-[0_20px_50px_rgba(239,68,68,0.15)] p-6 transform transition-all"
+            onclick="event.stopPropagation()">
             <div class="flex items-center gap-3 mb-4 pb-4 border-b border-white/5">
-                <div class="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                <div
+                    class="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center">
                     <i data-feather="alert-triangle" class="w-5 h-5 text-red-400"></i>
                 </div>
                 <div>
@@ -794,14 +845,118 @@
             <div class="bg-black/30 rounded-xl p-4 border border-white/5 mb-6">
                 <p id="feedbackContent" class="text-sm text-gray-300 leading-relaxed italic">"..."</p>
             </div>
-            <button onclick="closeFeedbackModal()" class="w-full py-3 bg-white/5 hover:bg-white/10 text-white text-sm font-bold rounded-xl transition border border-white/5">Close</button>
+            <button onclick="closeFeedbackModal()"
+                class="w-full py-3 bg-white/5 hover:bg-white/10 text-white text-sm font-bold rounded-xl transition border border-white/5">Close</button>
+        </div>
+    </div>
+    <div id="create-folder-modal"
+        class="fixed inset-0 z-[10000] hidden items-center justify-center bg-black/90 backdrop-blur-md transition-opacity"
+        onclick="if(event.target === this) window.closeCreateFolderModal()">
+        
+        <div class="glass-panel w-full max-w-[340px] mx-6 p-1 transform transition-all scale-100 shadow-2xl rounded-3xl overflow-hidden relative">
+            <div class="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-purple-500/10 to-blue-500/10 pointer-events-none"></div>
+
+            <div class="bg-[#0B0A14]/90 backdrop-blur-xl p-6 rounded-[20px] relative z-10">
+                <div class="text-center mb-6">
+                    <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-500/20 to-blue-500/20 border border-white/10 flex items-center justify-center mx-auto mb-3 shadow-[0_0_15px_rgba(168,85,247,0.15)]">
+                        <i data-feather="folder-plus" class="w-6 h-6 text-purple-300"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white font-['Space_Grotesk']">New Folder</h3>
+                    <p class="text-xs text-gray-500 mt-1">Organize your leads</p>
+                </div>
+                
+                <div class="space-y-4">
+                    <div class="relative group">
+                        <input type="text" id="create-folder-input" 
+                            class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-all text-center group-hover:border-white/20" 
+                            placeholder="e.g. VIP Clients" 
+                            autocomplete="off" 
+                            onkeyup="if(event.key === 'Enter') window.confirmCreateFolder()">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3 mt-2">
+                        <button onclick="window.closeCreateFolderModal()"
+                            class="py-3 bg-white/5 hover:bg-white/10 border border-white/5 text-gray-400 hover:text-white text-xs font-bold rounded-xl transition-all">
+                            Cancel
+                        </button>
+                        <button onclick="window.confirmCreateFolder()"
+                            class="py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-900/20 transition-all transform active:scale-95">
+                            Create
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- IMPORT MODAL -->
+    <div id="import-modal"
+        class="fixed inset-0 z-[9999] hidden flex items-center justify-center bg-black/90 backdrop-blur-md transition-opacity">
+        
+        <div class="glass-panel w-full max-w-[420px] mx-6 p-1 transform transition-all scale-100 shadow-2xl rounded-3xl overflow-hidden relative"
+             id="import-modal-content">
+             
+            <div class="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-purple-500/5 to-blue-500/5 pointer-events-none"></div>
+
+            <div class="bg-[#0B0A14]/95 backdrop-blur-xl p-8 rounded-[20px] relative z-10">
+                
+                <button onclick="window.closeImportModal()"
+                    class="absolute top-4 right-4 p-2 rounded-full hover:bg-white/5 text-gray-500 hover:text-white transition-colors">
+                    <i data-feather="x" class="w-4 h-4"></i>
+                </button>
+
+                <div class="text-center mb-8">
+                    <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 border border-white/10 flex items-center justify-center mx-auto mb-4 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+                        <i data-feather="upload-cloud" class="w-6 h-6 text-emerald-400"></i>
+                    </div>
+                    <h2 class="text-xl font-bold brand-font text-white">Import Data</h2>
+                    <p class="text-xs text-gray-500 mt-1">Supports CSV files (Max 500 rows)</p>
+                </div>
+
+                <div class="group relative border border-dashed border-white/10 bg-white/5 rounded-2xl p-8 text-center hover:border-emerald-500/30 hover:bg-white/10 transition-all cursor-pointer overflow-hidden"
+                    onclick="document.getElementById('csv-file').click()">
+                    
+                    <div id="upload-placeholder" class="space-y-3">
+                        <div class="mx-auto w-10 h-10 rounded-full bg-[#111018] border border-white/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+                             <i data-feather="plus" class="w-5 h-5 text-gray-400 group-hover:text-emerald-400"></i>
+                        </div>
+                        <div class="space-y-1">
+                            <p class="text-sm text-gray-200 font-semibold">Tap to Upload CSV</p>
+                            <p class="text-[10px] text-gray-500 uppercase tracking-wider">or drag and drop</p>
+                        </div>
+                    </div>
+
+                    <div id="upload-preview" class="hidden space-y-3">
+                        <div class="mx-auto w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                             <i data-feather="check" class="w-5 h-5 text-emerald-400"></i>
+                        </div>
+                        <div>
+                            <p id="file-name" class="text-sm text-white font-medium truncate px-4">filename.csv</p>
+                            <p id="row-count" class="text-xs text-emerald-400 mt-1 font-mono">0 rows ready</p>
+                        </div>
+                    </div>
+                    
+                    <input type="file" id="csv-file" class="hidden" accept=".csv" multiple
+                        onchange="window.handleFileSelect(this)">
+                </div>
+
+                <div class="mt-8">
+                    <button id="btn-process-import" class="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-bold rounded-xl shadow-lg shadow-emerald-900/20 transition-all transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
+                        onclick="window.processImport()" disabled>
+                        <span>Start Import</span>
+                        <i data-feather="arrow-right" class="w-4 h-4"></i>
+                    </button>
+                    <p id="import-msg" class="text-xs text-center mt-3 hidden"></p>
+                </div>
+            </div>
         </div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, query, orderBy, where, doc, updateDoc, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        import { getFirestore, collection, onSnapshot, query, orderBy, where, doc, updateDoc, deleteDoc, Timestamp, addDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyC9eUHEdAmV9qzHxpQe2en5WeOeRXiq10A",
@@ -817,10 +972,12 @@
         const db = getFirestore(app);
 
         const SUPER_ADMIN_EMAIL = "realjuliantung@gmail.com";
-        const API_BASE = "https://asia-southeast1-b2b-software.cloudfunctions.net"; // Added API Base
+        const API_BASE = "https://asia-southeast1-b2b-software.cloudfunctions.net"; 
         let clientEmail = null;
         let clientLeads = [];
-        let activeFilter = 'all'; // all, new, contacted, junk
+        let clientTabs = []; 
+        let activeTab = null; // Auto-selects first tab
+        let activeFilter = 'all';
         let customFilter = null; // { field: 'Source', value: 'Footer' }
         let sortOrder = 'desc'; // desc or asc
         let reviewFeatureEnabled = false; // Added Review State
@@ -828,6 +985,10 @@
         let statusChart = null;
         let chartRange = '7d';
         let calDate = new Date(); // Analytics calendar
+
+        // CSV Import State
+        let activeSource = 'api'; // 'api' or 'imported'
+        let csvData = [];
 
         // ==========================================
         // AUTH GATE
@@ -840,9 +1001,8 @@
             clientEmail = user.email;
             gate.style.display = 'none';
             document.getElementById('nav-email').textContent = clientEmail;
-            const name = clientEmail.split('@')[0].replace(/[._-]/g, ' ');
-            document.getElementById('welcome-name').textContent =
-                name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') + "'s Leads";
+            
+            // Name setting removed (now handled by Tab Title logic)
 
             startLeadsListener();
             startClientStatusListener(user.uid); // <--- Listen for Pause Status
@@ -852,13 +1012,68 @@
         // ==========================================
         // TAB SWITCHING
         // ==========================================
-        window.switchTab = (tab) => {
+        window.switchTab = (tabName) => {
+            // 1. Analytics View Switch
+            if (tabName === 'analytics') {
+                document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
+                
+                const analyticsView = document.getElementById('view-analytics');
+                if (analyticsView) analyticsView.classList.add('active');
+                
+                const analyticsTab = document.getElementById('tab-analytics');
+                if (analyticsTab) analyticsTab.classList.add('active');
+                
+                if (typeof renderAnalytics === 'function') renderAnalytics();
+                return;
+            }
+
+            // 2. Data View Switch
+            activeTab = tabName;
+            
+            // UI Updates: Show Leads View
             document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
-            document.getElementById('tab-leads').classList.remove('active');
-            document.getElementById('tab-analytics').classList.remove('active');
-            document.getElementById(`tab-${tab}`).classList.add('active');
-            document.getElementById(`view-${tab}`).classList.add('active');
-            if (tab === 'analytics') renderAnalytics();
+            const leadsView = document.getElementById('view-leads');
+            if (leadsView) leadsView.classList.add('active');
+
+            // Deactivate Analytics Tab Style
+            const analyticsTab = document.getElementById('tab-analytics');
+            if (analyticsTab) analyticsTab.classList.remove('active');
+            
+            // Update Header Texts (Safe Check)
+            const titleEl = document.getElementById('current-tab-title');
+            const descEl = document.getElementById('current-tab-desc');
+            const folderIcon = document.getElementById('folder-icon-container');
+            const labelEl = document.getElementById('current-tab-label');
+
+            let displayText = "Select Data";
+
+            if (clientTabs.includes(tabName)) {
+                // Custom Folder
+                displayText = tabName;
+                if(titleEl) titleEl.textContent = tabName;
+                if(descEl) descEl.textContent = 'Imported Lead Batch';
+                if(folderIcon) folderIcon.innerHTML = '<i data-feather="folder" class="w-5 h-5 text-blue-400"></i>';
+            } 
+            else if (tabName && tabName.includes(',')) {
+                // Form Cluster
+                const keys = tabName.split(',');
+                const name = getFormNameFromKeys(keys);
+                displayText = name;
+                if(titleEl) titleEl.textContent = name;
+                if(descEl) descEl.textContent = 'Fields: ' + keys.join(', ');
+                if(folderIcon) folderIcon.innerHTML = '<i data-feather="layout" class="w-5 h-5 text-purple-400"></i>';
+            }
+
+            // Update Popup Label
+            if(labelEl) labelEl.textContent = displayText;
+
+            // Reset Archive View when switching tabs
+            if(activeFilter === 'archived' && typeof window.toggleArchiveMode === 'function') window.toggleArchiveMode();
+
+            // Re-render
+            if (typeof renderTable === 'function') renderTable();
+            if (typeof renderTabsUI === 'function') renderTabsUI(); // Re-render popup to update active state
+            if (window.feather) feather.replace();
         };
 
         // ==========================================
@@ -882,6 +1097,12 @@
                 if (docSnap.exists()) {
                     const data = docSnap.data();
 
+                    // 0. LOAD TABS
+                    if (data.tabs && Array.isArray(data.tabs)) {
+                        clientTabs = ['General', ...data.tabs.filter(t => t !== 'General')];
+                    }
+                    renderTabsUI();
+
                     // 1. PAUSE CHECK
                     if (data.status === 'paused') {
                         if (overlay) overlay.style.display = 'flex';
@@ -904,10 +1125,10 @@
                     }
 
                     const limit = data.customDailyLimit || 50;
-                    
+
                     // 3. REVIEW FEATURE CHECK
                     reviewFeatureEnabled = !!data.reviewFeatureEnabled;
-                    
+
                     // CRITICAL FIX: Force the table to re-draw now that it knows the feature is enabled!
                     if (typeof renderTable === 'function') {
                         renderTable();
@@ -974,25 +1195,15 @@
         // COUNTS (Reduced logic for simplified UI)
         // ==========================================
         function updateCounts() {
-            // Count active (non-archived) for "All"
-            const allActive = clientLeads.filter(l => l.status !== 'archived').length;
-            const newCount = clientLeads.filter(l => (l.status === 'new' || !l.status)).length;
-            const contacted = clientLeads.filter(l => l.status === 'contacted').length;
-            const junk = clientLeads.filter(l => l.status === 'junk').length;
-            const archived = clientLeads.filter(l => l.status === 'archived').length;
-
-            document.getElementById('count-all').textContent = allActive;
-            document.getElementById('count-new').textContent = newCount;
-            document.getElementById('count-contacted').textContent = contacted;
-            document.getElementById('count-junk').textContent = junk;
-            if (document.getElementById('count-archived')) document.getElementById('count-archived').textContent = archived;
-
-            if (clientLeads.length > 0 && clientLeads[0].createdAt) {
-                const d = new Date(clientLeads[0].createdAt.seconds * 1000);
-                // Last active: "Oct 24, 2:30 PM"
-                document.getElementById('stat-last-active').textContent = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-            } else {
-                document.getElementById('stat-last-active').textContent = '—';
+            // SAFE UPDATE: Check if element exists before setting text
+            const lastActiveEl = document.getElementById('stat-last-active');
+            if (lastActiveEl) {
+                if (clientLeads.length > 0 && clientLeads[0].createdAt) {
+                    const d = new Date(clientLeads[0].createdAt.seconds * 1000);
+                    lastActiveEl.textContent = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                } else {
+                    lastActiveEl.textContent = '—';
+                }
             }
         }
 
@@ -1010,15 +1221,34 @@
         function getFilteredLeads() {
             let filtered = clientLeads;
 
-            // 1. Status Filter
-            // 1. Status Filter
-            if (activeFilter === 'all') {
-                filtered = filtered.filter(l => l.status !== 'archived' && l.status !== 'junk');
-            } else {
-                filtered = filtered.filter(l => (l.status || 'new') === activeFilter);
+            // 1. TABS LOGIC (Dropdown Selection)
+            if (!activeTab) {
+                // Return empty if initializing or no data found yet
+                return []; 
+            }
+            
+            if (clientTabs.includes(activeTab)) {
+                // CASE A: Custom Import Folder
+                filtered = filtered.filter(l => l.tabName === activeTab);
+            } 
+            else {
+                // CASE B: Form Signature (API Leads)
+                // Filter where source is NOT 'import' AND signature matches
+                filtered = filtered.filter(l => {
+                    if (l.source === 'import') return false; 
+                    if (!l.lead) return false;
+                    return getFormSignature(l.lead) === activeTab;
+                });
             }
 
-            // 2. Custom Field Filter
+            // 2. ARCHIVE STATUS FILTER
+            if (activeFilter === 'all') {
+                filtered = filtered.filter(l => l.status !== 'archived');
+            } else if (activeFilter === 'archived') {
+                filtered = filtered.filter(l => l.status === 'archived');
+            }
+
+            // 3. CUSTOM FIELD FILTER (Popups)
             if (customFilter) {
                 filtered = filtered.filter(l => {
                     const val = l.lead && l.lead[customFilter.field];
@@ -1026,15 +1256,15 @@
                 });
             }
 
-            // 3. Sorting
+            // 4. SORTING
             filtered.sort((a, b) => {
                 const dateA = a.createdAt ? a.createdAt.seconds : 0;
                 const dateB = b.createdAt ? b.createdAt.seconds : 0;
                 return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
             });
+
             return filtered;
         }
-
         // ==========================================
         // TABLE
         // ==========================================
@@ -1045,14 +1275,15 @@
             const filtered = getFilteredLeads();
 
             if (filtered.length === 0) {
-                const msg = activeFilter === 'all' ? "When your forms start generating leads, they'll appear here." : `No leads with status "${activeFilter}".`;
+                const msg = activeFilter === 'all' ? "When your forms start generating leads, they'll appear here." : "No archived leads found.";
                 tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon"><i data-feather="inbox" class="w-6 h-6 text-gray-600"></i></div><h3 class="text-base font-bold text-gray-400 brand-font mb-1">No Leads Found</h3><p class="text-sm text-gray-500 max-w-xs mx-auto">${msg}</p></div></td></tr>`;
                 feather.replace(); return;
             }
 
-            // Dynamic Columns
+            // Dynamic Columns (Based on FILTERED data only)
             let columns = new Set();
-            clientLeads.forEach(lead => { if (lead.lead) Object.keys(lead.lead).forEach(k => columns.add(k)); });
+            // FIX: Use 'filtered' instead of 'clientLeads' to ensure columns match the current tab
+            filtered.forEach(lead => { if (lead.lead) Object.keys(lead.lead).forEach(k => columns.add(k)); });
             let colArray = Array.from(columns);
             const priority = ['name', 'email', 'phone'];
             colArray.sort((a, b) => {
@@ -1063,9 +1294,9 @@
             });
 
             const arrow = sortOrder === 'desc' ? '<i data-feather="arrow-down" class="w-3 h-3 ml-1 inline text-gray-400"></i>' : '<i data-feather="arrow-up" class="w-3 h-3 ml-1 inline text-gray-400"></i>';
-            let headerHTML = `<tr><th onclick="window.toggleSort()" class="cursor-pointer hover:text-white transition select-none flex items-center gap-1 group">Date ${arrow}</th>`;
+            let headerHTML = `<tr><th onclick="window.toggleSort()" class="cursor-pointer hover:text-white transition select-none flex items-center gap-1 group w-32">Date ${arrow}</th>`;
             colArray.forEach(col => { headerHTML += `<th>${col.charAt(0).toUpperCase() + col.slice(1)}</th>`; });
-            headerHTML += `<th>Status</th><th>Notes</th><th class="text-center">Actions</th></tr>`;
+            headerHTML += `<th>Notes</th><th class="text-center w-20">Actions</th></tr>`;
             thead.innerHTML = headerHTML;
 
             filtered.forEach(item => {
@@ -1085,70 +1316,43 @@
                     val = linkify(val);
 
                     if (col.toLowerCase() === 'email') {
-                    val = `<span class="text-white block min-w-[120px]">${val}</span>`;
-                }
-                if (col.toLowerCase() === 'name') {
-                    let nameHtml = `<span class="font-semibold text-white whitespace-nowrap">${val}</span>`;
-                    if (item.negativeFeedback) {
-                        nameHtml += `<button onclick="window.viewFeedback('${item.id}')" class="flex-shrink-0 inline-flex items-center justify-center w-6 h-6 bg-red-500/10 border border-red-500/20 text-red-400 rounded-md hover:bg-red-500/20 transition animate-pulse" title="View Negative Feedback"><i data-feather="alert-triangle" class="w-3 h-3"></i></button>`;
+                        val = `<span class="text-white block min-w-[120px]">${val}</span>`;
                     }
-                    // Wrap in a flex container with a min-width to prevent mobile squishing
-                    val = `<div class="flex items-center gap-2 min-w-[140px]">${nameHtml}</div>`;
-                }
-                rowHTML += `<td class="text-sm text-gray-400">${val}</td>`;
+                    else if (col.toLowerCase() === 'name') {
+                        let nameHtml = `<span class="font-semibold text-white whitespace-nowrap">${val}</span>`;
+                        if (item.negativeFeedback) {
+                            nameHtml += `<button onclick="window.viewFeedback('${item.id}')" class="flex-shrink-0 inline-flex items-center justify-center w-6 h-6 bg-red-500/10 border border-red-500/20 text-red-400 rounded-md hover:bg-red-500/20 transition animate-pulse" title="View Negative Feedback"><i data-feather="alert-triangle" class="w-3 h-3"></i></button>`;
+                        }
+                        val = `<div class="flex items-center gap-2 min-w-[140px]">${nameHtml}</div>`;
+                    } 
+                    else {
+                        // MOBILE TRUNCATION LOGIC: 
+                        // Show shortened text on mobile, click to expand. Desktop shows full.
+                        // We use group to make the whole cell interactive if needed
+                        val = `<div class="truncate max-w-[120px] sm:max-w-none cursor-pointer transition-all hover:text-white" onclick="this.classList.toggle('truncate'); this.classList.toggle('whitespace-normal');" title="Tap to read more">
+                                ${val}
+                               </div>`;
+                    }
+                    rowHTML += `<td class="text-sm text-gray-400">${val}</td>`;
                 });
 
-                let currentStatus = (item.status || 'new').toUpperCase();
-                let badgeClass = 'badge-new';
-                let nextStatus = 'contacted';
-
-                if (currentStatus === 'CONTACTED') { badgeClass = 'badge-contacted'; nextStatus = 'junk'; }
-                else if (currentStatus === 'JUNK') { badgeClass = 'badge-junk'; nextStatus = 'new'; }
-                else if (currentStatus === 'ARCHIVED') { badgeClass = 'bg-gray-700 text-gray-300'; nextStatus = 'new'; }
-                else if (currentStatus === 'REVIEW_SENT') { badgeClass = 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'; nextStatus = 'contacted'; }
-
-                // Auto-Reply Indicator (Subtle Green Dot)
-                let autoReplyIcon = '';
-                if (item.autoReplySent) {
-                    autoReplyIcon = `
-                        <span class="ml-2 inline-block has-tooltip">
-                            <span class="block w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_rgba(16,185,129,0.5)]"></span>
-                            <span class="tooltip-content">Auto-Reply Sent</span>
-                        </span>`;
+                if (item.status === 'archived') {
+                    rowHTML += `<td><span class="badge bg-gray-700 text-gray-300">ARCHIVED</span></td>`;
+                } else {
+                    rowHTML += `<td><input type="text" class="note-input" placeholder="Add note..." value="${(item.note || '').replace(/"/g, '&quot;')}" onblur="window.saveNote('${item.id}', this.value)" /></td>`;
                 }
-
-                // Badge Click Action
-                let badgeAction = `onclick="window.updateStatus('${item.id}', '${nextStatus}')" title="Click to mark as ${nextStatus}"`;
-                if (currentStatus === 'ARCHIVED') {
-                    // If archived, maybe clicking badge just does nothing or restores? 
-                    // Let's make it intuitive: clicking 'ARCHIVED' badge could prompt to restore or do nothing.
-                    // For now, let's leave it as is, or maybe make it non-clickable?
-                    // User asked for specific "Archive" function.
-                    badgeAction = `style="cursor: default;"`;
-                }
-
-                rowHTML += `<td><span class="badge badge-click ${badgeClass}" ${badgeAction}>${currentStatus}</span>${autoReplyIcon}</td>`;
-                rowHTML += `<td><input type="text" class="note-input" placeholder="Add note..." value="${(item.note || '').replace(/"/g, '&quot;')}" onblur="window.saveNote('${item.id}', this.value)" /></td>`;
 
                 // Actions Column
                 let actionBtn = '';
-                
-                if (reviewFeatureEnabled && item.status !== 'archived') {
-                    if (currentStatus === 'REVIEW_SENT') {
-                         actionBtn += `<button class="p-1 text-yellow-500/50 cursor-not-allowed transition" title="Review Already Sent"><i data-feather="star" class="w-4 h-4 fill-current"></i></button>`;
-                    } else {
-                         actionBtn += `<button onclick="window.triggerReviewRequest('${item.id}')" class="p-1 text-gray-500 hover:text-yellow-400 transition" title="Send 5-Star Review Request"><i data-feather="star" class="w-4 h-4"></i></button>`;
-                    }
-                }
 
                 if (item.status === 'archived') {
-                    actionBtn += `<button onclick="window.restoreLead('${item.id}')" class="p-1 text-gray-500 hover:text-emerald-400 transition" title="Restore"><i data-feather="refresh-cw" class="w-4 h-4"></i></button>`;
+                    actionBtn += `<button onclick="window.restoreLead('${item.id}')" class="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 transition" title="Restore"><i data-feather="refresh-cw" class="w-4 h-4"></i></button>`;
                 } else {
-                    actionBtn += `<button onclick="window.archiveLead('${item.id}')" class="p-1 text-gray-500 hover:text-red-400 transition" title="Archive"><i data-feather="trash-2" class="w-4 h-4"></i></button>`;
+                    actionBtn += `<button onclick="window.archiveLead('${item.id}')" class="p-2 bg-white/5 text-gray-400 rounded-lg hover:bg-red-500/10 hover:text-red-400 transition" title="Archive"><i data-feather="archive" class="w-4 h-4"></i></button>`;
                 }
-                
+
                 // CRITICAL FIX: Wrap in a flex row to guarantee side-by-side on mobile
-                rowHTML += `<td><div class="flex flex-row items-center justify-end md:justify-center gap-3">${actionBtn}</div></td>`;
+                rowHTML += `<td><div class="flex flex-row items-center justify-center gap-3">${actionBtn}</div></td>`;
 
                 tr.innerHTML = rowHTML;
                 tbody.appendChild(tr);
@@ -1185,10 +1389,10 @@
         window.viewFeedback = (id) => {
             const leadObj = clientLeads.find(l => l.id === id);
             if (!leadObj || !leadObj.negativeFeedback) return;
-            
+
             // Insert text
             document.getElementById('feedbackContent').textContent = `"${leadObj.negativeFeedback}"`;
-            
+
             // Format Date
             let dateStr = "Recently";
             if (leadObj.feedbackSubmittedAt) {
@@ -1196,7 +1400,7 @@
                 dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
             }
             document.getElementById('feedbackDate').textContent = dateStr;
-            
+
             // Open Modal
             const modal = document.getElementById('feedbackModal');
             modal.classList.remove('hidden');
@@ -1231,15 +1435,15 @@
             // Extract Name (for personalization)
             const nameKey = Object.keys(leadObj.lead).find(k => k.toLowerCase() === 'name');
             const leadName = nameKey ? leadObj.lead[nameKey] : 'Valued Customer';
-            
+
             // Extract Page Source (for internal feedback routing)
             const pageSource = leadObj.lead['_page_source'] || leadObj.lead['source'] || 'Website';
 
             // Confirm Action
-            const confirmed = window.customConfirm ? 
-                await window.customConfirm(`Send a 5-Star Review Request to <br><b class="text-white">${leadEmail}</b>?<br><br><span class="text-xs text-gray-500">This will deduct 1 email credit from your daily limit.</span>`, "Send Review Request") : 
+            const confirmed = window.customConfirm ?
+                await window.customConfirm(`Send a 5-Star Review Request to <br><b class="text-white">${leadEmail}</b>?<br><br><span class="text-xs text-gray-500">This will deduct 1 email credit from your daily limit.</span>`, "Send Review Request") :
                 confirm("Send review request to " + leadEmail + "?");
-            
+
             if (!confirmed) return;
 
             // Visual Loading State
@@ -1302,14 +1506,28 @@
         };
 
         // Render Step 1: Fields
+        // Render Step 1: Fields (Updated with Search)
         function renderFilterFields() {
             document.getElementById('filter-modal-title').textContent = "Filter by...";
-            document.getElementById('filter-step-fields').classList.remove('hidden');
+            const containerDisplay = document.getElementById('filter-step-fields');
+            containerDisplay.classList.remove('hidden');
             document.getElementById('filter-step-values').classList.add('hidden');
             document.getElementById('filter-modal-footer').classList.add('hidden');
 
-            const container = document.getElementById('filter-step-fields');
-            container.innerHTML = '';
+            // Add Search Bar + Container
+            containerDisplay.innerHTML = `
+                <div class="sticky top-0 bg-[#16161f] z-10 pb-2 mb-2 pt-1 border-b border-white/5">
+                    <div class="relative">
+                        <i data-feather="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500"></i>
+                        <input type="text" id="field-search" placeholder="Search fields..." 
+                            class="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500/50 transition placeholder-gray-600"
+                            onkeyup="window.filterFieldList(this.value)">
+                    </div>
+                </div>
+                <div id="field-list-container" class="space-y-1"></div>
+            `;
+
+            const listContainer = document.getElementById('field-list-container');
 
             // Get Fields
             const fields = new Set();
@@ -1318,22 +1536,35 @@
             });
 
             if (fields.size === 0) {
-                container.innerHTML = `<div class="p-8 text-center text-gray-500 text-sm">No data found to filter.</div>`;
+                listContainer.innerHTML = `<div class="p-8 text-center text-gray-500 text-sm">No data found to filter.</div>`;
                 return;
             }
 
             Array.from(fields).sort().forEach(field => {
                 const btn = document.createElement('button');
-                btn.className = "w-full text-left px-4 py-3 rounded-lg hover:bg-white/10 text-gray-300 hover:text-white transition flex items-center justify-between group mb-1";
+                btn.className = "w-full text-left px-4 py-3 rounded-lg hover:bg-white/10 text-gray-300 hover:text-white transition flex items-center justify-between group";
                 btn.innerHTML = `
-                    <span class="font-medium capitalization">${field}</span>
+                    <span class="font-medium capitalization text-sm">${field}</span>
                     <i data-feather="chevron-right" class="w-4 h-4 text-gray-600 group-hover:text-white transition"></i>
                 `;
-                btn.onclick = () => selectFilterField(field);
-                container.appendChild(btn);
+                btn.onclick = () => window.selectFilterField(field);
+                listContainer.appendChild(btn);
             });
             feather.replace();
         }
+
+        window.filterFieldList = (query) => {
+            const term = query.toLowerCase();
+            const buttons = document.querySelectorAll('#field-list-container button');
+            buttons.forEach(btn => {
+                const text = btn.innerText.toLowerCase();
+                if (text.includes(term)) {
+                    btn.classList.remove('hidden');
+                } else {
+                    btn.classList.add('hidden');
+                }
+            });
+        };
 
         // Render Step 2: Values
         window.selectFilterField = (field) => {
@@ -1589,7 +1820,7 @@
         // ==========================================
         // HELPERS
         // ==========================================
-        
+
         // Custom Confirmation Promise Modal
         window.customConfirm = (message, title) => {
             return new Promise((resolve) => {
@@ -1602,32 +1833,305 @@
                 if (title) titleEl.innerHTML = title;
                 if (message) msgEl.innerHTML = message;
 
-                // Toggles Tailwind classes instead of missing CSS
+                // Reset handlers
+                const newCancel = btnCancel.cloneNode(true);
+                const newProceed = btnProceed.cloneNode(true);
+                btnCancel.parentNode.replaceChild(newCancel, btnCancel);
+                btnProceed.parentNode.replaceChild(newProceed, btnProceed);
+
                 modal.classList.remove('hidden');
                 modal.classList.add('flex');
 
-                // Cleanup and resolve
                 const cleanup = (result) => {
                     modal.classList.add('hidden');
                     modal.classList.remove('flex');
-                    btnCancel.removeEventListener('click', onCancel);
-                    btnProceed.removeEventListener('click', onProceed);
                     resolve(result);
                 };
 
-                const onCancel = () => cleanup(false);
-                const onProceed = () => cleanup(true);
+                newCancel.addEventListener('click', () => cleanup(false));
+                newProceed.addEventListener('click', () => cleanup(true));
 
-                btnCancel.addEventListener('click', onCancel);
-                btnProceed.addEventListener('click', onProceed);
-                
-                // Allow clicking outside to cancel
+                // Allow clicking outside
                 window.closeConfirmModal = (e) => {
                     if (e.target === modal) cleanup(false);
                 };
-                
-                feather.replace();
             });
+        };
+
+        // ==========================================
+        // CSV IMPORT LOGIC
+        // ==========================================
+        // Custom Prompt Promise Modal (Dynamic)
+        window.customPrompt = (title, defaultValue) => {
+            return new Promise((resolve) => {
+                const modal = document.createElement('div');
+                modal.className = "fixed inset-0 z-[10000] flex items-center justify-center bg-black/90 backdrop-blur-md transition-opacity";
+                
+                modal.innerHTML = `
+                    <div class="glass-panel w-full max-w-[340px] mx-6 p-1 shadow-2xl rounded-3xl overflow-hidden relative transform transition-all scale-100" onclick="event.stopPropagation()">
+                        <div class="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-blue-500/10 to-purple-500/10 pointer-events-none"></div>
+                        <div class="bg-[#0B0A14]/90 backdrop-blur-xl p-6 rounded-[20px] relative z-10">
+                            <div class="text-center mb-6">
+                                <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-500/20 to-purple-500/20 border border-white/10 flex items-center justify-center mx-auto mb-3 shadow-[0_0_15px_rgba(59,130,246,0.15)]">
+                                    <i data-feather="edit-2" class="w-6 h-6 text-blue-300"></i>
+                                </div>
+                                <h3 class="text-lg font-bold text-white font-['Space_Grotesk']">${title}</h3>
+                            </div>
+                            <div class="space-y-4">
+                                <input type="text" id="custom-prompt-input" value="${defaultValue}" 
+                                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all text-center" 
+                                    autocomplete="off">
+                                <div class="grid grid-cols-2 gap-3 mt-2">
+                                    <button id="prompt-cancel" class="py-3 bg-white/5 hover:bg-white/10 border border-white/5 text-gray-400 hover:text-white text-xs font-bold rounded-xl transition-all">Cancel</button>
+                                    <button id="prompt-confirm" class="py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-900/20 transition-all transform active:scale-95">Save</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                document.body.appendChild(modal);
+                if (window.feather) feather.replace();
+
+                const input = modal.querySelector('#custom-prompt-input');
+                setTimeout(() => { input.focus(); input.select(); }, 50);
+
+                const cleanup = (val) => {
+                    document.body.removeChild(modal);
+                    resolve(val);
+                };
+
+                modal.querySelector('#prompt-cancel').onclick = () => cleanup(null);
+                modal.querySelector('#prompt-confirm').onclick = () => cleanup(input.value);
+                input.onkeyup = (e) => { if (e.key === 'Enter') cleanup(input.value); };
+                modal.onclick = (e) => { if (e.target === modal) cleanup(null); };
+            });
+        };
+        window.activeSource = 'api';
+
+        window.switchSource = (source) => {
+            activeSource = source;
+
+            // Toggle Tab UI
+            const btnApi = document.getElementById('source-api');
+            const btnImport = document.getElementById('source-imported');
+
+            if (source === 'api') {
+                btnApi.classList.remove('text-gray-500', 'hover:text-gray-300', 'hover:bg-white/5', 'border-transparent');
+                btnApi.classList.add('bg-white/10', 'text-white', 'border-white/10');
+
+                btnImport.classList.add('text-gray-500', 'hover:text-gray-300', 'hover:bg-white/5', 'border-transparent');
+                btnImport.classList.remove('bg-white/10', 'text-white', 'border-white/10');
+            } else {
+                btnImport.classList.remove('text-gray-500', 'hover:text-gray-300', 'hover:bg-white/5', 'border-transparent');
+                btnImport.classList.add('bg-white/10', 'text-white', 'border-white/10');
+
+                btnApi.classList.add('text-gray-500', 'hover:text-gray-300', 'hover:bg-white/5', 'border-transparent');
+                btnApi.classList.remove('bg-white/10', 'text-white', 'border-white/10');
+            }
+
+            setFilter('all');
+            renderTable();
+        };
+
+        window.openImportModal = () => {
+            document.getElementById('import-modal').classList.remove('hidden');
+            setTimeout(() => document.getElementById('import-modal').classList.remove('opacity-0'), 10);
+        };
+
+        window.closeImportModal = () => {
+            document.getElementById('import-modal').classList.add('opacity-0');
+            setTimeout(() => {
+                document.getElementById('import-modal').classList.add('hidden');
+                resetImportModal();
+            }, 300);
+        };
+
+        function resetImportModal() {
+            document.getElementById('csv-file').value = '';
+            document.getElementById('upload-placeholder').classList.remove('hidden');
+            document.getElementById('upload-preview').classList.add('hidden');
+            document.getElementById('btn-process-import').disabled = true;
+            document.getElementById('import-msg').classList.add('hidden');
+            csvData = [];
+        }
+
+        window.handleFileSelect = (input) => {
+            const files = input.files;
+            if (!files || files.length === 0) return;
+
+            // Multiple Files Handler
+            csvData = []; // Reset global data
+            let filesProcessed = 0;
+            const totalFiles = files.length;
+
+            document.getElementById('upload-placeholder').classList.add('hidden');
+            document.getElementById('upload-preview').classList.remove('hidden');
+            document.getElementById('file-name').innerHTML = `<span class="spinner inline-block w-4 h-4 mr-2"></span>Processing ${totalFiles} files...`;
+            document.getElementById('row-count').textContent = '';
+
+            Array.from(files).forEach(file => {
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function (results) {
+                        // STRICT LIMIT CHECK
+                        let newData = results.data;
+                        const currentTotal = csvData.length + newData.length;
+
+                        if (currentTotal > 500) {
+                            alert(`Limit Exceeded: Imports are capped at 500 rows.\nOnly the first ${500 - csvData.length} rows of this file will be added.`);
+                            const remainingSpace = 500 - csvData.length;
+                            if (remainingSpace > 0) {
+                                newData = newData.slice(0, remainingSpace);
+                            } else {
+                                newData = [];
+                            }
+                        }
+
+                        // Append data
+                        csvData = [...csvData, ...newData];
+                        filesProcessed++;
+
+                        if (filesProcessed === totalFiles) {
+                            // All done
+                            document.getElementById('file-name').textContent = `${totalFiles} File(s) Selected`;
+                            document.getElementById('row-count').textContent = `${csvData.length} / 500 rows ready`;
+                            
+                            // Disable if max reached to prevent further confusion, or if empty
+                            document.getElementById('btn-process-import').disabled = (csvData.length === 0);
+                            
+                            if (csvData.length >= 500) {
+                                document.getElementById('row-count').classList.add('text-orange-400');
+                                document.getElementById('row-count').textContent += " (Max Reached)";
+                            }
+                        }
+                    },
+                    error: function (err) {
+                        console.error("Parse Error", err);
+                        // Continue anyway
+                        filesProcessed++;
+                        if (filesProcessed === totalFiles) {
+                            document.getElementById('btn-process-import').disabled = (csvData.length === 0);
+                        }
+                    }
+                });
+            });
+        };
+
+        window.processImport = async () => {
+            // PROMPT FOR FOLDER NAME
+            // Check if we are currently in a Custom Folder. If so, use that. If "All Leads" or "API", ask for new.
+            let targetFolder = activeTab;
+            
+            if (activeTab === 'all_leads' || activeTab === 'api_stream') {
+                const newName = prompt("Name this import batch (e.g., 'July Event List'):");
+                if (!newName) return; // Cancelled
+                targetFolder = newName;
+                
+                // Add to client tabs if not exists
+                if (!clientTabs.includes(targetFolder)) {
+                    // Update Firestore with new tab
+                     const user = authInstance.currentUser;
+                     const newTabsList = [...clientTabs, targetFolder];
+                     await updateDoc(doc(db, "clients", user.uid), { tabs: newTabsList });
+                }
+            }
+
+            const btn = document.getElementById('btn-process-import');
+
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner"></div> Importing...';
+
+            const msg = document.getElementById('import-msg');
+            msg.classList.add('hidden');
+
+            try {
+                let successCount = 0;
+                const batchSize = 400;
+                for (let i = 0; i < csvData.length; i += batchSize) {
+                    const chunk = csvData.slice(i, i + batchSize);
+
+                    const promises = chunk.map(row => {
+                        return addDoc(collection(db, "leads"), {
+                            clientId: clientEmail,
+                            lead: row,
+                            source: 'import',
+                            tabName: targetFolder, // <--- SAVES TO TARGET FOLDER
+                            status: 'new',
+                            createdAt: Timestamp.now(),
+                            importedAt: Timestamp.now()
+                        });
+                    });
+
+                    await Promise.all(promises);
+                    successCount += chunk.length;
+                }
+
+                msg.textContent = `Successfully imported ${successCount} leads!`;
+                msg.className = "text-xs text-center mt-4 text-emerald-400";
+                msg.classList.remove('hidden');
+
+                setTimeout(() => {
+                    window.closeImportModal();
+                    window.switchSource('imported');
+                }, 1500);
+
+            } catch (err) {
+                console.error(err);
+                msg.textContent = "Import failed: " + err.message;
+                msg.className = "text-xs text-center mt-4 text-red-400";
+                msg.classList.remove('hidden');
+                btn.disabled = false;
+                btn.innerHTML = '<span>Import Data</span>';
+            }
+        };
+
+        // ==========================================
+        // EXPORT CSV (Current Tab Only)
+        // ==========================================
+        window.exportCSV = () => {
+            // 1. Get data specifically for the current view
+            const dataToExport = getFilteredLeads();
+            
+            if (!dataToExport || dataToExport.length === 0) {
+                alert("No leads found in the current tab to export.");
+                return;
+            }
+
+            // 2. Flatten the object structure for CSV
+            const flatData = dataToExport.map(item => {
+                // Base fields
+                let row = {
+                    Date: item.createdAt ? new Date(item.createdAt.seconds * 1000).toLocaleString() : 'N/A',
+                    Status: item.status || 'new',
+                };
+                
+                // Merge dynamic form fields (lead object)
+                if (item.lead) {
+                    row = { ...row, ...item.lead };
+                }
+                
+                // Exclude internal system fields if any (start with _)
+                return row;
+            });
+
+            // 3. Generate CSV using PapaParse
+            const csv = Papa.unparse(flatData);
+            
+            // 4. Download Trigger
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            
+            // Filename based on active tab
+            const safeName = (activeTab || 'leads').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            link.setAttribute("download", `${safeName}_export.csv`);
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         };
 
         function linkify(text) {
@@ -1637,6 +2141,450 @@
                 return '<a href="' + url + '" target="_blank" class="text-blue-400 hover:text-blue-300 underline">' + url + '</a>';
             });
         }
+
+        // ==========================================
+        // TABS LOGIC
+        // ==========================================
+        // ==========================================
+        // LOGIC: EXACT FORM SIGNATURES
+        // ==========================================
+        function getFormSignature(leadObj) {
+            if (!leadObj) return 'unknown';
+            // Get keys, filter system keys, sort alphabetically
+            const keys = Object.keys(leadObj).filter(k => !k.startsWith('_')).sort();
+            return keys.join(','); 
+        }
+
+        function getFormNameFromKeys(keysArray) {
+            const keys = keysArray.map(k => k.toLowerCase());
+            
+            // Heuristics to name the tab intelligently
+            if (keys.includes('budget') || keys.includes('price')) return "Quote Request";
+            if (keys.includes('timeline') || keys.includes('project')) return "Project Inquiry";
+            if (keys.includes('frequency') || keys.includes('newsletter')) return "Newsletter";
+            if (keys.includes('resume') || keys.includes('cv')) return "Job App";
+            if (keys.includes('message')) return "Contact Form";
+            
+            // Fallback: Use unique fields
+            const uniqueFields = keysArray.filter(k => !['name', 'email', 'phone', 'source'].includes(k.toLowerCase()));
+            if (uniqueFields.length > 0) return `${uniqueFields[0]} Form`.charAt(0).toUpperCase() + `${uniqueFields[0]} Form`.slice(1);
+            
+            return "Web Form";
+        }
+
+        // ==========================================
+        // TABS UI RENDERER
+        // ==========================================
+        // ==========================================
+        // TABS UI RENDERER (DROPDOWN EDITION)
+        // ==========================================
+        // ==========================================
+        // TABS UI RENDERER (DROPDOWN)
+        // ==========================================
+        // ==========================================
+        // TABS UI RENDERER (POPUP MENU)
+        // ==========================================
+        // ==========================================
+        // FOLDER MANAGEMENT (Rename/Delete)
+        // ==========================================
+        window.renameFolder = async (oldName) => {
+            const rawName = await window.customPrompt("Rename Folder", oldName);
+            if (!rawName) return; // User cancelled
+            
+            const newName = rawName.trim();
+            if (newName === "" || newName === oldName) return;
+            if (clientTabs.includes(newName)) {
+                alert("A folder with this name already exists.");
+                return;
+            }
+
+            const user = authInstance.currentUser;
+            if (!user) return;
+
+            // 1. Update Tabs Array in Client Doc
+            const newTabs = clientTabs.map(t => t === oldName ? newName : t);
+            
+            // UI Optimistic Update
+            clientTabs = newTabs;
+            if (activeTab === oldName) activeTab = newName;
+            renderTabsUI();
+
+            try {
+                await updateDoc(doc(db, "clients", user.uid), { tabs: newTabs });
+
+                // 2. Batch Update Leads (Move them to new folder name)
+                const leadsToUpdate = clientLeads.filter(l => l.tabName === oldName);
+                
+                // Process in chunks of 400 (Firestore limit is 500)
+                const batchSize = 400;
+                for (let i = 0; i < leadsToUpdate.length; i += batchSize) {
+                    const chunk = leadsToUpdate.slice(i, i + batchSize);
+                    const promises = chunk.map(l => updateDoc(doc(db, "leads", l.id), { tabName: newName }));
+                    await Promise.all(promises);
+                }
+            } catch (e) {
+                console.error("Rename Error:", e);
+                alert("Failed to rename folder fully: " + e.message);
+                window.location.reload(); // Safety reload
+            }
+        };
+
+        window.deleteFolder = async (folderName) => {
+            const count = clientLeads.filter(l => l.tabName === folderName).length;
+            const confirmMsg = count > 0 
+                ? `This will permanently delete <b class="text-white">${folderName}</b> and all <b class="text-white">${count} leads</b> inside it.<br>This cannot be undone.`
+                : `Delete empty folder <b class="text-white">${folderName}</b>?`;
+
+            const confirmed = await window.customConfirm(confirmMsg, "Delete Folder?");
+            if (!confirmed) return;
+
+            const user = authInstance.currentUser;
+            if (!user) return;
+
+            try {
+                // 1. Update Tabs Array
+                const newTabs = clientTabs.filter(t => t !== folderName);
+                await updateDoc(doc(db, "clients", user.uid), { tabs: newTabs });
+
+                // 2. Delete Leads
+                const leadsToDelete = clientLeads.filter(l => l.tabName === folderName);
+                const batchSize = 400;
+                for (let i = 0; i < leadsToDelete.length; i += batchSize) {
+                    const chunk = leadsToDelete.slice(i, i + batchSize);
+                    const promises = chunk.map(l => deleteDoc(doc(db, "leads", l.id)));
+                    await Promise.all(promises);
+                }
+
+                // 3. Switch Tab if we were on the deleted one
+                if (activeTab === folderName) {
+                    activeTab = null; // Will trigger auto-select
+                    renderTabsUI();
+                }
+
+            } catch (e) {
+                console.error("Delete Error:", e);
+                alert("Error deleting folder: " + e.message);
+            }
+        };
+        // ==========================================
+        // TABS UI RENDERER (ROBUST VERSION)
+        // ==========================================
+        function renderTabsUI() {
+            const listContainer = document.getElementById('tabs-popup-list');
+            const labelEl = document.getElementById('current-tab-label');
+            if (!listContainer) return; 
+
+            listContainer.innerHTML = ''; // Clear
+
+            let firstAvailable = null;
+            let currentTabName = "Select Data Source";
+
+            // 1. DETECT FORM SIGNATURES
+            const apiLeads = clientLeads.filter(l => !l.source || l.source === 'api');
+            const formClusters = {}; 
+            
+            apiLeads.forEach(l => {
+                if (!l.lead) return;
+                const sig = getFormSignature(l.lead);
+                if (!formClusters[sig]) {
+                    formClusters[sig] = { 
+                        count: 0, 
+                        keys: Object.keys(l.lead).filter(k => !k.startsWith('_')).sort() 
+                    };
+                }
+                formClusters[sig].count++;
+            });
+
+            // 2. RENDER: WEB FORMS
+            if (Object.keys(formClusters).length > 0) {
+                const header = document.createElement('div');
+                header.className = "px-3 py-2 text-[10px] font-bold text-gray-600 uppercase tracking-widest";
+                header.textContent = "Web Forms";
+                listContainer.appendChild(header);
+
+                Object.entries(formClusters).forEach(([sig, data]) => {
+                    if(sig === '') return;
+                    if(!firstAvailable) firstAvailable = sig;
+                    
+                    const formName = getFormNameFromKeys(data.keys);
+                    if (activeTab === sig) currentTabName = formName;
+                    const isActive = activeTab === sig;
+
+                    const btn = document.createElement('button');
+                    btn.className = `w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs font-medium transition mb-1 ${isActive ? 'bg-purple-500/10 text-purple-300 border border-purple-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`;
+                    
+                    // Direct Click Handler
+                    btn.onclick = () => { 
+                        window.switchTab(sig); 
+                        window.toggleTabsPopup(false); 
+                    };
+
+                    btn.innerHTML = `
+                        <div class="flex items-center gap-3 pointer-events-none">
+                            <i data-feather="layout" class="w-4 h-4 ${isActive ? 'text-purple-400' : 'text-gray-600'}"></i>
+                            <span>${formName}</span>
+                        </div>
+                        <span class="bg-white/5 px-1.5 py-0.5 rounded text-[10px] text-gray-500 pointer-events-none">${data.count}</span>
+                    `;
+                    listContainer.appendChild(btn);
+                });
+            }
+
+            // 3. RENDER: CUSTOM FOLDERS
+            if (clientTabs.length > 0) {
+                const header = document.createElement('div');
+                header.className = "px-3 py-2 text-[10px] font-bold text-gray-600 uppercase tracking-widest mt-2";
+                header.textContent = "Custom Folders";
+                listContainer.appendChild(header);
+
+                clientTabs.forEach(tab => {
+                    if (tab === 'General') return;
+                    if(!firstAvailable) firstAvailable = tab;
+                    
+                    const count = clientLeads.filter(l => l.tabName === tab).length;
+                    if (activeTab === tab) currentTabName = tab;
+                    const isActive = activeTab === tab;
+
+                    const row = document.createElement('div');
+                    row.className = `group w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs font-medium transition mb-1 ${isActive ? 'bg-blue-500/10 text-blue-300 border border-blue-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`;
+
+                    // 1. Main Button (Icon + Name) - Takes up remaining space
+                    const mainBtn = document.createElement('button');
+                    mainBtn.className = "flex-grow flex items-center gap-3 text-left overflow-hidden h-full pr-2";
+                    mainBtn.onclick = () => { 
+                        window.switchTab(tab); 
+                        window.toggleTabsPopup(false); 
+                    };
+                    mainBtn.innerHTML = `
+                        <i data-feather="folder" class="w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-400' : 'text-gray-600'}"></i>
+                        <span class="truncate">${tab}</span>
+                    `;
+
+                    // 2. Actions (Rename / Delete) - Visible on hover
+                    const actionsDiv = document.createElement('div');
+                    actionsDiv.className = "flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mr-2";
+
+                    const renameBtn = document.createElement('button');
+                    renameBtn.className = "p-1.5 hover:bg-white/10 rounded-md text-gray-500 hover:text-white transition z-10";
+                    renameBtn.onclick = (e) => { 
+                        e.stopPropagation(); 
+                        window.renameFolder(tab); 
+                    };
+                    renameBtn.innerHTML = `<i data-feather="edit-2" class="w-3 h-3"></i>`;
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = "p-1.5 hover:bg-red-500/10 rounded-md text-gray-500 hover:text-red-400 transition z-10";
+                    deleteBtn.onclick = (e) => { 
+                        e.stopPropagation(); 
+                        window.deleteFolder(tab); 
+                    };
+                    deleteBtn.innerHTML = `<i data-feather="trash" class="w-3 h-3"></i>`;
+
+                    actionsDiv.appendChild(renameBtn);
+                    actionsDiv.appendChild(deleteBtn);
+
+                    // 3. Number Badge - Pushed all the way to the right
+                    const countBadge = document.createElement('span');
+                    countBadge.className = "bg-white/5 px-1.5 py-0.5 rounded text-[10px] text-gray-500 flex-shrink-0 ml-auto";
+                    countBadge.textContent = count;
+
+                    // Append in specific order
+                    row.appendChild(mainBtn);
+                    row.appendChild(actionsDiv);
+                    row.appendChild(countBadge);
+                    
+                    listContainer.appendChild(row);
+                });
+            }
+
+            if (labelEl) labelEl.textContent = currentTabName;
+
+            // Auto-Select Logic
+            const isValidSelection = activeTab && (formClusters[activeTab] || clientTabs.includes(activeTab));
+            if (!isValidSelection && firstAvailable) {
+                setTimeout(() => { if(window.switchTab) window.switchTab(firstAvailable); }, 50);
+            }
+
+            if(window.feather) feather.replace();
+        }
+
+        // Toggle Popup
+        window.toggleTabsPopup = (forceState = null) => {
+            const popup = document.getElementById('tabs-popup');
+            if (forceState !== null) {
+                forceState ? popup.classList.remove('hidden') : popup.classList.add('hidden');
+            } else {
+                popup.classList.toggle('hidden');
+            }
+        };
+
+        // Close popup when clicking outside
+        document.addEventListener('click', (e) => {
+            const popup = document.getElementById('tabs-popup');
+            const trigger = document.querySelector('button[onclick="window.toggleTabsPopup()"]');
+            if (!popup || !trigger) return;
+            if (!popup.contains(e.target) && !trigger.contains(e.target)) {
+                popup.classList.add('hidden');
+            }
+        });
+
+        
+
+        
+        // ARCHIVE TOGGLE
+        window.toggleArchiveMode = () => {
+            const btn = document.getElementById('btn-archive-toggle');
+            const ind = document.getElementById('archive-indicator');
+            const desc = document.getElementById('current-tab-desc');
+            
+            // Safety Check
+            if (!btn || !ind || !desc) {
+                console.warn("Archive toggle elements missing");
+                return;
+            }
+
+            if (activeFilter === 'all') {
+                activeFilter = 'archived';
+                btn.classList.add('text-red-400', 'bg-red-500/10', 'border-red-500/20');
+                ind.classList.remove('hidden');
+                desc.innerHTML = '<span class="text-red-400 font-bold">VIEWING ARCHIVED LEADS</span>';
+            } else {
+                activeFilter = 'all';
+                btn.classList.remove('text-red-400', 'bg-red-500/10', 'border-red-500/20');
+                ind.classList.add('hidden');
+                // Restore original description
+                window.switchTab(activeTab); 
+                return; 
+            }
+            renderTable();
+        };
+
+        // ==========================================
+        // CREATE FOLDER LOGIC (MODAL)
+        // ==========================================
+        window.promptNewTab = () => {
+            document.getElementById('create-folder-modal').classList.remove('hidden');
+            document.getElementById('create-folder-modal').classList.add('flex');
+            setTimeout(() => document.getElementById('create-folder-input').focus(), 100);
+        };
+
+        window.closeCreateFolderModal = () => {
+            const modal = document.getElementById('create-folder-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            document.getElementById('create-folder-input').value = ''; // Reset
+        };
+
+        window.confirmCreateFolder = async () => {
+            const input = document.getElementById('create-folder-input');
+            const name = input.value.trim();
+            
+            if (!name) return;
+            if (clientTabs.includes(name)) {
+                alert("A folder with this name already exists.");
+                return;
+            }
+
+            window.closeCreateFolderModal(); // Close immediately for better UX
+
+            // Save to Firestore
+            const newTabs = [...clientTabs, name].filter(t => t !== 'General');
+            
+            try {
+                const user = authInstance.currentUser;
+                if (!user) return;
+
+                // Optimistic UI Update
+                clientTabs.push(name);
+                renderTabsUI();
+
+                await updateDoc(doc(db, "clients", user.uid), {
+                    tabs: newTabs
+                });
+                
+                // Switch to new tab
+                window.switchTab(name);
+
+            } catch (e) {
+                console.error(e);
+                alert("Error creating folder: " + e.message);
+                // Revert on failure
+                clientTabs = clientTabs.filter(t => t !== name);
+                renderTabsUI();
+            }
+        };
+        // ==========================================
+        // EMERGENCY CLEAR ALL
+        // ==========================================
+        // ==========================================
+        // CLEAR DATA (CURRENT TAB ONLY)
+        // ==========================================
+        window.clearCurrentTab = async () => {
+            // 1. Identify what we are deleting
+            const leadsToDelete = getFilteredLeads(); // Reuses the current view/filter logic
+            const count = leadsToDelete.length;
+            
+            if (count === 0) {
+                alert("No leads found in this view to delete.");
+                return;
+            }
+
+            let confirmMsg = "";
+            let confirmTitle = "";
+
+            if (activeTab && clientTabs.includes(activeTab)) {
+                confirmTitle = `Clear Folder "${activeTab}"?`;
+                confirmMsg = `This will permanently delete <b class="text-white">${count} leads</b> from this folder.<br>This cannot be undone.`;
+            } else {
+                confirmTitle = "Clear Current View?";
+                confirmMsg = `This will permanently delete <b class="text-white">${count} leads</b> visible in this view.<br>This cannot be undone.`;
+            }
+
+            // 2. Double Confirmation
+            const confirm1 = await window.customConfirm(confirmMsg, confirmTitle);
+            if (!confirm1) return;
+
+            // 3. UI Loading State
+            const content = document.querySelector('.data-table');
+            if (content) content.style.opacity = '0.3';
+            
+            try {
+                // Delete in batches (Firestore limit 500)
+                const batchSize = 400;
+                let deleted = 0;
+
+                for (let i = 0; i < count; i += batchSize) {
+                    const chunk = leadsToDelete.slice(i, i + batchSize);
+                    const promises = chunk.map(l => deleteDoc(doc(db, "leads", l.id)));
+                    await Promise.all(promises);
+                    deleted += chunk.length;
+                }
+
+                // Removed the alert for smoother UX, just refresh
+                // alert(`Successfully cleared ${deleted} leads.`);
+            } catch (err) {
+                console.error(err);
+                alert("Error clearing data: " + err.message);
+            } finally {
+                if (content) content.style.opacity = '1';
+                // Close dropdown if open
+                const dropdown = document.getElementById('settings-dropdown');
+                if(dropdown) dropdown.classList.add('hidden');
+            }
+        };
+
+        // Close settings dropdown on click outside
+        document.addEventListener('click', (e) => {
+            const dropdown = document.getElementById('settings-dropdown');
+            const trigger = document.querySelector('button[title="Data Settings"]');
+            if (dropdown && !dropdown.classList.contains('hidden')) {
+                if (!dropdown.contains(e.target) && (!trigger || !trigger.contains(e.target))) {
+                    dropdown.classList.add('hidden');
+                }
+            }
+        });
+
+        
 
     </script>
 </body>
