@@ -1069,7 +1069,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
-        import { getFirestore, collection, onSnapshot, query, orderBy, where, doc, updateDoc, deleteDoc, Timestamp, addDoc, limit, startAfter, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, query, orderBy, where, doc, updateDoc, deleteDoc, Timestamp, addDoc, limit, startAfter, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyC9eUHEdAmV9qzHxpQe2en5WeOeRXiq10A",
@@ -1125,6 +1125,110 @@
             startClientStatusListener(user.uid); // <--- Listen for Pause Status
             feather.replace();
         });
+        // ==========================================
+        // RENAME & DELETE LOGIC (MISSING FUNCTIONS)
+        // ==========================================
+
+        // 1. Rename Web Forms (Aliases)
+        window.renameForm = async (signature) => {
+            // Get current name or fallback to formatted signature
+            const keys = signature.split(',');
+            const currentName = formAliases[signature] || getFormNameFromKeys(keys, signature);
+
+            const newName = await window.customPrompt("Rename Data Source", currentName);
+            if (!newName || newName === currentName) return;
+
+            try {
+                const user = authInstance.currentUser;
+                if (!user) return;
+
+                // Update Firestore (Uses dot notation to update specific Map key)
+                await updateDoc(doc(db, "clients", user.uid), {
+                    [`formAliases.${signature}`]: newName
+                });
+                
+                // The onSnapshot listener in startClientStatusListener will auto-update the UI
+
+            } catch (e) {
+                console.error(e);
+                alert("Error renaming form: " + e.message);
+            }
+        };
+
+        // 2. Rename Custom Folders
+        window.renameFolder = async (oldName) => {
+            const newName = await window.customPrompt("Rename Folder", oldName);
+            if (!newName || newName === oldName) return;
+
+            if (clientTabs.includes(newName)) {
+                alert("A folder with this name already exists.");
+                return;
+            }
+
+            try {
+                const user = authInstance.currentUser;
+                if (!user) return;
+
+                // A. Update the Tabs List in Client Settings
+                const newTabsList = clientTabs.map(t => t === oldName ? newName : t);
+                
+                await updateDoc(doc(db, "clients", user.uid), {
+                    tabs: newTabsList
+                });
+
+                // B. Batch Update: Move all leads from Old Name to New Name
+                const q = query(collection(db, "leads"), where("clientId", "==", clientEmail), where("tabName", "==", oldName));
+                const snapshot = await getDocs(q);
+
+                if (!snapshot.empty) {
+                    const batch = writeBatch(db);
+                    snapshot.docs.forEach(docSnap => {
+                        batch.update(docSnap.ref, { tabName: newName });
+                    });
+                    await batch.commit();
+                }
+
+                // If we were looking at the old folder, switch to the new one
+                if (activeTab === oldName) {
+                    window.switchTab(newName);
+                }
+
+            } catch (e) {
+                console.error(e);
+                alert("Error renaming folder: " + e.message);
+            }
+        };
+
+        // 3. Delete Custom Folders
+        window.deleteFolder = async (folderName) => {
+            const confirmed = await window.customConfirm(
+                `Delete folder "<b>${folderName}</b>"?<br>The leads inside will NOT be deleted, but they will be hidden from this view.`, 
+                "Delete Folder"
+            );
+            
+            if (!confirmed) return;
+
+            try {
+                const user = authInstance.currentUser;
+                if (!user) return;
+
+                // Remove from tabs array
+                const newTabsList = clientTabs.filter(t => t !== folderName);
+                
+                await updateDoc(doc(db, "clients", user.uid), {
+                    tabs: newTabsList
+                });
+
+                // If we were looking at this folder, go back to General or first available
+                if (activeTab === folderName) {
+                    window.switchTab('General'); // Or your default view
+                }
+
+            } catch (e) {
+                console.error(e);
+                alert("Error deleting folder: " + e.message);
+            }
+        };
 
         // ==========================================
         // TAB SWITCHING
