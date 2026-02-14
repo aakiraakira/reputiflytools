@@ -1844,6 +1844,7 @@
 
         // Render Step 1: Fields
         // Render Step 1: Fields (Updated with Search)
+        // Render Step 1: Fields (Updated with Counts)
         function renderFilterFields() {
             document.getElementById('filter-modal-title').textContent = "Filter by...";
             const containerDisplay = document.getElementById('filter-step-fields');
@@ -1866,22 +1867,32 @@
 
             const listContainer = document.getElementById('field-list-container');
 
-            // Get Fields
-            const fields = new Set();
+            // Get Fields and Counts
+            const fieldCounts = {};
             clientLeads.forEach(l => {
-                if (l.lead) Object.keys(l.lead).forEach(k => fields.add(k));
+                if (l.lead) {
+                    Object.keys(l.lead).forEach(k => {
+                        fieldCounts[k] = (fieldCounts[k] || 0) + 1;
+                    });
+                }
             });
 
-            if (fields.size === 0) {
+            const fields = Object.keys(fieldCounts);
+
+            if (fields.length === 0) {
                 listContainer.innerHTML = `<div class="p-8 text-center text-gray-500 text-sm">No data found to filter.</div>`;
                 return;
             }
 
-            Array.from(fields).sort().forEach(field => {
+            fields.sort().forEach(field => {
+                const count = fieldCounts[field];
                 const btn = document.createElement('button');
                 btn.className = "w-full text-left px-4 py-3 rounded-lg hover:bg-white/10 text-gray-300 hover:text-white transition flex items-center justify-between group";
                 btn.innerHTML = `
-                    <span class="font-medium capitalization text-sm">${field}</span>
+                    <div class="flex items-center gap-2">
+                        <span class="font-medium capitalization text-sm">${field}</span>
+                        <span class="text-[10px] text-gray-500 bg-white/5 px-2 py-0.5 rounded-md group-hover:bg-white/10 transition-colors">${count}</span>
+                    </div>
                     <i data-feather="chevron-right" class="w-4 h-4 text-gray-600 group-hover:text-white transition"></i>
                 `;
                 btn.onclick = () => window.selectFilterField(field);
@@ -1904,6 +1915,7 @@
         };
 
         // Render Step 2: Values
+        // Render Step 2: Values (Updated with Counts & Sorting)
         window.selectFilterField = (field) => {
             document.getElementById('filter-modal-title').textContent = `Filter by ${field}`;
             document.getElementById('filter-step-fields').classList.add('hidden');
@@ -1913,23 +1925,39 @@
             const container = document.getElementById('filter-step-values');
             container.innerHTML = '';
 
-            // Get Values
-            const values = new Set();
+            // Get Values and Counts
+            const valueCounts = {};
             clientLeads.forEach(l => {
-                if (l.lead && l.lead[field]) values.add(l.lead[field]);
+                if (l.lead && l.lead[field]) {
+                    const val = String(l.lead[field]).trim();
+                    if(val) valueCounts[val] = (valueCounts[val] || 0) + 1;
+                }
             });
 
-            if (values.size === 0) {
-                container.innerHTML = `<div class="p-8 text-center text-gray-500 text-sm">No values found.</div>`;
+            const uniqueValues = Object.keys(valueCounts);
+
+            if (uniqueValues.length === 0) {
+                container.innerHTML = `<div class="p-8 text-center text-gray-500 text-sm">No values found for this field.</div>`;
                 return;
             }
 
-            Array.from(values).sort().forEach(val => {
+            // Sort by Popularity (High to Low), then Alphabetical
+            uniqueValues.sort((a, b) => {
+                const diff = valueCounts[b] - valueCounts[a];
+                if (diff !== 0) return diff;
+                return a.localeCompare(b);
+            });
+
+            uniqueValues.forEach(val => {
+                const count = valueCounts[val];
                 const btn = document.createElement('button');
-                btn.className = "w-full text-left px-4 py-3 rounded-lg hover:bg-white/10 text-gray-300 hover:text-white transition flex items-center gap-3 mb-1";
+                btn.className = "w-full text-left px-4 py-3 rounded-lg hover:bg-white/10 text-gray-300 hover:text-white transition flex items-center justify-between gap-3 mb-1 group";
                 btn.innerHTML = `
-                    <div class="w-2 h-2 rounded-full bg-purple-500/50"></div>
-                    <span class="font-medium truncate">${val}</span>
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <div class="w-2 h-2 rounded-full bg-purple-500/50 flex-shrink-0"></div>
+                        <span class="font-medium truncate">${val}</span>
+                    </div>
+                    <span class="text-xs font-bold text-gray-500 group-hover:text-white bg-white/5 px-2 py-1 rounded-md transition-colors">${count}</span>
                 `;
                 btn.onclick = () => window.applyCustomFilter(field, val);
                 container.appendChild(btn);
