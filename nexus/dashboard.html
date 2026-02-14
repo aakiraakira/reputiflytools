@@ -681,6 +681,17 @@
         .pac-icon {
             filter: invert(1) opacity(0.5) !important;
         }
+
+        /* Hide Scrollbar for Modal Input */
+        #modal-limit-input::-webkit-outer-spin-button,
+        #modal-limit-input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        #modal-limit-input {
+            -moz-appearance: textfield;
+        }
     </style>
 </head>
 
@@ -1055,16 +1066,16 @@
 
                 <!-- Number Switcher -->
                 <div
-                    class="flex items-center justify-center gap-0 mb-6 bg-black/40 rounded-lg p-1 border border-white/5 inline-flex">
+                    class="flex items-center justify-center gap-0 mb-6 bg-black/40 rounded-full p-1 border border-white/5 inline-flex">
                     <button onclick="adjustModalLimit(-10)"
-                        class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5 rounded-xl transition">
+                        class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5 rounded-full transition">
                         <i data-feather="minus" class="w-4 h-4"></i>
                     </button>
                     <input type="number" id="modal-limit-input"
                         class="w-16 bg-transparent text-center text-xl font-bold text-white border-none focus:ring-0 p-0"
                         value="50">
                     <button onclick="adjustModalLimit(10)"
-                        class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5 rounded-xl transition">
+                        class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5 rounded-full transition">
                         <i data-feather="plus" class="w-4 h-4"></i>
                     </button>
                 </div>
@@ -1084,9 +1095,9 @@
                 <!-- Footer -->
                 <div class="flex justify-center gap-3">
                     <button onclick="closeLimitModal()"
-                        class="px-6 py-2.5 rounded-xl border border-white/10 text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition">Cancel</button>
+                        class="px-6 py-2.5 rounded-full border border-white/10 text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition">Cancel</button>
                     <button onclick="saveModalLimit()"
-                        class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-600 text-sm font-bold text-white shadow-lg hover:shadow-orange-500/20 hover:scale-[1.02] transition transform">Save
+                        class="px-6 py-2.5 rounded-full bg-gradient-to-r from-orange-500 to-red-600 text-sm font-bold text-white shadow-lg hover:shadow-orange-500/20 hover:scale-[1.02] transition transform">Save
                         Limit</button>
                 </div>
             </div>
@@ -1617,8 +1628,8 @@
                     : `<button onclick="window.manageClientAction('${client.uid}', 'enable')" class="icon-action icon-action-resume" title="Resume account"><i data-feather="play-circle" class="w-4 h-4"></i></button>`;
 
                 const reviewToggle = `
-                    <div class="toggle-switch ${client.reviewFeatureEnabled ? 'active' : ''} ${client.reviewFeatureEnabled ? 'bg-yellow-500' : ''}" 
-                         onclick="window.handleReviewToggle('${client.uid}', ${client.reviewFeatureEnabled})">
+                    <div id="toggle-review-${client.uid}" class="toggle-switch ${client.reviewFeatureEnabled ? 'active' : ''} ${client.reviewFeatureEnabled ? 'bg-yellow-500' : ''}" 
+                         onclick="window.handleReviewToggle('${client.uid}', ${client.reviewFeatureEnabled}, this)">
                         <div class="toggle-knob"></div>
                     </div>`;
 
@@ -1825,13 +1836,21 @@
         let reviewAutocomplete = null;
 
         // 1. Table Toggle Handler
-        window.handleReviewToggle = (uid, currentStatus) => {
+        window.handleReviewToggle = (uid, currentStatus, el) => {
             currentReviewClient = uid;
 
+            // Optimistic UI Update for direct toggle (only works for disabling currently since enabling opens a modal)
             if (currentStatus) {
-                // If currently ON, toggle OFF immediately (confirm first?)
-                // For simplicity, just toggle off and save.
-                window.saveReviewSettings(false, null);
+                // Determine the toggle element
+                const toggleEl = el || document.getElementById(`toggle-review-${uid}`);
+                if (toggleEl) {
+                    toggleEl.classList.remove('active');
+                    toggleEl.classList.remove('bg-yellow-500'); // Remove custom color if present
+                }
+
+                // Save logic will handle the backend update
+                // We pass 'false' to force disable
+                window.saveReviewSettings(false, null, toggleEl);
             } else {
                 // If currently OFF, Open Modal to Configure
                 window.openReviewSettings(uid);
@@ -1899,7 +1918,7 @@
         };
 
         // Modified Save Function (Handles both Modal Save and Toggle Off)
-        window.saveReviewSettings = async (forceEnabled = null, linkValue = null) => {
+        window.saveReviewSettings = async (forceEnabled = null, linkValue = null, toggleEl = null) => {
             try {
                 if (!currentReviewClient) return;
                 const uid = currentReviewClient; // Capture ID before it's cleared
@@ -1942,11 +1961,22 @@
                 if (data.success) {
                     showToast(data.message, "success");
                 } else {
+                    // Revert UI if failed and we have the element
+                    if (toggleEl && !enabled) {
+                        toggleEl.classList.add('active');
+                        // We don't easily know if it had bg-yellow-500, but active usually implies it for review feature
+                        // In `renderClientsTable` it adds it conditionally. 
+                        // For now, just adding active is enough to show it's back on.
+                    }
                     showToast(data.error || "Failed to save settings.", "error");
                 }
 
             } catch (e) {
                 console.error("Save Review Settings Error:", e);
+                // Revert UI if failed
+                if (toggleEl && forceEnabled === false) {
+                    toggleEl.classList.add('active');
+                }
                 showToast("Error: " + e.message, "error");
             }
         };
