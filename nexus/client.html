@@ -800,15 +800,7 @@
                 </div>
             </div>
 
-            <!-- Source Breakdown (New) -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <div class="glass-panel p-5">
-                    <h3 class="text-sm font-bold text-gray-300 uppercase tracking-wider mb-4">Top Sources</h3>
-                    <div class="chart-wrap flex items-center justify-center" style="height: 220px;">
-                        <canvas id="chart-source"></canvas>
-                    </div>
-                </div>
-            </div>
+            <!-- Source Breakdown (REMOVED) -->
 
             <!-- Calendar -->
             <div class="glass-panel p-5">
@@ -1061,7 +1053,6 @@
         let reviewFeatureEnabled = false; // Added Review State
         let volumeChart = null;
         let statusChart = null;
-        let sourceChart = null; // Added for new chart
         let chartRange = '7d';
         let calDate = new Date(); // Analytics calendar
 
@@ -1457,7 +1448,19 @@
         window.updateStatus = async (id, status) => {
             const row = document.querySelector(`button[onclick*="openLeadActions('${id}')"]`);
             if (row) row.closest('tr').style.opacity = '0.5';
-            await updateDoc(doc(db, "leads", id), { status: status });
+
+            const updateData = { status: status };
+
+            // Capture response time if moving to contacted/qualified for the first time
+            if (['contacted', 'qualified'].includes(status)) {
+                // We verify if it was already set to avoid overwriting (optional, but good practice)
+                const lead = clientLeads.find(l => l.id === id);
+                if (lead && !lead.contactedAt) {
+                    updateData.contactedAt = Timestamp.now();
+                }
+            }
+
+            await updateDoc(doc(db, "leads", id), updateData);
         };
 
         // --- STATUS/ACTIONS MODAL LOGIC ---
@@ -1852,22 +1855,47 @@
                 return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
             }).length;
 
-            const contacted = clientLeads.filter(l => ['contacted', 'qualified'].includes(l.status)).length;
-            const rate = total > 0 ? Math.round((contacted / total) * 100) : 0;
+            const contacted = clientLeads.filter(l => ['contacted', 'qualified'].includes(l.status));
+            const conversionRate = total > 0 ? Math.round((contacted.length / total) * 100) : 0;
+
+            // AVG RESPONSE TIME CALCULATION
+            let totalResponseTimeMs = 0;
+            let responseCount = 0;
+
+            contacted.forEach(l => {
+                if (l.createdAt && l.contactedAt) {
+                    const created = l.createdAt.seconds * 1000;
+                    const contactedTime = l.contactedAt.seconds * 1000;
+                    const diff = contactedTime - created;
+                    if (diff > 0) {
+                        totalResponseTimeMs += diff;
+                        responseCount++;
+                    }
+                }
+            });
+
+            const avgResponseStr = responseCount > 0 ? formatDuration(totalResponseTimeMs / responseCount) : '—';
 
             document.getElementById('kpi-total').textContent = total;
             document.getElementById('kpi-this-month').textContent = thisMonth;
-            document.getElementById('kpi-conversion').textContent = rate + '%';
+            document.getElementById('kpi-conversion').textContent = conversionRate + '%';
+            document.getElementById('kpi-response-time').textContent = avgResponseStr;
 
             // Charts (Destroy old first)
             if (volumeChart) volumeChart.destroy();
             if (statusChart) statusChart.destroy();
-            if (sourceChart) sourceChart.destroy(); // Fix potential chart re-use issue
 
             renderVolumeChart(chartRange);
             renderStatusChart();
-            renderSourceChart();
             renderCalendar();
+        }
+
+        function formatDuration(ms) {
+            if (!ms || ms === 0) return "N/A";
+            const minutes = Math.floor(ms / 60000);
+            if (minutes < 60) return `${minutes}m`;
+            const hours = Math.floor(minutes / 60);
+            return `${hours}h ${minutes % 60}m`;
         }
 
         function setChartRange(range) {
@@ -1975,53 +2003,7 @@
             });
         }
 
-        function renderSourceChart() {
-            const ctx = document.getElementById('chart-source').getContext('2d');
-            const sourceCounts = {};
 
-            clientLeads.forEach(l => {
-                let source = 'Unknown';
-                if (l.source === 'import' && l.tabName) {
-                    source = l.tabName; // Use tabName for imported leads
-                } else if (l.lead && l.lead._page_source) {
-                    source = l.lead._page_source;
-                } else if (l.lead && l.lead.source) {
-                    source = l.lead.source;
-                } else if (l.source === 'api') {
-                    source = 'API Form';
-                }
-
-                sourceCounts[source] = (sourceCounts[source] || 0) + 1;
-            });
-
-            const labels = Object.keys(sourceCounts);
-            const data = Object.values(sourceCounts);
-
-            const backgroundColors = [
-                '#60a5fa', '#a855f7', '#34d399', '#f87171', '#fbbf24', '#c084fc', '#22d3ee', '#f472b6', '#84cc16', '#ef4444'
-            ];
-
-            sourceChart = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: data,
-                        backgroundColor: backgroundColors.slice(0, labels.length),
-                        borderWidth: 0,
-                        hoverOffset: 4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    cutout: '75%',
-                    plugins: {
-                        legend: { position: 'right', labels: { color: '#ccc', font: { size: 11 }, boxWidth: 10 } }
-                    }
-                }
-            });
-        }
 
         // ==========================================
         // CALENDAR
