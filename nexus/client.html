@@ -802,6 +802,28 @@
 
             <!-- Source Breakdown (REMOVED) -->
 
+            <!-- Detailed Analytics Row -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <!-- Top Sources (Progress Bars) -->
+                <div class="glass-panel p-5">
+                    <h3 class="text-sm font-bold text-gray-300 uppercase tracking-wider mb-4">Top Data Sources</h3>
+                    <div id="analytics-sources" class="space-y-4">
+                        <!-- Dynamic Content -->
+                    </div>
+                </div>
+
+                <!-- Anomalies (Top 3 Spikes) -->
+                <div class="glass-panel p-5">
+                    <div class="flex items-center gap-2 mb-4">
+                        <i data-feather="activity" class="w-4 h-4 text-purple-400"></i>
+                        <h3 class="text-sm font-bold text-gray-300 uppercase tracking-wider">Volume Spikes</h3>
+                    </div>
+                    <div id="analytics-anomalies" class="space-y-3">
+                        <!-- Dynamic Content -->
+                    </div>
+                </div>
+            </div>
+
             <!-- Calendar -->
             <div class="glass-panel p-5">
                 <div class="flex items-center justify-between mb-4">
@@ -1045,10 +1067,11 @@
         const API_BASE = "https://asia-southeast1-b2b-software.cloudfunctions.net";
         let clientEmail = null;
         let clientLeads = [];
-        let clientTabs = [];
-        let activeTab = null; // Auto-selects first tab
-        let activeFilter = 'all';
-        let customFilter = null; // { field: 'Source', value: 'Footer' }
+        let clientTabs = ['General'];
+        let formAliases = {}; // New: Store custom names for forms
+        let activeTab = null; // Current "Folder" or "Form Signature"
+        let activeFilter = 'all'; // all, new, contacted, junk, archived
+        let customFilter = null; // { field: 'city', value: 'Singapore' }
         let sortOrder = 'desc'; // desc or asc
         let reviewFeatureEnabled = false; // Added Review State
         let volumeChart = null;
@@ -1167,9 +1190,12 @@
                 if (docSnap.exists()) {
                     const data = docSnap.data();
 
-                    // 0. LOAD TABS
+                    // 0. LOAD TABS & ALIASES
                     if (data.tabs && Array.isArray(data.tabs)) {
                         clientTabs = ['General', ...data.tabs.filter(t => t !== 'General')];
+                    }
+                    if (data.formAliases) {
+                        formAliases = data.formAliases;
                     }
                     renderTabsUI();
 
@@ -1887,7 +1913,95 @@
 
             renderVolumeChart(chartRange);
             renderStatusChart();
+            renderDetailedAnalytics(); // New Function
             renderCalendar();
+        }
+
+        function renderDetailedAnalytics() {
+            // 1. TOP SOURCES
+            const sourceCounts = {};
+            let totalWithSource = 0;
+
+            clientLeads.forEach(l => {
+                let source = 'Unknown';
+                if (l.source === 'import' && l.tabName) {
+                    source = l.tabName;
+                } else if (l.lead && (l.source === 'api' || !l.source)) {
+                    // API Form: Identify by Signature + Alias
+                    const sig = getFormSignature(l.lead);
+                    const keys = Object.keys(l.lead).filter(k => !k.startsWith('_')).sort();
+                    source = getFormNameFromKeys(keys, sig);
+                } else if (l.lead && l.lead._page_source) {
+                    source = l.lead._page_source;
+                } else if (l.lead && l.lead.source) {
+                    source = l.lead.source;
+                }
+                sourceCounts[source] = (sourceCounts[source] || 0) + 1;
+                totalWithSource++;
+            });
+
+            const sortedSources = Object.entries(sourceCounts).sort((a, b) => b[1] - a[1]).slice(0, 5); // Top 5
+            const sourceContainer = document.getElementById('analytics-sources');
+            sourceContainer.innerHTML = '';
+
+            if (sortedSources.length === 0) {
+                sourceContainer.innerHTML = '<p class="text-xs text-gray-500">No source data available.</p>';
+            } else {
+                sortedSources.forEach(([name, count]) => {
+                    const pct = Math.round((count / totalWithSource) * 100);
+                    sourceContainer.innerHTML += `
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-gray-300 font-medium">${name}</span>
+                                <span class="text-gray-400">${count} (${pct}%)</span>
+                            </div>
+                            <div class="w-full bg-white/5 rounded-full h-1.5">
+                                <div class="bg-blue-500 h-1.5 rounded-full" style="width: ${pct}%"></div>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+
+            // 2. VOLUME ANOMALIES (Top 3 Days)
+            const dayCounts = {};
+            clientLeads.forEach(l => {
+                if (!l.createdAt) return;
+                const dateStr = new Date(l.createdAt.seconds * 1000).toDateString();
+                dayCounts[dateStr] = (dayCounts[dateStr] || 0) + 1;
+            });
+
+            const sortedDays = Object.entries(dayCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+            const anomalyContainer = document.getElementById('analytics-anomalies');
+            anomalyContainer.innerHTML = '';
+
+            if (sortedDays.length === 0) {
+                anomalyContainer.innerHTML = '<p class="text-xs text-gray-500">No data found.</p>';
+            } else {
+                sortedDays.forEach(([dateStr, count], index) => {
+                    const d = new Date(dateStr);
+                    const formattedDate = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+                    const isToday = d.toDateString() === new Date().toDateString();
+
+                    anomalyContainer.innerHTML += `
+                        <div class="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400 font-bold text-xs">
+                                    #${index + 1}
+                                </div>
+                                <div>
+                                    <div class="text-sm text-white font-medium">${formattedDate} ${isToday ? '<span class="text-[10px] bg-purple-500 text-white px-1.5 py-0.5 rounded ml-1">Times!</span>' : ''}</div>
+                                    <div class="text-[10px] text-gray-500">High Volume Activity</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-lg font-bold text-white leading-none">${count}</div>
+                                <div class="text-[10px] text-gray-500">Leads</div>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
         }
 
         function formatDuration(ms) {
@@ -2392,7 +2506,12 @@
             return keys.join(',');
         }
 
-        function getFormNameFromKeys(keysArray) {
+        function getFormNameFromKeys(keysArray, signature) {
+            // 1. Check Alias First
+            if (signature && formAliases[signature]) {
+                return formAliases[signature];
+            }
+
             const keys = keysArray.map(k => k.toLowerCase());
 
             // Heuristics to name the tab intelligently
@@ -2463,6 +2582,35 @@
                 console.error("Rename Error:", e);
                 alert("Failed to rename folder fully: " + e.message);
                 window.location.reload(); // Safety reload
+            }
+        };
+
+        window.renameForm = async (signature) => {
+            const currentName = formAliases[signature] || "Web Form"; // Default or Aliased
+            const rawName = await window.customPrompt("Rename Form", currentName);
+            if (!rawName) return;
+
+            const newName = rawName.trim();
+            if (newName === "" || newName === currentName) return;
+
+            // Updated Local State
+            formAliases[signature] = newName;
+            renderTabsUI();
+
+            const user = authInstance.currentUser;
+            if (!user) return;
+
+            try {
+                // Update specific field in map using dot notation for specific key
+                await updateDoc(doc(db, "clients", user.uid), {
+                    [`formAliases.${signature}`]: newName
+                });
+            } catch (e) {
+                console.error("Rename Form Error:", e);
+                alert("Failed to save form name: " + e.message);
+                // Revert
+                delete formAliases[signature];
+                renderTabsUI();
             }
         };
 
@@ -2546,67 +2694,30 @@
                     if (sig === '') return;
                     if (!firstAvailable) firstAvailable = sig;
 
-                    const formName = getFormNameFromKeys(data.keys);
+                    if (sig === '') return;
+                    if (!firstAvailable) firstAvailable = sig;
+
+                    const formName = getFormNameFromKeys(data.keys, sig);
                     if (activeTab === sig) currentTabName = formName;
                     const isActive = activeTab === sig;
 
-                    const btn = document.createElement('button');
-                    btn.className = `w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs font-medium transition mb-1 ${isActive ? 'bg-purple-500/10 text-purple-300 border border-purple-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`;
-
-                    // Direct Click Handler
-                    btn.onclick = () => {
-                        window.switchTab(sig);
-                        window.toggleTabsPopup(false);
-                    };
-
-                    btn.innerHTML = `
-                        <div class="flex items-center gap-3 pointer-events-none">
-                            <i data-feather="layout" class="w-4 h-4 ${isActive ? 'text-purple-400' : 'text-gray-600'}"></i>
-                            <span>${formName}</span>
-                            ${data.hasNew ? '<div class="w-2 h-2 rounded-full bg-red-500 animate-pulse" title="New Leads"></div>' : ''}
-                        </div>
-                        <span class="bg-white/5 px-1.5 py-0.5 rounded text-[10px] text-gray-500 pointer-events-none">${data.count}</span>
-                    `;
-                    listContainer.appendChild(btn);
-
-                    if (data.hasNew && activeTab !== sig) hasAnyNew = true; // Only flag if NOT active
-                });
-            }
-
-            // 3. RENDER: CUSTOM FOLDERS
-            if (clientTabs.length > 0) {
-                const header = document.createElement('div');
-                header.className = "px-3 py-2 text-[10px] font-bold text-gray-600 uppercase tracking-widest mt-2";
-                header.textContent = "Custom Folders";
-                listContainer.appendChild(header);
-
-                clientTabs.forEach(tab => {
-                    if (tab === 'General') return;
-                    if (!firstAvailable) firstAvailable = tab;
-
-                    const count = clientLeads.filter(l => l.tabName === tab).length;
-                    const hasNew = clientLeads.some(l => l.tabName === tab && (l.status === 'new' || !l.status));
-
-                    if (activeTab === tab) currentTabName = tab;
-                    const isActive = activeTab === tab;
-
                     const row = document.createElement('div');
-                    row.className = `group w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs font-medium transition mb-1 ${isActive ? 'bg-blue-500/10 text-blue-300 border border-blue-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`;
+                    row.className = `group w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs font-medium transition mb-1 ${isActive ? 'bg-purple-500/10 text-purple-300 border border-purple-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`;
 
-                    // 1. Main Button (Icon + Name) - Takes up remaining space
+                    // 1. Main Button
                     const mainBtn = document.createElement('button');
                     mainBtn.className = "flex-grow flex items-center gap-3 text-left overflow-hidden h-full pr-2";
                     mainBtn.onclick = () => {
-                        window.switchTab(tab);
+                        window.switchTab(sig);
                         window.toggleTabsPopup(false);
                     };
                     mainBtn.innerHTML = `
-                        <i data-feather="folder" class="w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-400' : 'text-gray-600'}"></i>
-                        <span class="truncate">${tab}</span>
-                        ${hasNew ? '<div class="w-2 h-2 rounded-full bg-red-500 animate-pulse ml-2 flex-shrink-0" title="New Leads"></div>' : ''}
+                        <i data-feather="layout" class="w-4 h-4 flex-shrink-0 ${isActive ? 'text-purple-400' : 'text-gray-600'}"></i>
+                        <span class="truncate">${formName}</span>
+                        ${data.hasNew ? '<div class="w-2 h-2 rounded-full bg-red-500 animate-pulse ml-2 flex-shrink-0" title="New Leads"></div>' : ''}
                     `;
 
-                    // 2. Actions (Rename / Delete) - Visible on hover
+                    // 2. Rename Action (Only for Web Forms)
                     const actionsDiv = document.createElement('div');
                     actionsDiv.className = "flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mr-2";
 
@@ -2614,230 +2725,225 @@
                     renameBtn.className = "p-1.5 hover:bg-white/10 rounded-md text-gray-500 hover:text-white transition z-10";
                     renameBtn.onclick = (e) => {
                         e.stopPropagation();
-                        window.renameFolder(tab);
+                        window.renameForm(sig);
                     };
                     renameBtn.innerHTML = `<i data-feather="edit-2" class="w-3 h-3"></i>`;
-
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = "p-1.5 hover:bg-red-500/10 rounded-md text-gray-500 hover:text-red-400 transition z-10";
-                    deleteBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        window.deleteFolder(tab);
-                    };
-                    deleteBtn.innerHTML = `<i data-feather="trash" class="w-3 h-3"></i>`;
-
                     actionsDiv.appendChild(renameBtn);
-                    actionsDiv.appendChild(deleteBtn);
 
-                    // 3. Number Badge - Pushed all the way to the right
+                    // 3. Count
                     const countBadge = document.createElement('span');
                     countBadge.className = "bg-white/5 px-1.5 py-0.5 rounded text-[10px] text-gray-500 flex-shrink-0 ml-auto";
-                    countBadge.textContent = count;
+                    countBadge.textContent = data.count;
 
-                    // Append in specific order
                     row.appendChild(mainBtn);
                     row.appendChild(actionsDiv);
                     row.appendChild(countBadge);
 
                     listContainer.appendChild(row);
 
-                    if (hasNew && activeTab !== tab) hasAnyNew = true;
+                    if (data.hasNew && activeTab !== sig) hasAnyNew = true; // Only flag if NOT active
                 });
             }
 
-            if (labelEl) labelEl.textContent = currentTabName;
+            // 3. RENDER: CUSTOM FOLDERS
+            if (clientTabs.length > 0) {
 
-            // Update Global Indicator
-            const globalInd = document.getElementById('global-new-indicator');
-            if (globalInd) {
-                if (hasAnyNew) globalInd.classList.remove('hidden');
-                else globalInd.classList.add('hidden');
+
+                if (labelEl) labelEl.textContent = currentTabName;
+
+                // Update Global Indicator
+                const globalInd = document.getElementById('global-new-indicator');
+                if (globalInd) {
+                    if (hasAnyNew) globalInd.classList.remove('hidden');
+                    else globalInd.classList.add('hidden');
+                }
+
+                // Auto-Select Logic
+                const isValidSelection = activeTab && (formClusters[activeTab] || clientTabs.includes(activeTab));
+                if (!isValidSelection && firstAvailable) {
+                    setTimeout(() => { if (window.switchTab) window.switchTab(firstAvailable); }, 50);
+                }
+
+                if (window.feather) feather.replace();
             }
 
-            // Auto-Select Logic
-            const isValidSelection = activeTab && (formClusters[activeTab] || clientTabs.includes(activeTab));
-            if (!isValidSelection && firstAvailable) {
-                setTimeout(() => { if (window.switchTab) window.switchTab(firstAvailable); }, 50);
-            }
+            // Toggle Popup
+            window.toggleTabsPopup = (forceState = null) => {
+                const popup = document.getElementById('tabs-popup');
+                if (forceState !== null) {
+                    forceState ? popup.classList.remove('hidden') : popup.classList.add('hidden');
+                } else {
+                    popup.classList.toggle('hidden');
+                }
+            };
 
-            if (window.feather) feather.replace();
+            // Close popup when clicking outside
+            document.addEventListener('click', (e) => {
+                const popup = document.getElementById('tabs-popup');
+                const trigger = document.querySelector('button[onclick="window.toggleTabsPopup()"]');
+                if (!popup || !trigger) return;
+                if (!popup.contains(e.target) && !trigger.contains(e.target)) {
+                    popup.classList.add('hidden');
+                }
+            });
+
+
+
+
+            // ARCHIVE TOGGLE
+            window.toggleArchiveMode = () => {
+                const btn = document.getElementById('btn-archive-toggle');
+                const ind = document.getElementById('archive-indicator');
+                const desc = document.getElementById('current-tab-desc');
+
+                // Safety Check
+                if (!btn || !ind || !desc) {
+                    console.warn("Archive toggle elements missing");
+                    return;
+                }
+
+                if (activeFilter === 'all') {
+                    activeFilter = 'archived';
+                    btn.classList.add('text-red-400', 'bg-red-500/10', 'border-red-500/20');
+                    ind.classList.remove('hidden');
+                    desc.innerHTML = '<span class="text-red-400 font-bold">VIEWING ARCHIVED LEADS</span>';
+                } else {
+                    activeFilter = 'all';
+                    btn.classList.remove('text-red-400', 'bg-red-500/10', 'border-red-500/20');
+                    ind.classList.add('hidden');
+                    // Restore original description
+                    window.switchTab(activeTab);
+                    return;
+                }
+                renderTable();
+            };
+
+            // ==========================================
+            // CREATE FOLDER LOGIC (MODAL)
+            // ==========================================
+            window.promptNewTab = () => {
+                document.getElementById('create-folder-modal').classList.remove('hidden');
+                document.getElementById('create-folder-modal').classList.add('flex');
+                setTimeout(() => document.getElementById('create-folder-input').focus(), 100);
+            };
+
+            window.closeCreateFolderModal = () => {
+                const modal = document.getElementById('create-folder-modal');
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                document.getElementById('create-folder-input').value = ''; // Reset
+            };
+
+            window.confirmCreateFolder = async () => {
+                const input = document.getElementById('create-folder-input');
+                const name = input.value.trim();
+
+                if (!name) return;
+                if (clientTabs.includes(name)) {
+                    alert("A folder with this name already exists.");
+                    return;
+                }
+
+                window.closeCreateFolderModal(); // Close immediately for better UX
+
+                // Save to Firestore
+                const newTabs = [...clientTabs, name].filter(t => t !== 'General');
+
+                try {
+                    const user = authInstance.currentUser;
+                    if (!user) return;
+
+                    // Optimistic UI Update
+                    clientTabs.push(name);
+                    renderTabsUI();
+
+                    await updateDoc(doc(db, "clients", user.uid), {
+                        tabs: newTabs
+                    });
+
+                    // Switch to new tab
+                    window.switchTab(name);
+
+                } catch (e) {
+                    console.error(e);
+                    alert("Error creating folder: " + e.message);
+                    // Revert on failure
+                    clientTabs = clientTabs.filter(t => t !== name);
+                    renderTabsUI();
+                }
+            };
+            // ==========================================
+            // EMERGENCY CLEAR ALL
+            // ==========================================
+            // ==========================================
+            // CLEAR DATA (CURRENT TAB ONLY)
+            // ==========================================
+            window.clearCurrentTab = async () => {
+                // 1. Identify what we are deleting
+                const leadsToDelete = getFilteredLeads(); // Reuses the current view/filter logic
+                const count = leadsToDelete.length;
+
+                if (count === 0) {
+                    alert("No leads found in this view to delete.");
+                    return;
+                }
+
+                let confirmMsg = "";
+                let confirmTitle = "";
+
+                if (activeTab && clientTabs.includes(activeTab)) {
+                    confirmTitle = `Clear Folder "${activeTab}"?`;
+                    confirmMsg = `This will permanently delete <b class="text-white">${count} leads</b> from this folder.<br>This cannot be undone.`;
+                } else {
+                    confirmTitle = "Clear Current View?";
+                    confirmMsg = `This will permanently delete <b class="text-white">${count} leads</b> visible in this view.<br>This cannot be undone.`;
+                }
+
+                // 2. Double Confirmation
+                const confirm1 = await window.customConfirm(confirmMsg, confirmTitle);
+                if (!confirm1) return;
+
+                // 3. UI Loading State
+                const content = document.querySelector('.data-table');
+                if (content) content.style.opacity = '0.3';
+
+                try {
+                    // Delete in batches (Firestore limit 500)
+                    const batchSize = 400;
+                    let deleted = 0;
+
+                    for (let i = 0; i < count; i += batchSize) {
+                        const chunk = leadsToDelete.slice(i, i + batchSize);
+                        const promises = chunk.map(l => deleteDoc(doc(db, "leads", l.id)));
+                        await Promise.all(promises);
+                        deleted += chunk.length;
+                    }
+
+                    // Removed the alert for smoother UX, just refresh
+                    // alert(`Successfully cleared ${deleted} leads.`);
+                } catch (err) {
+                    console.error(err);
+                    alert("Error clearing data: " + err.message);
+                } finally {
+                    if (content) content.style.opacity = '1';
+                    // Close dropdown if open
+                    const dropdown = document.getElementById('settings-dropdown');
+                    if (dropdown) dropdown.classList.add('hidden');
+                }
+            };
+
+            // Close settings dropdown on click outside
+            document.addEventListener('click', (e) => {
+                const dropdown = document.getElementById('settings-dropdown');
+                const trigger = document.querySelector('button[title="Data Settings"]');
+                if (dropdown && !dropdown.classList.contains('hidden')) {
+                    if (!dropdown.contains(e.target) && (!trigger || !trigger.contains(e.target))) {
+                        dropdown.classList.add('hidden');
+                    }
+                }
+            });
         }
 
-        // Toggle Popup
-        window.toggleTabsPopup = (forceState = null) => {
-            const popup = document.getElementById('tabs-popup');
-            if (forceState !== null) {
-                forceState ? popup.classList.remove('hidden') : popup.classList.add('hidden');
-            } else {
-                popup.classList.toggle('hidden');
-            }
-        };
-
-        // Close popup when clicking outside
-        document.addEventListener('click', (e) => {
-            const popup = document.getElementById('tabs-popup');
-            const trigger = document.querySelector('button[onclick="window.toggleTabsPopup()"]');
-            if (!popup || !trigger) return;
-            if (!popup.contains(e.target) && !trigger.contains(e.target)) {
-                popup.classList.add('hidden');
-            }
-        });
-
-
-
-
-        // ARCHIVE TOGGLE
-        window.toggleArchiveMode = () => {
-            const btn = document.getElementById('btn-archive-toggle');
-            const ind = document.getElementById('archive-indicator');
-            const desc = document.getElementById('current-tab-desc');
-
-            // Safety Check
-            if (!btn || !ind || !desc) {
-                console.warn("Archive toggle elements missing");
-                return;
-            }
-
-            if (activeFilter === 'all') {
-                activeFilter = 'archived';
-                btn.classList.add('text-red-400', 'bg-red-500/10', 'border-red-500/20');
-                ind.classList.remove('hidden');
-                desc.innerHTML = '<span class="text-red-400 font-bold">VIEWING ARCHIVED LEADS</span>';
-            } else {
-                activeFilter = 'all';
-                btn.classList.remove('text-red-400', 'bg-red-500/10', 'border-red-500/20');
-                ind.classList.add('hidden');
-                // Restore original description
-                window.switchTab(activeTab);
-                return;
-            }
-            renderTable();
-        };
-
-        // ==========================================
-        // CREATE FOLDER LOGIC (MODAL)
-        // ==========================================
-        window.promptNewTab = () => {
-            document.getElementById('create-folder-modal').classList.remove('hidden');
-            document.getElementById('create-folder-modal').classList.add('flex');
-            setTimeout(() => document.getElementById('create-folder-input').focus(), 100);
-        };
-
-        window.closeCreateFolderModal = () => {
-            const modal = document.getElementById('create-folder-modal');
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-            document.getElementById('create-folder-input').value = ''; // Reset
-        };
-
-        window.confirmCreateFolder = async () => {
-            const input = document.getElementById('create-folder-input');
-            const name = input.value.trim();
-
-            if (!name) return;
-            if (clientTabs.includes(name)) {
-                alert("A folder with this name already exists.");
-                return;
-            }
-
-            window.closeCreateFolderModal(); // Close immediately for better UX
-
-            // Save to Firestore
-            const newTabs = [...clientTabs, name].filter(t => t !== 'General');
-
-            try {
-                const user = authInstance.currentUser;
-                if (!user) return;
-
-                // Optimistic UI Update
-                clientTabs.push(name);
-                renderTabsUI();
-
-                await updateDoc(doc(db, "clients", user.uid), {
-                    tabs: newTabs
-                });
-
-                // Switch to new tab
-                window.switchTab(name);
-
-            } catch (e) {
-                console.error(e);
-                alert("Error creating folder: " + e.message);
-                // Revert on failure
-                clientTabs = clientTabs.filter(t => t !== name);
-                renderTabsUI();
-            }
-        };
-        // ==========================================
-        // EMERGENCY CLEAR ALL
-        // ==========================================
-        // ==========================================
-        // CLEAR DATA (CURRENT TAB ONLY)
-        // ==========================================
-        window.clearCurrentTab = async () => {
-            // 1. Identify what we are deleting
-            const leadsToDelete = getFilteredLeads(); // Reuses the current view/filter logic
-            const count = leadsToDelete.length;
-
-            if (count === 0) {
-                alert("No leads found in this view to delete.");
-                return;
-            }
-
-            let confirmMsg = "";
-            let confirmTitle = "";
-
-            if (activeTab && clientTabs.includes(activeTab)) {
-                confirmTitle = `Clear Folder "${activeTab}"?`;
-                confirmMsg = `This will permanently delete <b class="text-white">${count} leads</b> from this folder.<br>This cannot be undone.`;
-            } else {
-                confirmTitle = "Clear Current View?";
-                confirmMsg = `This will permanently delete <b class="text-white">${count} leads</b> visible in this view.<br>This cannot be undone.`;
-            }
-
-            // 2. Double Confirmation
-            const confirm1 = await window.customConfirm(confirmMsg, confirmTitle);
-            if (!confirm1) return;
-
-            // 3. UI Loading State
-            const content = document.querySelector('.data-table');
-            if (content) content.style.opacity = '0.3';
-
-            try {
-                // Delete in batches (Firestore limit 500)
-                const batchSize = 400;
-                let deleted = 0;
-
-                for (let i = 0; i < count; i += batchSize) {
-                    const chunk = leadsToDelete.slice(i, i + batchSize);
-                    const promises = chunk.map(l => deleteDoc(doc(db, "leads", l.id)));
-                    await Promise.all(promises);
-                    deleted += chunk.length;
-                }
-
-                // Removed the alert for smoother UX, just refresh
-                // alert(`Successfully cleared ${deleted} leads.`);
-            } catch (err) {
-                console.error(err);
-                alert("Error clearing data: " + err.message);
-            } finally {
-                if (content) content.style.opacity = '1';
-                // Close dropdown if open
-                const dropdown = document.getElementById('settings-dropdown');
-                if (dropdown) dropdown.classList.add('hidden');
-            }
-        };
-
-        // Close settings dropdown on click outside
-        document.addEventListener('click', (e) => {
-            const dropdown = document.getElementById('settings-dropdown');
-            const trigger = document.querySelector('button[title="Data Settings"]');
-            if (dropdown && !dropdown.classList.contains('hidden')) {
-                if (!dropdown.contains(e.target) && (!trigger || !trigger.contains(e.target))) {
-                    dropdown.classList.add('hidden');
-                }
-            }
-        });
 
 
 
