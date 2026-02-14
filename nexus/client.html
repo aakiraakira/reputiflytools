@@ -528,8 +528,12 @@
 
                 <div class="flex items-center gap-2 relative">
                     <button onclick="window.toggleTabsPopup()"
-                        class="flex items-center gap-2 sm:gap-3 bg-[#0B0A14] hover:bg-[#1A1A24] border border-white/20 text-white text-xs sm:text-sm font-bold py-2 px-3 sm:py-2.5 sm:px-5 rounded-full shadow-lg transition group min-w-[130px] sm:min-w-[200px] justify-between">
+                        class="flex items-center gap-2 sm:gap-3 bg-[#0B0A14] hover:bg-[#1A1A24] border border-white/20 text-white text-xs sm:text-sm font-bold py-2 px-3 sm:py-2.5 sm:px-5 rounded-full shadow-lg transition group min-w-[130px] sm:min-w-[200px] justify-between relative">
                         <span id="current-tab-label" class="truncate">Select Data Source</span>
+                        <!-- Global Red Dot (Hidden if current tab has new leads, handled in JS) -->
+                        <div id="global-new-indicator"
+                            class="hidden absolute top-0 right-0 -mt-1 -mr-1 w-3 h-3 bg-red-500 border-2 border-[#0B0A14] rounded-full animate-pulse">
+                        </div>
                         <i data-feather="chevron-down"
                             class="w-4 h-4 text-gray-500 group-hover:text-purple-400 transition"></i>
                     </button>
@@ -796,6 +800,16 @@
                 </div>
             </div>
 
+            <!-- Source Breakdown (New) -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div class="glass-panel p-5">
+                    <h3 class="text-sm font-bold text-gray-300 uppercase tracking-wider mb-4">Top Sources</h3>
+                    <div class="chart-wrap flex items-center justify-center" style="height: 220px;">
+                        <canvas id="chart-source"></canvas>
+                    </div>
+                </div>
+            </div>
+
             <!-- Calendar -->
             <div class="glass-panel p-5">
                 <div class="flex items-center justify-between mb-4">
@@ -1047,6 +1061,7 @@
         let reviewFeatureEnabled = false; // Added Review State
         let volumeChart = null;
         let statusChart = null;
+        let sourceChart = null; // Added for new chart
         let chartRange = '7d';
         let calDate = new Date(); // Analytics calendar
 
@@ -1360,7 +1375,7 @@
             const arrow = sortOrder === 'desc' ? '<i data-feather="arrow-down" class="w-3 h-3 ml-1 inline text-gray-400"></i>' : '<i data-feather="arrow-up" class="w-3 h-3 ml-1 inline text-gray-400"></i>';
             let headerHTML = `<tr><th onclick="window.toggleSort()" class="cursor-pointer hover:text-white transition select-none flex items-center gap-1 group w-32">Date ${arrow}</th>`;
             colArray.forEach(col => { headerHTML += `<th>${col.charAt(0).toUpperCase() + col.slice(1)}</th>`; });
-            headerHTML += `<th>Notes</th><th class="text-center w-20">Actions</th></tr>`;
+            headerHTML += `<th>Notes</th><th class="text-center w-32">Status</th></tr>`; // Renamed Actions to Status
             thead.innerHTML = headerHTML;
 
             filtered.forEach(item => {
@@ -1401,19 +1416,37 @@
                 });
 
                 if (item.status === 'archived') {
-                    rowHTML += `<td><span class="badge bg-gray-700 text-gray-300">ARCHIVED</span></td>`;
+                    rowHTML += `<td><input type="text" class="note-input" placeholder="Add note..." value="${(item.note || '').replace(/"/g, '&quot;')}" onblur="window.saveNote('${item.id}', this.value)" disabled /></td>`;
                 } else {
                     rowHTML += `<td><input type="text" class="note-input" placeholder="Add note..." value="${(item.note || '').replace(/"/g, '&quot;')}" onblur="window.saveNote('${item.id}', this.value)" /></td>`;
                 }
 
-                // Actions Column - NOW CLEANER (Single Pencil Icon)
-                let actionBtn = `<button onclick="window.openLeadActions('${item.id}', '${item.status || 'new'}')" class="p-2 bg-white/5 text-gray-400 rounded-lg hover:bg-white/10 hover:text-white transition" title="Manage Lead"><i data-feather="edit-2" class="w-4 h-4"></i></button>`;
+                // --- STATUS COLUMN (Renamed from Actions) ---
+                const statusMap = {
+                    'new': { label: 'New', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
+                    'contacted': { label: 'Contacted', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
+                    'qualified': { label: 'Qualified', color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
+                    'junk': { label: 'Junk', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20' },
+                    'archived': { label: 'Archived', color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-white/10' },
+                    'review_sent': { label: 'Review Sent', color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20' }
+                };
 
-                // CRITICAL FIX: Wrap in a flex row to guarantee side-by-side on mobile
-                rowHTML += `<td><div class="flex flex-row items-center justify-center gap-3">${actionBtn}</div></td>`;
+                const s = statusMap[item.status || 'new'] || statusMap['new'];
 
-                tr.innerHTML = rowHTML;
-                tbody.appendChild(tr);
+                rowHTML += `
+                    <td class="text-center">
+                         <button onclick="window.openLeadActions('${item.id}', '${item.status || 'new'}')" 
+                            class="group relative inline-flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all hover:scale-105 active:scale-95 w-full justify-between ${s.bg} ${s.border}">
+                            <div class="flex items-center gap-1.5 overflow-hidden">
+                                <div class="w-1.5 h-1.5 rounded-full ${s.color.replace('text', 'bg')} flex-shrink-0"></div>
+                                <span class="text-[10px] font-bold uppercase tracking-wider ${s.color} truncate">${s.label}</span>
+                            </div>
+                            <i data-feather="edit-2" class="w-3 h-3 ${s.color} opacity-50 group-hover:opacity-100 transition-opacity"></i>
+                         </button>
+                    </td>
+                </tr>`;
+
+                tbody.innerHTML += rowHTML;
             });
             feather.replace();
         }
@@ -1829,9 +1862,11 @@
             // Charts (Destroy old first)
             if (volumeChart) volumeChart.destroy();
             if (statusChart) statusChart.destroy();
+            if (sourceChart) sourceChart.destroy(); // Fix potential chart re-use issue
 
             renderVolumeChart(chartRange);
             renderStatusChart();
+            renderSourceChart();
             renderCalendar();
         }
 
@@ -1925,6 +1960,54 @@
                     datasets: [{
                         data: counts,
                         backgroundColor: ['#34d399', '#60a5fa', '#a855f7', '#f87171'], // New (Green), Contacted (Blue), Qualified (Purple), Junk (Red)
+                        borderWidth: 0,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '75%',
+                    plugins: {
+                        legend: { position: 'right', labels: { color: '#ccc', font: { size: 11 }, boxWidth: 10 } }
+                    }
+                }
+            });
+        }
+
+        function renderSourceChart() {
+            const ctx = document.getElementById('chart-source').getContext('2d');
+            const sourceCounts = {};
+
+            clientLeads.forEach(l => {
+                let source = 'Unknown';
+                if (l.source === 'import' && l.tabName) {
+                    source = l.tabName; // Use tabName for imported leads
+                } else if (l.lead && l.lead._page_source) {
+                    source = l.lead._page_source;
+                } else if (l.lead && l.lead.source) {
+                    source = l.lead.source;
+                } else if (l.source === 'api') {
+                    source = 'API Form';
+                }
+
+                sourceCounts[source] = (sourceCounts[source] || 0) + 1;
+            });
+
+            const labels = Object.keys(sourceCounts);
+            const data = Object.values(sourceCounts);
+
+            const backgroundColors = [
+                '#60a5fa', '#a855f7', '#34d399', '#f87171', '#fbbf24', '#c084fc', '#22d3ee', '#f472b6', '#84cc16', '#ef4444'
+            ];
+
+            sourceChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: backgroundColors.slice(0, labels.length),
                         borderWidth: 0,
                         hoverOffset: 4
                     }]
@@ -2450,6 +2533,7 @@
 
             let firstAvailable = null;
             let currentTabName = "Select Data Source";
+            let hasAnyNew = false; // Track global new status for main button
 
             // 1. DETECT FORM SIGNATURES
             const apiLeads = clientLeads.filter(l => !l.source || l.source === 'api');
@@ -2502,6 +2586,8 @@
                         <span class="bg-white/5 px-1.5 py-0.5 rounded text-[10px] text-gray-500 pointer-events-none">${data.count}</span>
                     `;
                     listContainer.appendChild(btn);
+
+                    if (data.hasNew && activeTab !== sig) hasAnyNew = true; // Only flag if NOT active
                 });
             }
 
@@ -2572,10 +2658,19 @@
                     row.appendChild(countBadge);
 
                     listContainer.appendChild(row);
+
+                    if (hasNew && activeTab !== tab) hasAnyNew = true;
                 });
             }
 
             if (labelEl) labelEl.textContent = currentTabName;
+
+            // Update Global Indicator
+            const globalInd = document.getElementById('global-new-indicator');
+            if (globalInd) {
+                if (hasAnyNew) globalInd.classList.remove('hidden');
+                else globalInd.classList.add('hidden');
+            }
 
             // Auto-Select Logic
             const isValidSelection = activeTab && (formClusters[activeTab] || clientTabs.includes(activeTab));
