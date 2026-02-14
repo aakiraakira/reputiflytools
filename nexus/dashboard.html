@@ -1179,7 +1179,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, doc, updateDoc, deleteDoc, setDoc, addDoc, query, orderBy, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, doc, updateDoc, deleteDoc, setDoc, addDoc, query, orderBy, where, limit, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // CONFIG
         const firebaseConfig = {
@@ -1254,10 +1254,9 @@
         });
 
         function initDashboard() {
-            // Start all realtime listeners once authenticated
-            startLeadsListener();
+            // SCALABILITY FIX: Removed startLeadsListener() (It causes crashes)
+            // We now only listen to clients initially.
             startClientsListener();
-
             startSettingsListener();
             setupEmailInputLogic();
             feather.replace();
@@ -1361,8 +1360,10 @@
                 snapshot.forEach((docSnap) => {
                     allClients.push({ uid: docSnap.id, ...docSnap.data() });
                 });
+                // Render BOTH tables from this lightweight data
                 renderClientsTable();
-                populateEmailDropdown(); // refresh dropdown to exclude already-created accounts
+                renderOverview(); 
+                populateEmailDropdown();
             });
         }
 
@@ -1439,37 +1440,43 @@
         // ==========================================
         // 1. OVERVIEW TABLE (LEADS)
         // ==========================================
+        // ==========================================
+        // 1. OVERVIEW TABLE (SCALABLE)
+        // ==========================================
         function renderOverview() {
             const tbody = document.getElementById('overview-table-body');
             tbody.innerHTML = '';
-            const clients = Object.keys(clientMap);
 
-            if (clients.length === 0) {
+            if (allClients.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="5" class="text-center py-20 text-gray-500">No data found.</td></tr>`;
                 return;
             }
 
-            clients.forEach(cId => {
-                const leads = clientMap[cId];
-                const lastLead = leads[0];
-                const dateStr = lastLead.createdAt ? new Date(lastLead.createdAt.seconds * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A';
+            allClients.forEach(client => {
+                // READ STATS FROM DB DOCUMENT (Fast)
+                const stats = client.stats || { totalLeads: 0 };
+                const totalLeads = stats.totalLeads || 0;
+                
+                // DATE LOGIC
+                const dateStr = client.usageStats ? client.usageStats.date : (client.createdAt ? new Date(client.createdAt.seconds * 1000).toLocaleDateString() : 'N/A');
 
                 const tr = document.createElement('tr');
                 tr.className = "transition-colors duration-200 group hover:bg-white/5 cursor-pointer";
                 tr.onclick = (e) => {
                     if (e.target.closest('button')) return;
-                    window.viewClient(cId);
+                    window.viewClient(client.uid, client.email); // Pass Email explicitly
                 };
 
-                const clientData = allClients.find(c => c.email === cId) || {};
+                const limit = client.customDailyLimit || 50;
                 const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
                 let usage = 0;
-                if (clientData.usageStats && clientData.usageStats.date === today) {
-                    usage = clientData.usageStats.count || 0;
+                if (client.usageStats && client.usageStats.date === today) {
+                    usage = client.usageStats.count || 0;
                 }
-                const limit = clientData.customDailyLimit || 50;
+                
                 const usageText = `${usage} / ${limit}`;
-                const usageColor = usage >= limit ? 'text-red-500 font-bold' : (usage >= limit * 0.8 ? 'text-orange-400' : 'text-gray-400');
+                const usageColor = usage >= limit ? 'text-red-500 font-bold' : 'text-gray-400';
+                const cId = client.email || 'Unknown';
 
                 tr.innerHTML = `
                     <td>
@@ -1479,16 +1486,16 @@
                             </div>
                             <div>
                                 <div class="text-sm font-bold text-white">${cId}</div>
-                                <div class="text-[10px] text-gray-500 font-mono">ID: ${clientData.uid || 'N/A'}</div>
+                                <div class="text-[10px] text-gray-500 font-mono">ID: ${client.uid || 'N/A'}</div>
                             </div>
                         </div>
                     </td>
-                    <td><span class="bg-white/5 border border-white/5 text-gray-300 px-3 py-1 rounded text-xs font-mono font-bold">${leads.length}</span></td>
+                    <td><span class="bg-white/5 border border-white/5 text-gray-300 px-3 py-1 rounded text-xs font-mono font-bold">${totalLeads}</span></td>
                     <td><span class="font-mono text-xs ${usageColor}">${usageText}</span></td>
                     <td class="text-sm text-gray-400">${dateStr}</td>
                     <td class="text-right">
                         <div class="flex items-center justify-end gap-2">
-                            <button onclick="window.viewClient('${cId}')" class="btn-hero-glass">View</button>
+                            <button onclick="window.viewClient('${client.uid}', '${cId}')" class="btn-hero-glass">View</button>
                             <button onclick="window.exportSingle('${cId}')" class="p-2 hover:bg-white/10 rounded-full text-gray-400 hover:text-white transition"><i data-feather="download" class="w-4 h-4"></i></button>
                         </div>
                     </td>
@@ -1501,13 +1508,53 @@
         // ==========================================
         // 2. DETAIL TABLE (LEADS)
         // ==========================================
-        function renderDetail(clientId) {
+        // ==========================================
+        // DETAIL VIEW (ON-DEMAND LOADING)
+        // ==========================================
+        let detailUnsubscribe = null; // Store listener to kill it later
+
+        window.viewClient = (uid, email) => {
+            // 1. Setup UI
+            currentClient = email; // Store email for export/CSV
+            document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
+            document.getElementById('tab-leads').classList.add('active');
+            document.getElementById('tab-clients').classList.remove('active');
+            
+            setTimeout(() => {
+                document.getElementById('view-detail').classList.add('active');
+                document.getElementById('detail-client-name').innerText = email || uid;
+                document.getElementById('detail-table-body').innerHTML = `<tr><td colspan="5" class="text-center py-20 text-gray-500"><div class="spinner mb-2"></div><br>Fetching live data...</td></tr>`;
+            }, 100);
+
+            // 2. Kill previous listener if exists
+            if (detailUnsubscribe) {
+                detailUnsubscribe();
+                detailUnsubscribe = null;
+            }
+
+            // 3. Start NEW listener for THIS client only (Limit 50)
+            // Query by "clientId" (which stores the email)
+            const q = query(
+                collection(db, "leads"), 
+                where("clientId", "==", email), 
+                orderBy("createdAt", "desc"), 
+                limit(50)
+            );
+
+            detailUnsubscribe = onSnapshot(q, (snapshot) => {
+                const leads = [];
+                snapshot.forEach(doc => leads.push({ id: doc.id, ...doc.data() }));
+                renderDetail(leads); // Pass data directly
+            }, (err) => {
+                console.error("Detail Error", err);
+                if(err.message.includes("index")) alert("Missing Index! Click link in console.");
+            });
+        };
+
+        function renderDetail(leads) {
             const tbody = document.getElementById('detail-table-body');
             const thead = document.getElementById('detail-table-head');
-            const title = document.getElementById('detail-client-name');
-            const leads = clientMap[clientId] || [];
 
-            title.innerText = clientId;
             tbody.innerHTML = '';
             thead.innerHTML = '';
 
@@ -1516,6 +1563,7 @@
                 return;
             }
 
+            // Dynamic Columns Logic
             let columns = new Set();
             leads.forEach(lead => {
                 if (lead.lead) Object.keys(lead.lead).forEach(k => columns.add(k));
@@ -1523,23 +1571,19 @@
             let colArray = Array.from(columns);
             const priority = ['name', 'email', 'phone'];
             colArray.sort((a, b) => {
-                if (!a) return 1;
-                if (!b) return -1;
-                const aVal = String(a).toLowerCase();
-                const bVal = String(b).toLowerCase();
-                const aP = priority.indexOf(aVal);
-                const bP = priority.indexOf(bVal);
+                const aP = priority.indexOf(a.toLowerCase()), bP = priority.indexOf(b.toLowerCase());
                 if (aP !== -1 && bP !== -1) return aP - bP;
-                if (aP !== -1) return -1;
-                if (bP !== -1) return 1;
-                return aVal.localeCompare(bVal);
+                if (aP !== -1) return -1; if (bP !== -1) return 1;
+                return a.localeCompare(b);
             });
 
+            // Header
             let headerHTML = `<tr><th>Date</th>`;
             colArray.forEach(col => { headerHTML += `<th>${col.charAt(0).toUpperCase() + col.slice(1)}</th>`; });
             headerHTML += `<th>Status</th><th>Notes</th><th class="text-right">Actions</th></tr>`;
             thead.innerHTML = headerHTML;
 
+            // Rows
             leads.forEach(item => {
                 const tr = document.createElement('tr');
                 tr.className = "transition-colors duration-200 group";
@@ -1548,16 +1592,14 @@
                 let badgeClass = 'badge-new';
                 if (item.status === 'junk') badgeClass = 'badge-junk';
                 if (item.status === 'contacted') badgeClass = 'badge-contacted';
-                if (item.status === 'archived') badgeClass = 'bg-gray-700 text-gray-300 border border-gray-600'; // Custom grey style
+                if (item.status === 'archived') badgeClass = 'bg-gray-700 text-gray-300 border border-gray-600';
 
                 let rowHTML = `<td class="font-mono text-[11px] text-gray-500">${dateStr}</td>`;
+                
                 colArray.forEach(col => {
                     let val = item.lead ? (item.lead[col] || '-') : '-';
-                    // Escape HTML first
-                    val = val.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-                    // Linkify
+                    val = val.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
                     val = linkify(val);
-
                     if (col.toLowerCase() === 'email') val = `<span class="text-white">${val}</span>`;
                     if (col.toLowerCase() === 'name') val = `<span class="font-bold text-white">${val}</span>`;
                     rowHTML += `<td class="text-sm text-gray-400">${val}</td>`;
@@ -1567,14 +1609,9 @@
                 const nextStatusMap = { 'new': 'contacted', 'contacted': 'junk', 'junk': 'new', 'archived': 'new' };
                 const nextStatus = nextStatusMap[currentStatus] || 'new';
 
-                // For archived in admin view, maybe just let them toggle it back to new?
-                // Or if it's archived, maybe it shouldn't be easily toggleable via badge click?
-                // User asked for "Gray badge", didn't specify interaction. 
-                // Ensuring it has a valid class (badge-click is generic)
-
                 rowHTML += `
                     <td>
-                        <span class="badge badge-click ${badgeClass}" onclick="window.updateStatus('${item.id}', '${nextStatus}')" title="Click to mark as ${nextStatus}">${currentStatus.toUpperCase()}</span>
+                        <span class="badge badge-click ${badgeClass}" onclick="window.updateStatus('${item.id}', '${nextStatus}')">${currentStatus.toUpperCase()}</span>
                     </td>
                     <td>
                         <input type="text" class="note-input" placeholder="Add note..."
@@ -1583,7 +1620,7 @@
                     </td>
                     <td class="text-right">
                         <div class="flex items-center justify-end gap-2 opacity-60 group-hover:opacity-100 transition">
-                            <button onclick="window.deleteLead('${item.id}')" class="p-2 hover:bg-white/10 rounded-lg text-gray-500 hover:text-white transition" title="Delete lead"><i data-feather="x" class="w-4 h-4"></i></button>
+                            <button onclick="window.deleteLead('${item.id}')" class="p-2 hover:bg-white/10 rounded-lg text-gray-500 hover:text-white transition"><i data-feather="x" class="w-4 h-4"></i></button>
                         </div>
                     </td>`;
 
@@ -2191,16 +2228,7 @@
         // ==========================================
         // LEADS: GLOBAL ACTIONS
         // ==========================================
-        window.viewClient = (cId) => {
-            currentClient = cId;
-            document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
-            document.getElementById('tab-leads').classList.add('active');
-            document.getElementById('tab-clients').classList.remove('active');
-            setTimeout(() => {
-                document.getElementById('view-detail').classList.add('active');
-                renderDetail(cId);
-            }, 100);
-        };
+        
 
         window.showOverview = () => {
             currentClient = null;
