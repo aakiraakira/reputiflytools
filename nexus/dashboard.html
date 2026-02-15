@@ -486,6 +486,14 @@
             }
         }
 
+        .spinner-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+            width: 100%;
+        }
+
         /* Inline note input */
         .note-input {
             background: rgba(255, 255, 255, 0.03);
@@ -804,6 +812,12 @@
             </div>
 
             <div class="glass-panel overflow-hidden min-h-[600px] flex flex-col">
+                <!-- CATEGORY TABS -->
+                <div id="detail-tabs-container"
+                    class="flex items-center gap-2 px-6 py-4 border-b border-white/5 overflow-x-auto">
+                    <!-- Tabs will be injected here -->
+                </div>
+
                 <div class="overflow-x-auto flex-grow">
                     <table class="data-table">
                         <thead id="detail-table-head"></thead>
@@ -1362,7 +1376,7 @@
                 });
                 // Render BOTH tables from this lightweight data
                 renderClientsTable();
-                renderOverview(); 
+                renderOverview();
                 populateEmailDropdown();
             });
         }
@@ -1456,7 +1470,7 @@
                 // READ STATS FROM DB DOCUMENT (Fast)
                 const stats = client.stats || { totalLeads: 0 };
                 const totalLeads = stats.totalLeads || 0;
-                
+
                 // DATE LOGIC
                 const dateStr = client.usageStats ? client.usageStats.date : (client.createdAt ? new Date(client.createdAt.seconds * 1000).toLocaleDateString() : 'N/A');
 
@@ -1473,7 +1487,7 @@
                 if (client.usageStats && client.usageStats.date === today) {
                     usage = client.usageStats.count || 0;
                 }
-                
+
                 const usageText = `${usage} / ${limit}`;
                 const usageColor = usage >= limit ? 'text-red-500 font-bold' : 'text-gray-400';
                 const cId = client.email || 'Unknown';
@@ -1512,76 +1526,284 @@
         // DETAIL VIEW (ON-DEMAND LOADING)
         // ==========================================
         let detailUnsubscribe = null; // Store listener to kill it later
+        let statsUnsubscribe = null; // Listener for Tabs
+        let lastVisibleClientLead = null; // Pagination cursor
+        let currentClientEmail = null; // Store for pagination query
+        let activeClientTab = 'all'; // Track active filter
 
         window.viewClient = (uid, email) => {
             // 1. Setup UI
             currentClient = email; // Store email for export/CSV
+            currentClientEmail = email;
+            lastVisibleClientLead = null; // Reset pagination
+            activeClientTab = 'all'; // Reset tab
+
             document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
             document.getElementById('tab-leads').classList.add('active');
             document.getElementById('tab-clients').classList.remove('active');
-            
-            setTimeout(() => {
-                document.getElementById('view-detail').classList.add('active');
-                document.getElementById('detail-client-name').innerText = email || uid;
-                document.getElementById('detail-table-body').innerHTML = `<tr><td colspan="5" class="text-center py-20 text-gray-500"><div class="spinner mb-2"></div><br>Fetching live data...</td></tr>`;
-            }, 100);
 
-            // 2. Kill previous listener if exists
-            if (detailUnsubscribe) {
-                detailUnsubscribe();
-                detailUnsubscribe = null;
-            }
+            document.getElementById('view-detail').classList.add('active');
+            document.getElementById('detail-client-name').innerText = email || uid;
 
-            // 3. Start NEW listener for THIS client only (Limit 50)
-            // Query by "clientId" (which stores the email)
-            const q = query(
-                collection(db, "leads"), 
-                where("clientId", "==", email), 
-                orderBy("createdAt", "desc"), 
-                limit(50)
-            );
+            // Use new spinner container for centering
+            document.getElementById('detail-table-body').innerHTML = `
+                <tr>
+                    <td colspan="7">
+                        <div class="spinner-container">
+                            <div class="spinner"></div>
+                        </div>
+                        <div class="text-center text-xs text-gray-500 mt-2">Fetching live data...</div>
+                    </td>
+                </tr>`;
 
-            detailUnsubscribe = onSnapshot(q, (snapshot) => {
-                const leads = [];
-                snapshot.forEach(doc => leads.push({ id: doc.id, ...doc.data() }));
-                renderDetail(leads); // Pass data directly
-            }, (err) => {
-                console.error("Detail Error", err);
-                if(err.message.includes("index")) alert("Missing Index! Click link in console.");
-            });
-        };
+            // Remove existing Load More button if any
+            const existingBtn = document.getElementById('btn-load-more-client');
+            if (existingBtn) existingBtn.remove();
 
-        function renderDetail(leads) {
-            const tbody = document.getElementById('detail-table-body');
-            const thead = document.getElementById('detail-table-head');
+            // 2. Kill previous listeners
+            if (detailUnsubscribe) { detailUnsubscribe(); detailUnsubscribe = null; }
+            if (statsUnsubscribe) { statsUnsubscribe(); statsUnsubscribe = null; }
 
-            tbody.innerHTML = '';
-            thead.innerHTML = '';
-
-            if (leads.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="5" class="text-center py-20 text-gray-500">No leads found.</td></tr>`;
+            if (!email) {
+                document.getElementById('detail-table-body').innerHTML = `<tr><td colspan="7" class="text-center py-20 text-red-400">Error: Client Email missing. Cannot fetch leads.</td></tr>`;
                 return;
             }
 
-            // Dynamic Columns Logic
-            let columns = new Set();
-            leads.forEach(lead => {
-                if (lead.lead) Object.keys(lead.lead).forEach(k => columns.add(k));
-            });
-            let colArray = Array.from(columns);
-            const priority = ['name', 'email', 'phone'];
-            colArray.sort((a, b) => {
-                const aP = priority.indexOf(a.toLowerCase()), bP = priority.indexOf(b.toLowerCase());
-                if (aP !== -1 && bP !== -1) return aP - bP;
-                if (aP !== -1) return -1; if (bP !== -1) return 1;
-                return a.localeCompare(b);
+            // 3. Listen to Client Stats (For Tabs)
+            const clientRef = doc(db, "clients", uid);
+            statsUnsubscribe = onSnapshot(clientRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    renderCategoryTabs(data.stats, uid, email); // Render Tabs
+                }
             });
 
-            // Header
-            let headerHTML = `<tr><th>Date</th>`;
-            colArray.forEach(col => { headerHTML += `<th>${col.charAt(0).toUpperCase() + col.slice(1)}</th>`; });
-            headerHTML += `<th>Status</th><th>Notes</th><th class="text-right">Actions</th></tr>`;
-            thead.innerHTML = headerHTML;
+            // 4. Initial Load (All Leads)
+            fetchClientLeads(email);
+        };
+
+        function fetchClientLeads(email, tab = 'all') {
+            // Kill existing listener before switching tabs
+            if (detailUnsubscribe) { detailUnsubscribe(); detailUnsubscribe = null; }
+
+            lastVisibleClientLead = null; // Reset pagination for new tab
+            const existingBtn = document.getElementById('btn-load-more-client');
+            if (existingBtn) existingBtn.remove();
+
+            document.getElementById('detail-table-body').innerHTML = `
+                <tr>
+                    <td colspan="7">
+                        <div class="spinner-container"><div class="spinner"></div></div>
+                    </td>
+                </tr>`;
+
+            try {
+                let q = query(
+                    collection(db, "leads"),
+                    where("clientId", "==", email),
+                    orderBy("createdAt", "desc"),
+                    limit(20)
+                );
+
+                if (tab !== 'all') {
+                    q = query(
+                        collection(db, "leads"),
+                        where("clientId", "==", email),
+                        where("source", "==", tab),
+                        orderBy("createdAt", "desc"),
+                        limit(20)
+                    );
+                }
+
+                detailUnsubscribe = onSnapshot(q, (snapshot) => {
+                    const leads = [];
+                    snapshot.forEach(doc => leads.push({ id: doc.id, ...doc.data() }));
+
+                    if (snapshot.docs.length > 0) {
+                        lastVisibleClientLead = snapshot.docs[snapshot.docs.length - 1];
+                    }
+
+                    renderDetail(leads);
+
+                    if (snapshot.docs.length === 20) {
+                        renderLoadMoreButton();
+                    }
+                }, (err) => {
+                    console.error("Detail Error", err);
+                    document.getElementById('detail-table-body').innerHTML = `<tr><td colspan="7" class="text-center py-20 text-red-500">Error: ${err.message}</td></tr>`;
+                });
+            } catch (e) {
+                console.error("Query setup error", e);
+                document.getElementById('detail-table-body').innerHTML = `<tr><td colspan="7" class="text-center py-20 text-red-500">Query Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        function renderCategoryTabs(stats, uid, email) {
+            const container = document.getElementById('detail-tabs-container');
+            if (!container) return;
+
+            container.innerHTML = '';
+
+            if (!stats || !stats.sources || Object.keys(stats.sources).length === 0) {
+                container.innerHTML = `<div class="text-xs text-gray-500 italic px-2">No categories found</div>`;
+                return;
+            }
+
+            // Helper to format names
+            const formatTabName = (name) => {
+                if (!name) return 'Unknown';
+                const upper = name.toUpperCase();
+
+                // 1. Check for Newsletter
+                if (upper.includes('FREQUENCY') || upper.includes('NEWSLETTER')) {
+                    return 'Newsletter';
+                }
+
+                // 2. Check for comma-separated fields (Form submissions)
+                if (name.includes(',')) {
+                    return 'Website Lead';
+                }
+
+                // 3. Capitalize
+                return name.charAt(0).toUpperCase() + name.slice(1);
+            };
+
+            const sources = Object.entries(stats.sources).sort(([, a], [, b]) => b.count - a.count);
+
+            // Default to first source if 'all' (since we removed 'All Leads' tab)
+            if (activeClientTab === 'all' && sources.length > 0) {
+                activeClientTab = sources[0][0];
+                fetchClientLeads(email, activeClientTab);
+            }
+
+            sources.forEach(([source, data]) => {
+                const displayName = formatTabName(source);
+                const isActive = activeClientTab === source;
+
+                const btn = document.createElement('button');
+                // Exact Match: Use .nav-tab class from main CSS
+                btn.className = `nav-tab flex items-center gap-2 ${isActive ? 'active' : ''}`;
+
+                // Name + Count Badge
+                // Style badge to blend with nav-tab aesthetics
+                const countBadgeClass = isActive ? 'bg-white/20 text-white' : 'bg-white/10 text-gray-500';
+                btn.innerHTML = `
+                    <span>${displayName}</span>
+                    <span class="${countBadgeClass} px-1.5 py-0.5 rounded-full text-[10px] min-w-[18px] text-center">${data.count}</span>
+                `;
+
+                btn.onclick = () => {
+                    activeClientTab = source;
+                    renderCategoryTabs(stats, uid, email);
+                    fetchClientLeads(email, source);
+                };
+                container.appendChild(btn);
+            });
+        }
+
+
+        window.loadMoreClientLeads = async () => {
+            if (!lastVisibleClientLead || !currentClientEmail) return;
+
+            const btn = document.getElementById('btn-load-more-client');
+            if (btn) btn.innerHTML = '<span class="spinner"></span> Loading...';
+
+            try {
+                let q = query(
+                    collection(db, "leads"),
+                    where("clientId", "==", currentClientEmail),
+                    orderBy("createdAt", "desc"),
+                    startAfter(lastVisibleClientLead),
+                    limit(20)
+                );
+
+                if (activeClientTab !== 'all') {
+                    q = query(
+                        collection(db, "leads"),
+                        where("clientId", "==", currentClientEmail),
+                        where("source", "==", activeClientTab),
+                        orderBy("createdAt", "desc"),
+                        startAfter(lastVisibleClientLead),
+                        limit(20)
+                    );
+                }
+
+                const snapshot = await getDocs(q);
+                const leads = [];
+                snapshot.forEach(doc => leads.push({ id: doc.id, ...doc.data() }));
+
+                if (snapshot.docs.length > 0) {
+                    lastVisibleClientLead = snapshot.docs[snapshot.docs.length - 1];
+                    // Append to existing table
+                    renderDetail(leads, true);
+                } else {
+                    if (btn) btn.remove(); // No more data
+                }
+
+                if (snapshot.docs.length < 20 && btn) {
+                    btn.remove(); // End of list
+                } else if (btn) {
+                    btn.innerHTML = 'Load More';
+                }
+
+            } catch (e) {
+                console.error("Load More Error", e);
+                if (btn) btn.innerHTML = 'Error loading more';
+            }
+        };
+
+        function renderLoadMoreButton() {
+            // Check if already exists
+            if (document.getElementById('btn-load-more-client')) return;
+
+            const container = document.getElementById('view-detail');
+            const btn = document.createElement('button');
+            btn.id = 'btn-load-more-client';
+            btn.className = "btn-hero-glass mx-auto block mt-6 mb-12";
+            btn.textContent = "Load More";
+            btn.onclick = window.loadMoreClientLeads;
+            container.appendChild(btn);
+        }
+
+        let currentDetailColumns = [];
+
+        function renderDetail(leads, append = false) {
+            const tbody = document.getElementById('detail-table-body');
+            const thead = document.getElementById('detail-table-head');
+
+            if (!append) {
+                tbody.innerHTML = '';
+                thead.innerHTML = '';
+                currentDetailColumns = [];
+            }
+
+            if (leads.length === 0 && !append) {
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center py-20 text-gray-500">No leads found.</td></tr>`;
+                return;
+            }
+
+            // Dynamic Columns Logic (Calculate only if fresh or empty)
+            if (!append || currentDetailColumns.length === 0) {
+                let columns = new Set();
+                leads.forEach(lead => {
+                    if (lead.lead) Object.keys(lead.lead).forEach(k => columns.add(k));
+                });
+                let colArray = Array.from(columns);
+                const priority = ['name', 'email', 'phone'];
+                colArray.sort((a, b) => {
+                    const aP = priority.indexOf(a.toLowerCase()), bP = priority.indexOf(b.toLowerCase());
+                    if (aP !== -1 && bP !== -1) return aP - bP;
+                    if (aP !== -1) return -1; if (bP !== -1) return 1;
+                    return a.localeCompare(b);
+                });
+                currentDetailColumns = colArray;
+
+                // Header
+                let headerHTML = `<tr><th>Date</th>`;
+                currentDetailColumns.forEach(col => { headerHTML += `<th>${col.charAt(0).toUpperCase() + col.slice(1)}</th>`; });
+                headerHTML += `<th>Status</th><th>Notes</th><th class="text-right">Actions</th></tr>`;
+                thead.innerHTML = headerHTML;
+            }
 
             // Rows
             leads.forEach(item => {
@@ -1595,8 +1817,8 @@
                 if (item.status === 'archived') badgeClass = 'bg-gray-700 text-gray-300 border border-gray-600';
 
                 let rowHTML = `<td class="font-mono text-[11px] text-gray-500">${dateStr}</td>`;
-                
-                colArray.forEach(col => {
+
+                currentDetailColumns.forEach(col => {
                     let val = item.lead ? (item.lead[col] || '-') : '-';
                     val = val.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
                     val = linkify(val);
@@ -1936,18 +2158,18 @@
                 } catch (err) {
                     console.error("Autocomplete Error:", err);
                 }
+
+                // Double Click Handler for Link Input
+                document.getElementById('review-link-input').addEventListener('dblclick', function () {
+                    // Switch to Search Mode
+                    this.style.display = 'none';
+                    const searchInput = document.getElementById('google-maps-search');
+                    searchInput.style.display = 'block';
+                    searchInput.focus();
+                    showToast("Search Mode Active", "info");
+                });
             }
         };
-
-        // Double Click Handler for Link Input
-        document.getElementById('review-link-input').addEventListener('dblclick', function () {
-            // Switch to Search Mode
-            this.style.display = 'none';
-            const searchInput = document.getElementById('google-maps-search');
-            searchInput.style.display = 'block';
-            searchInput.focus();
-            showToast("Search Mode Active", "info");
-        });
 
         window.closeReviewModal = () => {
             document.getElementById('review-modal').classList.remove('open');
@@ -2228,7 +2450,7 @@
         // ==========================================
         // LEADS: GLOBAL ACTIONS
         // ==========================================
-        
+
 
         window.showOverview = () => {
             currentClient = null;
