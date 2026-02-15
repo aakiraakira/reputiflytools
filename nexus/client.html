@@ -2235,11 +2235,13 @@
             
 
             // Restore Global Leads variable
-            clientLeads = originalLeads;
-
-            // 6. RENDER LISTS & CALENDAR
+            // 6. RENDER LISTS & CALENDAR (Run this BEFORE restoring the original view's leads)
+            // This ensures we use the 'recentLeads' data we just fetched for calculations
             if (typeof renderDetailedAnalytics === 'function') renderDetailedAnalytics();
             if (typeof renderCalendar === 'function') renderCalendar();
+
+            // Restore Global Leads variable
+            clientLeads = originalLeads;
         }
 
         function renderDetailedAnalytics() {
@@ -2405,12 +2407,21 @@
 
         function renderStatusChart() {
             const ctx = document.getElementById('chart-status').getContext('2d');
-            const counts = [
-                clientLeads.filter(l => l.status === 'new' || !l.status).length,
-                clientLeads.filter(l => l.status === 'contacted').length,
-                clientLeads.filter(l => l.status === 'qualified').length,
-                clientLeads.filter(l => l.status === 'junk').length
-            ];
+            
+            // Calculate dynamically from the loaded leads
+            let newCount = 0, contactedCount = 0, qualifiedCount = 0, junkCount = 0;
+            
+            clientLeads.forEach(l => {
+                const st = l.status || 'new';
+                if (st === 'new') newCount++;
+                else if (st === 'contacted') contactedCount++;
+                else if (st === 'qualified') qualifiedCount++;
+                else if (st === 'junk') junkCount++;
+            });
+
+            const counts = [newCount, contactedCount, qualifiedCount, junkCount];
+
+            if (statusChart) statusChart.destroy();
 
             statusChart = new Chart(ctx, {
                 type: 'doughnut',
@@ -2418,7 +2429,7 @@
                     labels: ['New', 'Contacted', 'Qualified', 'Junk'],
                     datasets: [{
                         data: counts,
-                        backgroundColor: ['#34d399', '#60a5fa', '#a855f7', '#f87171'], // New (Green), Contacted (Blue), Qualified (Purple), Junk (Red)
+                        backgroundColor: ['#34d399', '#60a5fa', '#a855f7', '#f87171'], 
                         borderWidth: 0,
                         hoverOffset: 4
                     }]
