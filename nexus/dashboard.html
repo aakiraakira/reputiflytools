@@ -1603,55 +1603,49 @@
             document.getElementById('detail-table-body').innerHTML = `<tr><td colspan="7"><div class="spinner-container"><div class="spinner"></div></div></td></tr>`;
 
             try {
-                let q;
-
-                // DEFAULT: FETCH ALL
-                if (tab === 'all') {
-                    q = query(
-                        collection(db, "leads"),
-                        where("clientId", "==", email),
-                        orderBy("createdAt", "desc"),
-                        limit(20)
-                    );
-                } else {
-                    // SPECIFIC TAB
-                    // Check if this tab is a "Custom Folder" (in currentClientTabs) or a "Form Signature"
-                    if (currentClientTabs.includes(tab)) {
-                        // It's a Folder -> Query 'tabName'
-                        q = query(
-                            collection(db, "leads"),
-                            where("clientId", "==", email),
-                            where("tabName", "==", tab),
-                            orderBy("createdAt", "desc"),
-                            limit(20)
-                        );
-                    } else {
-                        // It's a Web Form -> Query 'source'
-                        q = query(
-                            collection(db, "leads"),
-                            where("clientId", "==", email),
-                            where("source", "==", tab),
-                            orderBy("createdAt", "desc"),
-                            limit(20)
-                        );
-                    }
-                }
+                // Fetch ALL leads initially, then filter client-side to correctly handle dynamic Form Signatures
+                let q = query(
+                    collection(db, "leads"),
+                    where("clientId", "==", email),
+                    orderBy("createdAt", "desc"),
+                    limit(50) // Increased limit to ensure we hit filtered results
+                );
 
                 detailUnsubscribe = onSnapshot(q, (snapshot) => {
                     const leads = [];
-                    snapshot.forEach(doc => leads.push({ id: doc.id, ...doc.data() }));
-                    currentClientLeads = leads;
-
+                    
                     if (snapshot.docs.length > 0) {
                         lastVisibleClientLead = snapshot.docs[snapshot.docs.length - 1];
                     }
 
+                    snapshot.forEach(docSnap => {
+                        const data = docSnap.data();
+                        let shouldInclude = true;
+
+                        if (tab !== 'all') {
+                            if (currentClientTabs.includes(tab)) {
+                                // Filter by Custom Folder
+                                if (data.tabName !== tab) shouldInclude = false;
+                            } else {
+                                // Filter by Web Form Signature
+                                const keys = data.lead ? Object.keys(data.lead).filter(k => !k.startsWith('_')).sort() : [];
+                                const signature = keys.join(',');
+                                if (signature !== tab) shouldInclude = false;
+                            }
+                        }
+
+                        if (shouldInclude) {
+                            leads.push({ id: docSnap.id, ...data });
+                        }
+                    });
+
+                    currentClientLeads = leads;
                     renderDetail(leads);
 
-                    if (snapshot.docs.length === 20) renderLoadMoreButton();
+                    if (snapshot.docs.length === 50) renderLoadMoreButton();
                 }, (err) => {
                     console.error("Detail Error", err);
-                    document.getElementById('detail-table-body').innerHTML = `<tr><td colspan="7" class="text-center py-20 text-red-500">Error: ${err.message}<br><span class="text-xs text-gray-500">Check Firestore Indexes for 'tabName'</span></td></tr>`;
+                    document.getElementById('detail-table-body').innerHTML = `<tr><td colspan="7" class="text-center py-20 text-red-500">Error: ${err.message}</td></tr>`;
                 });
             } catch (e) {
                 console.error("Query setup error", e);
@@ -1697,6 +1691,22 @@
                 // fetchClientLeads(email, activeClientTab);
             }
 
+            // ADD THE "ALL LEADS" TAB FIRST
+            const isAllActive = activeClientTab === 'all';
+            const allBtn = document.createElement('button');
+            allBtn.className = `nav-tab flex items-center gap-2 ${isAllActive ? 'active' : ''}`;
+            allBtn.innerHTML = `
+                <i data-feather="inbox" class="w-3 h-3"></i>
+                <span>All Leads</span>
+                <span class="${isAllActive ? 'bg-white/20 text-white' : 'bg-white/10 text-gray-500'} px-1.5 py-0.5 rounded-full text-[10px] min-w-[18px] text-center">${stats.totalLeads || 0}</span>
+            `;
+            allBtn.onclick = () => {
+                activeClientTab = 'all';
+                renderCategoryTabs(stats, uid, email); 
+                fetchClientLeads(email, 'all');
+            };
+            container.appendChild(allBtn);
+
             sortedKeys.forEach((source) => {
                 const data = stats.sources[source];
                 const displayName = getDisplayName(source);
@@ -1736,39 +1746,55 @@
             if (btn) btn.innerHTML = '<span class="spinner"></span> Loading...';
 
             try {
+                // Always query all leads to enable client-side filtering for Form Signatures
                 let q = query(
                     collection(db, "leads"),
                     where("clientId", "==", currentClientEmail),
                     orderBy("createdAt", "desc"),
                     startAfter(lastVisibleClientLead),
-                    limit(20)
+                    limit(50)
                 );
-
-                if (activeClientTab !== 'all') {
-                    q = query(
-                        collection(db, "leads"),
-                        where("clientId", "==", currentClientEmail),
-                        where("source", "==", activeClientTab),
-                        orderBy("createdAt", "desc"),
-                        startAfter(lastVisibleClientLead),
-                        limit(20)
-                    );
-                }
 
                 const snapshot = await getDocs(q);
                 const leads = [];
-                snapshot.forEach(doc => leads.push({ id: doc.id, ...doc.data() }));
-
+                
                 if (snapshot.docs.length > 0) {
                     lastVisibleClientLead = snapshot.docs[snapshot.docs.length - 1];
-                    // Append to existing table
-                    renderDetail(leads, true);
                 } else {
                     if (btn) btn.remove(); // No more data
+                    return;
                 }
 
-                if (snapshot.docs.length < 20 && btn) {
-                    btn.remove(); // End of list
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data();
+                    let shouldInclude = true;
+
+                    if (activeClientTab !== 'all') {
+                        if (currentClientTabs.includes(activeClientTab)) {
+                            // Custom Folder
+                            if (data.tabName !== activeClientTab) shouldInclude = false;
+                        } else {
+                            // Web Form Signature
+                            const keys = data.lead ? Object.keys(data.lead).filter(k => !k.startsWith('_')).sort() : [];
+                            const signature = keys.join(',');
+                            if (signature !== activeClientTab) shouldInclude = false;
+                        }
+                    }
+
+                    if (shouldInclude) {
+                        leads.push({ id: docSnap.id, ...data });
+                    }
+                });
+
+                currentClientLeads = [...currentClientLeads, ...leads];
+                
+                // Render if there are valid leads in this chunk
+                if (leads.length > 0) {
+                    renderDetail(leads, true);
+                }
+
+                if (snapshot.docs.length < 50 && btn) {
+                    btn.remove(); // End of DB list
                 } else if (btn) {
                     btn.innerHTML = 'Load More';
                 }
