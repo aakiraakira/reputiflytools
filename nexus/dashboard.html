@@ -806,9 +806,14 @@
                         <span id="detail-client-name">Client Name</span>
                     </h1>
                 </div>
-                <button id="btn-export-single" class="btn-liquid-glow">
-                    <i data-feather="download" class="w-4 h-4"></i> Export CSV
-                </button>
+                <div class="flex items-center gap-3">
+                    <button onclick="generateInsights()" class="btn-liquid-glow">
+                        <i data-feather="zap" class="w-4 h-4"></i> AI Insights
+                    </button>
+                    <button id="btn-export-single" class="btn-liquid-glow">
+                        <i data-feather="download" class="w-4 h-4"></i> Export CSV
+                    </button>
+                </div>
             </div>
 
             <div class="glass-panel overflow-hidden min-h-[600px] flex flex-col">
@@ -930,6 +935,7 @@
                                 <th>UID</th>
                                 <th>Status</th>
                                 <th>Reviews</th>
+                                <th>AI</th>
                                 <th>Daily Limit</th>
                                 <th>Joined</th>
                                 <th class="text-right">Actions</th>
@@ -1229,6 +1235,8 @@
         let availableEmails = [];
         let currentReviewClient = null;
         let currentModalClient = null;
+        let currentClientLeads = [];
+        let currentClientStats = null;
 
         // ==========================================
         // AUTH GATE — Only allow master admin
@@ -1575,6 +1583,7 @@
             statsUnsubscribe = onSnapshot(clientRef, (docSnap) => {
                 if (docSnap.exists()) {
                     const data = docSnap.data();
+                    currentClientStats = data.stats; // Store for AI Insights
                     renderCategoryTabs(data.stats, uid, email); // Render Tabs
                 }
             });
@@ -1619,6 +1628,7 @@
                 detailUnsubscribe = onSnapshot(q, (snapshot) => {
                     const leads = [];
                     snapshot.forEach(doc => leads.push({ id: doc.id, ...doc.data() }));
+                    currentClientLeads = leads; // Store for AI Insights
 
                     if (snapshot.docs.length > 0) {
                         lastVisibleClientLead = snapshot.docs[snapshot.docs.length - 1];
@@ -1920,6 +1930,12 @@
                     <td><span class="text-[11px] font-mono text-gray-500">${client.uid}</span></td>
                     <td><span class="badge ${badgeClass}">${status}</span></td>
                     <td>${reviewToggle}</td>
+                    <td>
+                        <div id="toggle-ai-${client.uid}" class="toggle-switch ${client.aiInsightsEnabled ? 'active' : ''} ${client.aiInsightsEnabled ? 'bg-purple-500' : ''}" 
+                             onclick="window.handleAiToggle('${client.uid}', ${!!client.aiInsightsEnabled}, this)">
+                            <div class="toggle-knob"></div>
+                        </div>
+                    </td>
                     
                     <td>
                         <button onclick="window.editClientLimit('${client.uid}', '${client.customDailyLimit || 0}')" 
@@ -2107,6 +2123,33 @@
         // ==========================================
 
         let reviewAutocomplete = null;
+
+        // ==========================================
+        // TOGGLE: AI INSIGHTS
+        // ==========================================
+        window.handleAiToggle = async (uid, currentStatus, el) => {
+            const newStatus = !currentStatus;
+            // Optimistic UI
+            if (el) {
+                el.classList.toggle('active', newStatus);
+                el.classList.toggle('bg-purple-500', newStatus);
+            }
+            try {
+                const clientRef = doc(db, 'clients', uid);
+                await updateDoc(clientRef, { aiInsightsEnabled: newStatus });
+                // Update local state
+                const client = allClients.find(c => c.uid === uid);
+                if (client) client.aiInsightsEnabled = newStatus;
+                showToast(`AI Insights ${newStatus ? 'enabled' : 'disabled'}`, 'success');
+            } catch (err) {
+                // Revert on error
+                if (el) {
+                    el.classList.toggle('active', currentStatus);
+                    el.classList.toggle('bg-purple-500', currentStatus);
+                }
+                showToast('Failed to update AI setting: ' + err.message, 'error');
+            }
+        };
 
         // 1. Table Toggle Handler
         window.handleReviewToggle = (uid, currentStatus, el) => {
@@ -2663,7 +2706,196 @@
                 btnOk.addEventListener('click', handleOk);
             });
         }
+        // ==========================================
+        // AI INSIGHTS (Reputifly AI)
+        // ==========================================
+        window.generateInsights = async () => {
+            // 1. Check if we have leads loaded
+            if (!currentClientLeads || currentClientLeads.length === 0) {
+                showToast('No leads loaded. Select a client first.', 'error');
+                return;
+            }
+
+            // 2. Show the modal with loading state
+            const modal = document.getElementById('ai-insights-modal');
+            const contentEl = document.getElementById('ai-insights-content');
+            const loadingEl = document.getElementById('ai-insights-loading');
+
+            modal.classList.add('open');
+            loadingEl.classList.remove('hidden');
+            contentEl.classList.add('hidden');
+            contentEl.innerHTML = '';
+
+            try {
+                // 3. Summarize leads client-side (strip sensitive data, keep structure)
+                const leadSummary = currentClientLeads.map(l => {
+                    const clean = {};
+                    Object.entries(l).forEach(([k, v]) => {
+                        if (['id', 'clientId', 'uid'].includes(k)) return; // Skip internal IDs
+                        if (k === 'createdAt' && v?.seconds) {
+                            clean[k] = new Date(v.seconds * 1000).toISOString();
+                        } else if (k === 'metadata') {
+                            clean[k] = v; // Keep metadata (geo, referrer, etc.)
+                        } else {
+                            clean[k] = v;
+                        }
+                    });
+                    return clean;
+                });
+
+                const clientEmail = document.getElementById('detail-client-name')?.textContent || 'Unknown';
+
+                // 4. Call the API
+                const token = await getAuthToken();
+                const resp = await fetch(`${API_BASE}/analyzeLeads`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        leads: leadSummary,
+                        context: {
+                            clientEmail,
+                            totalLeads: currentClientLeads.length,
+                            activeSource: activeClientTab || 'all',
+                            sources: currentClientStats?.sources || {}
+                        }
+                    })
+                });
+
+                const data = await resp.json();
+
+                if (!resp.ok || !data.success) {
+                    throw new Error(data.error || 'Failed to generate insights');
+                }
+
+                // 5. Render insights
+                const { insights } = data;
+                loadingEl.classList.add('hidden');
+                contentEl.classList.remove('hidden');
+
+                const typeStyles = {
+                    positive: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: 'trending-up', iconColor: 'text-emerald-400' },
+                    warning: { bg: 'bg-amber-500/10', border: 'border-amber-500/20', icon: 'alert-triangle', iconColor: 'text-amber-400' },
+                    info: { bg: 'bg-blue-500/10', border: 'border-blue-500/20', icon: 'info', iconColor: 'text-blue-400' }
+                };
+
+                contentEl.innerHTML = `
+                    <!-- Headline -->
+                    <div class="text-center mb-8">
+                        <h2 class="text-xl md:text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-orange-400 bg-clip-text text-transparent brand-font leading-relaxed">
+                            ${insights.headline}
+                        </h2>
+                    </div>
+
+                    <!-- Key Metrics Grid -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+                        ${insights.keyMetrics.map(m => `
+                            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 text-center hover:bg-white/10 transition-all duration-300 hover:scale-[1.02]">
+                                <i data-feather="${m.icon}" class="w-5 h-5 text-purple-400 mx-auto mb-2"></i>
+                                <div class="text-lg font-bold text-white mb-1">${m.value}</div>
+                                <div class="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">${m.label}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <!-- Insight Cards -->
+                    <div class="space-y-3 mb-8">
+                        ${insights.insights.map(i => {
+                    const s = typeStyles[i.type] || typeStyles.info;
+                    return `
+                                <div class="${s.bg} border ${s.border} rounded-2xl p-4">
+                                    <div class="flex items-start gap-3">
+                                        <i data-feather="${s.icon}" class="w-4 h-4 ${s.iconColor} flex-shrink-0 mt-0.5"></i>
+                                        <div>
+                                            <h4 class="text-sm font-bold text-white mb-1">${i.title}</h4>
+                                            <p class="text-xs text-gray-400 leading-relaxed">${i.body}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                }).join('')}
+                    </div>
+
+                    <!-- Recommendations -->
+                    <div class="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-2xl p-5">
+                        <h4 class="text-xs font-bold text-purple-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+                            <i data-feather="target" class="w-3.5 h-3.5"></i> Recommended Actions
+                        </h4>
+                        <ol class="space-y-2">
+                            ${insights.recommendations.map((r, i) => `
+                                <li class="flex items-start gap-3 text-xs text-gray-300">
+                                    <span class="flex-shrink-0 w-5 h-5 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center text-[10px] font-bold">${i + 1}</span>
+                                    <span class="leading-relaxed">${r}</span>
+                                </li>
+                            `).join('')}
+                        </ol>
+                    </div>
+                `;
+
+                feather.replace();
+
+            } catch (err) {
+                loadingEl.classList.add('hidden');
+                contentEl.classList.remove('hidden');
+                contentEl.innerHTML = `
+                    <div class="text-center py-12">
+                        <i data-feather="alert-circle" class="w-10 h-10 text-red-400 mx-auto mb-4"></i>
+                        <h3 class="text-white font-bold mb-2">Analysis Failed</h3>
+                        <p class="text-xs text-gray-500 mb-4">${err.message}</p>
+                        <button onclick="generateInsights()" class="px-4 py-2 rounded-full bg-white/10 text-xs text-white hover:bg-white/20 transition">Try Again</button>
+                    </div>
+                `;
+                feather.replace();
+            }
+        };
+
+        window.closeInsightsModal = () => {
+            document.getElementById('ai-insights-modal').classList.remove('open');
+        };
     </script>
+
+    <!-- AI INSIGHTS MODAL -->
+    <div id="ai-insights-modal" class="modal-backdrop" style="z-index: 10005;">
+        <div class="modal-content" style="max-width: 680px; max-height: 85vh; overflow-y: auto;">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-lg font-bold text-white brand-font flex items-center gap-2">
+                    <i data-feather="zap" class="w-5 h-5 text-purple-400"></i> AI Insights
+                </h3>
+                <button onclick="closeInsightsModal()" class="text-gray-500 hover:text-white transition"><i
+                        data-feather="x"></i></button>
+            </div>
+
+            <!-- Loading State -->
+            <div id="ai-insights-loading" class="hidden">
+                <div class="text-center py-8">
+                    <div
+                        class="inline-flex items-center gap-3 bg-purple-500/10 border border-purple-500/20 rounded-full px-5 py-2.5 mb-6">
+                        <div class="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin">
+                        </div>
+                        <span class="text-xs text-purple-300 font-semibold">Analyzing with Reputifly AI...</span>
+                    </div>
+                </div>
+                <!-- Shimmer Skeleton -->
+                <div class="space-y-4 animate-pulse">
+                    <div class="h-8 bg-white/5 rounded-xl w-3/4 mx-auto"></div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div class="h-20 bg-white/5 rounded-2xl"></div>
+                        <div class="h-20 bg-white/5 rounded-2xl"></div>
+                        <div class="h-20 bg-white/5 rounded-2xl"></div>
+                        <div class="h-20 bg-white/5 rounded-2xl"></div>
+                    </div>
+                    <div class="h-24 bg-white/5 rounded-2xl"></div>
+                    <div class="h-24 bg-white/5 rounded-2xl"></div>
+                    <div class="h-32 bg-white/5 rounded-2xl"></div>
+                </div>
+            </div>
+
+            <!-- Content (injected via JS) -->
+            <div id="ai-insights-content" class="hidden"></div>
+        </div>
+    </div>
 </body>
 
 </html>
