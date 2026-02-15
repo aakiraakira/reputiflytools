@@ -1793,9 +1793,8 @@
             actionHeader.textContent = "Actions";
             container.appendChild(actionHeader);
 
-            // Review Request (If enabled)
-            // Assuming reviewFeatureEnabled is defined globally or within scope
-            const reviewFeatureEnabled = true; // Placeholder, replace with actual logic if needed
+            // Review Request (Check Global State)
+            // We use the local module variable 'reviewFeatureEnabled'
             if (reviewFeatureEnabled && !isArchived) {
                 const reviewBtn = document.createElement('button');
                 reviewBtn.className = `w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-white/5 hover:bg-yellow-500/10 hover:border-yellow-500/20 hover:text-yellow-400 transition group mb-1 ${isReviewSent ? 'opacity-50' : 'bg-white/5'}`;
@@ -1934,10 +1933,15 @@
 
             if (!confirmed) return;
 
-            // Visual Loading State
-            const row = document.querySelector(`button[onclick*="triggerReviewRequest('${id}')"]`).closest('tr');
-            row.style.opacity = '0.5';
-            row.style.pointerEvents = 'none';
+            // Visual Loading State (Find row via the main table button)
+            const tableBtn = document.querySelector(`button[onclick*="openLeadActions('${id}')"]`);
+            // Check if button exists before accessing .closest()
+            const row = tableBtn ? tableBtn.closest('tr') : null;
+            
+            if (row) {
+                row.style.opacity = '0.5';
+                row.style.pointerEvents = 'none';
+            }
 
             try {
                 // Get Auth Token
@@ -1965,13 +1969,11 @@
                     // We can show a toast here if you have a toast function, or just let the UI update silently.
                 } else {
                     // Revert opacity on failure
-                    row.style.opacity = '1';
-                    row.style.pointerEvents = 'auto';
+                    if (row) { row.style.opacity = '1'; row.style.pointerEvents = 'auto'; }
                     window.customAlert ? window.customAlert(data.error || "Failed to send request.", "Error") : alert(data.error);
                 }
             } catch (error) {
-                row.style.opacity = '1';
-                row.style.pointerEvents = 'auto';
+                if (row) { row.style.opacity = '1'; row.style.pointerEvents = 'auto'; }
                 window.customAlert ? window.customAlert("Network error: " + error.message, "Error") : alert(error.message);
             }
         };
@@ -2961,31 +2963,37 @@
 
 
         // ARCHIVE TOGGLE
+        // ARCHIVE TOGGLE (FIXED)
         window.toggleArchiveMode = () => {
             const btn = document.getElementById('btn-archive-toggle');
             const ind = document.getElementById('archive-indicator');
             const desc = document.getElementById('current-tab-desc');
 
             // Safety Check
-            if (!btn || !ind || !desc) {
-                console.warn("Archive toggle elements missing");
-                return;
-            }
+            if (!btn || !ind || !desc) return;
 
             if (activeFilter === 'all') {
+                // --- ENABLE ARCHIVE MODE ---
                 activeFilter = 'archived';
+                
+                // UI Updates
                 btn.classList.add('text-red-400', 'bg-red-500/10', 'border-red-500/20');
                 ind.classList.remove('hidden');
                 desc.innerHTML = '<span class="text-red-400 font-bold">VIEWING ARCHIVED LEADS</span>';
+                
+                // CRITICAL FIX: Fetch archived data from DB instead of just re-rendering
+                subscribeToLeads(); 
             } else {
+                // --- DISABLE ARCHIVE MODE ---
                 activeFilter = 'all';
+                
+                // UI Reset
                 btn.classList.remove('text-red-400', 'bg-red-500/10', 'border-red-500/20');
                 ind.classList.add('hidden');
-                // Restore original description
+                
+                // Restore original view (Refetches normal leads)
                 window.switchTab(activeTab);
-                return;
             }
-            renderTable();
         };
 
         // ==========================================
