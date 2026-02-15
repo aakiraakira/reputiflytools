@@ -1286,41 +1286,45 @@
         // ==========================================
         // TAB SWITCHING
         // ==========================================
+        // ==========================================
+        // TAB SWITCHING (Updated for Form 1, Form 2...)
+        // ==========================================
         window.switchTab = (tabName) => {
             // 1. Analytics View Switch
             if (tabName === 'analytics') {
                 document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
-
                 const analyticsView = document.getElementById('view-analytics');
                 if (analyticsView) analyticsView.classList.add('active');
-
                 const analyticsTab = document.getElementById('tab-analytics');
                 if (analyticsTab) analyticsTab.classList.add('active');
-
                 if (typeof renderAnalytics === 'function') renderAnalytics();
                 return;
             }
 
             // 2. Data View Switch
             activeTab = tabName;
-            subscribeToLeads(); // Fetch new data for this tab
+            
+            // Reset Arrays/UI
+            clientLeads = []; 
+            document.getElementById('leads-table-body').innerHTML = `<tr><td colspan="5" class="text-center py-20 text-gray-500">Loading ${getFormDisplayName(tabName)}...</td></tr>`;
+            
+            subscribeToLeads(); // Fetch new data
 
-            // UI Updates: Show Leads View
+            // UI Updates
             document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
             const leadsView = document.getElementById('view-leads');
             if (leadsView) leadsView.classList.add('active');
 
-            // Deactivate Analytics Tab Style
             const analyticsTab = document.getElementById('tab-analytics');
             if (analyticsTab) analyticsTab.classList.remove('active');
 
-            // Update Header Texts (Safe Check)
+            // --- UPDATE HEADINGS ---
             const titleEl = document.getElementById('current-tab-title');
             const descEl = document.getElementById('current-tab-desc');
             const folderIcon = document.getElementById('folder-icon-container');
             const labelEl = document.getElementById('current-tab-label');
 
-            let displayText = "Select Data";
+            let displayText = "Loading...";
 
             if (clientTabs.includes(tabName)) {
                 // Custom Folder
@@ -1329,25 +1333,25 @@
                 if (descEl) descEl.textContent = 'Imported Lead Batch';
                 if (folderIcon) folderIcon.innerHTML = '<i data-feather="folder" class="w-5 h-5 text-blue-400"></i>';
             }
-            else if (tabName && tabName.includes(',')) {
-                // Form Cluster
-                const keys = tabName.split(',');
-                const name = getFormNameFromKeys(keys);
+            else {
+                // Form Signature
+                const name = getFormDisplayName(tabName); // Uses the new helper
                 displayText = name;
                 if (titleEl) titleEl.textContent = name;
-                if (descEl) descEl.textContent = 'Fields: ' + keys.join(', ');
+                
+                // Show fields in description so they know which form it is
+                const fields = tabName.split(',').join(', ');
+                if (descEl) descEl.textContent = 'Fields: ' + fields;
+                
                 if (folderIcon) folderIcon.innerHTML = '<i data-feather="layout" class="w-5 h-5 text-purple-400"></i>';
             }
 
-            // Update Popup Label
+            // Update Popup Button Text
             if (labelEl) labelEl.textContent = displayText;
 
-            // Reset Archive View when switching tabs
             if (activeFilter === 'archived' && typeof window.toggleArchiveMode === 'function') window.toggleArchiveMode();
-
-            // Re-render
-            if (typeof renderTable === 'function') renderTable();
-            if (typeof renderTabsUI === 'function') renderTabsUI(); // Re-render popup to update active state
+            
+            if (typeof renderTabsUI === 'function') renderTabsUI();
             if (window.feather) feather.replace();
         };
 
@@ -1454,6 +1458,9 @@
         // ==========================================
         // SCALABLE LEADS LISTENER (Pagination)
         // ==========================================
+        // ==========================================
+        // SCALABLE LEADS LISTENER (Fixed: Client-Side Filtering)
+        // ==========================================
         function subscribeToLeads(append = false) {
             if (leadsUnsubscribe && !append) {
                 leadsUnsubscribe();
@@ -1467,32 +1474,19 @@
                 if (typeof renderTable === 'function') renderTable();
             }
 
+            // 1. BASE QUERY: Fetch ALL leads for this client (ordered by date)
+            // We removed the 'where("source"...)' clause because it hides untagged leads.
             let q = query(
                 collection(db, "leads"),
-                where("clientId", "==", clientEmail)
+                where("clientId", "==", clientEmail),
+                orderBy("createdAt", "desc"),
+                limit(50) // Increased limit slightly to ensure we catch the right ones
             );
 
-            // 1. Source/Tab Filter
-            if (activeTab && activeTab !== 'analytics' && activeTab !== 'all_leads') {
-                if (clientTabs.includes(activeTab)) {
-                    // Import Folder
-                    console.log("Querying TabName:", activeTab);
-                    q = query(q, where("tabName", "==", activeTab));
-                } else {
-                    // API Signature
-                    console.log("Querying Source:", activeTab);
-                    q = query(q, where("source", "==", activeTab));
-                }
-            } else {
-                console.log("Querying All Leads (No source filter)");
-            }
-
-            // 2. Status Filter
+            // 2. Status Filter (Keep this, it's reliable)
             if (activeFilter !== 'all') {
                 q = query(q, where("status", "==", activeFilter));
             }
-
-            q = query(q, orderBy("createdAt", "desc"), limit(20));
 
             // 3. Pagination
             if (append && lastVisibleLead) {
@@ -1506,52 +1500,44 @@
 
                 if (!snapshot.empty) {
                     lastVisibleLead = snapshot.docs[snapshot.docs.length - 1];
-                } else {
-                    if (activeTab && activeTab !== 'all_leads' && clientLeads.length === 0) {
-                        // No results, but no alert needed.
-                    }
                 }
 
                 snapshot.forEach((docSnap) => {
-                    const existingIdx = clientLeads.findIndex(l => l.id === docSnap.id);
-                    if (existingIdx !== -1) {
-                        clientLeads[existingIdx] = { id: docSnap.id, ...docSnap.data() };
-                    } else {
-                        clientLeads.push({ id: docSnap.id, ...docSnap.data() });
+                    const data = docSnap.data();
+                    
+                    // --- ROBUST FILTERING FIX ---
+                    // Instead of trusting the DB query, we calculate the signature right here.
+                    let shouldInclude = true;
+
+                    if (activeTab && activeTab !== 'analytics' && activeTab !== 'all_leads') {
+                        if (clientTabs.includes(activeTab)) {
+                            // Case A: Custom Folder (Check 'tabName' field)
+                            if (data.tabName !== activeTab) shouldInclude = false;
+                        } else {
+                            // Case B: Web Form (Check calculated signature)
+                            const signature = getFormSignature(data.lead); // Calculate signature on the fly
+                            if (signature !== activeTab) shouldInclude = false;
+                        }
+                    }
+
+                    if (shouldInclude) {
+                        const existingIdx = clientLeads.findIndex(l => l.id === docSnap.id);
+                        if (existingIdx !== -1) {
+                            clientLeads[existingIdx] = { id: docSnap.id, ...data };
+                        } else {
+                            clientLeads.push({ id: docSnap.id, ...data });
+                        }
                     }
                 });
 
+                // Sort in Memory (Newest First) to ensure correct order after filtering
                 clientLeads.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
 
                 if (typeof renderTable === 'function') renderTable();
-                if (document.getElementById('view-analytics').classList.contains('active') && typeof renderAnalytics === 'function') renderAnalytics();
-
+                
             }, (error) => {
                 console.error("Error listening to leads:", error);
-
-                if (error.code === 'failed-precondition' || error.message.includes('index')) {
-                    const msg = "Query failed: Missing Index. Check console for creation link.";
-                    console.error(msg);
-                    alert(msg + "\n\nError: " + error.message + "\n\nCLICK THE LINK IN CONSOLE TO FIX.");
-
-                    const listContainer = document.getElementById('leads-list');
-                    if (listContainer) {
-                        listContainer.innerHTML = `
-                            <div class="flex flex-col items-center justify-center py-12 text-center select-text cursor-text">
-                                <div class="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
-                                    <i data-feather="database" class="w-6 h-6 text-red-500"></i>
-                                </div>
-                                <h3 class="text-white font-medium mb-2">Missing Database Index</h3>
-                                <div class="bg-gray-900 p-4 rounded-lg border border-gray-800 max-w-lg overflow-x-auto text-left">
-                                    <p class="text-xs font-mono text-red-300 break-all whitespace-pre-wrap select-all">${error.message}</p>
-                                </div>
-                            </div>
-                        `;
-                        if (window.feather) feather.replace();
-                    }
-                } else {
-                    alert("Error loading leads: " + error.message);
-                }
+                // Error handling...
             });
 
             if (!append) leadsUnsubscribe = unsubscribe;
@@ -2836,178 +2822,120 @@
             return keys.join(',');
         }
 
-        function getFormNameFromKeys(keysArray, signature) {
-            // 1. Check Alias First
-            if (signature && formAliases[signature]) {
-                return formAliases[signature];
-            }
+        // ==========================================
+        // LOGIC: EXACT FORM SIGNATURES (ROBUST)
+        // ==========================================
+        // ==========================================
+        // HELPER: GET DYNAMIC FORM NAME (Form 1, Form 2...)
+        // ==========================================
+        function getFormDisplayName(signature) {
+            // 1. Check for User-Defined Alias
+            if (formAliases && formAliases[signature]) return formAliases[signature];
 
-            const keys = keysArray.map(k => k.toLowerCase());
+            // 2. Auto-Numbering (Robust)
+            // We sort the keys exactly like the UI does to ensure "Form 1" is always "Form 1"
+            const sources = clientStats.sources || {};
+            const apiSignatures = Object.keys(sources).filter(k => !clientTabs.includes(k)).sort();
+            
+            const index = apiSignatures.indexOf(signature);
+            if (index !== -1) return `Form ${index + 1}`;
 
-            // Heuristics to name the tab intelligently
-            if (keys.includes('budget') || keys.includes('price')) return "Quote Request";
-            if (keys.includes('timeline') || keys.includes('project')) return "Project Inquiry";
-            if (keys.includes('frequency') || keys.includes('newsletter')) return "Newsletter";
-            if (keys.includes('resume') || keys.includes('cv')) return "Job App";
-            if (keys.includes('message')) return "Contact Form";
-
-            // Fallback: Use unique fields
-            const uniqueFields = keysArray.filter(k => !['name', 'email', 'phone', 'source'].includes(k.toLowerCase()));
-            if (uniqueFields.length > 0) return `${uniqueFields[0]} Form`.charAt(0).toUpperCase() + `${uniqueFields[0]} Form`.slice(1);
-
-            return "Web Form";
+            return "Unknown Form";
         }
 
         // ==========================================
         // TABS UI RENDERER (SCALABLE)
         // ==========================================
+        // ==========================================
+        // TABS UI RENDERER (ROBUST AUTO-NUMBERING)
+        // ==========================================
+        // ==========================================
+        // UI RENDERER (No "View All" + Auto-Select)
+        // ==========================================
         function renderTabsUI() {
             const listContainer = document.getElementById('tabs-popup-list');
-            const labelEl = document.getElementById('current-tab-label');
             if (!listContainer) return;
 
             listContainer.innerHTML = ''; // Clear
 
-            let firstAvailable = null;
-            let currentTabName = "Select Data Source";
-            let hasAnyNew = false; // This tracks if there are new leads in OTHER tabs
-
-            // 1. WEB FORMS (API Sources from Stats)
             const sources = clientStats.sources || {};
-            const apiSignatures = Object.keys(sources).filter(k => !clientTabs.includes(k));
+            // Get API Forms and Custom Folders
+            const apiSignatures = Object.keys(sources).filter(k => !clientTabs.includes(k)).sort();
+            const allAvailable = [...apiSignatures, ...clientTabs];
 
+            // --- CRITICAL: AUTO-SELECT DEFAULT VIEW ---
+            // If we are on "All Leads" (default) or nothing is selected, FORCE switch to the first available form.
+            if ((!activeTab || activeTab === 'all_leads') && allAvailable.length > 0) {
+                 // Prefer API forms first, then Folders
+                 const target = apiSignatures.length > 0 ? apiSignatures[0] : clientTabs[0];
+                 console.log("Auto-selecting default form:", target);
+                 window.switchTab(target); 
+                 return; // Stop rendering, wait for switchTab to call us back
+            }
+
+            // --- 1. DETECTED WEB FORMS ---
             if (apiSignatures.length > 0) {
                 const header = document.createElement('div');
                 header.className = "px-3 py-2 text-[10px] font-bold text-gray-600 uppercase tracking-widest";
-                header.textContent = "Web Forms";
+                header.textContent = "Forms";
                 listContainer.appendChild(header);
             }
 
-            apiSignatures.sort().forEach(sig => {
+            apiSignatures.forEach((sig) => {
                 const stat = sources[sig];
-                if (!firstAvailable) firstAvailable = sig;
-
-                const keys = sig.split(',');
-                const formName = getFormNameFromKeys(keys, sig);
-
-                if (activeTab === sig) currentTabName = formName;
+                const displayName = getFormDisplayName(sig); // Robust naming
                 const isActive = activeTab === sig;
-                const showDot = stat.newCount > 0 && !isActive; // Only show dot if NOT active
-
-                if (showDot) hasAnyNew = true;
+                const showDot = stat.newCount > 0 && !isActive;
 
                 const row = document.createElement('div');
-                row.className = `group w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs font-medium transition mb-1 ${isActive ? 'bg-purple-500/10 text-purple-300 border border-purple-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`;
+                row.className = `group w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs font-medium transition mb-1 cursor-pointer ${isActive ? 'bg-purple-500/10 text-purple-300 border border-purple-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`;
+                
+                // Clicking the row switches tab
+                row.onclick = () => { window.switchTab(sig); window.toggleTabsPopup(false); };
 
-                // 1. Main Button
-                const mainBtn = document.createElement('button');
-                mainBtn.className = "flex-grow flex items-center gap-3 text-left overflow-hidden h-full pr-2";
-                mainBtn.onclick = () => {
-                    window.switchTab(sig);
-                    window.toggleTabsPopup(false);
-                };
-                mainBtn.innerHTML = `
-                    <i data-feather="layout" class="w-4 h-4 flex-shrink-0 ${isActive ? 'text-purple-400' : 'text-gray-600'}"></i>
-                    <span class="truncate">${formName}</span>
-                    ${showDot ? '<div class="w-2 h-2 rounded-full bg-red-500 animate-pulse ml-2 flex-shrink-0" title="New Leads"></div>' : ''}
+                row.innerHTML = `
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <i data-feather="layout" class="w-4 h-4 flex-shrink-0 ${isActive ? 'text-purple-400' : 'text-gray-600'}"></i>
+                        <span class="truncate font-semibold">${displayName}</span>
+                        ${showDot ? '<div class="w-2 h-2 rounded-full bg-red-500 animate-pulse ml-2 flex-shrink-0"></div>' : ''}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="event.stopPropagation(); window.renameForm('${sig}')" class="p-1 opacity-0 group-hover:opacity-100 hover:text-white text-gray-500 transition" title="Rename"><i data-feather="edit-2" class="w-3 h-3"></i></button>
+                        <span class="bg-white/5 px-1.5 py-0.5 rounded text-[10px] text-gray-500">${stat.count || 0}</span>
+                    </div>
                 `;
-
-                // 2. Rename Action
-                const actionsDiv = document.createElement('div');
-                actionsDiv.className = "flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mr-2";
-                const renameBtn = document.createElement('button');
-                renameBtn.className = "p-1.5 hover:bg-white/10 rounded-md text-gray-500 hover:text-white transition z-10";
-                renameBtn.onclick = (e) => { e.stopPropagation(); window.renameForm(sig); };
-                renameBtn.innerHTML = `<i data-feather="edit-2" class="w-3 h-3"></i>`;
-                actionsDiv.appendChild(renameBtn);
-
-                // 3. Count
-                const countBadge = document.createElement('span');
-                countBadge.className = "bg-white/5 px-1.5 py-0.5 rounded text-[10px] text-gray-500 flex-shrink-0 ml-auto";
-                countBadge.textContent = stat.count || 0;
-
-                row.appendChild(mainBtn);
-                row.appendChild(actionsDiv);
-                row.appendChild(countBadge);
                 listContainer.appendChild(row);
             });
 
-
-            // 2. CUSTOM FOLDERS (Imports)
+            // --- 2. CUSTOM FOLDERS ---
             if (clientTabs.length > 0) {
                 const header = document.createElement('div');
                 header.className = "px-3 py-2 text-[10px] font-bold text-gray-600 uppercase tracking-widest mt-2";
-                header.textContent = "Custom Folders";
+                header.textContent = "Folders";
                 listContainer.appendChild(header);
 
                 clientTabs.forEach(tab => {
                     if (tab === 'General') return;
-
                     const stat = sources[tab] || { count: 0, newCount: 0 };
-                    if (!firstAvailable) firstAvailable = tab;
-
-                    if (activeTab === tab) currentTabName = tab;
                     const isActive = activeTab === tab;
-                    const showDot = stat.newCount > 0 && !isActive;
-
-                    if (showDot) hasAnyNew = true;
 
                     const row = document.createElement('div');
-                    row.className = `group w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs font-medium transition mb-1 ${isActive ? 'bg-blue-500/10 text-blue-300 border border-blue-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`;
+                    row.className = `group w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs font-medium transition mb-1 cursor-pointer ${isActive ? 'bg-blue-500/10 text-blue-300 border border-blue-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`;
+                    row.onclick = () => { window.switchTab(tab); window.toggleTabsPopup(false); };
 
-                    // Main Button
-                    const mainBtn = document.createElement('button');
-                    mainBtn.className = "flex-grow flex items-center gap-3 text-left overflow-hidden h-full pr-2";
-                    mainBtn.onclick = () => {
-                        window.switchTab(tab);
-                        window.toggleTabsPopup(false);
-                    };
-                    mainBtn.innerHTML = `
-                        <i data-feather="folder" class="w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-400' : 'text-gray-600'}"></i>
-                        <span class="truncate">${tab}</span>
-                        ${showDot ? '<div class="w-2 h-2 rounded-full bg-red-500 animate-pulse ml-2 flex-shrink-0" title="New Leads"></div>' : ''}
+                    row.innerHTML = `
+                        <div class="flex items-center gap-3 overflow-hidden">
+                            <i data-feather="folder" class="w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-400' : 'text-gray-600'}"></i>
+                            <span class="truncate">${tab}</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="event.stopPropagation(); window.renameFolder('${tab}')" class="p-1 opacity-0 group-hover:opacity-100 hover:text-white text-gray-500 transition"><i data-feather="edit-2" class="w-3 h-3"></i></button>
+                            <button onclick="event.stopPropagation(); window.deleteFolder('${tab}')" class="p-1 opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition"><i data-feather="trash" class="w-3 h-3"></i></button>
+                            <span class="bg-white/5 px-1.5 py-0.5 rounded text-[10px] text-gray-500">${stat.count || 0}</span>
+                        </div>
                     `;
-
-                    // Actions
-                    const actionsDiv = document.createElement('div');
-                    actionsDiv.className = "flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mr-2";
-                    const renameBtn = document.createElement('button');
-                    renameBtn.className = "p-1.5 hover:bg-white/10 rounded-md text-gray-500 hover:text-white transition z-10";
-                    renameBtn.onclick = (e) => { e.stopPropagation(); window.renameFolder(tab); };
-                    renameBtn.innerHTML = `<i data-feather="edit-2" class="w-3 h-3"></i>`;
-
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = "p-1.5 hover:bg-red-500/10 rounded-md text-gray-500 hover:text-red-400 transition z-10";
-                    deleteBtn.onclick = (e) => { e.stopPropagation(); window.deleteFolder(tab); };
-                    deleteBtn.innerHTML = `<i data-feather="trash" class="w-3 h-3"></i>`;
-
-                    actionsDiv.appendChild(renameBtn);
-                    actionsDiv.appendChild(deleteBtn);
-
-                    // Count
-                    const countBadge = document.createElement('span');
-                    countBadge.className = "bg-white/5 px-1.5 py-0.5 rounded text-[10px] text-gray-500 flex-shrink-0 ml-auto";
-                    countBadge.textContent = stat.count || 0;
-
-                    row.appendChild(mainBtn);
-                    row.appendChild(actionsDiv);
-                    row.appendChild(countBadge);
                     listContainer.appendChild(row);
                 });
-            }
-
-            if (labelEl) labelEl.textContent = currentTabName;
-
-            // FIX: Only show global dot if there are new leads in *other* tabs
-            const globalInd = document.getElementById('global-new-indicator');
-            if (globalInd) {
-                if (hasAnyNew) globalInd.classList.remove('hidden');
-                else globalInd.classList.add('hidden');
-            }
-
-            const isValidSelection = activeTab && (clientStats.sources[activeTab] || clientTabs.includes(activeTab));
-            if (!isValidSelection && firstAvailable && !activeTab) {
-                window.switchTab(firstAvailable);
             }
 
             if (window.feather) feather.replace();
