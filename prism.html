@@ -63,48 +63,33 @@
         .log-error { color: #f87171; }   /* Red */
         .log-system { color: #22d3ee; font-weight: bold; } /* Cyan */
 
-        /* Liquid Mesh Background */
-        .mesh-bg {
+        /* Ambient Glow Blobs */
+        .ambient-glow {
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            z-index: -2;
-            background:
-                radial-gradient(at 0% 0%, hsla(336, 83%, 56%, 0.15) 0px, transparent 50%),
-                radial-gradient(at 100% 0%, hsla(28, 100%, 50%, 0.1) 0px, transparent 50%),
-                radial-gradient(at 100% 100%, hsla(336, 83%, 56%, 0.1) 0px, transparent 50%),
-                radial-gradient(at 0% 100%, hsla(240, 100%, 70%, 0.05) 0px, transparent 50%);
-            background-size: 150% 150%;
-            animation: fluidBackground 20s ease infinite;
-            filter: blur(60px);
-        }
-
-        @keyframes fluidBackground {
-            0% {
-                background-position: 0% 50%;
-            }
-
-            50% {
-                background-position: 100% 50%;
-            }
-
-            100% {
-                background-position: 0% 50%;
-            }
-        }
-
-        .noise-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: -1;
-            opacity: 0.03;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(230, 57, 127, 0.15) 0%, transparent 70%);
+            border-radius: 50%;
             pointer-events: none;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+            z-index: -2;
+            filter: blur(80px);
+            animation: drift 20s infinite alternate;
+        }
+
+        .glow-1 {
+            top: -200px;
+            left: -100px;
+        }
+
+        .glow-2 {
+            bottom: -200px;
+            right: -100px;
+            background: radial-gradient(circle, rgba(255, 138, 0, 0.1) 0%, transparent 70%);
+        }
+
+        @keyframes drift {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(30px, 50px); }
         }
 
         /* --- SCROLLBAR --- */
@@ -440,6 +425,14 @@
                             </label>
 
                             <div class="w-px h-8 bg-white/10 mx-2"></div>
+                            <div class="relative group">
+                                <select id="pageFilter" onchange="renderGrid()" class="bg-black/20 border border-white/10 text-xs text-gray-300 rounded-lg px-3 py-1.5 outline-none focus:border-pink-500 transition appearance-none pr-8 cursor-pointer hover:bg-white/5">
+                                    <option value="all">All Pages</option>
+                                </select>
+                                <i data-feather="filter" class="w-3 h-3 text-gray-500 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+                            </div>
+
+                            <div class="w-px h-8 bg-white/10 mx-2"></div>
 
                             <button id="resetAction"
                                 class="p-2 hover:bg-white/10 rounded-full text-gray-400 hover:text-white transition"
@@ -504,6 +497,10 @@
                                     <button onclick="downloadZip()"
                                         class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/10 hover:text-white transition flex items-center gap-2 border-t border-white/5">
                                         <i data-feather="package" class="w-4 h-4 text-orange-500"></i> Download ZIP
+                                    </button>
+                                    <button onclick="downloadCursorPack()"
+                                        class="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-white/10 hover:text-white transition flex items-center gap-2 border-t border-white/5 bg-gradient-to-r from-cyan-500/10 to-transparent">
+                                        <i data-feather="terminal" class="w-4 h-4 text-cyan-400"></i> Cursor Pack (.zip)
                                     </button>
                                 </div>
                             </div>
@@ -1220,56 +1217,150 @@
 
         function processHTML(htmlString) {
             const parser = new DOMParser();
-
-            // Enhance Raw Text capture from the parsed HTML for better structure if possible
             const doc = parser.parseFromString(htmlString, 'text/html');
-            if (doc.body.textContent.trim().length > rawTextContent.length) {
-                rawTextContent = doc.body.innerText; // Prefer innerText from DOM
-            }
 
-            // Extract Styles
-            extractStyles(doc);
-
+            // Reset State
             extractedData = [];
             gridOutput.innerHTML = '';
+            
+            // HIERARCHY STATE
+            let currentPage = 'General Page';
+            let currentSection = 'Uncategorized Section';
+            let currentZone = 'neutral'; // 'neutral', 'red', 'green'
+            
+            // MASTER STORAGE for Comments (Key = "Page > Section")
+            let sectionComments = {}; 
 
-            // CONTEXT LOGIC (Always capture context, toggle controls display)
-            let currentHeader = 'Uncategorized';
-            const seen = new Set();
-            const walker = document.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT, null);
+            // 1. HELPER: Detect Zone based on Color OR Text
+            function detectZone(node) {
+                const text = node.textContent.toUpperCase();
+                const style = node.getAttribute('style') || '';
+                const bgcolor = node.getAttribute('bgcolor') || '';
+                const combinedStyle = (style + bgcolor).toLowerCase();
+
+                // RED FLAGS (Visual Feedback)
+                if (text.includes('VISUAL FEEDBACK') || 
+                    combinedStyle.includes('#ea9999') || 
+                    combinedStyle.includes('rgb(234, 153, 153)')) {
+                    return 'red';
+                }
+                // GREEN FLAGS (New Assets)
+                if (text.includes('NEW ASSETS') || 
+                    combinedStyle.includes('#00ff00') || 
+                    combinedStyle.includes('rgb(0, 255, 0)')) {
+                    return 'green';
+                }
+                return null;
+            }
+
+            // 2. HELPER: STRICT NOISE FILTER
+            function cleanCommentText(text) {
+                let t = text.trim();
+                if (t.length < 2) return null; // Ignore single chars
+                
+                // A. Remove Emojis (Red/Green circles)
+                t = t.replace(/🔴|🟢/g, '').trim();
+
+                // B. Remove Template Boilerplate (Regex for flexibility)
+                const boilerplate = [
+                    /VISUAL FEEDBACK/i, /NEW ASSETS/i, 
+                    /Paste screenshots/i, /Upload only/i, 
+                    /FILES TO DOWNLOAD/i, /Leave blank/i,
+                    /Type your instructions/i
+                ];
+                
+                if (boilerplate.some(regex => regex.test(t))) return null;
+                
+                return t.length > 1 ? t : null;
+            }
+
+            // 3. WALKER: Scan Top-to-Bottom
+            const walker = document.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, null);
+            const seenImages = new Set();
 
             while (walker.nextNode()) {
                 const node = walker.currentNode;
+                
+                // Build the Context Key dynamically
+                const contextKey = `${currentPage} > ${currentSection}`;
+                
+                if (!sectionComments[contextKey]) sectionComments[contextKey] = [];
+
+                // --- A. TEXT NODES (Capture Comments) ---
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const cleanText = cleanCommentText(node.textContent);
+                    // CAPTURE RULES:
+                    // 1. Must be inside Red OR Green zone
+                    // 2. Must be actual user text (not boilerplate)
+                    if ((currentZone === 'red' || currentZone === 'green') && cleanText) {
+                         const arr = sectionComments[contextKey];
+                         // Avoid duplicates
+                         if (arr[arr.length - 1] !== cleanText) {
+                             arr.push(cleanText);
+                         }
+                    }
+                    continue;
+                }
+
+                // --- B. ELEMENT NODES ---
                 const tag = node.tagName.toLowerCase();
 
-                if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
+                // PAGE DETECTION (H1)
+                if (tag === 'h1') {
                     const text = node.textContent.trim();
-                    if (text && text.length < 100) currentHeader = text;
-                } else if (tag === 'img') {
+                    if (text) { currentPage = text; currentSection = 'Intro'; }
+                }
+
+                // SECTION DETECTION (H2, H3)
+                if (tag === 'h2' || tag === 'h3') {
+                    const text = node.textContent.trim();
+                    if (text) { currentSection = text; }
+                }
+
+                // ZONE DETECTION
+                if (tag === 'td' || tag === 'th' || tag === 'tr') {
+                    const newZone = detectZone(node);
+                    if (newZone) currentZone = newZone;
+                }
+
+                // IMAGE EXTRACTION
+                if (tag === 'img') {
                     const src = node.src || node.getAttribute('data-src');
-                    if (isValidImg(src, seen)) {
+                    if (isValidImg(src, seenImages)) {
+                        
+                        let type = 'asset'; 
+                        if (currentZone === 'red') type = 'reference';
+                        if (currentZone === 'green') type = 'production';
+
                         extractedData.push({
                             src: src,
-                            alt: cleanString(node.alt) || inferAltFromSrc(src),
-                            context: currentHeader
+                            alt: inferAltFromSrc(src),
+                            page: currentPage,
+                            section: currentSection,
+                            context: contextKey,
+                            zone: currentZone,
+                            type: type,
+                            // Pass reference to comments array
+                            comments: sectionComments[contextKey]
                         });
-                        seen.add(src);
+                        seenImages.add(src);
                     }
                 }
             }
-            // Fallback if 0 images found via tree walker (sometimes structure is flat)
-            if (extractedData.length === 0) {
-                const images = doc.querySelectorAll('img');
-                images.forEach(img => {
-                    const src = img.src || img.getAttribute('data-src');
-                    if (isValidImg(src, seen)) {
-                        extractedData.push({ src, alt: img.alt || inferAltFromSrc(src), context: 'Uncategorized' });
-                        seen.add(src);
-                    }
+
+            // POPULATE FILTER DROPDOWN
+            const filterSelect = document.getElementById('pageFilter');
+            if(filterSelect) {
+                const pages = [...new Set(extractedData.map(i => i.page))];
+                filterSelect.innerHTML = '<option value="all">All Pages</option>';
+                pages.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p; opt.innerText = p;
+                    filterSelect.appendChild(opt);
                 });
             }
 
-            saveState(); // SAVE ON NEW PASTE
+            saveState();
             renderGrid();
         }
 
@@ -1282,93 +1373,119 @@
 
         function renderGrid() {
             if (extractedData.length === 0) {
-                pasteZone.innerHTML = '<p class="text-red-400">No images found. Try selecting more content.</p>';
+                pasteZone.innerHTML = '<p class="text-red-400">No data found. Paste your Google Doc HTML.</p>';
                 return;
             }
 
             gridOutput.innerHTML = '';
-            const isContext = contextToggle.checked;
-            const isWP = wpToggle.checked;
+            
+            // 1. FILTER
+            const filterValue = document.getElementById('pageFilter').value;
+            const filteredData = extractedData.filter(item => filterValue === 'all' || item.page === filterValue);
 
-            // Grouping logic
-            let grouped = {};
-            if (isContext) {
-                grouped = extractedData.reduce((acc, item) => {
-                    (acc[item.context] = acc[item.context] || []).push(item);
-                    return acc;
-                }, {});
-            } else {
-                grouped = { "All Images": extractedData };
-            }
+            // 2. GROUP BY SECTION (Page > Section)
+            const grouped = filteredData.reduce((acc, item) => {
+                (acc[item.context] = acc[item.context] || []).push(item);
+                return acc;
+            }, {});
 
-            // Render Groups
+            // 3. RENDER
             for (const [header, items] of Object.entries(grouped)) {
+                
+                // --- SECTION HEADER ---
+                const headerEl = document.createElement('div');
+                headerEl.className = 'col-span-full mt-6 mb-2 pb-2 border-b border-white/10 flex items-center justify-between';
+                
+                // Get comments for this section (from the first item)
+                const comments = items[0].comments || [];
+                const commentCount = comments.length;
 
-                if (isContext) {
-                    const headerEl = document.createElement('div');
-                    headerEl.className = 'context-header';
-                    headerEl.innerHTML = `<i data-feather="hash" class="w-4 h-4"></i> ${header} <span class="bg-white/10 text-white text-[10px] px-2 rounded-full ml-auto">${items.length}</span>`;
-                    gridOutput.appendChild(headerEl);
-                }
+                headerEl.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <span class="text-pink-500 font-bold uppercase tracking-wider text-xs border border-pink-500/30 px-2 py-1 rounded bg-pink-500/10">SECTION</span>
+                        <h3 class="text-white font-bold text-lg brand-font">${header}</h3>
+                    </div>
+                    
+                    <div class="flex gap-2">
+                        ${commentCount > 0 ? `<span class="text-xs text-gray-400 flex items-center gap-1 bg-white/5 px-2 rounded"><i data-feather="message-square" class="w-3 h-3"></i> ${commentCount} notes</span>` : ''}
+                        
+                        <button onclick="copySectionContext('${header.replace(/'/g, "\\'")}')" 
+                            class="bg-white/10 hover:bg-white/20 text-white text-xs px-3 py-1.5 rounded-lg transition flex items-center gap-2 border border-white/5">
+                            <i data-feather="cpu" class="w-3 h-3 text-cyan-400"></i> Copy Context for AI
+                        </button>
+                    </div>
+                `;
+                gridOutput.appendChild(headerEl);
 
+                // --- IMAGES ---
                 items.forEach(data => {
-                    // Find actual index in main array for deletion
-                    // This is simple since objects are references, but let's store the source index or use ID? 
-                    // Simpler: find index of this object in extractedData
                     const realIndex = extractedData.indexOf(data);
-
-                    // Prepare preview name
-                    let displayName = data.alt;
-                    if (isWP) {
-                        displayName = sanitizeSlug(data.alt); // Preview the slug
+                    
+                    // Style logic (Red vs Green)
+                    let borderClass = 'border-white/10';
+                    let badgeHtml = '';
+                    
+                    if (data.type === 'reference') {
+                        borderClass = 'border-red-500/40 bg-red-500/5';
+                        badgeHtml = '<span class="absolute top-2 left-2 px-2 py-0.5 bg-red-500 text-white text-[9px] font-bold rounded shadow-lg z-20">VISUAL REF</span>';
+                    } else if (data.type === 'production') {
+                        borderClass = 'border-green-500/40 bg-green-500/5 shadow-[0_0_15px_-5px_rgba(34,197,94,0.2)]';
+                        badgeHtml = '<span class="absolute top-2 left-2 px-2 py-0.5 bg-green-500 text-white text-[9px] font-bold rounded shadow-lg z-20">ASSET</span>';
                     }
 
                     const card = document.createElement('div');
-                    card.className = 'image-card p-3 flex flex-col gap-3 group relative';
+                    card.className = `image-card p-3 flex flex-col gap-3 group relative border ${borderClass} transition-all duration-300`;
+                    
                     card.innerHTML = `
-                        <div class="relative aspect-square bg-black/50 rounded-lg overflow-hidden flex items-center justify-center">
-                            <img src="${data.src}" class="max-w-full max-h-full object-contain" loading="lazy">
+                        <div class="relative aspect-video bg-black/50 rounded-lg overflow-hidden flex items-center justify-center">
+                            ${badgeHtml}
+                            <img src="${data.src}" class="max-w-full max-h-full object-contain">
                             
-                            <!-- ACTIONS OVERLAY -->
-                            <div class="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2 p-4 text-center">
-                                
-                                <!-- Delete Button (Top Right) -->
-                                <button onclick="deleteImage(${realIndex})" class="absolute top-2 right-2 p-1.5 bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition" title="Remove">
-                                    <i data-feather="x" class="w-4 h-4"></i>
-                                </button>
-                                
-                                <p class="text-[10px] text-gray-400 font-mono break-all line-clamp-2 mb-2 mt-4">${data.src.substring(0, 50)}...</p>
-                                <div class="flex gap-2">
-                                    <a href="${data.src}" target="_blank" class="p-2 bg-white/10 hover:bg-pink-500 rounded-full text-white transition" title="Open">
-                                        <i data-feather="external-link" class="w-4 h-4"></i>
-                                    </a>
-                                    <button onclick="copyLink('${data.src}')" class="p-2 bg-white/10 hover:bg-pink-500 rounded-full text-white transition" title="Copy URL">
-                                        <i data-feather="copy" class="w-4 h-4"></i>
-                                    </button>
-                                </div>
+                            <div class="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2 z-30">
+                                <button onclick="deleteImage(${realIndex})" class="p-2 bg-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded-lg"><i data-feather="trash-2" class="w-4 h-4"></i></button>
                             </div>
                         </div>
-                        <div>
-                            <p class="text-xs text-gray-300 line-clamp-2" title="${data.alt}">
-                                ${isWP ? '<span class="wp-badge">WP</span> ' : ''}${displayName}
-                            </p>
+                        <div class="flex justify-between items-center">
+                            <span class="text-[10px] font-mono text-gray-500 truncate w-2/3">${data.alt}</span>
+                            <button onclick="copyLink('${data.src}')" class="text-xs text-gray-400 hover:text-white"><i data-feather="copy" class="w-3 h-3"></i></button>
                         </div>
                     `;
                     gridOutput.appendChild(card);
                 });
             }
 
-            // UI Update
-            countBadge.innerText = extractedData.length;
+            countBadge.innerText = filteredData.length;
             resultsContainer.classList.remove('hidden');
-
-            // Reset Paste Zone
-            pasteZone.innerHTML = `<i data-feather="check-circle" class="w-8 h-8 text-green-500 mb-2"></i>
-                <p class="text-green-400">Found ${extractedData.length} images</p>
-                <p class="text-xs text-gray-500 mt-2">Paste again to replace</p>`;
-
+            pasteZone.innerHTML = `<i data-feather="check-circle" class="w-8 h-8 text-green-500 mb-2"></i><p class="text-green-400">Processed ${filteredData.length} items</p>`;
             feather.replace();
         }
+
+        // NEW: Copy Specific Section Context
+        window.copySectionContext = (headerKey) => {
+            const items = extractedData.filter(i => i.context === headerKey);
+            if (!items.length) return;
+
+            // Get comments (stored on the first item of the group usually, or aggregate them)
+            const comments = items[0].comments || [];
+
+            // Build the AI Prompt
+            let output = `### CONTEXT: ${headerKey}\n\n`;
+            
+            if (comments.length > 0) {
+                output += `**CLIENT COMMENTS / INSTRUCTIONS:**\n`;
+                comments.forEach(c => output += `- ${c}\n`);
+                output += `\n`;
+            }
+
+            output += `**IMAGE ASSETS:**\n`;
+            items.forEach(i => {
+                const label = i.type === 'reference' ? '[VISUAL REFERENCE/SCREENSHOT]' : '[NEW ASSET TO USE]';
+                output += `- ${label}: ${i.src}\n`;
+            });
+
+            navigator.clipboard.writeText(output);
+            showToast(`Context copied for: ${headerKey}`);
+        };
 
         // --- 3. ACTIONS ---
 
@@ -1514,23 +1631,34 @@
         window.downloadZip = async () => {
             if (!extractedData.length) return;
 
-            showToast('Preparing ZIP...');
+            // --- SCOPED FILTER LOGIC ---
+            const filterValue = document.getElementById('pageFilter').value;
+            const scopedData = extractedData.filter(item => filterValue === 'all' || item.page === filterValue);
+
+            // We keep 'production' (Green) and 'asset' (Neutral/Legacy).
+            // We EXCLUDE 'reference' (Red).
+            const assetsToZip = scopedData.filter(img => img.type !== 'reference');
+            const excludedCount = scopedData.length - assetsToZip.length;
+
+            if (assetsToZip.length === 0) {
+                showToast('No clean assets to zip! (All were Reference)');
+                return;
+            }
+
+            showToast(`Zipping ${assetsToZip.length} Clean Assets...`);
             const zip = new JSZip();
 
             // Folder Logic
             let rootFolder = zip.folder("reputifly_images");
             if (wpToggle.checked) {
-                // WordPress structure
-                const pathName = getDatedFolder(); // e.g., "wp-content/uploads/2026/05/"
-                // We typically just want the images. But if user wants structure:
-                // Let's make the root of the zip contain the structure
+                const pathName = getDatedFolder(); 
                 rootFolder = zip.folder(pathName);
             }
 
             let successCount = 0;
             let failCount = 0;
 
-            const promises = extractedData.map(async (item, index) => {
+            const promises = assetsToZip.map(async (item, index) => {
                 try {
                     const response = await fetch(item.src);
                     if (!response.ok) throw new Error('Network error');
@@ -1542,12 +1670,10 @@
                     // Name Logic
                     let filename = "";
                     if (wpToggle.checked) {
-                        // WP Sanitized
                         let slug = sanitizeSlug(item.alt);
                         if (!slug) slug = `image-${index}`;
                         filename = `${slug}.${ext}`;
                     } else {
-                        // Regular
                         let safeName = item.alt.replace(/[^a-z0-9]/gi, '_').substring(0, 50);
                         if (!safeName) safeName = `image_${index}`;
                         filename = `${safeName}.${ext}`;
@@ -1564,16 +1690,147 @@
             await Promise.all(promises);
 
             zip.generateAsync({ type: "blob" }).then(function (content) {
-                saveAs(content, wpToggle.checked ? "wordpress-uploads.zip" : "reputifly_images.zip");
-                showToast(`Done! ${successCount} saved, ${failCount} failed.`);
+                const name = wpToggle.checked ? "wordpress-uploads-CLEAN.zip" : "reputifly_clean_assets.zip";
+                saveAs(content, name);
+                
+                let msg = `Saved ${successCount} assets.`;
+                if (excludedCount > 0) msg += ` (Ignored ${excludedCount} screenshots)`;
+                showToast(msg);
             });
         };
 
         // BOOKMARKLET
         const bmCode = `javascript:(function(){const i=Array.from(document.images).map(n=>({s:n.src,a:n.alt||'Asset'}));const u=[...new Set(i.map(x=>x.s))];if(!u.length)return alert('No images!');const w=window.open('','_blank');w.document.write('<html><body style="background:#111;color:#eee;font-family:sans-serif;padding:20px"><h1>'+u.length+' Images</h1><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">'+u.map(s=>'<img src="'+s+'" style="max-width:100%;border:1px solid #333">').join('')+'</div></body></html>');})();`;
         document.getElementById('repBookmarklet').href = bmCode;
+        // CURSOR PACK GENERATOR
+        window.downloadCursorPack = async () => {
+            if (!extractedData.length) return;
 
-        // --- REDESIGN KIT (GOD MODE) ---
+            // CHECK API KEY FIRST
+            const key = localStorage.getItem('reputifly_api_key');
+            const model = localStorage.getItem('reputifly_model') || 'gemini-2.5-flash';
+            const useAI = (key && key.trim() !== "");
+
+            const filterValue = document.getElementById('pageFilter').value;
+            const scopedData = extractedData.filter(item => filterValue === 'all' || item.page === filterValue);
+            
+            if (scopedData.length === 0) {
+                showToast('No items to pack for this view!');
+                return;
+            }
+
+            if (useAI) showToast('🤖 AI Processing Instructions...');
+            else showToast('Generating Standard Pack (No AI Key)...');
+
+            const zip = new JSZip();
+            const rootFolder = zip.folder(`Cursor_Pack_${filterValue === 'all' ? 'Full_Site' : sanitizeSlug(filterValue)}`);
+            
+            let markdownContent = `# 🤖 AI DEVELOPMENT INSTRUCTIONS\n`;
+            markdownContent += `> **ROLE:** You are a Senior Frontend Developer.\n`;
+            markdownContent += `> **TASK:** Execute the revisions below. The "AI Plan" matches specific assets to instructions.\n`;
+            markdownContent += `> **IMPORTANT:** Trust the "Client Instructions" over the filename. If an instruction says "replace with this image" but the file is named "REF_SCREENSHOT", treat it as a valid production asset. Clients often paste assets in the wrong box.\n\n`;
+            markdownContent += `--- \n\n`;
+
+            // Group by Context
+            const grouped = scopedData.reduce((acc, item) => {
+                (acc[item.context] = acc[item.context] || []).push(item);
+                return acc;
+            }, {});
+
+            let globalAssetCounter = 1;
+
+            // Process Each Section
+            for (const [contextHeader, items] of Object.entries(grouped)) {
+                markdownContent += `## 📍 SECTION: ${contextHeader}\n\n`;
+
+                // PREPARE DATA
+                const comments = [...new Set(items[0].comments || [])];
+                const assets = [];
+                const assetFiles = []; // To store for zipping
+
+                // Download & Rename Assets First
+                for (const item of items) {
+                     try {
+                        const response = await fetch(item.src);
+                        const blob = await response.blob();
+                        let ext = blob.type.split('/')[1] || 'jpg';
+                        if (ext.includes('+')) ext = ext.split('+')[0];
+
+                        const sectionSlug = sanitizeSlug(item.section);
+                        const role = item.type === 'reference' ? 'REF_SCREENSHOT' : 'NEW_ASSET';
+                        const filename = `${sectionSlug}_${role}_${globalAssetCounter}.${ext}`;
+                        
+                        // Add to Zip
+                        rootFolder.file(filename, blob);
+                        
+                        // Add to Lists
+                        assets.push({ role, filename, originalAlt: item.alt });
+                        globalAssetCounter++;
+
+                     } catch (e) { console.warn(e); }
+                }
+
+                // --- THE AI LAYER ---
+                if (useAI && comments.length > 0) {
+                    try {
+                        const prompt = `
+                        ACT AS A TECHNICAL PROJECT MANAGER.
+                        I have a list of raw client comments and a list of image files (in order of appearance).
+                        Your job is to match the comments to the files and output a CLEAN implementation plan.
+                        
+                        CONTEXT: ${contextHeader}
+                        
+                        RAW COMMENTS (In order):
+                        ${JSON.stringify(comments)}
+                        
+                        AVAILABLE FILES (In order):
+                        ${JSON.stringify(assets.map(a => a.filename))}
+                        
+                        INSTRUCTIONS:
+                        1. If a comment says "Change this pic" and there is a corresponding ASSET file at that index, link them.
+                        2. If comments are vague, provide the best logical guess based on order.
+                        3. Output a simple Markdown Checklist.
+                        `;
+
+                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                        });
+                        const data = await response.json();
+                        const aiPlan = data.candidates[0].content.parts[0].text;
+
+                        markdownContent += `### 🧠 AI Implementation Plan:\n${aiPlan}\n\n`;
+
+                    } catch (e) {
+                        markdownContent += `> ⚠️ AI Analysis Failed: ${e.message}\n\n`;
+                    }
+                } else if (comments.length > 0) {
+                     // Fallback if no AI Key
+                     markdownContent += `### 📝 Client Comments:\n`;
+                     comments.forEach(c => markdownContent += `- [ ] ${c}\n`);
+                     markdownContent += `\n`;
+                } else {
+                     markdownContent += `*(No text instructions)*\n\n`;
+                }
+
+                // RAW FILE TABLE (The Safety Net)
+                markdownContent += `### 📂 Asset Reference (Raw Data):\n`;
+                markdownContent += `| Role | Filename |\n| :--- | :--- |\n`;
+                assets.forEach(a => {
+                    markdownContent += `| **${a.role}** | \`${a.filename}\` |\n`;
+                });
+                markdownContent += `\n---\n\n`;
+            }
+
+            // Write MD file
+            rootFolder.file("cursor_instructions.md", markdownContent);
+
+            // Generate Zip
+            zip.generateAsync({ type: "blob" }).then(function (content) {
+                saveAs(content, `Cursor_Pack_${filterValue === 'all' ? 'Full' : sanitizeSlug(filterValue)}.zip`);
+                showToast(`Cursor Pack Ready!`);
+            });
+        };
        // --- REDESIGN KIT (GOD MODE) ---
         window.generateRedesignKit = async () => {
             const key = localStorage.getItem('reputifly_api_key');
