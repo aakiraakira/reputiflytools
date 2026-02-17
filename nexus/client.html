@@ -787,6 +787,7 @@
                                     class="w-full text-left px-4 py-2.5 text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 flex items-center gap-2 transition">
                                     <i data-feather="trash-2" class="w-3.5 h-3.5"></i> Clear Current Tab
                                 </button>
+                                
                             </div>
                         </div>
                     </div>
@@ -2214,91 +2215,51 @@
         // ANALYTICS & CHARTS
         // ==========================================
         async function renderAnalytics() {
-            console.log("Rendering Analytics...");
+            console.log("Rendering Analytics (Scalable Mode)...");
 
-            // 1. GLOBAL KPIs (From Stats)
-            const total = clientStats.totalLeads || 0;
+            // 1. GLOBAL KPIs (From Stats - 0 Reads)
+            const stats = clientStats || { totalLeads: 0, dailyVolume: {}, statusBreakdown: {} };
+            const total = stats.totalLeads || 0;
 
             if (document.getElementById('kpi-total')) {
                 document.getElementById('kpi-total').textContent = total;
             }
 
-            // 2. FETCH RECENT DATA FOR CHARTS (Last 300)
-            let recentLeads = [];
-            try {
-                // FIX: Query ONLY by clientId to avoid "Missing Index" errors
-                const q = query(
-                    collection(db, "leads"),
-                    where("clientId", "==", clientEmail)
-                );
-
-                const snap = await getDocs(q);
-
-                // Convert to array
-                let allLeads = snap.docs.map(d => d.data());
-
-                // Sort in Memory (Newest First)
-                allLeads.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-
-                // Slice top 300 for performance
-                recentLeads = allLeads.slice(0, 300);
-
-            } catch (e) {
-                console.error("Analytics Query Error:", e);
-                // recentLeads remains [] if error, preventing crash
+            // 2. CALCULATE TIME-BASED KPIs
+            const now = new Date();
+            // Format YYYY-MM to match stats keys
+            const currentMonthPrefix = now.toISOString().slice(0, 7); 
+            
+            let thisMonth = 0;
+            if (stats.dailyVolume) {
+                Object.keys(stats.dailyVolume).forEach(dateKey => {
+                    if (dateKey.startsWith(currentMonthPrefix)) {
+                        thisMonth += stats.dailyVolume[dateKey];
+                    }
+                });
             }
 
-            // 3. CALCULATE TIME-BASED KPIs
-            const now = new Date();
-            const thisMonth = recentLeads.filter(l => {
-                if (!l.createdAt) return false;
-                const d = new Date(l.createdAt.seconds * 1000);
-                return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-            }).length;
+            // Conversion Rate
+            const s = stats.statusBreakdown || {};
+            const contacted = (s.contacted || 0) + (s.qualified || 0);
+            const conversionRate = total > 0 ? Math.round((contacted / total) * 100) : 0;
 
-            const contacted = recentLeads.filter(l => ['contacted', 'qualified'].includes(l.status));
-
-            // Calculate conversion based on the recent batch
-            const conversionRate = recentLeads.length > 0 ? Math.round((contacted.length / recentLeads.length) * 100) : 0;
-
-            // 4. AVG RESPONSE TIME (From Recent)
-            let totalResponseTimeMs = 0;
-            let responseCount = 0;
-            contacted.forEach(l => {
-                if (l.createdAt && l.contactedAt) {
-                    const diff = (l.contactedAt.seconds * 1000) - (l.createdAt.seconds * 1000);
-                    if (diff > 0) { totalResponseTimeMs += diff; responseCount++; }
-                }
-            });
-            const avgResponseStr = responseCount > 0 ? formatDuration(totalResponseTimeMs / responseCount) : '—';
+            // Avg Response Time (Disabled in Scalable Mode to save reads)
+            const avgResponseStr = '—'; 
 
             // Update DOM
             if (document.getElementById('kpi-this-month')) document.getElementById('kpi-this-month').textContent = thisMonth;
             if (document.getElementById('kpi-conversion')) document.getElementById('kpi-conversion').textContent = conversionRate + '%';
             if (document.getElementById('kpi-response-time')) document.getElementById('kpi-response-time').textContent = avgResponseStr;
 
-            // 5. UPDATE CHARTS
-            // Temporarily swap clientLeads with recentLeads so charts use the analytics data
-            // instead of the currently viewed page data
-            const originalLeads = clientLeads;
-            clientLeads = recentLeads;
-
+            // 3. UPDATE CHARTS
             if (volumeChart) volumeChart.destroy();
             if (statusChart) statusChart.destroy();
 
-            // Render Charts using the temporary data
             if (typeof renderVolumeChart === 'function') renderVolumeChart(chartRange);
             if (typeof renderStatusChart === 'function') renderStatusChart();
-
-
-            // Restore Global Leads variable
-            // 6. RENDER LISTS & CALENDAR (Run this BEFORE restoring the original view's leads)
-            // This ensures we use the 'recentLeads' data we just fetched for calculations
             if (typeof renderDetailedAnalytics === 'function') renderDetailedAnalytics();
             if (typeof renderCalendar === 'function') renderCalendar();
-
-            // Restore Global Leads variable
-            clientLeads = originalLeads;
         }
 
         function renderDetailedAnalytics() {
@@ -2318,12 +2279,10 @@
                 }
 
                 sortedSources.forEach(([sig, stat], index) => {
-                    // FIX: Use the new helper that handles "Form 1", "Form 2", etc.
                     const name = getFormDisplayName(sig);
                     const percent = clientStats.totalLeads > 0 ? Math.round((stat.count / clientStats.totalLeads) * 100) : 0;
                     const colorClass = colors[index % colors.length];
 
-                    // FIX: Create DIV rows instead of TR (Table Rows) to match your HTML
                     const row = document.createElement('div');
                     row.className = "flex items-center justify-between text-xs";
                     row.innerHTML = `
@@ -2340,21 +2299,14 @@
                 });
             }
 
-            // 2. VOLUME SPIKES (Added Missing Logic)
+            // 2. VOLUME SPIKES (Scalable)
             const anomaliesContainer = document.getElementById('analytics-anomalies');
             if (anomaliesContainer) {
                 anomaliesContainer.innerHTML = '';
 
-                // Group leads by date
-                const dateMap = {};
-                clientLeads.forEach(l => {
-                    if (!l.createdAt) return;
-                    const d = new Date(l.createdAt.seconds * 1000).toDateString();
-                    dateMap[d] = (dateMap[d] || 0) + 1;
-                });
-
-                // Find top 3 days
-                const sortedDays = Object.entries(dateMap)
+                // Use stats.dailyVolume instead of iterating leads
+                const vol = clientStats.dailyVolume || {};
+                const sortedDays = Object.entries(vol)
                     .sort(([, a], [, b]) => b - a)
                     .slice(0, 3);
 
@@ -2363,7 +2315,7 @@
                 }
 
                 sortedDays.forEach(([dateStr, count]) => {
-                    const d = new Date(dateStr);
+                    const d = new Date(dateStr); // dateStr is YYYY-MM-DD
                     const formattedDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
                     const row = document.createElement('div');
@@ -2402,31 +2354,24 @@
         function renderVolumeChart(range) {
             const days = range === '7d' ? 7 : (range === '30d' ? 30 : 90);
             const labels = [];
-
-            // 1. Generate Labels
+            const dataPoints = [];
+            
+            // Generate Labels & Data from stats.dailyVolume
             for (let i = days - 1; i >= 0; i--) {
                 const d = new Date();
                 d.setDate(d.getDate() - i);
-                labels.push(d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' }));
+                
+                // Key format matches index.js: YYYY-MM-DD
+                // We use en-CA to force YYYY-MM-DD format
+                const key = d.toLocaleDateString("en-CA"); 
+                const label = d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+                
+                labels.push(label);
+                
+                // Fetch from stats or 0
+                const val = (clientStats.dailyVolume && clientStats.dailyVolume[key]) || 0;
+                dataPoints.push(val);
             }
-
-            // 2. Map Data correctly
-            const map = {};
-            labels.forEach(l => map[l] = 0);
-
-            clientLeads.forEach(l => {
-                if (!l.createdAt) return;
-                const d = new Date(l.createdAt.seconds * 1000);
-                const dateKey = d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
-
-                // Only count if this date exists in our range labels
-                if (map[dateKey] !== undefined) {
-                    map[dateKey]++;
-                }
-            });
-
-            // FIX: Ensure we use 'l' here (labels)
-            const finalData = labels.map(l => map[l]);
 
             const ctx = document.getElementById('chart-volume').getContext('2d');
             if (volumeChart) volumeChart.destroy();
@@ -2437,7 +2382,7 @@
                     labels: labels,
                     datasets: [{
                         label: 'Leads',
-                        data: finalData,
+                        data: dataPoints,
                         backgroundColor: '#a855f7',
                         borderRadius: 4,
                         hoverBackgroundColor: '#d8b4fe'
@@ -2464,19 +2409,14 @@
 
         function renderStatusChart() {
             const ctx = document.getElementById('chart-status').getContext('2d');
-
-            // Calculate dynamically from the loaded leads
-            let newCount = 0, contactedCount = 0, qualifiedCount = 0, junkCount = 0;
-
-            clientLeads.forEach(l => {
-                const st = l.status || 'new';
-                if (st === 'new') newCount++;
-                else if (st === 'contacted') contactedCount++;
-                else if (st === 'qualified') qualifiedCount++;
-                else if (st === 'junk') junkCount++;
-            });
-
-            const counts = [newCount, contactedCount, qualifiedCount, junkCount];
+            
+            const s = clientStats.statusBreakdown || { new: 0, contacted: 0, qualified: 0, junk: 0 };
+            const counts = [
+                s.new || 0, 
+                s.contacted || 0, 
+                s.qualified || 0, 
+                s.junk || 0
+            ];
 
             if (statusChart) statusChart.destroy();
 
@@ -2518,6 +2458,9 @@
             const firstDay = new Date(year, month, 1).getDay();
             const daysInMonth = new Date(year, month + 1, 0).getDate();
             const today = new Date();
+            
+            // Get stats safely
+            const vol = (clientStats && clientStats.dailyVolume) ? clientStats.dailyVolume : {};
 
             // Empty cells for padding
             for (let i = 0; i < firstDay; i++) {
@@ -2533,16 +2476,15 @@
                 // Check if today
                 if (cellDate.toDateString() === today.toDateString()) div.classList.add('today');
 
-                // Count leads for this day
-                const count = clientLeads.filter(l => {
-                    if (!l.createdAt) return false;
-                    const ld = new Date(l.createdAt.seconds * 1000);
-                    return ld.toDateString() === cellDate.toDateString();
-                }).length;
+                // SCALABLE COUNT LOOKUP
+                // We construct the key 'YYYY-MM-DD' to match the database format
+                // Using Singapore time to match the backend
+                const dateKey = cellDate.toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
+                const count = vol[dateKey] || 0;
 
                 if (count > 0) {
                     div.classList.add('has-leads');
-                    div.style.background = `rgba(168, 85, 247, ${Math.min(0.2 + (count * 0.1), 0.8)})`; // Purple opacity based on volume
+                    div.style.background = `rgba(168, 85, 247, ${Math.min(0.2 + (count * 0.1), 0.8)})`; 
                     div.style.borderColor = `rgba(168, 85, 247, 0.3)`;
                 } else {
                     div.style.background = 'rgba(255,255,255,0.02)';
