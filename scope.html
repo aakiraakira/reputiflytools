@@ -269,6 +269,45 @@
             color: #444;
             font-style: italic;
         }
+
+        /* CHECKLIST STYLES */
+        .checklist-item {
+            transition: all 0.2s;
+        }
+        .checklist-item.completed {
+            background: rgba(34, 197, 94, 0.1);
+            border-color: rgba(34, 197, 94, 0.3);
+        }
+        .checklist-item.completed .section-name {
+            text-decoration: line-through;
+            color: #4ade80;
+        }
+        .checkbox-custom {
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #555;
+            border-radius: 6px;
+            cursor: pointer;
+            display: grid;
+            place-content: center;
+            transition: 0.2s;
+        }
+        .checkbox-custom::before {
+            content: "";
+            width: 10px;
+            height: 10px;
+            background: #E6397F;
+            transform: scale(0);
+            transition: 0.2s;
+            border-radius: 2px;
+        }
+        .checkbox-custom:checked {
+            border-color: #E6397F;
+        }
+        .checkbox-custom:checked::before {
+            transform: scale(1);
+        }
     </style>
 </head>
 
@@ -359,6 +398,9 @@
                             <button onclick="copyClientLink()"
                                 class="btn-secondary w-full justify-start text-sm text-blue-400 border-blue-500/20 hover:bg-blue-500/10"><i
                                     data-feather="link" class="w-4 h-4"></i> Copy Client Link</button>
+                            <button onclick="copyEmployeeLink()"
+                                class="btn-secondary w-full justify-start text-sm text-purple-400 border-purple-500/20 hover:bg-purple-500/10"><i
+                                    data-feather="check-square" class="w-4 h-4"></i> Copy Employee Link</button>
                         </div>
                     </div>
 
@@ -444,6 +486,30 @@
                     Signed by <span id="successSigner" class="text-white font-bold">...</span><br>
                     <span id="successDate">...</span>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="employeeView" class="hidden min-h-screen bg-[#050507] py-12 px-4 animate-in">
+        <div class="max-w-3xl mx-auto">
+            <div class="flex items-center justify-between mb-8">
+                <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-8 brightness-125">
+                <div class="bg-purple-500/10 text-purple-400 px-3 py-1 rounded-full text-xs font-bold border border-purple-500/20">
+                    DEV CHECKLIST
+                </div>
+            </div>
+
+            <div class="glass-panel p-8 mb-8">
+                <h1 class="text-2xl font-bold text-white mb-2" id="empProjectTitle">Loading...</h1>
+                <p class="text-gray-500 text-sm mb-6">Check off sections as you complete them. Save your progress regularly.</p>
+                
+                <div id="employeeChecklistArea" class="space-y-8"></div>
+            </div>
+
+            <div class="sticky bottom-6 z-50">
+                <button onclick="saveEmployeeProgress()" id="empSaveBtn" class="btn-primary w-full py-4 text-lg shadow-2xl shadow-purple-900/50 flex items-center justify-center gap-3">
+                    <i data-feather="save" class="w-5 h-5"></i> Update Progress
+                </button>
             </div>
         </div>
     </div>
@@ -540,13 +606,16 @@
 
             const urlParams = new URLSearchParams(window.location.search);
             const clientProject = urlParams.get('client_view');
+            const employeeProject = urlParams.get('employee_view');
 
-            if (clientProject) {
+            if (clientProject || employeeProject) {
                 const auth = document.getElementById('authScreen');
                 if (auth) auth.remove();
                 const app = document.getElementById('appContainer');
                 if (app) app.remove();
-                initClientView(clientProject);
+                
+                if (clientProject) initClientView(clientProject);
+                if (employeeProject) initEmployeeView(employeeProject);
                 return;
             }
 
@@ -1139,6 +1208,191 @@
             canvas.toBlob(function (blob) {
                 saveAs(blob, `${currentProjectID}_sitemap.png`);
             });
+        };
+
+        // --- EMPLOYEE & EXCLUSION LOGIC ---
+
+        // 1. Updated Render Scope Builder to Include Exclusion Toggle
+        const originalRender = renderScopeBuilder; 
+        renderScopeBuilder = () => {
+            const container = document.getElementById('scopeBuilderArea');
+            container.innerHTML = "";
+
+            if (scopeData.length === 0) {
+                document.getElementById('emptyState').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('emptyState').classList.add('hidden');
+
+            scopeData.forEach((page, pIdx) => {
+                const el = document.createElement('div');
+                // Visual indicator if excluded
+                const isExcluded = page.exclude === true;
+                el.className = `glass-panel p-6 relative animate-in mb-6 ${isExcluded ? 'border-dashed border-gray-600 opacity-75' : ''}`;
+                
+                const sectionsHtml = page.sections.map((sec, sIdx) => {
+                    const secName = typeof sec === 'string' ? sec : sec.name;
+                    const secDesc = typeof sec === 'string' ? '' : (sec.description || '');
+
+                    return `
+                    <div class="section-item flex flex-col gap-2 mb-2 bg-black/30 p-3 rounded-lg group border border-transparent hover:border-white/10 transition-colors">
+                        <div class="flex items-center gap-3">
+                            <div class="w-1.5 h-1.5 bg-pink-500 rounded-full flex-shrink-0"></div>
+                            <input type="text" value="${secName}" onchange="updateSectionName(${pIdx}, ${sIdx}, this.value)" class="bg-transparent text-sm text-gray-300 w-full outline-none font-medium" placeholder="Section Name">
+                            
+                            <div class="action-btns flex gap-1">
+                                <button onclick="moveSection(${pIdx}, ${sIdx}, -1)" class="text-gray-600 hover:text-white p-1" title="Move Up"><i data-feather="arrow-up" class="w-3 h-3"></i></button>
+                                <button onclick="moveSection(${pIdx}, ${sIdx}, 1)" class="text-gray-600 hover:text-white p-1" title="Move Down"><i data-feather="arrow-down" class="w-3 h-3"></i></button>
+                                <button onclick="removeSection(${pIdx}, ${sIdx})" class="text-gray-600 hover:text-red-500 p-1" title="Remove"><i data-feather="x" class="w-3 h-3"></i></button>
+                            </div>
+                        </div>
+                        <input type="text" value="${secDesc}" onchange="updateSectionDesc(${pIdx}, ${sIdx}, this.value)" class="purpose-input ml-4" placeholder="Purpose">
+                    </div>
+                `}).join('');
+
+                el.innerHTML = `
+                    <div class="flex flex-col gap-2 mb-4 pb-4 border-b border-white/5">
+                        <div class="flex justify-between items-center">
+                            <input type="text" value="${page.name}" onchange="updatePageName(${pIdx}, this.value)" class="bg-transparent text-lg font-bold text-white outline-none w-full placeholder-gray-600" placeholder="Page Name">
+                            <button onclick="removePage(${pIdx})" class="text-gray-500 hover:text-red-500 p-2"><i data-feather="trash-2" class="w-4 h-4"></i></button>
+                        </div>
+                        <div class="flex items-center gap-2">
+                             <input type="checkbox" id="exclude-${pIdx}" ${isExcluded ? 'checked' : ''} onchange="togglePageExclusion(${pIdx})" class="accent-pink-500 w-4 h-4 cursor-pointer">
+                             <label for="exclude-${pIdx}" class="text-xs text-gray-400 cursor-pointer hover:text-white">Exclude from Employee Checklist (e.g. Terms)</label>
+                        </div>
+                    </div>
+                    <div class="space-y-1 pl-1">
+                        ${sectionsHtml}
+                    </div>
+                    <div class="mt-4 flex gap-2">
+                        <input type="text" id="newSecInput-${pIdx}" placeholder="Add section..." class="bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white w-full outline-none focus:border-pink-500 transition-colors" onkeydown="if(event.key==='Enter') addSection(${pIdx})">
+                        <button onclick="addSection(${pIdx})" class="bg-white/10 hover:bg-white/20 text-white rounded px-3"><i data-feather="plus" class="w-4 h-4"></i></button>
+                    </div>
+                `;
+                container.appendChild(el);
+            });
+            feather.replace();
+        }
+
+        window.togglePageExclusion = (idx) => {
+            scopeData[idx].exclude = !scopeData[idx].exclude;
+            renderScopeBuilder(); // Re-render to show visual feedback
+        }
+
+        window.copyEmployeeLink = () => {
+            const url = `${window.location.origin}${window.location.pathname}?employee_view=${encodeURIComponent(currentProjectID)}`;
+            navigator.clipboard.writeText(url);
+            showToast("Employee Checklist Link Copied!");
+        };
+
+        // --- EMPLOYEE VIEW FUNCTIONS ---
+        async function initEmployeeView(projectName) {
+            document.getElementById('employeeView').classList.remove('hidden');
+            currentProjectID = decodeURIComponent(projectName);
+            document.getElementById('empProjectTitle').innerText = currentProjectID;
+
+            try {
+                const docSnap = await window.getDoc(window.doc(window.db, "project_metadata", currentProjectID));
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    if (data.scope && data.scope.pages) { 
+                        scopeData = data.scope.pages;
+                        renderEmployeeScope(); 
+                    }
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function renderEmployeeScope() {
+            const container = document.getElementById('employeeChecklistArea');
+            container.innerHTML = "";
+
+            let totalTasks = 0;
+            let completedTasks = 0;
+
+            scopeData.forEach((page, pIdx) => {
+                const isExcluded = page.exclude === true;
+                
+                // If excluded, render simple read-only list
+                if (isExcluded) {
+                    const sectionsHtml = page.sections.map(sec => {
+                         const name = typeof sec === 'string' ? sec : sec.name;
+                         return `<div class="text-gray-600 text-sm py-1 ml-4">• ${name}</div>`
+                    }).join('');
+                    
+                    container.innerHTML += `
+                        <div class="opacity-50 border border-dashed border-gray-700 rounded-xl p-6">
+                            <h3 class="text-lg font-bold text-gray-500 mb-2 flex items-center gap-2"><i data-feather="eye-off" class="w-4 h-4"></i> ${page.name} <span class="text-xs bg-gray-800 px-2 py-0.5 rounded ml-2">For Client Reference Only</span></h3>
+                            ${sectionsHtml}
+                        </div>`;
+                    return;
+                }
+
+                // If not excluded, render checklist
+                const sectionsHtml = page.sections.map((sec, sIdx) => {
+                    const name = typeof sec === 'string' ? sec : sec.name;
+                    const desc = (typeof sec === 'object' && sec.description) ? sec.description : '';
+                    const isDone = (typeof sec === 'object' && sec.completed) === true;
+                    
+                    if (!isExcluded) totalTasks++;
+                    if (isDone) completedTasks++;
+
+                    return `
+                    <label class="checklist-item flex items-start gap-4 p-4 rounded-xl bg-white/5 border border-white/5 cursor-pointer hover:bg-white/10 ${isDone ? 'completed' : ''}">
+                        <input type="checkbox" class="checkbox-custom mt-1" ${isDone ? 'checked' : ''} onchange="toggleTask(${pIdx}, ${sIdx})">
+                        <div class="flex-1">
+                            <span class="section-name font-bold text-gray-200 block ${isDone ? 'line-through text-gray-500' : ''}">${name}</span>
+                            ${desc ? `<p class="text-xs text-gray-500 mt-1">${desc}</p>` : ''}
+                        </div>
+                    </label>
+                `}).join('');
+
+                container.innerHTML += `
+                    <div class="animate-in">
+                        <h3 class="text-xl font-bold text-white mb-4 pl-1 border-l-4 border-purple-500 ml-1">${page.name}</h3>
+                        <div class="flex flex-col gap-3">${sectionsHtml}</div>
+                    </div>
+                `;
+            });
+            
+            // Update Save Button Text with Stats
+            const pct = totalTasks === 0 ? 100 : Math.round((completedTasks/totalTasks)*100);
+            document.getElementById('empSaveBtn').innerHTML = `<i data-feather="save" class="w-5 h-5"></i> Update Progress (${pct}% Complete)`;
+            feather.replace();
+        }
+
+        window.toggleTask = (pIdx, sIdx) => {
+            const sec = scopeData[pIdx].sections[sIdx];
+            
+            // Convert string to object if needed to store state
+            if (typeof sec === 'string') {
+                scopeData[pIdx].sections[sIdx] = { name: sec, description: "", completed: true };
+            } else {
+                sec.completed = !sec.completed;
+            }
+            renderEmployeeScope();
+        }
+
+        window.saveEmployeeProgress = async () => {
+            const btn = document.getElementById('empSaveBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "Saving...";
+            
+            try {
+                // Determine if we need to preserve signature
+                const existingRef = window.doc(window.db, "project_metadata", currentProjectID);
+                const existingSnap = await window.getDoc(existingRef);
+                const existingData = existingSnap.exists() ? existingSnap.data() : {};
+                const sig = (existingData.scope && existingData.scope.signature) ? existingData.scope.signature : null;
+
+                await window.setDoc(existingRef, {
+                    scope: { pages: scopeData, signature: sig }
+                }, { merge: true });
+
+                showToast("Progress Saved! ✅");
+            } catch(e) { console.error(e); showToast("Error Saving"); }
+            
+            setTimeout(() => btn.innerHTML = originalText, 1000);
         };
     </script>
 </body>
