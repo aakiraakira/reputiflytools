@@ -986,16 +986,83 @@
         window.submitClientSignature = async () => {
             const name = document.getElementById('clientNameInput').value.trim();
             const checked = document.getElementById('confirmCheck').checked;
+            
             if (!name || !checked) return showToast("Please fill all fields");
+            
             const btn = document.querySelector('#signForm button');
-            btn.innerText = "Signing..."; btn.disabled = true;
+            const originalText = btn.innerText;
+            btn.innerText = "Securing Signature..."; 
+            btn.disabled = true;
+
             try {
+                // 1. CAPTURE DIGITAL FINGERPRINT (Evidence)
+                const metadata = {
+                    project: currentProjectID,
+                    signer_name: name,
+                    signed_at_iso: new Date().toISOString(),
+                    url: window.location.href,
+                    user_agent: navigator.userAgent || 'Unknown',
+                    screen_res: `${window.screen.width}x${window.screen.height}`,
+                    window_size: `${window.innerWidth}x${window.innerHeight}`,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    language: navigator.language || 'en-US',
+                    platform: navigator.platform || 'Unknown',
+                    referrer: document.referrer || 'Direct Access'
+                };
+
+                // 2. UPDATE FIRESTORE (The Legal Record)
                 const docRef = window.doc(window.db, "project_metadata", currentProjectID);
                 const docSnap = await window.getDoc(docRef);
                 const data = docSnap.data();
-                await window.setDoc(docRef, { scope: { ...data.scope, signature: { name: name, timestamp: window.serverTimestamp() } } }, { merge: true });
-                location.reload();
-            } catch (e) { console.error(e); showToast("Error Signing"); btn.disabled = false; }
+                
+                // Save signature + metadata to database
+                await window.setDoc(docRef, { 
+                    scope: { 
+                        ...data.scope, 
+                        signature: { 
+                            name: name, 
+                            timestamp: window.serverTimestamp(),
+                            ...metadata 
+                        } 
+                    } 
+                }, { merge: true });
+
+                // 3. API NOTIFICATION (Instant Alert to Tracking)
+                try {
+                    // Using your existing Reputifly Cloud Function
+                    await fetch("https://asia-southeast1-b2b-software.cloudfunctions.net/reputifly", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            _to: "julian@reputifly.com",
+                            _subject: `✍️ CONTRACT SIGNED: ${currentProjectID}`,
+                            _sender_name: "Scope Manager",
+                            // Data Fields for Email Body
+                            "Project Name": currentProjectID,
+                            "Signer Name": name,
+                            "Signed At": new Date().toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }),
+                            "Device": metadata.platform,
+                            "Browser Agent": metadata.user_agent,
+                            "Screen Res": metadata.screen_res,
+                            "Location/Timezone": metadata.timezone,
+                            "Signature Link": window.location.href
+                        })
+                    });
+                } catch (apiErr) {
+                    console.warn("API Log Failed (Non-fatal):", apiErr);
+                    // We continue because the Firestore save was successful
+                }
+
+                // 4. SUCCESS STATE
+                showToast("Signature Secured! Redirecting...");
+                setTimeout(() => location.reload(), 1500);
+
+            } catch (e) { 
+                console.error(e); 
+                showToast("Error Signing: " + e.message); 
+                btn.innerText = originalText;
+                btn.disabled = false; 
+            }
         };
 
         window.createNewProjectModal = () => openModal('newProjectModal');
