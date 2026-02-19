@@ -1890,6 +1890,17 @@
                 `;
                 container.appendChild(archiveBtn);
             }
+            // --- NEW: Hard Delete Button ---
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = "w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-white/5 bg-white/5 hover:bg-red-600/10 hover:border-red-600/30 hover:text-red-500 transition group mt-3";
+            deleteBtn.onclick = () => { window.closeStatusModal(); window.hardDeleteLead(id); };
+            deleteBtn.innerHTML = `
+                <div class="flex items-center gap-3">
+                     <i data-feather="trash-2" class="w-4 h-4 text-gray-500 group-hover:text-red-500"></i>
+                     <span class="font-bold text-sm text-gray-400 group-hover:text-red-500">Delete Forever</span>
+                </div>
+            `;
+            container.appendChild(deleteBtn);
 
             // Check title
             document.querySelector('#status-modal h3').textContent = "Manage Lead";
@@ -1912,6 +1923,37 @@
             if (!id) return;
             window.closeStatusModal();
             await window.updateStatus(id, newStatus);
+        };
+        window.hardDeleteLead = async (id) => {
+            // Updated to pass "Delete Forever" as button text and "true" for danger mode
+            const confirmed = await window.customConfirm(
+                `Permanently delete this lead?<br><span class="text-xs text-red-400">This action cannot be undone.</span>`, 
+                "Delete Lead?",
+                "Delete Forever", // <--- Button Text
+                true              // <--- isDanger (Red Button)
+            );
+            
+            if (!confirmed) return;
+
+            // Visual feedback
+            const btn = document.querySelector(`button[onclick*="openLeadActions('${id}')"]`);
+            if (btn) {
+                const row = btn.closest('tr');
+                if (row) {
+                    row.style.transition = "opacity 0.5s";
+                    row.style.opacity = '0.2';
+                    row.style.pointerEvents = 'none';
+                }
+            }
+
+            try {
+                await deleteDoc(doc(db, "leads", id));
+                // Listener handles the rest (Efficiently)
+            } catch (e) {
+                console.error(e);
+                alert("Error deleting lead: " + e.message);
+                if (btn && btn.closest('tr')) btn.closest('tr').style.opacity = '1';
+            }
         };
 
         window.archiveLead = async (id) => {
@@ -2500,7 +2542,8 @@
         // ==========================================
 
         // Custom Confirmation Promise Modal
-        window.customConfirm = (message, title) => {
+        // UPDATED: Custom Confirmation with Dynamic Button Text & Color
+        window.customConfirm = (message, title, confirmText = "Confirm", isDanger = false) => {
             return new Promise((resolve) => {
                 const modal = document.getElementById('confirmModal');
                 const titleEl = document.getElementById('confirmTitle');
@@ -2510,8 +2553,19 @@
 
                 if (title) titleEl.innerHTML = title;
                 if (message) msgEl.innerHTML = message;
+                
+                // Update Button Text
+                btnProceed.textContent = confirmText;
 
-                // Reset handlers
+                // Update Button Style (Danger vs Normal)
+                if (isDanger) {
+                    btnProceed.className = "flex-1 py-3 px-4 bg-red-500 hover:bg-red-600 text-white text-sm font-bold rounded-full shadow-lg transition transform hover:-translate-y-0.5";
+                } else {
+                    // Default Yellow/Orange Gradient
+                    btnProceed.className = "flex-1 py-3 px-4 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 text-white text-sm font-bold rounded-full shadow-lg transition transform hover:-translate-y-0.5";
+                }
+
+                // Reset handlers (clone to remove old listeners)
                 const newCancel = btnCancel.cloneNode(true);
                 const newProceed = btnProceed.cloneNode(true);
                 btnCancel.parentNode.replaceChild(newCancel, btnCancel);
@@ -2529,7 +2583,6 @@
                 newCancel.addEventListener('click', () => cleanup(false));
                 newProceed.addEventListener('click', () => cleanup(true));
 
-                // Allow clicking outside
                 window.closeConfirmModal = (e) => {
                     if (e.target === modal) cleanup(false);
                 };
