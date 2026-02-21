@@ -8,11 +8,12 @@
 
     <link rel="icon" type="image/png"
         href="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
         rel="stylesheet">
     <script src="https://unpkg.com/feather-icons"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -1697,7 +1698,8 @@
             document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
             // Keep the custom filter active visually if distinct
             if (['all', 'new', 'contacted', 'junk', 'archived'].includes(status)) {
-                document.getElementById(`btn-${status}`).classList.add('active');
+                const btn = document.getElementById(`btn-${status}`);
+                if (btn) btn.classList.add('active'); // CRASH FIX: Check if button exists first
             }
             subscribeToLeads(); // Fetch new data for this filter
         }
@@ -3550,7 +3552,8 @@
                             totalLeads: clientLeads.length,
                             activeSource: activeTab || 'all',
                             sources: clientStats?.sources || {},
-                            fieldAggregates: clientStats?.fieldAggregates || {}
+                            fieldAggregates: clientStats?.fieldAggregates || {},
+                            topCustomers: clientStats?.topCustomers || {}
                         }
                     })
                 });
@@ -3592,7 +3595,9 @@
                     return `
                                 <div class="${s.bg} border ${s.border} rounded-2xl" style="padding:16px;margin:0;">
                                     <h4 class="text-sm font-bold text-white" style="margin:0 0 4px 0;padding:0;">${i.title}</h4>
-                                    <p class="text-xs text-gray-400 leading-relaxed" style="margin:0;padding:0;">${i.body}</p>
+                                    <div class="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-li:my-0 text-gray-400" style="margin:0;padding:0;">
+                                        ${formatAIResponse(i.body)}
+                                    </div>
                                 </div>
                             `;
                 }).join('')}
@@ -3603,7 +3608,9 @@
                         </h4>
                         <div style="display:flex;flex-direction:column;gap:10px;margin:0;padding:0;">
                             ${insights.recommendations.map((r, idx) => `
-                                <div class="text-xs text-gray-300 leading-relaxed" style="margin:0;padding:0;">${r}</div>
+                                <div class="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-li:my-0 text-gray-300" style="margin:0;padding:0;">
+                                    ${formatAIResponse(r)}
+                                </div>
                             `).join('')}
                         </div>
                     </div>
@@ -3813,6 +3820,26 @@ clone.querySelectorAll('p, li, div').forEach(t => {
         };
 
         // --- PREMIUM AI CHATBOT LOGIC ---
+        let aiChatHistory = []; // Session RAM memory for the AI
+
+        window.toggleChatExpand = () => {
+            const win = document.getElementById('ai-chat-window');
+            const msgs = document.getElementById('ai-chat-messages');
+            
+            // Toggle width classes for Expanded Desktop Mode
+            win.classList.toggle('sm:w-[420px]');
+            win.classList.toggle('sm:w-[800px]');
+            win.classList.toggle('max-w-[95vw]');
+            
+            // Toggle height classes
+            win.classList.toggle('max-h-[80vh]');
+            win.classList.toggle('max-h-[90vh]');
+            msgs.classList.toggle('h-[450px]');
+            msgs.classList.toggle('h-[650px]');
+            msgs.classList.toggle('max-h-[50vh]');
+            msgs.classList.toggle('max-h-[75vh]');
+        };
+
         window.toggleAIChat = (forceHide = false) => {
             const chatWindow = document.getElementById('ai-chat-window');
             const triggerBtn = document.getElementById('ai-chat-trigger-btn');
@@ -3885,12 +3912,17 @@ clone.querySelectorAll('p, li, div').forEach(t => {
             try {
                 const payload = {
                     question: question,
+                    history: aiChatHistory, // Send previous memory to backend
                     context: {
                         clientEmail: authInstance.currentUser.email,
                         totalLeads: clientStats?.totalLeads || 0,
-                        fieldAggregates: clientStats?.fieldAggregates || {}
+                        fieldAggregates: clientStats?.fieldAggregates || {},
+                        topCustomers: clientStats?.topCustomers || {}
                     }
                 };
+
+                // Add User's question to memory immediately
+                aiChatHistory.push({ role: "user", parts: [{ text: question }] });
 
                 const response = await fetch(`${API_BASE}/chatWithData`, {
                     method: 'POST',
@@ -3902,14 +3934,23 @@ clone.querySelectorAll('p, li, div').forEach(t => {
                 document.getElementById(loadingId).remove();
 
                 if (data.success) {
-                    // Premium AI Response Bubble
+                    // Save AI's response to memory
+                    aiChatHistory.push({ role: "model", parts: [{ text: data.answer }] });
+
+                    // Premium AI Response Bubble (Powered by Tailwind Typography & Copy Button)
                     messagesDiv.innerHTML += `
-                        <div class="self-start max-w-[90%]">
-                            <div class="bg-white/5 backdrop-blur-md border border-white/10 text-gray-200 p-4 rounded-2xl rounded-tl-sm text-sm shadow-xl ai-response-content">
+                        <div class="self-start max-w-[90%] relative group mb-3">
+                            <div class="bg-white/5 backdrop-blur-md border border-white/10 text-gray-200 p-5 rounded-2xl rounded-tl-sm shadow-xl ai-response-content prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-headings:text-white prose-strong:text-white prose-ul:my-2 prose-li:my-0 text-sm">
                                 ${formatAIResponse(data.answer)}
                             </div>
+                            <button onclick="window.copyToClipboard(this)" class="absolute -bottom-3 right-4 opacity-0 group-hover:opacity-100 transition-opacity bg-black/80 border border-white/10 rounded-md px-2 py-1 text-[10px] text-gray-400 hover:text-white flex items-center gap-1 shadow-lg cursor-pointer z-10">
+                                <i data-feather="copy" class="w-3 h-3"></i> Copy
+                            </button>
                         </div>`;
-                } else throw new Error(data.error);
+                } else {
+                    aiChatHistory.pop(); // Remove failed question from memory
+                    throw new Error(data.error);
+                }
             } catch (err) {
                 if(document.getElementById(loadingId)) document.getElementById(loadingId).remove();
                 messagesDiv.innerHTML += `
@@ -3929,24 +3970,58 @@ clone.querySelectorAll('p, li, div').forEach(t => {
             return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }
 
+        // --- AI UI CONTROLLER (AGENTIC ACTIONS) ---
+        window.resetAIFilters = () => {
+            if (typeof window.switchTab === 'function') window.switchTab('all_leads');
+            if (typeof window.setFilter === 'function') window.setFilter('all');
+            const searchInput = document.getElementById('search-input');
+            if (searchInput) {
+                searchInput.value = ''; 
+                searchInput.dispatchEvent(new Event('input'));
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+
+        window.applyCustomFilter = (field, value) => {
+            if (typeof window.switchTab === 'function') window.switchTab('all_leads');
+            if (typeof window.setFilter === 'function') window.setFilter('all');
+            const searchInput = document.getElementById('search-input');
+            if (searchInput) {
+                searchInput.value = value; 
+                searchInput.dispatchEvent(new Event('input'));
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+
+        // Setup Marked.js for perfect Markdown rendering
+        marked.use({ breaks: true, gfm: true });
+
+        window.parseAILinks = (text) => { return text; };
+
+        // Global Copy to Clipboard function
+        window.copyToClipboard = async (btn) => {
+            const contentDiv = btn.previousElementSibling;
+            const textToCopy = contentDiv.innerText; // Grabs the clean text without HTML tags
+            
+            try {
+                await navigator.clipboard.writeText(textToCopy);
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = '<i data-feather="check" class="w-3 h-3 text-emerald-400"></i> <span class="text-emerald-400">Copied!</span>';
+                if (window.feather) feather.replace();
+                
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    if (window.feather) feather.replace();
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy: ', err);
+            }
+        };
+
         function formatAIResponse(text) {
             if (!text) return '';
-            let formatted = escapeHtml(text);
-            // Headers
-            formatted = formatted.replace(/^### (.*$)/gim, '<h3 class="font-bold text-white mt-3 mb-1 text-sm">$1</h3>');
-            formatted = formatted.replace(/^## (.*$)/gim, '<h2 class="font-bold text-white mt-4 mb-2 text-base">$1</h2>');
-            formatted = formatted.replace(/^# (.*$)/gim, '<h1 class="font-bold text-white mt-4 mb-2 text-lg">$1</h1>');
-            // Bold and Italics
-            formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>');
-            formatted = formatted.replace(/\*(.*?)\*/g, '<em class="text-gray-300">$1</em>');
-            // Lists (bullets and numbers)
-            formatted = formatted.replace(/^\- (.*$)/gim, '<li class="ml-5 list-disc my-1">$1</li>');
-            formatted = formatted.replace(/^\* (.*$)/gim, '<li class="ml-5 list-disc my-1">$1</li>');
-            formatted = formatted.replace(/^\d+\.\s(.*$)/gim, '<li class="ml-5 list-decimal my-1">$1</li>');
-            // Paragraphs and Line breaks
-            formatted = formatted.replace(/\n\n/g, '</p><p class="mt-2">');
-            formatted = formatted.replace(/\n/g, '<br>');
-            return `<p>${formatted}</p>`;
+            // marked.parse handles headers, lists, paragraphs, and spacing flawlessly
+            return marked.parse(text);
         }
     </script>
 
@@ -3995,9 +4070,14 @@ clone.querySelectorAll('p, li, div').forEach(t => {
                             <p class="text-[10px] text-gray-400 font-medium uppercase tracking-widest">Data Analyst</p>
                         </div>
                     </div>
-                    <button onclick="window.toggleAIChat(true)" class="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-gray-400 hover:text-white transition-all">
-                        <i data-feather="x" class="w-4 h-4"></i>
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <button onclick="window.toggleChatExpand()" class="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-gray-400 hover:text-white transition-all hidden sm:flex" title="Expand Interface">
+                            <i data-feather="maximize-2" class="w-4 h-4"></i>
+                        </button>
+                        <button onclick="window.toggleAIChat(true)" class="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-gray-400 hover:text-white transition-all">
+                            <i data-feather="x" class="w-4 h-4"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
 
