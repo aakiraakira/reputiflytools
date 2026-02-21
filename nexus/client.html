@@ -1559,24 +1559,36 @@
                 if (typeof renderTable === 'function') renderTable();
             }
 
-            // 1. BASE QUERY: Fetch ALL leads for this client (ordered by date)
-            // We removed the 'where("source"...)' clause because it hides untagged leads.
-            let q = query(
-                collection(db, "leads"),
-                where("clientId", "==", clientEmail),
-                orderBy("createdAt", "desc"),
-                limit(50) // Increased limit slightly to ensure we catch the right ones
-            );
+            // 1. Build Query Constraints
+            let constraints = [where("clientId", "==", clientEmail)];
 
-            // 2. Status Filter (Keep this, it's reliable)
             if (activeFilter !== 'all') {
-                q = query(q, where("status", "==", activeFilter));
+                constraints.push(where("status", "==", activeFilter));
             }
 
-            // 3. Pagination
-            if (append && lastVisibleLead) {
-                q = query(q, startAfter(lastVisibleLead));
+            // DB-Level Filtering for Tabs (Fixes the missing leads bug)
+            let isTabSpecific = false;
+            if (activeTab && activeTab !== 'analytics' && activeTab !== 'all_leads') {
+                isTabSpecific = true;
+                if (clientTabs.includes(activeTab)) {
+                    constraints.push(where("tabName", "==", activeTab));
+                } else {
+                    constraints.push(where("source", "==", activeTab));
+                }
             }
+
+            // Prevent Firebase Composite Index Errors:
+            // If looking at ALL leads, use orderBy and limit(50).
+            // If looking at a SPECIFIC tab, skip orderBy and grab up to 300 to sort perfectly in memory.
+            if (!isTabSpecific) {
+                constraints.push(orderBy("createdAt", "desc"));
+                constraints.push(limit(50));
+                if (append && lastVisibleLead) constraints.push(startAfter(lastVisibleLead));
+            } else {
+                constraints.push(limit(300)); 
+            }
+
+            let q = query(collection(db, "leads"), ...constraints);
 
             const unsubscribe = onSnapshot(q, (snapshot) => {
                 if (!append) {
@@ -1585,33 +1597,24 @@
 
                 if (!snapshot.empty) {
                     lastVisibleLead = snapshot.docs[snapshot.docs.length - 1];
-                    // If the fetch returns exactly 50, there might be more. If less, we hit the end.
-                    hasMoreLeads = snapshot.docs.length === 50; 
+                    hasMoreLeads = snapshot.docs.length === (isTabSpecific ? 300 : 50); 
                 } else {
                     hasMoreLeads = false;
                 }
 
                 snapshot.forEach((docSnap) => {
                     const data = docSnap.data();
-
-                    // --- ROBUST FILTERING FIX ---
-                    // Instead of trusting the DB query, we calculate the signature right here.
                     let shouldInclude = true;
 
-                    if (activeTab && activeTab !== 'analytics' && activeTab !== 'all_leads') {
-                        if (clientTabs.includes(activeTab)) {
-                            // Case A: Custom Folder (Check 'tabName' field)
-                            if (data.tabName !== activeTab) shouldInclude = false;
-                        } else {
-                            // Case B: Web Form (Check calculated signature)
-                            const signature = getFormSignature(data.lead); // Calculate signature on the fly
-                            if (signature !== activeTab) shouldInclude = false;
-                        }
-                    }
-
-                    // FIX: Exclude archived leads from the main 'All' view
+                    // Exclude archived leads from the main 'All' view
                     if (activeFilter === 'all' && data.status === 'archived') {
                         shouldInclude = false;
+                    }
+
+                    // Fallback memory check for very old forms that don't have the 'source' field saved
+                    if (isTabSpecific && !clientTabs.includes(activeTab)) {
+                         const signature = getFormSignature(data.lead); 
+                         if (signature !== activeTab && data.source !== activeTab) shouldInclude = false;
                     }
 
                     if (shouldInclude) {
@@ -2844,19 +2847,21 @@
             try {
                 const originalLength = csvData.length;
 
-                // 1. Smart Deduplication (Email + Exact Form Columns)
+                // 1. Smart Deduplication (Exact Row Values)
                 const uniqueCsvData = [];
                 const seenRecords = new Set();
 
+                // Prevent double-importing the exact same row by checking screen memory
                 if (typeof clientLeads !== 'undefined' && Array.isArray(clientLeads)) {
                     clientLeads.forEach(doc => {
                         if (!doc.lead) return;
-                        const keys = Object.keys(doc.lead).filter(k => !k.startsWith('_')).sort().join(',');
-                        const eKey = Object.keys(doc.lead).find(k => k.trim().toLowerCase() === 'email');
-                        if (eKey && doc.lead[eKey]) {
-                            const email = String(doc.lead[eKey]).trim().toLowerCase();
-                            seenRecords.add(`${email}_${keys}`);
-                        }
+                        // Combine all values into a single string to detect true duplicates
+                        const valString = Object.keys(doc.lead)
+                            .filter(k => !k.startsWith('_'))
+                            .sort()
+                            .map(k => String(doc.lead[k]).trim().toLowerCase())
+                            .join('|');
+                        seenRecords.add(valString);
                     });
                 }
 
@@ -2869,18 +2874,15 @@
                         }
                     }
 
-                    const signature = Object.keys(cleanRow).sort().join(',');
-                    const emailKey = Object.keys(cleanRow).find(k => k.trim().toLowerCase() === 'email');
-                    const emailVal = emailKey && cleanRow[emailKey] ? String(cleanRow[emailKey]).trim().toLowerCase() : null;
-                    
-                    if (emailVal) {
-                        const recordHash = `${emailVal}_${signature}`;
-                        if (!seenRecords.has(recordHash)) {
-                            seenRecords.add(recordHash);     
-                            uniqueCsvData.push(cleanRow);      
-                        }
-                    } else {
-                        uniqueCsvData.push(cleanRow); 
+                    // Create a signature of all VALUES in the incoming CSV row
+                    const valString = Object.keys(cleanRow)
+                        .sort()
+                        .map(k => String(cleanRow[k]).trim().toLowerCase())
+                        .join('|');
+
+                    if (!seenRecords.has(valString)) {
+                        seenRecords.add(valString);     
+                        uniqueCsvData.push(cleanRow);      
                     }
                 });
                 
