@@ -1113,23 +1113,21 @@
                         </div>
                         <div class="space-y-1">
                             <p class="text-sm text-gray-200 font-semibold">Tap to Upload CSV</p>
-                            <p class="text-[10px] text-gray-500 uppercase tracking-wider">or drag and drop</p>
-                        </div>
-                    </div>
-
-                    <div id="upload-preview" class="hidden space-y-3">
-                        <div
-                            class="mx-auto w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                            <i data-feather="check" class="w-5 h-5 text-emerald-400"></i>
-                        </div>
-                        <div>
-                            <p id="file-name" class="text-sm text-white font-medium truncate px-4">filename.csv</p>
-                            <p id="row-count" class="text-xs text-emerald-400 mt-1 font-mono">0 rows ready</p>
+                            <p class="text-[10px] text-gray-500 uppercase tracking-wider">Add as many as you need</p>
                         </div>
                     </div>
 
                     <input type="file" id="csv-file" class="hidden" accept=".csv" multiple
                         onchange="window.handleFileSelect(this)">
+                </div>
+
+                <div id="staged-files-container" class="hidden mt-4">
+                    <div class="flex justify-between items-end mb-2 px-1">
+                        <span class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Queued Files</span>
+                        <span id="staged-total-count" class="text-xs font-mono text-emerald-400">0 / 500 rows</span>
+                    </div>
+                    <div id="staged-files-list" class="space-y-2 max-h-[180px] overflow-y-auto pr-1 no-scrollbar">
+                        </div>
                 </div>
 
                 <div class="mt-8">
@@ -1204,6 +1202,7 @@
         let clientTabs = ['General']; // Import Folders
         let clientStats = { totalLeads: 0, unreadCount: 0, sources: {} }; // New: Scalable Stats
         let lastVisibleLead = null; // New: For Pagination
+        let hasMoreLeads = true; // NEW: Tracks if we hit the end of the DB
         let leadsUnsubscribe = null; // New: To manage listeners
         let formAliases = {}; // New: Store custom names for forms
         let activeTab = null; // Current "Folder" or "Form Signature"
@@ -1586,6 +1585,10 @@
 
                 if (!snapshot.empty) {
                     lastVisibleLead = snapshot.docs[snapshot.docs.length - 1];
+                    // If the fetch returns exactly 50, there might be more. If less, we hit the end.
+                    hasMoreLeads = snapshot.docs.length === 50; 
+                } else {
+                    hasMoreLeads = false;
                 }
 
                 snapshot.forEach((docSnap) => {
@@ -2705,6 +2708,8 @@
             setTimeout(() => document.getElementById('import-modal').classList.remove('opacity-0'), 10);
         };
 
+        let stagedImportFiles = []; // Array to hold the queue of files before import
+
         window.closeImportModal = () => {
             document.getElementById('import-modal').classList.add('opacity-0');
             setTimeout(() => {
@@ -2716,165 +2721,303 @@
         function resetImportModal() {
             document.getElementById('csv-file').value = '';
             document.getElementById('upload-placeholder').classList.remove('hidden');
-            document.getElementById('upload-preview').classList.add('hidden');
+            
+            const container = document.getElementById('staged-files-container');
+            if(container) container.classList.add('hidden');
+            
             document.getElementById('btn-process-import').disabled = true;
             document.getElementById('import-msg').classList.add('hidden');
             csvData = [];
+            stagedImportFiles = []; // Clear the queue
         }
 
         window.handleFileSelect = (input) => {
             const files = input.files;
             if (!files || files.length === 0) return;
 
-            // Multiple Files Handler
-            csvData = []; // Reset global data
+            // Show a tiny spinner in the dropzone while processing
+            const placeholder = document.getElementById('upload-placeholder');
+            const originalHtml = placeholder.innerHTML;
+            placeholder.innerHTML = `<div class="mx-auto w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin mb-2"></div><p class="text-xs text-gray-400">Parsing...</p>`;
+
             let filesProcessed = 0;
             const totalFiles = files.length;
-
-            document.getElementById('upload-placeholder').classList.add('hidden');
-            document.getElementById('upload-preview').classList.remove('hidden');
-            document.getElementById('file-name').innerHTML = `<span class="spinner inline-block w-4 h-4 mr-2"></span>Processing ${totalFiles} files...`;
-            document.getElementById('row-count').textContent = '';
 
             Array.from(files).forEach(file => {
                 Papa.parse(file, {
                     header: true,
                     skipEmptyLines: true,
                     complete: function (results) {
-                        // STRICT LIMIT CHECK
-                        let newData = results.data;
-                        const currentTotal = csvData.length + newData.length;
+                        // Add to our staging queue instead of overwriting
+                        stagedImportFiles.push({
+                            id: Date.now() + Math.random().toString(36).substr(2, 9),
+                            name: file.name,
+                            data: results.data
+                        });
 
-                        if (currentTotal > 500) {
-                            alert(`Limit Exceeded: Imports are capped at 500 rows.\nOnly the first ${500 - csvData.length} rows of this file will be added.`);
-                            const remainingSpace = 500 - csvData.length;
-                            if (remainingSpace > 0) {
-                                newData = newData.slice(0, remainingSpace);
-                            } else {
-                                newData = [];
-                            }
-                        }
-
-                        // Append data
-                        csvData = [...csvData, ...newData];
                         filesProcessed++;
-
                         if (filesProcessed === totalFiles) {
-                            // All done
-                            document.getElementById('file-name').textContent = `${totalFiles} File(s) Selected`;
-                            document.getElementById('row-count').textContent = `${csvData.length} / 500 rows ready`;
-
-                            // Disable if max reached to prevent further confusion, or if empty
-                            document.getElementById('btn-process-import').disabled = (csvData.length === 0);
-
-                            if (csvData.length >= 500) {
-                                document.getElementById('row-count').classList.add('text-orange-400');
-                                document.getElementById('row-count').textContent += " (Max Reached)";
-                            }
+                            input.value = ''; // Reset the input so the user can select the same file again if they deleted it
+                            placeholder.innerHTML = originalHtml; 
+                            window.renderStagedFiles();
                         }
                     },
                     error: function (err) {
                         console.error("Parse Error", err);
-                        // Continue anyway
                         filesProcessed++;
                         if (filesProcessed === totalFiles) {
-                            document.getElementById('btn-process-import').disabled = (csvData.length === 0);
+                            input.value = '';
+                            placeholder.innerHTML = originalHtml;
+                            window.renderStagedFiles();
                         }
                     }
                 });
             });
         };
 
-        window.processImport = async () => {
-            // 1. Create a unique cluster based on the CSV columns
-            const columns = Object.keys(csvData[0])
-                .map(k => k.trim())
-                .filter(k => k !== "")
-                .sort();
-                
-            const targetFolder = `Import: ${columns.slice(0, 3).join(', ')}${columns.length > 3 ? '...' : ''}`;
-
-            // 2. Add to client tabs instantly so it appears in the sidebar
-            if (!clientTabs.includes(targetFolder)) {
-                const newTabsList = [...clientTabs, targetFolder];
-                await updateDoc(doc(db, "clients", authInstance.currentUser.uid), { tabs: newTabsList });
-                clientTabs = newTabsList; 
-            }
-
+        window.renderStagedFiles = () => {
+            const container = document.getElementById('staged-files-container');
+            const list = document.getElementById('staged-files-list');
+            const countEl = document.getElementById('staged-total-count');
             const btn = document.getElementById('btn-process-import');
 
-            btn.disabled = true;
-            btn.innerHTML = '<div class="spinner"></div> Importing...';
+            if (stagedImportFiles.length === 0) {
+                container.classList.add('hidden');
+                btn.disabled = true;
+                return;
+            }
 
-            const msg = document.getElementById('import-msg');
+            container.classList.remove('hidden');
+            list.innerHTML = '';
+
+            let totalRows = 0;
+
+            stagedImportFiles.forEach(fileObj => {
+                totalRows += fileObj.data.length;
+
+                const item = document.createElement('div');
+                item.className = "flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors group";
+                item.innerHTML = `
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                            <i data-feather="file-text" class="w-4 h-4 text-emerald-400"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="text-xs font-semibold text-white truncate pr-2">${fileObj.name}</p>
+                            <p class="text-[10px] text-gray-500">${fileObj.data.length} rows</p>
+                        </div>
+                    </div>
+                    <button onclick="event.stopPropagation(); window.removeStagedFile('${fileObj.id}')" class="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all flex-shrink-0 opacity-50 group-hover:opacity-100" title="Remove File">
+                        <i data-feather="x" class="w-4 h-4"></i>
+                    </button>
+                `;
+                list.appendChild(item);
+            });
+
+            if (window.feather) feather.replace();
+
+            // Handle hard UI limits
+            if (totalRows > 500) {
+                countEl.innerHTML = `<span class="text-red-400">${totalRows} / 500 rows (Limit Exceeded)</span>`;
+                btn.disabled = true; // Prevent import if over limit
+            } else {
+                countEl.innerHTML = `${totalRows} / 500 rows ready`;
+                btn.disabled = false;
+            }
             
-            // 1. Inject the Progress Bar UI into the existing message container
-            msg.className = "block w-full mt-4";
-            msg.innerHTML = `
-                <div class="flex justify-between text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-1">
-                    <span>Processing Data...</span>
-                    <span id="import-progress-text">0 / ${csvData.length}</span>
-                </div>
-                <div class="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-                    <div id="import-progress-bar" class="h-full bg-emerald-500 transition-all duration-300" style="width: 0%"></div>
-                </div>
-            `;
-            
-            const progressText = document.getElementById('import-progress-text');
-            const progressBar = document.getElementById('import-progress-bar');
+            // Rebuild the global csvData array for the import processor
+            csvData = [];
+            stagedImportFiles.forEach(f => {
+                csvData = [...csvData, ...f.data];
+            });
+        };
+
+        window.removeStagedFile = (id) => {
+            stagedImportFiles = stagedImportFiles.filter(f => f.id !== id);
+            window.renderStagedFiles();
+        };
+
+        window.processImport = async () => {
+            const btn = document.getElementById('btn-process-import');
+            btn.disabled = true;
 
             try {
+                const originalLength = csvData.length;
+
+                // 1. Smart Deduplication (Email + Exact Form Columns)
+                const uniqueCsvData = [];
+                const seenRecords = new Set();
+
+                if (typeof clientLeads !== 'undefined' && Array.isArray(clientLeads)) {
+                    clientLeads.forEach(doc => {
+                        if (!doc.lead) return;
+                        const keys = Object.keys(doc.lead).filter(k => !k.startsWith('_')).sort().join(',');
+                        const eKey = Object.keys(doc.lead).find(k => k.trim().toLowerCase() === 'email');
+                        if (eKey && doc.lead[eKey]) {
+                            const email = String(doc.lead[eKey]).trim().toLowerCase();
+                            seenRecords.add(`${email}_${keys}`);
+                        }
+                    });
+                }
+
+                csvData.forEach(row => {
+                    const cleanRow = {};
+                    for (const key in row) {
+                        const trimmedKey = key.trim();
+                        if (trimmedKey !== "") {
+                            cleanRow[trimmedKey] = row[key];
+                        }
+                    }
+
+                    const signature = Object.keys(cleanRow).sort().join(',');
+                    const emailKey = Object.keys(cleanRow).find(k => k.trim().toLowerCase() === 'email');
+                    const emailVal = emailKey && cleanRow[emailKey] ? String(cleanRow[emailKey]).trim().toLowerCase() : null;
+                    
+                    if (emailVal) {
+                        const recordHash = `${emailVal}_${signature}`;
+                        if (!seenRecords.has(recordHash)) {
+                            seenRecords.add(recordHash);     
+                            uniqueCsvData.push(cleanRow);      
+                        }
+                    } else {
+                        uniqueCsvData.push(cleanRow); 
+                    }
+                });
+                
+                csvData = uniqueCsvData; 
+                const duplicatesSkipped = originalLength - csvData.length;
+
+                const msg = document.getElementById('import-msg');
+
+                if (csvData.length === 0) {
+                    msg.innerHTML = `<p class="text-xs text-center text-amber-400 font-bold">⚠️ All leads in this file are already in your database.</p>`;
+                    msg.className = "block w-full mt-4";
+                    btn.disabled = false;
+                    btn.innerHTML = 'Import Data';
+                    return;
+                }
+
+                // 2. Cluster Incoming Data by CSV Column Headers
+                const groupedData = {};
+                csvData.forEach(row => {
+                    const signature = Object.keys(row).sort().join(',') || 'empty_row';
+                    if (!groupedData[signature]) groupedData[signature] = [];
+                    groupedData[signature].push(row);
+                });
+
+                // 3. Smart Folder Mapping (Check Existing Database Signatures)
+                msg.className = "block w-full mt-4";
+                msg.innerHTML = `<div class="flex justify-center"><div class="spinner border-emerald-400 border-t-transparent w-4 h-4"></div></div><p class="text-[10px] uppercase tracking-widest text-emerald-400 font-bold text-center mt-2">Analyzing Database Structure...</p>`;
+
+                const signatureToTab = {};
+                let maxImportNumber = 0;
+                let newTabsList = [...clientTabs];
+
+                // Find max number and fetch column signatures of existing folders
+                const existingImportTabs = clientTabs.filter(t => t.startsWith("Imported Leads "));
+                
+                for (const tab of existingImportTabs) {
+                    const num = parseInt(tab.replace("Imported Leads ", ""));
+                    if (!isNaN(num) && num > maxImportNumber) maxImportNumber = num;
+                    
+                    // Fetch exactly 1 lead from this folder to read its columns (Cost: 1 Database Read)
+                    const q = query(collection(db, "leads"), where("clientId", "==", clientEmail), where("tabName", "==", tab), limit(1));
+                    const snap = await getDocs(q);
+                    if (!snap.empty) {
+                        const leadData = snap.docs[0].data().lead;
+                        if (leadData) {
+                            const sig = Object.keys(leadData).filter(k => !k.startsWith('_')).sort().join(',');
+                            signatureToTab[sig] = tab;
+                        }
+                    }
+                }
+
+                const signatureToFolderMap = {};
+                let lastGeneratedFolder = "";
+
+                for (const signature in groupedData) {
+                    if (signatureToTab[signature]) {
+                        // Perfect Match! Append to existing folder
+                        signatureToFolderMap[signature] = signatureToTab[signature];
+                        lastGeneratedFolder = signatureToTab[signature];
+                    } else {
+                        // New Structure! Create a new sequential folder
+                        maxImportNumber++;
+                        const folderName = `Imported Leads ${maxImportNumber}`;
+                        signatureToFolderMap[signature] = folderName;
+                        signatureToTab[signature] = folderName; // Save in memory for this loop
+                        if (!newTabsList.includes(folderName)) newTabsList.push(folderName);
+                        lastGeneratedFolder = folderName;
+                    }
+                }
+
+                // Update database with new folders (only if we actually created new ones)
+                if (newTabsList.length > clientTabs.length) {
+                    await updateDoc(doc(db, "clients", authInstance.currentUser.uid), { tabs: newTabsList });
+                    clientTabs = newTabsList; 
+                }
+                
+                // 4. Inject the Progress Bar UI
+                msg.innerHTML = `
+                    <div class="flex justify-between text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-1">
+                        <span>Saving to Database...</span>
+                        <span id="import-progress-text">0 / ${csvData.length}</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                        <div id="import-progress-bar" class="h-full bg-emerald-500 transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                `;
+                
+                const progressText = document.getElementById('import-progress-text');
+                const progressBar = document.getElementById('import-progress-bar');
+
                 let successCount = 0;
-                // 2. Reduce batch size from 400 to 50 for smoother visual animation
                 const batchSize = 50; 
                 
+                // 5. Process in batches
                 for (let i = 0; i < csvData.length; i += batchSize) {
                     const chunk = csvData.slice(i, i + batchSize);
 
                     const promises = chunk.map(row => {
-                        const cleanRow = {};
-                        for (const key in row) {
-                            const trimmedKey = key.trim();
-                            if (trimmedKey !== "") {
-                                cleanRow[trimmedKey] = row[key];
-                            }
-                        }
+                        const signature = Object.keys(row).sort().join(',') || 'empty_row';
+                        const targetFolder = signatureToFolderMap[signature];
 
                         return addDoc(collection(db, "leads"), {
-                                clientId: clientEmail,
-                                lead: cleanRow,
-                                source: 'import',
-                                tabName: targetFolder, // Re-added to ensure it groups perfectly into the generated folder
-                                status: 'new',
-                                createdAt: Timestamp.now(),
-                                importedAt: Timestamp.now()
-                            });
+                            clientId: clientEmail,
+                            lead: row,
+                            source: 'import',
+                            tabName: targetFolder, 
+                            status: 'new',
+                            createdAt: Timestamp.now(),
+                            importedAt: Timestamp.now()
+                        });
                     });
 
                     await Promise.all(promises);
                     successCount += chunk.length;
                     
-                    // 3. Update the Progress Bar after every batch
                     const percent = Math.round((successCount / csvData.length) * 100);
                     progressText.textContent = `${successCount} / ${csvData.length}`;
                     progressBar.style.width = `${percent}%`;
                 }
 
-                // 4. Show success message
-                msg.innerHTML = `<p class="text-xs text-center text-emerald-400 font-bold">✅ Successfully imported ${successCount} leads!</p>`;
+                // 6. Show success message (including skipped duplicates)
+                const skipNotice = duplicatesSkipped > 0 ? `<br><span class="text-[10px] text-amber-500 mt-1 block">(${duplicatesSkipped} duplicates skipped)</span>` : '';
+                msg.innerHTML = `<p class="text-xs text-center text-emerald-400 font-bold leading-tight">✅ Successfully imported ${successCount} leads!${skipNotice}</p>`;
 
                 setTimeout(() => {
-                        window.closeImportModal();
-                        window.switchTab(targetFolder); // Switch directly to the newly imported data source
-                    }, 1500);
+                    window.closeImportModal();
+                    // If multiple files with different structures were uploaded, go to All Leads, else go to the specific folder
+                    const redirectTab = Object.keys(groupedData).length > 1 ? 'all_leads' : lastGeneratedFolder;
+                    window.switchTab(redirectTab); 
+                }, 2000);
 
             } catch (err) {
-                console.error(err);
-                msg.textContent = "Import failed: " + err.message;
-                msg.className = "text-xs text-center mt-4 text-red-400";
-                msg.classList.remove('hidden');
+                console.error("Import Error:", err);
+                const msg = document.getElementById('import-msg');
+                msg.innerHTML = `<p class="text-xs text-center text-red-500 font-bold mt-4">❌ Import failed: ${err.message}</p>`;
                 btn.disabled = false;
-                btn.innerHTML = '<span>Import Data</span>';
+                btn.innerHTML = 'Import Data';
             }
         };
         // ==========================================
