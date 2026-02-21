@@ -2786,22 +2786,19 @@
         };
 
         window.processImport = async () => {
-            // PROMPT FOR FOLDER NAME
-            // Check if we are currently in a Custom Folder. If so, use that. If "All Leads" or "API", ask for new.
-            let targetFolder = activeTab;
+            // 1. Create a unique cluster based on the CSV columns
+            const columns = Object.keys(csvData[0])
+                .map(k => k.trim())
+                .filter(k => k !== "")
+                .sort();
+                
+            const targetFolder = `Import: ${columns.slice(0, 3).join(', ')}${columns.length > 3 ? '...' : ''}`;
 
-            if (activeTab === 'all_leads' || activeTab === 'api_stream') {
-                const newName = prompt("Name this import batch (e.g., 'July Event List'):");
-                if (!newName) return; // Cancelled
-                targetFolder = newName;
-
-                // Add to client tabs if not exists
-                if (!clientTabs.includes(targetFolder)) {
-                    // Update Firestore with new tab
-                    const user = authInstance.currentUser;
-                    const newTabsList = [...clientTabs, targetFolder];
-                    await updateDoc(doc(db, "clients", user.uid), { tabs: newTabsList });
-                }
+            // 2. Add to client tabs instantly so it appears in the sidebar
+            if (!clientTabs.includes(targetFolder)) {
+                const newTabsList = [...clientTabs, targetFolder];
+                await updateDoc(doc(db, "clients", authInstance.currentUser.uid), { tabs: newTabsList });
+                clientTabs = newTabsList; 
             }
 
             const btn = document.getElementById('btn-process-import');
@@ -2810,16 +2807,31 @@
             btn.innerHTML = '<div class="spinner"></div> Importing...';
 
             const msg = document.getElementById('import-msg');
-            msg.classList.add('hidden');
+            
+            // 1. Inject the Progress Bar UI into the existing message container
+            msg.className = "block w-full mt-4";
+            msg.innerHTML = `
+                <div class="flex justify-between text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-1">
+                    <span>Processing Data...</span>
+                    <span id="import-progress-text">0 / ${csvData.length}</span>
+                </div>
+                <div class="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div id="import-progress-bar" class="h-full bg-emerald-500 transition-all duration-300" style="width: 0%"></div>
+                </div>
+            `;
+            
+            const progressText = document.getElementById('import-progress-text');
+            const progressBar = document.getElementById('import-progress-bar');
 
             try {
                 let successCount = 0;
-                const batchSize = 400;
+                // 2. Reduce batch size from 400 to 50 for smoother visual animation
+                const batchSize = 50; 
+                
                 for (let i = 0; i < csvData.length; i += batchSize) {
                     const chunk = csvData.slice(i, i + batchSize);
 
                     const promises = chunk.map(row => {
-                        // FIX: Clean empty keys from CSV to prevent Firebase crashes
                         const cleanRow = {};
                         for (const key in row) {
                             const trimmedKey = key.trim();
@@ -2829,28 +2841,32 @@
                         }
 
                         return addDoc(collection(db, "leads"), {
-                            clientId: clientEmail,
-                            lead: cleanRow,
-                            source: 'import',
-                            tabName: targetFolder, // <--- SAVES TO TARGET FOLDER
-                            status: 'new',
-                            createdAt: Timestamp.now(),
-                            importedAt: Timestamp.now()
-                        });
+                                clientId: clientEmail,
+                                lead: cleanRow,
+                                source: 'import',
+                                tabName: targetFolder, // Re-added to ensure it groups perfectly into the generated folder
+                                status: 'new',
+                                createdAt: Timestamp.now(),
+                                importedAt: Timestamp.now()
+                            });
                     });
 
                     await Promise.all(promises);
                     successCount += chunk.length;
+                    
+                    // 3. Update the Progress Bar after every batch
+                    const percent = Math.round((successCount / csvData.length) * 100);
+                    progressText.textContent = `${successCount} / ${csvData.length}`;
+                    progressBar.style.width = `${percent}%`;
                 }
 
-                msg.textContent = `Successfully imported ${successCount} leads!`;
-                msg.className = "text-xs text-center mt-4 text-emerald-400";
-                msg.classList.remove('hidden');
+                // 4. Show success message
+                msg.innerHTML = `<p class="text-xs text-center text-emerald-400 font-bold">✅ Successfully imported ${successCount} leads!</p>`;
 
                 setTimeout(() => {
-                    window.closeImportModal();
-                    window.switchTab(targetFolder); // Switch to the newly imported tab
-                }, 1500);
+                        window.closeImportModal();
+                        window.switchTab(targetFolder); // Switch directly to the newly imported data source
+                    }, 1500);
 
             } catch (err) {
                 console.error(err);
@@ -2878,7 +2894,7 @@
         // EXPORT CSV (Current Tab Only)
         // ==========================================
         window.exportCSV = () => {
-            // 1. Get data specifically for the current view
+            // 1. Get data specifically for the current view (Already fully filtered!)
             const dataToExport = getFilteredLeads();
 
             if (!dataToExport || dataToExport.length === 0) {
@@ -2886,20 +2902,28 @@
                 return;
             }
 
-            // 2. Flatten the object structure for CSV
+            // 2. Map columns perfectly to match what the user sees on the UI
+            let columns = new Set();
+            dataToExport.forEach(lead => { if (lead.lead) Object.keys(lead.lead).forEach(k => columns.add(k)); });
+            let colArray = Array.from(columns);
+            const priority = ['name', 'email', 'phone'];
+            colArray.sort((a, b) => {
+                const aP = priority.indexOf(a.toLowerCase()), bP = priority.indexOf(b.toLowerCase());
+                if (aP !== -1 && bP !== -1) return aP - bP;
+                if (aP !== -1) return -1; if (bP !== -1) return 1;
+                return a.localeCompare(b);
+            });
+
             const flatData = dataToExport.map(item => {
-                // Base fields
                 let row = {
                     Date: item.createdAt ? new Date(item.createdAt.seconds * 1000).toLocaleString() : 'N/A',
                     Status: item.status || 'new',
                 };
+                
+                colArray.forEach(col => {
+                    row[col] = item.lead ? (item.lead[col] || '') : '';
+                });
 
-                // Merge dynamic form fields (lead object)
-                if (item.lead) {
-                    row = { ...row, ...item.lead };
-                }
-
-                // Exclude internal system fields if any (start with _)
                 return row;
             });
 
