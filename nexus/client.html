@@ -1467,11 +1467,19 @@
 
                     // AI INSIGHTS TOGGLE
                     const aiBtn = document.getElementById('btn-ai-insights');
-                    if (aiBtn) {
-                        if (data.aiInsightsEnabled) {
-                            aiBtn.classList.remove('hidden');
-                        } else {
-                            aiBtn.classList.add('hidden');
+                    const aiChatWidget = document.getElementById('ai-chat-widget');
+                    
+                    if (data.aiInsightsEnabled) {
+                        if (aiBtn) aiBtn.classList.remove('hidden');
+                        if (aiChatWidget) {
+                            aiChatWidget.classList.remove('hidden');
+                            aiChatWidget.classList.add('flex');
+                        }
+                    } else {
+                        if (aiBtn) aiBtn.classList.add('hidden');
+                        if (aiChatWidget) {
+                            aiChatWidget.classList.add('hidden');
+                            aiChatWidget.classList.remove('flex');
                         }
                     }
 
@@ -1577,16 +1585,10 @@
                 }
             }
 
-            // Prevent Firebase Composite Index Errors:
-            // If looking at ALL leads, use orderBy and limit(50).
-            // If looking at a SPECIFIC tab, skip orderBy and grab up to 300 to sort perfectly in memory.
-            if (!isTabSpecific) {
-                constraints.push(orderBy("createdAt", "desc"));
-                constraints.push(limit(50));
-                if (append && lastVisibleLead) constraints.push(startAfter(lastVisibleLead));
-            } else {
-                constraints.push(limit(300)); 
-            }
+            // Strict 50-limit enforced globally (Requires Composite Index if switching tabs)
+            constraints.push(orderBy("createdAt", "desc"));
+            constraints.push(limit(50));
+            if (append && lastVisibleLead) constraints.push(startAfter(lastVisibleLead));
 
             let q = query(collection(db, "leads"), ...constraints);
 
@@ -3003,7 +3005,43 @@
                     progressBar.style.width = `${percent}%`;
                 }
 
-                // 6. Show success message (including skipped duplicates)
+                // 6. Bulk Update Stats for AI Scoreboard
+                try {
+                    const todayKey = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
+                    
+                    if (!clientStats) clientStats = { totalLeads: 0, unreadCount: 0, sources: {}, dailyVolume: {}, statusBreakdown: { new: 0 }, fieldAggregates: {} };
+                    
+                    clientStats.totalLeads += successCount;
+                    clientStats.unreadCount += successCount;
+                    if (!clientStats.statusBreakdown) clientStats.statusBreakdown = { new: 0 };
+                    clientStats.statusBreakdown.new = (clientStats.statusBreakdown.new || 0) + successCount;
+                    if (!clientStats.dailyVolume) clientStats.dailyVolume = {};
+                    clientStats.dailyVolume[todayKey] = (clientStats.dailyVolume[todayKey] || 0) + successCount;
+
+                    clientStats.fieldAggregates = clientStats.fieldAggregates || {};
+                    
+                    csvData.forEach(row => {
+                        const skipKeys = ['name', 'email', 'phone', 'mobile', 'whatsapp', 'message', 'notes', 'date', 'time'];
+                        Object.entries(row).forEach(([k, v]) => {
+                            const cleanKey = String(k).trim();
+                            const cleanVal = String(v).trim();
+                            if (skipKeys.some(skip => cleanKey.toLowerCase().includes(skip))) return;
+                            if (cleanVal.length > 40 || cleanVal.length === 0) return;
+
+                            if (!clientStats.fieldAggregates[cleanKey]) clientStats.fieldAggregates[cleanKey] = {};
+                            clientStats.fieldAggregates[cleanKey][cleanVal] = (clientStats.fieldAggregates[cleanKey][cleanVal] || 0) + 1;
+                        });
+                    });
+
+                    const user = authInstance.currentUser;
+                    if (user) {
+                        await updateDoc(doc(db, "clients", user.uid), { stats: clientStats });
+                    }
+                } catch (statErr) {
+                    console.error("Failed to update bulk stats", statErr);
+                }
+
+                // 7. Show success message (including skipped duplicates)
                 const skipNotice = duplicatesSkipped > 0 ? `<br><span class="text-[10px] text-amber-500 mt-1 block">(${duplicatesSkipped} duplicates skipped)</span>` : '';
                 msg.innerHTML = `<p class="text-xs text-center text-emerald-400 font-bold leading-tight">✅ Successfully imported ${successCount} leads!${skipNotice}</p>`;
 
@@ -3445,11 +3483,8 @@
                 return;
             }
 
-            const modal = document.getElementById('ai-insights-modal');
-            const contentEl = document.getElementById('ai-insights-content');
-            const loadingEl = document.getElementById('ai-insights-loading');
-
             modal.classList.add('open');
+            document.getElementById('ai-chat-widget').style.display = 'none'; // Hide Chatbot when Modal opens
             loadingEl.classList.remove('hidden');
             contentEl.classList.add('hidden');
             contentEl.innerHTML = '';
@@ -3479,12 +3514,14 @@
                         'Authorization': `Bearer ${token}`
                     },
                     body: JSON.stringify({
-                        leads: leadSummary,
+                        // Limit to 50 for context, the heavy lifting is in fieldAggregates
+                        leads: leadSummary.slice(0, 50),
                         context: {
                             clientEmail: clientEmail || 'Unknown',
                             totalLeads: clientLeads.length,
                             activeSource: activeTab || 'all',
-                            sources: clientStats?.sources || {}
+                            sources: clientStats?.sources || {},
+                            fieldAggregates: clientStats?.fieldAggregates || {}
                         }
                     })
                 });
@@ -3566,6 +3603,7 @@
             document.getElementById('ai-insights-modal').classList.remove('open');
         };
 
+         
         window.downloadInsightsPDF = async () => {
             const contentEl = document.getElementById('ai-insights-content');
             if (!contentEl || contentEl.classList.contains('hidden')) return;
@@ -3692,78 +3730,149 @@
             }
         };
 
+        // --- AI CHATBOT LOGIC ---
+        window.toggleAIChat = (forceHide = false) => {
+            const chatWindow = document.getElementById('ai-chat-window');
+            const chatWidget = document.getElementById('ai-chat-widget');
+            if (!chatWindow) return;
 
+            if (forceHide) {
+                chatWindow.classList.add('hidden');
+                chatWindow.classList.remove('flex');
+                return;
+            }
+
+            if (chatWindow.classList.contains('hidden')) {
+                chatWindow.classList.remove('hidden');
+                chatWindow.classList.add('flex');
+            } else {
+                chatWindow.classList.add('hidden');
+                chatWindow.classList.remove('flex');
+            }
+        };
+
+        window.sendAIChat = async (e) => {
+            e.preventDefault();
+            const input = document.getElementById('ai-chat-input');
+            const messagesDiv = document.getElementById('ai-chat-messages');
+            const btn = document.getElementById('ai-chat-btn');
+            const question = input.value.trim();
+            if (!question) return;
+
+            input.value = '';
+            messagesDiv.innerHTML += `<div class="self-end max-w-[85%] bg-gradient-to-br from-[#E6397F] to-[#FF8A00] text-white p-3.5 rounded-2xl rounded-tr-sm text-sm shadow-md">${escapeHtml(question)}</div>`;
+            
+            const loadingId = 'loading-' + Date.now();
+            messagesDiv.innerHTML += `<div id="${loadingId}" class="self-start max-w-[85%] bg-white/5 border border-white/10 text-gray-400 p-3.5 rounded-2xl rounded-tl-sm flex items-center gap-3 shadow-sm backdrop-blur-md mt-2"><div class="w-4 h-4 border-2 border-pink-400 border-t-transparent rounded-full animate-spin"></div><span class="text-sm">Analyzing data...</span></div>`;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            btn.disabled = true;
+
+            try {
+                const payload = {
+                    question: question,
+                    context: {
+                        clientEmail: authInstance.currentUser.email,
+                        totalLeads: clientStats?.totalLeads || 0,
+                        fieldAggregates: clientStats?.fieldAggregates || {}
+                    }
+                };
+
+                const response = await fetch(`${API_BASE}/chatWithData`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await authInstance.currentUser.getIdToken()}` },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+                document.getElementById(loadingId).remove();
+
+                if (data.success) {
+                    messagesDiv.innerHTML += `<div class="self-start max-w-[85%] bg-white/10 border border-white/10 text-gray-200 p-3.5 rounded-2xl rounded-tl-sm text-sm leading-relaxed shadow-sm backdrop-blur-md mt-2">${data.answer}</div>`;
+                } else throw new Error(data.error);
+            } catch (err) {
+                if(document.getElementById(loadingId)) document.getElementById(loadingId).remove();
+                messagesDiv.innerHTML += `<div class="self-start max-w-[85%] bg-red-500/10 border border-red-500/20 text-red-400 p-3.5 rounded-2xl rounded-tl-sm text-xs mt-2">Connection failed: ${err.message}</div>`;
+            }
+            btn.disabled = false;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            if (window.feather) feather.replace();
+        };
+
+        function escapeHtml(unsafe) {
+            return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
     </script>
 
-    <!-- AI INSIGHTS MODAL -->
-    <div id="ai-insights-modal" class="modal-backdrop" style="z-index: 10005;">
-        <div class="modal-content" style="max-width: 900px; max-height: 85vh; overflow-y: auto;">
-            <div class="flex justify-between items-center mb-6">
-                <h3 class="text-lg font-bold text-white brand-font flex items-center gap-2">
-                    <i data-feather="zap" class="w-5 h-5 text-purple-400"></i> AI Insights
-                </h3>
-                <div class="flex items-center gap-1">
-                    <button id="header-pdf-btn" onclick="downloadInsightsPDF()"
-                        class="hidden w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 hover:text-purple-400 hover:bg-white/5 transition-all duration-200"
-                        title="Download PDF">
-                        <i data-feather="download" class="w-4 h-4"></i>
+    <div id="ai-insights-modal" class="modal-backdrop">
+        <div class="modal-content max-w-4xl max-h-[90vh] overflow-y-auto no-scrollbar relative p-0 bg-[#0B0A14] border border-white/10">
+            <div class="sticky top-0 z-50 bg-[#0B0A14]/80 backdrop-blur-md border-b border-white/10 p-4 flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-500/20 to-pink-500/20 border border-white/10 flex items-center justify-center">
+                        <i data-feather="cpu" class="w-6 h-6 text-purple-400"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-xl font-bold text-white brand-font">Reputifly AI Analyst</h2>
+                        <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Deep Business Intelligence</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="header-pdf-btn" onclick="window.downloadInsightsPDF()" class="hidden btn-hero-glass text-xs py-2">
+                        <i data-feather="download" class="w-3.5 h-3.5"></i> Export PDF
                     </button>
-                    <button onclick="closeInsightsModal()"
-                        class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 hover:text-white hover:bg-white/5 transition-all duration-200">
-                        <i data-feather="x" class="w-4 h-4"></i>
+                    <button onclick="window.closeInsightsModal(); document.getElementById('ai-chat-widget').style.display='flex';" class="p-2 hover:bg-white/5 rounded-full text-gray-400 hover:text-white transition">
+                        <i data-feather="x" class="w-5 h-5"></i>
                     </button>
                 </div>
             </div>
-            <div id="ai-insights-loading" class="hidden">
-                <div class="text-center py-8">
-                    <div
-                        class="inline-flex items-center gap-3 bg-purple-500/10 border border-purple-500/20 rounded-full px-5 py-2.5 mb-6">
-                        <div class="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin">
-                        </div>
-                        <span class="text-xs text-purple-300 font-semibold">Analyzing with Reputifly AI...</span>
-                    </div>
-                </div>
-                <div class="space-y-4 animate-pulse">
-                    <div class="h-8 bg-white/5 rounded-xl w-3/4 mx-auto"></div>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div class="h-20 bg-white/5 rounded-2xl"></div>
-                        <div class="h-20 bg-white/5 rounded-2xl"></div>
-                        <div class="h-20 bg-white/5 rounded-2xl"></div>
-                        <div class="h-20 bg-white/5 rounded-2xl"></div>
-                    </div>
-                    <div class="h-24 bg-white/5 rounded-2xl"></div>
-                    <div class="h-24 bg-white/5 rounded-2xl"></div>
-                    <div class="h-32 bg-white/5 rounded-2xl"></div>
-                </div>
+            <div id="ai-insights-loading" class="py-24 text-center">
+                <div class="gate-spinner mx-auto mb-4"></div>
+                <p class="text-gray-400 text-sm animate-pulse">Running advanced data modeling...</p>
             </div>
-            <div id="ai-insights-content" class="hidden"></div>
+            <div id="ai-insights-content" class="p-8 hidden"></div>
         </div>
     </div>
+
+    <div id="ai-chat-widget" class="fixed bottom-6 right-6 z-50 flex-col items-end hidden">
+        <div id="ai-chat-window" class="hidden w-[360px] glass-panel shadow-2xl overflow-hidden mb-4 flex-col border border-white/10" style="background: rgba(17, 16, 24, 0.95); backdrop-filter: blur(20px);">
+            <div class="bg-gradient-to-r from-[#E6397F] to-[#FF8A00] p-4 flex justify-between items-center shadow-lg">
+                <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-full bg-black/20 border border-white/30 flex items-center justify-center shadow-inner">
+                        <i data-feather="cpu" class="w-5 h-5 text-white"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-white leading-tight brand-font">Reputifly AI</h3>
+                        <p class="text-[10px] text-white/90 font-medium uppercase tracking-wider">Data Analyst</p>
+                    </div>
+                </div>
+                <button onclick="window.toggleAIChat()" class="w-8 h-8 flex items-center justify-center rounded-full bg-black/20 hover:bg-black/40 text-white transition-colors"><i data-feather="x" class="w-4 h-4"></i></button>
+            </div>
+            <div id="ai-chat-messages" class="h-[350px] overflow-y-auto p-4 flex flex-col no-scrollbar space-y-4">
+                <div class="self-start max-w-[85%] bg-white/10 border border-white/10 text-gray-200 p-3.5 rounded-2xl rounded-tl-sm text-sm shadow-sm backdrop-blur-md">
+                    Hi! I'm your Reputifly AI Analyst. Ask me anything about your business performance.
+                </div>
+            </div>
+            <div class="p-3 border-t border-white/10 bg-black/40">
+                <form id="ai-chat-form" class="flex items-center gap-2" onsubmit="window.sendAIChat(event)">
+                    <input type="text" id="ai-chat-input" placeholder="Ask about your data..." class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-pink-500/50 transition-all shadow-inner" autocomplete="off">
+                    <button type="submit" id="ai-chat-btn" class="p-3 bg-gradient-to-br from-[#E6397F] to-[#FF8A00] hover:scale-105 active:scale-95 text-white rounded-xl transition-all shadow-lg shadow-pink-500/20 border border-white/20"><i data-feather="send" class="w-4 h-4"></i></button>
+                </form>
+            </div>
+        </div>
+        <button onclick="window.toggleAIChat()" class="w-14 h-14 rounded-full shadow-2xl shadow-pink-500/30 flex items-center justify-center hover:scale-110 active:scale-95 transition-all group bg-gradient-to-br from-[#E6397F] to-[#FF8A00] border border-white/20">
+            <i data-feather="message-circle" class="w-6 h-6 text-white group-hover:hidden"></i>
+            <i data-feather="cpu" class="w-6 h-6 text-white hidden group-hover:block"></i>
+        </button>
+    </div>
+
     <div id="paywall-overlay" class="paywall-overlay">
         <div class="paywall-card">
-            <div
-                class="mx-auto w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mb-4 border border-red-500/20">
-                <i data-feather="lock" class="w-5 h-5 text-red-400"></i>
+            <div class="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
+                <i data-feather="lock" class="w-8 h-8 text-red-500"></i>
             </div>
-            <h3 class="text-white font-bold text-lg mb-2 brand-font">Account Paused</h3>
-            <p class="text-gray-400 text-xs mb-6 leading-relaxed">
-                Your lead access is temporarily suspended.<br>
-                You have <span class="text-white font-bold" id="hidden-lead-count">incoming</span> leads
-                waiting.
-            </p>
-
-            <a href="https://wa.me/6580111965?text=Hi%20Reputifly,%20my%20account%20is%20paused.%20Can%20you%20help%20me%20reactivate%20it?" target="_blank" class="btn-liquid-glow">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="white" xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0">
-                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
-                </svg>
-                <span class="pt-[2px]">WhatsApp Us</span>
-            </a>
-
-            <a href="https://reputifly.org/nexus/features" target="_blank" class="inline-block text-[10px] text-gray-500 hover:text-white transition-colors border-b border-transparent hover:border-gray-500 pb-0.5">
-                View Plan Features &rarr;
-            </a>
+            <h3 class="text-xl font-bold text-white mb-2 brand-font">Account Suspended</h3>
+            <p class="text-sm text-gray-400 mb-6">Your account is currently paused.</p>
+            <a href="https://wa.me/6584281358" target="_blank" class="btn-liquid-glow">Contact Support</a>
         </div>
     </div>
 </body>
-
 </html>
