@@ -609,6 +609,22 @@
                 transform: rotate(360deg);
             }
         }
+
+        /* Premium Chat Glass based on Master Design System */
+        .chat-glass-panel {
+            background: rgba(20, 20, 30, 0.75);
+            backdrop-filter: blur(30px);
+            -webkit-backdrop-filter: blur(30px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-top: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 40px 80px -12px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            border-radius: 24px;
+        }
+
+        /* Override AI Response formatting to look premium */
+        .ai-response-content p { margin-bottom: 0.75rem; }
+        .ai-response-content p:last-child { margin-bottom: 0; }
+        .ai-response-content li { margin-bottom: 0.25rem; }
     </style>
 </head>
 
@@ -3483,6 +3499,10 @@
                 return;
             }
 
+            const modal = document.getElementById('ai-insights-modal');
+            const loadingEl = document.getElementById('ai-insights-loading');
+            const contentEl = document.getElementById('ai-insights-content');
+
             modal.classList.add('open');
             document.getElementById('ai-chat-widget').style.display = 'none'; // Hide Chatbot when Modal opens
             loadingEl.classList.remove('hidden');
@@ -3601,6 +3621,11 @@
 
         window.closeInsightsModal = () => {
             document.getElementById('ai-insights-modal').classList.remove('open');
+            // Ensure the chat widget reappears when the modal is closed
+            const chatWidget = document.getElementById('ai-chat-widget');
+            if (chatWidget) {
+                chatWidget.style.display = 'flex';
+            }
         };
 
          
@@ -3647,7 +3672,50 @@
                 clone.querySelectorAll('svg, i[data-feather]').forEach(icon => icon.remove());
 
                 // Fix flex containers that had icons — tighten gaps
-                clone.querySelectorAll('.flex.items-start.gap-3').forEach(el => { el.style.gap = '0'; });
+                // Fix flex containers that had icons — tighten gaps
+clone.querySelectorAll('.flex.items-start.gap-3').forEach(el => { el.style.gap = '0'; });
+
+// --- PDF rendering fixes (html2canvas + Tailwind opacity colors) ---
+// Force translucent highlight boxes to real RGBA so they don't turn into solid green/blue.
+const forceRGBAByClass = (selector, bg, border) => {
+    clone.querySelectorAll(selector).forEach(el => {
+        if (bg) el.style.background = bg;
+        if (border) el.style.borderColor = border;
+    });
+};
+
+// These match your insight cards / sections (Tailwind */10 and */20 styles)
+forceRGBAByClass('.bg-emerald-500\\/10', 'rgba(16,185,129,0.10)', null);
+forceRGBAByClass('.border-emerald-500\\/20', null, 'rgba(16,185,129,0.20)');
+
+forceRGBAByClass('.bg-blue-500\\/10', 'rgba(59,130,246,0.10)', null);
+forceRGBAByClass('.border-blue-500\\/20', null, 'rgba(59,130,246,0.20)');
+
+forceRGBAByClass('.bg-yellow-500\\/10', 'rgba(234,179,8,0.10)', null);
+forceRGBAByClass('.border-yellow-500\\/20', null, 'rgba(234,179,8,0.20)');
+
+forceRGBAByClass('.bg-red-500\\/10', 'rgba(239,68,68,0.10)', null);
+forceRGBAByClass('.border-red-500\\/20', null, 'rgba(239,68,68,0.20)');
+
+forceRGBAByClass('.bg-purple-500\\/10', 'rgba(168,85,247,0.10)', null);
+forceRGBAByClass('.border-purple-500\\/20', null, 'rgba(168,85,247,0.20)');
+
+// If you used gradient containers, force a safe gradient fallback for PDF
+clone.querySelectorAll('.bg-gradient-to-br').forEach(el => {
+    el.style.background = 'linear-gradient(135deg, rgba(168,85,247,0.10), rgba(236,72,153,0.10))';
+});
+// --- Typography normalization for PDF (prevents weird wrapping/spacing) ---
+clone.style.maxWidth = '100%';
+clone.querySelectorAll('h1,h2,h3,h4').forEach(h => {
+    h.style.lineHeight = '1.25';
+    h.style.wordBreak = 'break-word';
+    h.style.marginTop = '0';
+});
+clone.querySelectorAll('p, li, div').forEach(t => {
+    t.style.lineHeight = '1.6';
+    t.style.wordBreak = 'break-word';
+    t.style.whiteSpace = 'normal';
+});
 
                 // Build wrapper at exact A4 content width
                 const wrapper = document.createElement('div');
@@ -3730,24 +3798,41 @@
             }
         };
 
-        // --- AI CHATBOT LOGIC ---
+        // --- PREMIUM AI CHATBOT LOGIC ---
         window.toggleAIChat = (forceHide = false) => {
             const chatWindow = document.getElementById('ai-chat-window');
-            const chatWidget = document.getElementById('ai-chat-widget');
+            const triggerBtn = document.getElementById('ai-chat-trigger-btn');
+            
             if (!chatWindow) return;
 
-            if (forceHide) {
-                chatWindow.classList.add('hidden');
-                chatWindow.classList.remove('flex');
-                return;
-            }
+            const isOpen = chatWindow.classList.contains('opacity-100');
 
-            if (chatWindow.classList.contains('hidden')) {
-                chatWindow.classList.remove('hidden');
-                chatWindow.classList.add('flex');
+            if (forceHide || isOpen) {
+                // Smooth Close Animation
+                chatWindow.classList.remove('opacity-100', 'scale-100', 'translate-y-0', 'pointer-events-auto');
+                chatWindow.classList.add('opacity-0', 'scale-90', 'translate-y-10', 'pointer-events-none');
+                
+                // Show the trigger button again
+                if (triggerBtn) {
+                    triggerBtn.classList.remove('opacity-0', 'scale-0', 'pointer-events-none');
+                    triggerBtn.classList.add('opacity-100', 'scale-100', 'pointer-events-auto');
+                }
             } else {
-                chatWindow.classList.add('hidden');
-                chatWindow.classList.remove('flex');
+                // Smooth Open Animation
+                chatWindow.classList.remove('opacity-0', 'scale-90', 'translate-y-10', 'pointer-events-none');
+                chatWindow.classList.add('opacity-100', 'scale-100', 'translate-y-0', 'pointer-events-auto');
+                
+                // Hide the trigger button entirely
+                if (triggerBtn) {
+                    triggerBtn.classList.remove('opacity-100', 'scale-100', 'pointer-events-auto');
+                    triggerBtn.classList.add('opacity-0', 'scale-0', 'pointer-events-none');
+                }
+
+                // Auto-focus input after transition completes
+                setTimeout(() => {
+                    const input = document.getElementById('ai-chat-input');
+                    if (input) input.focus();
+                }, 400);
             }
         };
 
@@ -3760,10 +3845,26 @@
             if (!question) return;
 
             input.value = '';
-            messagesDiv.innerHTML += `<div class="self-end max-w-[85%] bg-gradient-to-br from-[#E6397F] to-[#FF8A00] text-white p-3.5 rounded-2xl rounded-tr-sm text-sm shadow-md">${escapeHtml(question)}</div>`;
+            
+            // Premium User Message Bubble (Liquid Glow)
+            messagesDiv.innerHTML += `
+                <div class="self-end max-w-[85%]">
+                    <div class="bg-gradient-to-br from-[#E6397F] to-[#FF8A00] text-white p-4 rounded-2xl rounded-tr-sm text-sm shadow-[0_10px_25px_-5px_rgba(230,57,127,0.4)] leading-relaxed font-medium border border-white/20">
+                        ${escapeHtml(question)}
+                    </div>
+                </div>`;
             
             const loadingId = 'loading-' + Date.now();
-            messagesDiv.innerHTML += `<div id="${loadingId}" class="self-start max-w-[85%] bg-white/5 border border-white/10 text-gray-400 p-3.5 rounded-2xl rounded-tl-sm flex items-center gap-3 shadow-sm backdrop-blur-md mt-2"><div class="w-4 h-4 border-2 border-pink-400 border-t-transparent rounded-full animate-spin"></div><span class="text-sm">Analyzing data...</span></div>`;
+            
+            // Premium Loading State
+            messagesDiv.innerHTML += `
+                <div id="${loadingId}" class="self-start max-w-[85%]">
+                    <div class="bg-white/5 backdrop-blur-md border border-white/10 text-gray-400 p-4 rounded-2xl rounded-tl-sm flex items-center gap-3 shadow-sm">
+                        <div class="w-4 h-4 border-2 border-[#E6397F] border-t-transparent rounded-full animate-spin"></div>
+                        <span class="text-sm font-medium">Analyzing Data...</span>
+                    </div>
+                </div>`;
+                
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
             btn.disabled = true;
 
@@ -3787,11 +3888,22 @@
                 document.getElementById(loadingId).remove();
 
                 if (data.success) {
-                    messagesDiv.innerHTML += `<div class="self-start max-w-[85%] bg-white/10 border border-white/10 text-gray-200 p-3.5 rounded-2xl rounded-tl-sm text-sm leading-relaxed shadow-sm backdrop-blur-md mt-2">${data.answer}</div>`;
+                    // Premium AI Response Bubble
+                    messagesDiv.innerHTML += `
+                        <div class="self-start max-w-[90%]">
+                            <div class="bg-white/5 backdrop-blur-md border border-white/10 text-gray-200 p-4 rounded-2xl rounded-tl-sm text-sm shadow-xl ai-response-content">
+                                ${formatAIResponse(data.answer)}
+                            </div>
+                        </div>`;
                 } else throw new Error(data.error);
             } catch (err) {
                 if(document.getElementById(loadingId)) document.getElementById(loadingId).remove();
-                messagesDiv.innerHTML += `<div class="self-start max-w-[85%] bg-red-500/10 border border-red-500/20 text-red-400 p-3.5 rounded-2xl rounded-tl-sm text-xs mt-2">Connection failed: ${err.message}</div>`;
+                messagesDiv.innerHTML += `
+                    <div class="self-start max-w-[90%]">
+                        <div class="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-2xl rounded-tl-sm text-xs font-medium">
+                            <i data-feather="alert-circle" class="w-4 h-4 inline mr-1 -mt-0.5"></i> Connection failed: ${err.message}
+                        </div>
+                    </div>`;
             }
             btn.disabled = false;
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -3799,7 +3911,28 @@
         };
 
         function escapeHtml(unsafe) {
+            if (typeof unsafe !== 'string') return '';
             return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
+        function formatAIResponse(text) {
+            if (!text) return '';
+            let formatted = escapeHtml(text);
+            // Headers
+            formatted = formatted.replace(/^### (.*$)/gim, '<h3 class="font-bold text-white mt-3 mb-1 text-sm">$1</h3>');
+            formatted = formatted.replace(/^## (.*$)/gim, '<h2 class="font-bold text-white mt-4 mb-2 text-base">$1</h2>');
+            formatted = formatted.replace(/^# (.*$)/gim, '<h1 class="font-bold text-white mt-4 mb-2 text-lg">$1</h1>');
+            // Bold and Italics
+            formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>');
+            formatted = formatted.replace(/\*(.*?)\*/g, '<em class="text-gray-300">$1</em>');
+            // Lists (bullets and numbers)
+            formatted = formatted.replace(/^\- (.*$)/gim, '<li class="ml-5 list-disc my-1">$1</li>');
+            formatted = formatted.replace(/^\* (.*$)/gim, '<li class="ml-5 list-disc my-1">$1</li>');
+            formatted = formatted.replace(/^\d+\.\s(.*$)/gim, '<li class="ml-5 list-decimal my-1">$1</li>');
+            // Paragraphs and Line breaks
+            formatted = formatted.replace(/\n\n/g, '</p><p class="mt-2">');
+            formatted = formatted.replace(/\n/g, '<br>');
+            return `<p>${formatted}</p>`;
         }
     </script>
 
@@ -3819,7 +3952,7 @@
                     <button id="header-pdf-btn" onclick="window.downloadInsightsPDF()" class="hidden btn-hero-glass text-xs py-2">
                         <i data-feather="download" class="w-3.5 h-3.5"></i> Export PDF
                     </button>
-                    <button onclick="window.closeInsightsModal(); document.getElementById('ai-chat-widget').style.display='flex';" class="p-2 hover:bg-white/5 rounded-full text-gray-400 hover:text-white transition">
+                    <button onclick="window.closeInsightsModal();" class="p-2 hover:bg-white/5 rounded-full text-gray-400 hover:text-white transition">
                         <i data-feather="x" class="w-5 h-5"></i>
                     </button>
                 </div>
@@ -3832,36 +3965,58 @@
         </div>
     </div>
 
-    <div id="ai-chat-widget" class="fixed bottom-6 right-6 z-50 flex-col items-end hidden">
-        <div id="ai-chat-window" class="hidden w-[360px] glass-panel shadow-2xl overflow-hidden mb-4 flex-col border border-white/10" style="background: rgba(17, 16, 24, 0.95); backdrop-filter: blur(20px);">
-            <div class="bg-gradient-to-r from-[#E6397F] to-[#FF8A00] p-4 flex justify-between items-center shadow-lg">
-                <div class="flex items-center gap-3">
-                    <div class="w-9 h-9 rounded-full bg-black/20 border border-white/30 flex items-center justify-center shadow-inner">
-                        <i data-feather="cpu" class="w-5 h-5 text-white"></i>
+    <div id="ai-chat-widget" class="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[100] flex-col items-end hidden">
+        
+        <div id="ai-chat-window" class="absolute bottom-0 right-0 w-[calc(100vw-2rem)] sm:w-[420px] max-h-[80vh] flex flex-col chat-glass-panel origin-bottom-right transition-all duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] opacity-0 scale-90 translate-y-10 pointer-events-none mb-2">
+            
+            <div class="p-5 border-b border-white/10 bg-white/5 relative overflow-hidden rounded-t-[24px]">
+                <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#E6397F] to-[#FF8A00]"></div>
+                <div class="flex items-center justify-between relative z-10">
+                    <div class="flex items-center gap-4">
+                        <div class="w-10 h-10 rounded-full bg-[#0B0A14] border border-white/20 flex items-center justify-center shadow-[0_0_15px_rgba(230,57,127,0.3)]">
+                            <i data-feather="cpu" class="w-5 h-5 text-white"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-white brand-font tracking-tight">Reputifly AI</h3>
+                            <p class="text-[10px] text-gray-400 font-medium uppercase tracking-widest">Data Analyst</p>
+                        </div>
                     </div>
-                    <div>
-                        <h3 class="text-sm font-bold text-white leading-tight brand-font">Reputifly AI</h3>
-                        <p class="text-[10px] text-white/90 font-medium uppercase tracking-wider">Data Analyst</p>
+                    <button onclick="window.toggleAIChat(true)" class="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-gray-400 hover:text-white transition-all">
+                        <i data-feather="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div id="ai-chat-messages" class="h-[450px] max-h-[50vh] overflow-y-auto p-5 flex flex-col space-y-5 no-scrollbar scroll-smooth">
+                <div class="self-start max-w-[85%]">
+                    <div class="bg-white/5 backdrop-blur-md border border-white/10 text-gray-200 p-4 rounded-2xl rounded-tl-sm text-sm shadow-sm leading-relaxed">
+                        Hi! I'm your Reputifly AI Analyst. Ask me anything about your business performance.
                     </div>
                 </div>
-                <button onclick="window.toggleAIChat()" class="w-8 h-8 flex items-center justify-center rounded-full bg-black/20 hover:bg-black/40 text-white transition-colors"><i data-feather="x" class="w-4 h-4"></i></button>
             </div>
-            <div id="ai-chat-messages" class="h-[350px] overflow-y-auto p-4 flex flex-col no-scrollbar space-y-4">
-                <div class="self-start max-w-[85%] bg-white/10 border border-white/10 text-gray-200 p-3.5 rounded-2xl rounded-tl-sm text-sm shadow-sm backdrop-blur-md">
-                    Hi! I'm your Reputifly AI Analyst. Ask me anything about your business performance.
-                </div>
-            </div>
-            <div class="p-3 border-t border-white/10 bg-black/40">
-                <form id="ai-chat-form" class="flex items-center gap-2" onsubmit="window.sendAIChat(event)">
-                    <input type="text" id="ai-chat-input" placeholder="Ask about your data..." class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-pink-500/50 transition-all shadow-inner" autocomplete="off">
-                    <button type="submit" id="ai-chat-btn" class="p-3 bg-gradient-to-br from-[#E6397F] to-[#FF8A00] hover:scale-105 active:scale-95 text-white rounded-xl transition-all shadow-lg shadow-pink-500/20 border border-white/20"><i data-feather="send" class="w-4 h-4"></i></button>
+
+            <div class="p-4 bg-black/30 rounded-b-[24px] border-t border-white/5 relative">
+                <form id="ai-chat-form" class="relative flex items-center" onsubmit="window.sendAIChat(event)">
+                    <input type="text" id="ai-chat-input" placeholder="Ask about your data..." class="w-full bg-[#0B0A14]/90 backdrop-blur-xl border border-white/10 hover:border-white/20 rounded-full pl-5 pr-14 py-3.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#E6397F]/50 transition-all shadow-inner" autocomplete="off">
+                    <button type="submit" id="ai-chat-btn" class="absolute right-1.5 p-2.5 bg-gradient-to-br from-[#E6397F] to-[#FF8A00] hover:scale-105 active:scale-95 text-white rounded-full transition-all shadow-[0_0_15px_rgba(230,57,127,0.4)] disabled:opacity-50 disabled:cursor-not-allowed border border-white/20">
+                        <i data-feather="send" class="w-4 h-4 ml-0.5"></i>
+                    </button>
                 </form>
             </div>
         </div>
-        <button onclick="window.toggleAIChat()" class="w-14 h-14 rounded-full shadow-2xl shadow-pink-500/30 flex items-center justify-center hover:scale-110 active:scale-95 transition-all group bg-gradient-to-br from-[#E6397F] to-[#FF8A00] border border-white/20">
-            <i data-feather="message-circle" class="w-6 h-6 text-white group-hover:hidden"></i>
-            <i data-feather="cpu" class="w-6 h-6 text-white hidden group-hover:block"></i>
+
+        <button id="ai-chat-trigger-btn" onclick="window.toggleAIChat()" class="relative group w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 active:scale-95 z-50">
+            <div class="absolute inset-0 rounded-full bg-gradient-to-br from-[#E6397F] to-[#FF8A00] blur-xl opacity-60 group-hover:opacity-100 transition-opacity duration-500"></div>
+            <div class="absolute inset-0 rounded-full bg-gradient-to-br from-[#E6397F] to-[#FF8A00] border border-white/30 shadow-2xl"></div>
+            
+            <div id="trigger-icon-chat" class="absolute transition-all duration-500 transform scale-100 rotate-0 group-hover:rotate-12">
+                <i data-feather="message-circle" class="w-6 h-6 sm:w-7 sm:h-7 text-white"></i>
+            </div>
+            <div id="trigger-icon-close" class="absolute transition-all duration-500 transform scale-0 -rotate-90 opacity-0">
+                <i data-feather="x" class="w-7 h-7 text-white"></i>
+            </div>
         </button>
+
     </div>
 
     <div id="paywall-overlay" class="paywall-overlay">
