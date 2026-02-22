@@ -688,6 +688,15 @@
             </p>
             <input type="tel" id="clientPhone" placeholder="e.g. +65 9123 4567">
 
+            <label class="field-label">Email <span style="font-weight:400;color:#555;">(optional — for status
+                    updates)</span></label>
+            <input type="text" id="clientEmail" placeholder="e.g. you@company.com">
+
+            <!-- Honeypot: invisible to humans, bots fill it -->
+            <div style="position:absolute;left:-9999px;" aria-hidden="true">
+                <input type="text" id="_website" name="_website" tabindex="-1" autocomplete="off">
+            </div>
+
             <div class="btn-row">
                 <button class="btn-back" onclick="prevStep(2)"><i class="fa-solid fa-arrow-left"
                         style="font-size:12px;"></i></button>
@@ -960,6 +969,8 @@
             const industry = document.getElementById('industryInput').value.trim();
             const extraNotes = document.getElementById('extraNotes').value.trim();
             const clientPhone = document.getElementById('clientPhone').value.trim();
+            const clientEmail = document.getElementById('clientEmail').value.trim();
+            const honeypot = document.getElementById('_website').value;
 
             if (!clientPhone) return showToast("Please enter your phone number.");
 
@@ -970,6 +981,7 @@
             let richDesc = `Industry: ${industry}. `;
             if (extraNotes) richDesc += `Business details from the client: ${extraNotes}. `;
             richDesc += `Client phone: ${clientPhone}. `;
+            if (clientEmail) richDesc += `Client email: ${clientEmail}. `;
             richDesc += `This is a SINGLE LANDING PAGE (Home Page only). The AI should decide the best sections, visual vibe, and layout.`;
 
             if (!hasLogo && selectedPalette) {
@@ -983,22 +995,41 @@
             formData.append('businessName', businessName);
             formData.append('businessDesc', richDesc);
             formData.append('recipientEmail', 'runikojane@gmail.com');
+            if (clientEmail) formData.append('clientEmail', clientEmail);
+            if (honeypot) formData.append('_website', honeypot);
 
             if (hasLogo && logoFile) {
                 formData.append('logo', logoFile);
             }
 
-            // Fire and forget - show success immediately
-            fetch(API_URL, { method: 'POST', body: formData }).catch(() => { });
-
-            // Build WhatsApp link
+            // Build WhatsApp link (prepared early so it works regardless)
             const waMsg = encodeURIComponent(`Hi, I just submitted a website sample request for "${businessName}" (${industry}). My number is ${clientPhone}. Looking forward to seeing the sample!`);
             document.getElementById('waLink').href = `https://wa.me/${WA_NUMBER}?text=${waMsg}`;
 
-            // Show success
-            document.getElementById('step3').classList.remove('active');
-            document.getElementById('stepDone').classList.add('active');
-            document.querySelector('.progress-bar').style.display = 'none';
+            try {
+                const response = await fetch(API_URL, { method: 'POST', body: formData });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    // Server returned an error
+                    const errorMsg = data.error || 'Something went wrong. Please try again.';
+                    showToast(errorMsg);
+                    btn.disabled = false;
+                    btn.innerHTML = 'Get My Free Sample';
+                    return;
+                }
+
+                // Success — show the WhatsApp screen
+                document.getElementById('step3').classList.remove('active');
+                document.getElementById('stepDone').classList.add('active');
+                document.querySelector('.progress-bar').style.display = 'none';
+
+            } catch (err) {
+                // Network error or timeout
+                showToast('Network error. Please check your connection and try again.');
+                btn.disabled = false;
+                btn.innerHTML = 'Get My Free Sample';
+            }
         }
     </script>
 </body>
