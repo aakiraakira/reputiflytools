@@ -1221,7 +1221,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
-        import { getFirestore, collection, onSnapshot, query, orderBy, where, doc, updateDoc, deleteDoc, Timestamp, addDoc, limit, startAfter, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, query, orderBy, where, doc, updateDoc, deleteDoc, Timestamp, addDoc, limit, startAfter, getDocs, writeBatch, FieldPath } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyC9eUHEdAmV9qzHxpQe2en5WeOeRXiq10A",
@@ -3999,117 +3999,127 @@
             return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }
 
-        // --- AI UI CONTROLLER (AGENTIC ACTIONS) ---
-        window.resetAIFilters = () => {
-            if (typeof window.switchTab === 'function') window.switchTab('all_leads');
-            if (typeof window.setFilter === 'function') window.setFilter('all');
-            const searchInput = document.getElementById('search-input');
-            if (searchInput) {
-                searchInput.value = '';
-                searchInput.dispatchEvent(new Event('input'));
-            }
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        };
-
-        window.applyCustomFilter = (field, value) => {
-            if (typeof window.switchTab === 'function') window.switchTab('all_leads');
-            if (typeof window.setFilter === 'function') window.setFilter('all');
-            const searchInput = document.getElementById('search-input');
-            if (searchInput) {
-                searchInput.value = value;
-                searchInput.dispatchEvent(new Event('input'));
-            }
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        };
+         
 
         // AI-Powered One-Click Segment Export (Queries Firestore directly — bypasses pagination)
-        window.applyFilterAndExport = async (field, value) => {
-            // Show loading toast immediately
+        // AI-Powered One-Click Segment Export
+        // Deep View (Paginated): Fetches segment in batches of 50 to protect database read limits
+        window._currentSegment = { field: '', value: '', label: '', lastDoc: null, matches: [] };
+
+        window.viewSegmentInTable = async (field, value, label, isLoadMore = false) => {
+            const exactField = field.trim();
+            const exactValueStr = value.trim();
+
+            // 1. Unify with Native UI: Visually apply the filter pill
+            if (exactField !== 'ALL') {
+                const pill = document.getElementById('active-filter-pill');
+                const text = document.getElementById('active-filter-text');
+                if (pill && text) {
+                    text.textContent = `${exactField}: ${exactValueStr}`;
+                    pill.classList.remove('hidden');
+                    customFilter = { field: exactField, value: exactValueStr }; // Sync memory state
+                }
+            }
+
+            // Show loading toast
             const loadingToast = document.createElement('div');
-            loadingToast.className = 'fixed bottom-6 right-6 bg-purple-500/90 text-white px-5 py-3 rounded-xl shadow-2xl z-[9999] flex items-center gap-2';
-            loadingToast.innerHTML = `<svg class="animate-spin w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg> Fetching all matching leads...`;
+            loadingToast.className = 'fixed bottom-6 right-6 bg-blue-500/90 text-white px-5 py-3 rounded-xl shadow-2xl z-[9999] flex items-center gap-2';
+            loadingToast.innerHTML = `<svg class="animate-spin w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg> Fetching leads...`;
             document.body.appendChild(loadingToast);
 
             try {
-                // 1. Query Firestore directly — NOT the paginated in-memory array
-                const searchVal = value.toLowerCase().trim();
-                const q = query(
-                    collection(db, "leads"),
-                    where("clientId", "==", clientEmail),
-                    orderBy("createdAt", "desc")
-                );
-                const snapshot = await getDocs(q);
+                if (!isLoadMore) {
+                    window._currentSegment = { field: exactField, value: exactValueStr, label: label, lastDoc: null, matches: [] };
+                }
 
-                // 2. Filter matches client-side (flexible: works for any field/value)
-                const matches = [];
-                snapshot.forEach((docSnap) => {
-                    const data = docSnap.data();
-                    if (!data.lead || typeof data.lead !== 'object') return;
-                    const matchFound = Object.values(data.lead).some(v =>
-                        String(v).toLowerCase().includes(searchVal)
-                    );
-                    if (matchFound) {
-                        matches.push({ id: docSnap.id, ...data });
+                let q;
+                const baseCollection = collection(db, "leads");
+                
+                if (exactField === 'ALL' && exactValueStr === 'ALL') {
+                    if (window._currentSegment.lastDoc) {
+                        q = query(baseCollection, where("clientId", "==", clientEmail), startAfter(window._currentSegment.lastDoc), limit(50));
+                    } else {
+                        q = query(baseCollection, where("clientId", "==", clientEmail), limit(50));
                     }
-                });
+                } else {
+                    // ROBUST FIX: Use FieldPath to safely handle periods and spaces in keys
+                    const safePath = new FieldPath('lead', exactField);
+                    
+                    if (window._currentSegment.lastDoc) {
+                        q = query(baseCollection, where("clientId", "==", clientEmail), where(safePath, "==", exactValueStr), startAfter(window._currentSegment.lastDoc), limit(50));
+                    } else {
+                        q = query(baseCollection, where("clientId", "==", clientEmail), where(safePath, "==", exactValueStr), limit(50));
+                    }
+                }
+                
+                let snapshot = await getDocs(q);
+
+                // Smart Type-Fallback if exact string match fails
+                if (snapshot.empty && !isNaN(exactValueStr) && exactField !== 'ALL') {
+                    const safePath = new FieldPath('lead', exactField);
+                    let fallbackQ = query(baseCollection, where("clientId", "==", clientEmail), where(safePath, "==", Number(exactValueStr)));
+                    if(window._currentSegment.lastDoc) fallbackQ = query(fallbackQ, startAfter(window._currentSegment.lastDoc));
+                    fallbackQ = query(fallbackQ, limit(50));
+                    snapshot = await getDocs(fallbackQ);
+                }
+
+                // Memory Fallback: If DB fails completely, check current loaded memory
+                if (snapshot.empty && !isLoadMore && exactField !== 'ALL') {
+                    const memoryMatches = clientLeads.filter(l => l.lead && String(l.lead[exactField]) === exactValueStr);
+                    if (memoryMatches.length > 0) {
+                        window._currentSegment.matches = memoryMatches;
+                        clientLeads = memoryMatches; // Override local memory so the table maps properly
+                        
+                        loadingToast.remove();
+                        if(typeof window.renderTable === 'function') window.renderTable();
+                        
+                        // Close AI modal so user can see table
+                        if (typeof window.closeInsightsModal === 'function') window.closeInsightsModal();
+                        return;
+                    }
+                }
 
                 loadingToast.remove();
 
-                if (!matches.length) {
-                    const toast = document.createElement('div');
-                    toast.className = 'fixed bottom-6 right-6 bg-red-500/90 text-white px-5 py-3 rounded-xl shadow-2xl z-[9999] flex items-center gap-2';
-                    toast.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg> No leads found matching "${value}"`;
-                    document.body.appendChild(toast);
-                    setTimeout(() => toast.remove(), 3500);
+                if (snapshot.empty && !isLoadMore) {
+                    alert(`No leads found matching "${exactValueStr}" in database.`);
+                    // Fallback to manual custom filter UI rendering just in case
+                    if(typeof window.renderTable === 'function') window.renderTable();
                     return;
                 }
 
-                // 3. Build CSV columns dynamically
-                let columns = new Set();
-                matches.forEach(lead => { if (lead.lead) Object.keys(lead.lead).forEach(k => columns.add(k)); });
-                let colArray = Array.from(columns);
-                const priority = ['name', 'email', 'phone'];
-                colArray.sort((a, b) => {
-                    const aP = priority.indexOf(a.toLowerCase()), bP = priority.indexOf(b.toLowerCase());
-                    if (aP !== -1 && bP !== -1) return aP - bP;
-                    if (aP !== -1) return -1; if (bP !== -1) return 1;
-                    return a.localeCompare(b);
-                });
+                if (!snapshot.empty) {
+                    window._currentSegment.lastDoc = snapshot.docs[snapshot.docs.length - 1];
+                    snapshot.forEach(docSnap => window._currentSegment.matches.push({ id: docSnap.id, ...docSnap.data() }));
+                }
 
-                const flatData = matches.map(item => {
-                    let row = {
-                        Date: item.createdAt ? new Date(item.createdAt.seconds * 1000).toLocaleString() : 'N/A',
-                        Status: item.status || 'new',
-                    };
-                    colArray.forEach(col => { row[col] = item.lead ? (item.lead[col] || '') : ''; });
-                    return row;
-                });
+                // Override clientLeads so renderTable works natively (This fixes the blank UI bug)
+                clientLeads = window._currentSegment.matches;
+                
+                if(typeof window.renderTable === 'function') {
+                    window.renderTable();
+                }
 
-                // 4. Generate & Download CSV
-                const csv = Papa.unparse(flatData);
-                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                const link = document.createElement("a");
-                link.setAttribute("href", URL.createObjectURL(blob));
-                const safeName = value.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-                link.setAttribute("download", `${safeName}_segment.csv`);
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                // Close the AI modal so they can actually see the results
+                if (typeof window.closeInsightsModal === 'function') {
+                    window.closeInsightsModal();
+                    // Keep chat open if they want to ask followups
+                    const chatWidget = document.getElementById('ai-chat-widget');
+                    if (chatWidget) chatWidget.style.display = 'flex';
+                }
 
-                // 5. Success toast with count
-                const toast = document.createElement('div');
-                toast.className = 'fixed bottom-6 right-6 bg-emerald-500/90 text-white px-5 py-3 rounded-xl shadow-2xl z-[9999] flex items-center gap-2';
-                toast.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Exported ${matches.length} leads matching "${value}"`;
-                document.body.appendChild(toast);
-                setTimeout(() => toast.remove(), 3500);
+                // The native UI active-filter pill now handles the visual state.
+                // If the user scrolls down, ensure your native table scroll listener 
+                // is configured to respect the current customFilter state.
+                const tableContainer = document.querySelector('.overflow-x-auto');
+                if (tableContainer && !isLoadMore) {
+                    tableContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+
             } catch (err) {
-                loadingToast.remove();
-                console.error('Export query failed:', err);
-                const toast = document.createElement('div');
-                toast.className = 'fixed bottom-6 right-6 bg-red-500/90 text-white px-5 py-3 rounded-xl shadow-2xl z-[9999] flex items-center gap-2';
-                toast.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg> Export failed: ${err.message}`;
-                document.body.appendChild(toast);
-                setTimeout(() => toast.remove(), 5000);
+                if (loadingToast) loadingToast.remove();
+                console.error('View segment failed:', err);
+                alert("Failed to load segment: " + err.message);
             }
         };
 
@@ -4140,19 +4150,42 @@
 
         function formatAIResponse(text) {
             if (!text) return '';
-            // 1. Convert [EXPORT:Field:Value:Label] into clean segment export cards
-            text = text.replace(/\[EXPORT:([^:]+):([^:]+):([^\]]+)\]/g, (match, field, value, label) => {
+            
+            // 1. Parse markdown FIRST so it doesn't break our custom HTML buttons
+            let parsedHtml = marked.parse(text);
+            // 1.5 Parse Global Actions
+            parsedHtml = parsedHtml.replace(/\[CLEAR_FILTERS:([^\]]+)\]/g, (match, label) => {
+                return `<button onclick="window.location.reload()" style="width:100%; margin:8px 0; padding:10px 14px; border-radius:10px; font-size:12px; font-weight:600; color:#e2e8f0; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); cursor:pointer; text-align:center; transition:all 0.2s;" onmouseover="this.style.background='rgba(239,68,68,0.25)'" onmouseout="this.style.background='rgba(239,68,68,0.12)'">↻ ${label}</button>`;
+            });
+
+            parsedHtml = parsedHtml.replace(/\[VIEW_ALL:([^\]]+)\]/g, (match, label) => {
+                return `<button onclick="window.viewSegmentInTable('ALL', 'ALL', 'Complete Database')" style="width:100%; margin:8px 0; padding:10px 14px; border-radius:10px; font-size:12px; font-weight:600; color:#e2e8f0; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); cursor:pointer; text-align:center; transition:all 0.2s;" onmouseover="this.style.background='rgba(16,185,129,0.25)'" onmouseout="this.style.background='rgba(16,185,129,0.12)'">📥 ${label}</button>`;
+            });
+
+            // 2. Convert [VIEW|Field|Value|Label] into a bold table view button
+            parsedHtml = parsedHtml.replace(/\[VIEW\|([^\|]+)\|([^\|]+)\|([^\]]+)\]/g, (match, field, value, label) => {
                 const safeField = field.replace(/'/g, "\\'");
                 const safeValue = value.replace(/'/g, "\\'");
-                // Estimate count from fieldAggregates if available
+                const safeLabel = label.replace(/'/g, "\\'");
+                
                 let countHint = '';
                 if (clientStats?.fieldAggregates?.[field]?.[value]) {
-                    countHint = `<span style="color:#a78bfa;font-size:11px;margin-left:6px;">${clientStats.fieldAggregates[field][value]} leads</span>`;
+                    countHint = `<span style="display:block;font-size:11px;margin-top:4px;opacity:0.7;">${clientStats.fieldAggregates[field][value]} leads available</span>`;
                 }
-                return `<div style="display:inline-block;margin:6px 4px 6px 0;"><button onclick="applyFilterAndExport('${safeField}', '${safeValue}')" style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:500;color:#e2e8f0;background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.3);cursor:pointer;transition:all 0.2s;white-space:nowrap;" onmouseover="this.style.background='rgba(139,92,246,0.25)';this.style.borderColor='rgba(139,92,246,0.6)'" onmouseout="this.style.background='rgba(139,92,246,0.12)';this.style.borderColor='rgba(139,92,246,0.3)'"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#a78bfa" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>${label}${countHint}</button></div>`;
+                
+                return `
+                <div style="display:block; width:100%; margin:12px 0;">
+                    <button onclick="window.viewSegmentInTable('${safeField}', '${safeValue}', '${safeLabel}')" style="width:100%; display:flex; flex-direction:column; align-items:flex-start; padding:12px 16px; border-radius:12px; font-size:13px; font-weight:600; color:#e2e8f0; background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.3); cursor:pointer; transition:all 0.2s; text-align:left;" onmouseover="this.style.background='rgba(59,130,246,0.25)'" onmouseout="this.style.background='rgba(59,130,246,0.12)'">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#60a5fa" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                            <span>${label}</span>
+                        </div>
+                        ${countHint}
+                    </button>
+                </div>`;
             });
-            // 2. marked.parse handles headers, lists, paragraphs, and spacing flawlessly
-            return marked.parse(text);
+            
+            return parsedHtml;
         }
     </script>
 
