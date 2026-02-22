@@ -995,7 +995,7 @@
             if (!clientPhone) return showToast("Please enter your phone number.");
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span> Generating...';
+            btn.innerHTML = '<span class="spinner"></span> Submitting...';
 
             // Build description for AI
             let richDesc = `Industry: ${industry}. `;
@@ -1022,34 +1022,52 @@
                 formData.append('logo', logoFile);
             }
 
-            // Build WhatsApp link (prepared early so it works regardless)
+            // ---- 1. GUARANTEED LEAD CAPTURE (STANDARD API) ----
+            // This safely tracks the lead in the dashboard, sends Telegram, and emails the owner
+            // exactly like all other Reputifly forms, bypassing any AI rate limits.
+            const leadPayload = {
+                "_to": "runikojane@gmail.com",
+                "_subject": `🔵 New Nexus Intake Lead: ${businessName}`,
+                "Name": businessName,
+                "Phone": clientPhone,
+                "Email": clientEmail || "Not provided",
+                "Industry": industry,
+                "Notes": extraNotes || "N/A",
+                "Source": "Nexus Intake Form"
+            };
+
+            fetch('https://asia-southeast1-b2b-software.cloudfunctions.net/reputifly', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(leadPayload)
+            }).then(r => console.log("Lead secured via standard API", r.status))
+                .catch(e => console.warn("Standard DB lead capture error:", e));
+
+            // ---- 2. AI GENERATOR (FIRE & FORGET) ----
+            // Send the request to the backend but DON'T wait for the AI to finish.
+            fetch(API_URL, { method: 'POST', body: formData })
+                .then(response => {
+                    if (!response.ok) {
+                        console.warn('Backend returned error for AI generation (lead is safe).');
+                    }
+                })
+                .catch(err => {
+                    console.warn('Network error on AI generation:', err);
+                });
+
+            // Immediately show success screen & redirect to WhatsApp
+            document.getElementById('step3').classList.remove('active');
+            document.getElementById('stepDone').classList.add('active');
+            document.querySelector('.progress-bar').style.display = 'none';
+
+            // Build WhatsApp link
             const waMsg = encodeURIComponent(`Hi, I just submitted a website sample request for "${businessName}" (${industry}). My number is ${clientPhone}. Looking forward to seeing the sample!`);
             document.getElementById('waLink').href = `https://wa.me/${WA_NUMBER}?text=${waMsg}`;
 
-            try {
-                const response = await fetch(API_URL, { method: 'POST', body: formData });
-                const data = await response.json();
-
-                if (!response.ok) {
-                    // Server returned an error
-                    const errorMsg = data.error || 'Something went wrong. Please try again.';
-                    showToast(errorMsg);
-                    btn.disabled = false;
-                    btn.innerHTML = 'Get My Free Sample';
-                    return;
-                }
-
-                // Success — show the WhatsApp screen
-                document.getElementById('step3').classList.remove('active');
-                document.getElementById('stepDone').classList.add('active');
-                document.querySelector('.progress-bar').style.display = 'none';
-
-            } catch (err) {
-                // Network error or timeout
-                showToast('Network error. Please check your connection and try again.');
-                btn.disabled = false;
-                btn.innerHTML = 'Get My Free Sample';
-            }
+            // Auto-open WhatsApp after a short delay so the user sees the success screen
+            setTimeout(() => {
+                window.open(`https://wa.me/${WA_NUMBER}?text=${waMsg}`, '_blank');
+            }, 1500);
         }
     </script>
 </body>
