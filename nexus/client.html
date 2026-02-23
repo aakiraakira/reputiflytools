@@ -1292,7 +1292,8 @@
 
             // Name setting removed (now handled by Tab Title logic)
 
-            subscribeToLeads();
+            // subscribeToLeads() removed to fix double-fetch race condition 
+            // The initial fetch is now purely driven by renderTabsUI()'s auto-selection
             startClientStatusListener(user.uid); // <--- Listen for Pause Status
             feather.replace();
         });
@@ -3227,6 +3228,8 @@
             const index = apiSignatures.indexOf(signature);
             if (index !== -1) return `Form ${index + 1}`;
 
+            if (signature === 'all_leads') return "All Leads";
+
             return "Unknown Form";
         }
 
@@ -3251,19 +3254,37 @@
             const allAvailable = [...apiSignatures, ...clientTabs];
 
             // --- CRITICAL: AUTO-SELECT DEFAULT VIEW ---
-            // If we are on "All Leads" (default) or nothing is selected, FORCE switch to the first available form.
-            // --- CRITICAL: AUTO-SELECT DEFAULT VIEW ---
-            // Fix: Prioritize tabs that actually have data (count > 0)
-            if ((!activeTab || activeTab === 'all_leads') && allAvailable.length > 0) {
-                // 1. Try to find a form/folder with leads > 0
-                let target = allAvailable.find(sig => (sources[sig]?.count || 0) > 0);
+            if (!activeTab || activeTab === 'all_leads') {
+                let target = null;
 
-                // 2. If all are empty, fallback to the first available form
-                if (!target) target = allAvailable[0];
+                // 1. First API form with leads
+                let targetApiWithData = apiSignatures.find(sig => (sources[sig]?.count || 0) > 0);
 
-                console.log("Auto-selecting tab with data:", target);
-                window.switchTab(target);
-                return; // Stop rendering, wait for switchTab to call us back
+                // 2. First Imported Folder with leads
+                let targetImportedWithData = clientTabs.find(sig => (sources[sig]?.count || 0) > 0);
+
+                if (targetApiWithData) {
+                    target = targetApiWithData;
+                } else if (targetImportedWithData) {
+                    target = targetImportedWithData;
+                } else if (apiSignatures.length > 0) {
+                    target = apiSignatures[0]; // First API form (blank)
+                } else if (clientTabs.length > 1) {
+                    // Try to pick the first CUSTOM folder (not 'General') if everything is blank
+                    target = clientTabs.find(t => t !== 'General') || clientTabs[0];
+                } else if (clientTabs.length > 0) {
+                    target = clientTabs[0]; // 'General' fallback
+                }
+
+                if (target) {
+                    console.log("Auto-selecting tab:", target);
+                    window.switchTab(target);
+                    return; // Stop rendering, wait for switchTab to call us back
+                } else if (!activeTab) {
+                    console.log("No tabs available, defaulting to all_leads");
+                    window.switchTab('all_leads');
+                    return;
+                }
             }
             // --- 1. DETECTED WEB FORMS ---
             if (apiSignatures.length > 0) {
@@ -4314,7 +4335,7 @@
             </div>
             <h3 class="text-xl font-bold text-white mb-2 brand-font">Account Suspended</h3>
             <p class="text-sm text-gray-400 mb-6">Your account is currently paused.</p>
-            <a href="https://wa.me/6584281358" target="_blank" class="btn-liquid-glow">Contact Support</a>
+            <a href="https://wa.me/6580111965" target="_blank" class="btn-liquid-glow">Contact Support</a>
         </div>
     </div>
 </body>
