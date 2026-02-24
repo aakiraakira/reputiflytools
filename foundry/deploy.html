@@ -349,6 +349,21 @@
         </div>
 
     </main>
+    <div id="cloneModal" class="fixed inset-0 z-[100] flex items-center justify-center hidden bg-black/80 backdrop-blur-sm transition-opacity">
+            <div class="glass-panel rounded-[2rem] p-8 max-w-md w-full mx-4 border border-[#FF8A00]/30 shadow-[0_0_50px_rgba(255,138,0,0.15)] transform scale-95 transition-transform" id="cloneModalContent">
+                <div class="w-16 h-16 bg-[#FF8A00]/20 rounded-full flex items-center justify-center mb-6 mx-auto border border-[#FF8A00]/30">
+                    <i data-feather="git-branch" class="w-8 h-8 text-[#FF8A00]"></i>
+                </div>
+                <h3 class="text-2xl font-bold text-center mb-2 text-white">Create New Revision</h3>
+                <p class="text-gray-400 text-center text-sm mb-8" id="cloneModalText">Branching from v1 to v2...</p>
+                
+                <div class="flex gap-4">
+                    <button onclick="closeCloneModal()" class="flex-1 btn-hero-glass py-4 text-sm justify-center">Cancel</button>
+                    <button id="confirmCloneBtn" class="flex-1 btn-liquid-glow py-4 text-sm justify-center">Confirm Clone</button>
+                </div>
+            </div>
+        </div>
+    </main>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -650,42 +665,51 @@
                 if (data.success) {
                     window.repoData = data.folders; // Save for dropdown logic
                     
-                    // Update Dropdown
+                    // Update Dropdown (Ignoring index.html)
                     dropdown.innerHTML = '<option value="">-- Select Client --</option>';
                     Object.keys(data.folders).forEach(client => {
-                        dropdown.innerHTML += `<option value="${client}">${client}</option>`;
+                        if (client.toLowerCase() !== 'index.html') {
+                            dropdown.innerHTML += `<option value="${client}">${client}</option>`;
+                        }
                     });
 
                     if(silent) return; // Stop UI update if just fetching for dropdown
 
                     grid.innerHTML = '';
-                    if(Object.keys(data.folders).length === 0) {
+                    const validClients = Object.keys(data.folders).filter(c => c.toLowerCase() !== 'index.html');
+
+                    if(validClients.length === 0) {
                         grid.innerHTML = '<div class="p-12 text-center text-gray-500 font-medium">Repository is empty.</div>';
                     } else {
-                        for (const [client, versions] of Object.entries(data.folders)) {
+                        for (const client of validClients) {
+                            const versions = data.folders[client];
                             let versionsHtml = '';
+                            const revisions = versions.filter(v => v !== 'base');
                             
-                            versions.forEach((ver, index) => {
-                                const isLatest = index === versions.length - 1;
-                                const displayVer = ver === 'base' ? 'Original Base' : ver.toUpperCase();
-                                const urlPath = ver === 'base' ? client : `${client}/${ver}`;
-                                
-                                versionsHtml += `
-                                    <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4 py-4 px-6 bg-white/[0.02] border-t border-white/5 hover:bg-white/5 transition-colors group/ver">
-                                        <div class="flex items-center gap-4 pl-6 border-l-2 ${isLatest ? 'border-[#FF8A00]' : 'border-white/10'}">
-                                            <span class="font-mono text-sm font-bold ${isLatest ? 'text-[#FF8A00]' : 'text-gray-400'}">${displayVer}</span>
-                                            ${isLatest ? '<span class="text-[9px] bg-[#FF8A00]/20 text-[#FF8A00] px-2 py-0.5 rounded-full uppercase font-bold tracking-widest border border-[#FF8A00]/20">Active</span>' : ''}
+                            if (revisions.length === 0) {
+                                versionsHtml = '<div class="px-8 py-5 text-sm text-gray-500 font-medium italic">No current revisions. Click "New Branch" to create v1.</div>';
+                            } else {
+                                revisions.forEach((ver, index) => {
+                                    const isLatest = index === revisions.length - 1;
+                                    const urlPath = `${client}/${ver}`;
+                                    
+                                    versionsHtml += `
+                                        <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4 py-4 px-6 bg-white/[0.02] border-t border-white/5 hover:bg-white/5 transition-colors group/ver">
+                                            <div class="flex items-center gap-4 pl-6 border-l-2 ${isLatest ? 'border-[#FF8A00]' : 'border-white/10'}">
+                                                <span class="font-mono text-sm font-bold ${isLatest ? 'text-[#FF8A00]' : 'text-gray-400'}">${ver.toUpperCase()}</span>
+                                                ${isLatest ? '<span class="text-[9px] bg-[#FF8A00]/20 text-[#FF8A00] px-2 py-0.5 rounded-full uppercase font-bold tracking-widest border border-[#FF8A00]/20">Active</span>' : ''}
+                                            </div>
+                                            <div class="flex items-center gap-2 opacity-50 group-hover/ver:opacity-100 transition-opacity flex-wrap">
+                                                <a href="https://samples.reputifly.org/${urlPath}/" target="_blank" class="px-3 py-2 btn-hero-glass rounded-xl text-gray-300 hover:text-white text-xs font-bold flex items-center gap-1.5 tooltip" title="View Live"><i data-feather="external-link" class="w-3.5 h-3.5"></i> Live</a>
+                                                <a href="https://github.dev/aakiraakira/reputifly-samples/tree/main/${urlPath}" target="_blank" class="px-3 py-2 btn-hero-glass rounded-xl text-purple-400 hover:text-purple-300 text-xs font-bold flex items-center gap-1.5 tooltip" title="Launch VS Code in Browser"><i data-feather="monitor" class="w-3.5 h-3.5"></i> VS Code</a>
+                                                <button onclick="editSample('${client}', '${ver}')" class="px-3 py-2 btn-hero-glass rounded-xl text-blue-400 hover:text-blue-300 text-xs font-bold flex items-center gap-1.5 tooltip" title="Overwrite specific version"><i data-feather="edit-2" class="w-3.5 h-3.5"></i> Overwrite</button>
+                                                <button onclick="cloneVersion('${client}', '${ver}')" class="px-3 py-2 btn-liquid-glow rounded-xl text-white text-[11px] font-bold flex items-center gap-1.5 px-4"><i data-feather="copy" class="w-3.5 h-3.5"></i> Duplicate</button>
+                                                <button onclick="deleteSample('${client}', '${ver}')" class="p-2 btn-hero-glass rounded-xl text-red-400 hover:text-red-300 hover:bg-red-500/10 border-red-500/20 tooltip" title="Delete Revision"><i data-feather="trash-2" class="w-4 h-4"></i></button>
+                                            </div>
                                         </div>
-                                        <div class="flex items-center gap-2 opacity-50 group-hover/ver:opacity-100 transition-opacity flex-wrap">
-                                            <a href="https://samples.reputifly.org/${urlPath}/" target="_blank" class="px-3 py-2 btn-hero-glass rounded-xl text-gray-300 hover:text-white text-xs font-bold flex items-center gap-1.5 tooltip" title="View Live"><i data-feather="external-link" class="w-3.5 h-3.5"></i> Live</a>
-                                            <a href="https://github.dev/aakiraakira/reputifly-samples/tree/main/${urlPath}" target="_blank" class="px-3 py-2 btn-hero-glass rounded-xl text-purple-400 hover:text-purple-300 text-xs font-bold flex items-center gap-1.5 tooltip" title="Launch VS Code in Browser"><i data-feather="monitor" class="w-3.5 h-3.5"></i> VS Code</a>
-                                            <button onclick="editSample('${client}', '${ver}')" class="px-3 py-2 btn-hero-glass rounded-xl text-blue-400 hover:text-blue-300 text-xs font-bold flex items-center gap-1.5 tooltip" title="Overwrite specific version"><i data-feather="edit-2" class="w-3.5 h-3.5"></i> Overwrite</button>
-                                            <button onclick="cloneVersion('${client}', '${ver}')" class="px-3 py-2 btn-liquid-glow rounded-xl text-white text-[11px] font-bold flex items-center gap-1.5 px-4"><i data-feather="copy" class="w-3.5 h-3.5"></i> Duplicate</button>
-                                            <button onclick="deleteSample('${client}', '${ver}')" class="p-2 btn-hero-glass rounded-xl text-red-400 hover:text-red-300 hover:bg-red-500/10 border-red-500/20 tooltip" title="Delete Revision"><i data-feather="trash-2" class="w-4 h-4"></i></button>
-                                        </div>
-                                    </div>
-                                `;
-                            });
+                                    `;
+                                });
+                            }
 
                             grid.innerHTML += `
                                 <div class="flex flex-col group/client bg-black/40 border border-white/5 rounded-[24px] mb-3 overflow-hidden shadow-lg">
@@ -694,10 +718,15 @@
                                             <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-500/10 to-purple-500/10 border border-blue-500/20 flex items-center justify-center">
                                                 <i data-feather="folder" class="w-5 h-5 text-blue-400"></i>
                                             </div>
-                                            <p class="font-bold text-xl text-white">/${client}</p>
+                                            <p class="font-bold text-xl text-white flex items-center gap-3">/${client} <span class="text-[10px] uppercase tracking-widest font-bold text-[#FF8A00] bg-[#FF8A00]/10 px-2 py-1 rounded border border-[#FF8A00]/20">(Sample)</span></p>
                                         </div>
                                         <div class="flex items-center gap-4">
-                                            <span class="text-xs text-gray-400 font-bold bg-white/5 px-3 py-1 rounded-full border border-white/10">${versions.length} versions</span>
+                                            <div class="hidden sm:flex items-center gap-2 mr-4" onclick="event.stopPropagation()">
+                                                <a href="https://samples.reputifly.org/${client}/" target="_blank" class="px-3 py-2 btn-hero-glass rounded-xl text-gray-300 hover:text-white text-xs font-bold flex items-center gap-1.5" title="View Base Live"><i data-feather="external-link" class="w-3.5 h-3.5"></i> Live</a>
+                                                <a href="https://github.dev/aakiraakira/reputifly-samples/tree/main/${client}" target="_blank" class="px-3 py-2 btn-hero-glass rounded-xl text-purple-400 hover:text-purple-300 text-xs font-bold flex items-center gap-1.5" title="VS Code Base"><i data-feather="monitor" class="w-3.5 h-3.5"></i> VS Code</a>
+                                                <button onclick="cloneVersion('${client}', 'base')" class="px-3 py-2 btn-liquid-glow rounded-xl text-white text-[11px] font-bold flex items-center gap-1.5 px-4"><i data-feather="git-branch" class="w-3.5 h-3.5"></i> New Branch</button>
+                                            </div>
+                                            <span class="text-xs text-gray-400 font-bold bg-white/5 px-3 py-1 rounded-full border border-white/10">${revisions.length} revs</span>
                                             <button onclick="event.stopPropagation(); deleteSample('${client}')" class="p-2 text-gray-600 hover:text-red-400 transition-colors tooltip" title="Delete entire client"><i data-feather="x-circle" class="w-6 h-6"></i></button>
                                             <i data-feather="chevron-down" id="icon-${client}" class="w-6 h-6 text-gray-500 transition-transform"></i>
                                         </div>
@@ -709,9 +738,11 @@
                             `;
                         }
                     }
+                } else {
+                    if(!silent) grid.innerHTML = `<div class="p-12 text-center text-red-400 font-bold">API Error: ${data.error}</div>`;
                 }
             } catch(e) { 
-                if(!silent) grid.innerHTML = `<div class="p-12 text-center text-red-400 font-bold">Failed to sync.</div>`; 
+                if(!silent) grid.innerHTML = `<div class="p-12 text-center text-red-400 font-bold">Failed to sync. Check console.</div>`; 
             }
             
             if(!silent) {
@@ -728,14 +759,39 @@
             switchTab('deploy');
         };
 
-        window.cloneVersion = async (client, sourceVer) => {
+        let pendingClone = null;
+
+        window.cloneVersion = (client, sourceVer) => {
             const existingVersions = window.repoData[client] || [];
             let nextNum = 1;
             const vNums = existingVersions.filter(v => v.startsWith('v')).map(v => parseInt(v.replace('v', '')));
             if(vNums.length > 0) nextNum = Math.max(...vNums) + 1;
             const targetVer = `v${nextNum}`;
 
-            if(!confirm(`Duplicate ${sourceVer.toUpperCase()} into a new ${targetVer.toUpperCase()} branch?`)) return;
+            pendingClone = { client, sourceVer, targetVer };
+            
+            const displaySource = sourceVer === 'base' ? 'Original Sample' : sourceVer.toUpperCase();
+            document.getElementById('cloneModalText').innerHTML = `Duplicating <b class="text-white">${displaySource}</b> into a new branch: <b class="text-[#FF8A00]">${targetVer.toUpperCase()}</b>`;
+            
+            const modal = document.getElementById('cloneModal');
+            modal.classList.remove('hidden');
+            setTimeout(() => document.getElementById('cloneModalContent').classList.remove('scale-95'), 10);
+            feather.replace();
+        };
+
+        window.closeCloneModal = () => {
+            document.getElementById('cloneModalContent').classList.add('scale-95');
+            setTimeout(() => document.getElementById('cloneModal').classList.add('hidden'), 200);
+            pendingClone = null;
+        };
+
+        document.getElementById('confirmCloneBtn').addEventListener('click', async () => {
+            if(!pendingClone) return;
+            const { client, sourceVer, targetVer } = pendingClone;
+            
+            const btn = document.getElementById('confirmCloneBtn');
+            btn.innerHTML = '<i data-feather="loader" class="animate-spin w-4 h-4"></i> Cloning...';
+            feather.replace();
             
             try {
                 const res = await fetch(API_CLONE, { 
@@ -745,11 +801,18 @@
                 });
                 const data = await res.json();
                 if(data.success) {
-                    alert(`Success: Cloned to ${targetVer}.`);
+                    closeCloneModal();
                     loadSamples();
-                } else alert("Clone Error: " + data.error);
-            } catch(e) { alert("Network error during clone."); }
-        };
+                } else {
+                    alert("Clone Error: " + data.error);
+                    closeCloneModal();
+                }
+            } catch(e) { 
+                alert("Network error during clone."); 
+                closeCloneModal();
+            }
+            btn.innerHTML = 'Confirm Clone';
+        });
 
         window.deleteSample = async (client, ver = null) => {
             const msg = ver ? `Delete revision ${ver.toUpperCase()} for ${client}?` : `DANGER: Delete entire client folder /${client} and ALL revisions?`;
