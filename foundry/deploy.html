@@ -345,7 +345,9 @@
                 <div class="bg-black/60 px-8 py-5 border-b border-white/5 flex text-[11px] font-bold text-gray-500 uppercase tracking-widest">
                     <div class="w-full">Client Directories & Versions</div>
                 </div>
-                <div id="samplesList" class="flex flex-col divide-y divide-white/5 max-h-[65vh] overflow-y-auto hide-scrollbar bg-black/20">
+                <div class="max-h-[68vh] overflow-y-auto pr-1 hide-scrollbar">
+                    <div id="samplesList" class="flex flex-col bg-black/20 p-3">
+                    </div>
                 </div>
             </div>
         </div>
@@ -379,7 +381,7 @@
 
                 <div class="flex flex-col gap-8">
                     <div id="accessModal" class="fixed inset-0 z-[100] flex items-center justify-center hidden bg-black/80 backdrop-blur-sm transition-opacity">
-        <div class="glass-panel rounded-[2.5rem] p-8 max-w-2xl w-full mx-4 border border-blue-500/30 shadow-[0_0_50px_rgba(59,130,246,0.15)] flex flex-col max-h-[80vh]">
+        <div class="glass-panel rounded-[2.5rem] p-8 max-w-2xl w-full mx-4 border border-blue-500/30 shadow-[0_0_50px_rgba(59,130,246,0.15)] flex flex-col max-h-[80vh] min-h-0">
             <div class="flex justify-between items-center mb-6">
                 <div>
                     <h3 class="text-2xl font-bold text-white mb-1">Manage Permissions</h3>
@@ -387,7 +389,7 @@
                 </div>
                 <button onclick="closeAccessModal()" class="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors"><i data-feather="x" class="w-5 h-5 text-gray-400"></i></button>
             </div>
-            <div class="overflow-y-auto hide-scrollbar flex-1 pr-2 bg-black/20 rounded-[1.5rem] p-2 border border-white/5">
+            <div class="overflow-y-auto flex-1 min-h-0 pr-2 bg-black/20 rounded-[1.5rem] p-2 border border-white/5">
                 <div id="clientPermissionsGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     </div>
             </div>
@@ -429,8 +431,8 @@
                 </div>
             </div>
         </div>
-    </main>
-    </div> <script type="module">
+    </div>
+    <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
@@ -457,14 +459,27 @@
         const auth = getAuth(app);
         let currentIdToken = null;
         window.repoData = {}; // Global store for branch calculation
+        window.currentUserEmail = null;
+        window.currentUserUid = null;
+        window.isSuperAdmin = false;
         feather.replace();
 
         onAuthStateChanged(auth, async (user) => {
-            if (!user) { window.location.href = 'index.html'; return; }
-            currentIdToken = await user.getIdToken();
-            document.getElementById('userBadge').innerText = user.email.split('@')[0];
-            if (user.uid === SUPER_ADMIN_UID) document.getElementById('navAdminBtn').classList.remove('hidden');
-        });
+    if (!user) { window.location.href = 'index.html'; return; }
+    currentIdToken = await user.getIdToken();
+    window.currentUserEmail = (user.email || '').toLowerCase();
+    window.currentUserUid = user.uid;
+    window.isSuperAdmin = user.uid === SUPER_ADMIN_UID;
+    document.getElementById('userBadge').innerText = user.email.split('@')[0];
+    if (user.uid === SUPER_ADMIN_UID) document.getElementById('navAdminBtn').classList.remove('hidden');
+
+    // Preload repo data so Access Control / Revision dropdown always has all projects
+    try {
+        await loadSamples(true);
+    } catch (e) {
+        console.error("Initial repo preload failed:", e);
+    }
+});
 
         document.getElementById('logoutBtn').addEventListener('click', () => signOut(auth));
 
@@ -590,28 +605,38 @@
             document.getElementById('btnText').innerText = "Compiling & Pushing...";
 
             try {
+                currentIdToken = await auth.currentUser.getIdToken();
                 const response = await fetch(API_DEPLOY, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
                     body: JSON.stringify({ folderName, version, htmlContent, logoBase64: isZipMode ? parsedLogoBase64 : null })
                 });
-                const result = await response.json();
-                if (result.success) {
-                    document.getElementById('deployForm').classList.add('hidden');
-                    document.getElementById('resultBox').classList.remove('hidden');
-                    document.getElementById('liveLink').href = result.liveUrl;
-                    
-                    const copyBtn = document.getElementById('copyLinkBtn');
-                    copyBtn.onclick = () => {
-                        navigator.clipboard.writeText(result.liveUrl);
-                        copyBtn.innerHTML = '<i data-feather="check" class="w-5 h-5"></i> Copied!';
-                        feather.replace();
-                        setTimeout(() => { copyBtn.innerHTML = '<i data-feather="copy" class="w-5 h-5"></i> Copy Link'; feather.replace(); }, 2000);
-                    };
-                } else alert("Error: " + result.error);
-            } catch (err) { alert("Network Error."); }
-            submitBtn.disabled = false;
-            document.getElementById('btnText').innerText = "Deploy Base Build";
+
+                const rawText = await response.text();
+                let result = {};
+                try { result = rawText ? JSON.parse(rawText) : {}; } catch (_) { result = { error: rawText || `HTTP ${response.status}` }; }
+
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error || `HTTP ${response.status}`);
+                }
+
+                document.getElementById('deployForm').classList.add('hidden');
+                document.getElementById('resultBox').classList.remove('hidden');
+                document.getElementById('liveLink').href = result.liveUrl;
+
+                const copyBtn = document.getElementById('copyLinkBtn');
+                copyBtn.onclick = () => {
+                    navigator.clipboard.writeText(result.liveUrl);
+                    copyBtn.innerHTML = '<i data-feather="check" class="w-5 h-5"></i> Copied!';
+                    feather.replace();
+                    setTimeout(() => { copyBtn.innerHTML = '<i data-feather="copy" class="w-5 h-5"></i> Copy Link'; feather.replace(); }, 2000);
+                };
+            } catch (err) {
+                alert("Error: " + (err.message || "Network Error."));
+            } finally {
+                submitBtn.disabled = false;
+                document.getElementById('btnText').innerText = "Deploy Base Build";
+            }
         });
 
         window.resetDeployer = () => {
@@ -812,11 +837,15 @@
                 const data = await res.json();
                 
                 if (data.success) {
-                    window.repoData = data.folders; // Save for dropdown logic
+                    const folders = data.folders || {};
+                    if (typeof data.isSuperAdmin === 'boolean') {
+                        window.isSuperAdmin = data.isSuperAdmin;
+                    }
+                    window.repoData = folders; // Save for dropdown / permissions
                     
                     // Update Dropdown (Ignoring index.html)
                     dropdown.innerHTML = '<option value="">-- Select Client --</option>';
-                    Object.keys(data.folders).forEach(client => {
+                    Object.keys(folders).forEach(client => {
                         if (client.toLowerCase() !== 'index.html') {
                             dropdown.innerHTML += `<option value="${client}">${client}</option>`;
                         }
@@ -825,13 +854,13 @@
                     if(silent) return; // Stop UI update if just fetching for dropdown
 
                     grid.innerHTML = '';
-                    const validClients = Object.keys(data.folders).filter(c => c.toLowerCase() !== 'index.html');
+                    const validClients = Object.keys(folders).filter(c => c.toLowerCase() !== 'index.html');
 
                     if(validClients.length === 0) {
                         grid.innerHTML = '<div class="p-12 text-center text-gray-500 font-medium">Repository is empty.</div>';
                     } else {
                         for (const client of validClients) {
-                            const versions = data.folders[client];
+                            const versions = folders[client];
                             let versionsHtml = '';
                             const revisions = versions.filter(v => v !== 'base');
                             
@@ -972,73 +1001,125 @@
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` }, 
                     body: JSON.stringify({ folderName: client, version: ver }) 
                 });
-                const data = await res.json();
-                if(data.success) loadSamples();
-                else alert(data.error); // Catch "Cannot delete base" error
+                const data = await res.json().catch(() => ({}));
+                if(res.ok && data.success) loadSamples();
+                else alert(data.error || `Delete failed (HTTP ${res.status})`);
             } catch(e) { alert("Delete failed."); }
         };
 
         // ADMIN LOGIC
         window.loadUsers = async () => {
             const listDiv = document.getElementById('usersList');
-            const res = await fetch(API_ADMIN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` }, body: JSON.stringify({ action: "list" }) });
-            const data = await res.json();
-            if (data.success) {
+            listDiv.innerHTML = '<div class="text-sm text-gray-400 p-4">Loading staff...</div>';
+
+            try {
+                currentIdToken = await auth.currentUser.getIdToken();
+                const res = await fetch(API_ADMIN, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
+                    body: JSON.stringify({ action: "list" })
+                });
+
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+
                 listDiv.innerHTML = '';
-                data.users.forEach(u => {
+                (data.users || []).forEach(u => {
                     const isSuper = u.uid === SUPER_ADMIN_UID;
                     listDiv.innerHTML += `
                         <div class="flex justify-between items-center p-5 bg-white/5 rounded-2xl border border-white/5 text-sm transition-all hover:border-white/10 mb-3">
-                            <div class="flex items-center gap-4">
-                                <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center"><i data-feather="user" class="w-5 h-5 text-gray-300"></i></div>
-                                <span class="text-base ${isSuper ? 'text-[#FF8A00] font-bold' : 'text-gray-200 font-medium'}">${u.email} ${isSuper ? '<span class="ml-2 text-[9px] bg-[#FF8A00]/20 text-[#FF8A00] px-2 py-0.5 rounded-full border border-[#FF8A00]/30 tracking-widest">OWNER</span>' : ''}</span>
+                            <div class="flex items-center gap-4 min-w-0">
+                                <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center shrink-0"><i data-feather="user" class="w-5 h-5 text-gray-300"></i></div>
+                                <span class="text-base ${isSuper ? 'text-[#FF8A00] font-bold' : 'text-gray-200 font-medium'} truncate">${u.email} ${isSuper ? '<span class="ml-2 text-[9px] bg-[#FF8A00]/20 text-[#FF8A00] px-2 py-0.5 rounded-full border border-[#FF8A00]/30 tracking-widest">OWNER</span>' : ''}</span>
                             </div>
                             ${!isSuper ? `
-                            <div class="flex items-center gap-2">
+                            <div class="flex items-center gap-2 shrink-0">
                                 <button onclick="openAccessModal('${u.email}')" class="text-blue-400 hover:text-blue-300 bg-blue-500/10 p-2.5 rounded-xl border border-blue-500/20 transition-colors tooltip" title="Manage Folders"><i data-feather="sliders" class="w-5 h-5"></i></button>
-                                <button onclick="deleteUser('${u.uid}')" class="text-red-400 hover:text-red-300 bg-red-500/10 p-2.5 rounded-xl border border-red-500/20 transition-colors tooltip" title="Revoke User"><i data-feather="user-minus" class="w-5 h-5"></i></button>
+                                <button onclick="deleteUser('${u.uid}','${u.email}')" class="text-red-400 hover:text-red-300 bg-red-500/10 p-2.5 rounded-xl border border-red-500/20 transition-colors tooltip" title="Revoke User"><i data-feather="user-minus" class="w-5 h-5"></i></button>
                             </div>
                             ` : ''}
                         </div>`;
                 });
+
+                if (!listDiv.innerHTML.trim()) {
+                    listDiv.innerHTML = '<div class="text-sm text-gray-400 p-4">No staff accounts found.</div>';
+                }
                 feather.replace();
+            } catch (e) {
+                listDiv.innerHTML = `<div class="text-sm text-red-400 p-4">Failed to load users: ${e.message}</div>`;
             }
         };
 
-        window.deleteUser = async (uid) => {
-            if(!confirm("Revoke this user's access?")) return;
-            await fetch(API_ADMIN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` }, body: JSON.stringify({ action: "delete", targetUid: uid }) });
-            loadUsers();
-        };
+        window.deleteUser = async (uid, email = null) => {
+    if (!confirm("Revoke this user's access?")) return;
+
+    try {
+        currentIdToken = await auth.currentUser.getIdToken();
+        const res = await fetch(API_ADMIN, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
+            body: JSON.stringify({ action: "delete", targetUid: uid, email })
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            throw new Error(data.error || `HTTP ${res.status}`);
+        }
+
+        await loadUsers();
+    } catch (e) {
+        alert("Delete user error: " + e.message);
+    }
+};
         window.currentManageEmail = null;
 
-        window.openAccessModal = (email) => {
-            window.currentManageEmail = email;
-            document.getElementById('accessModalUser').innerText = email;
-            const grid = document.getElementById('clientPermissionsGrid');
-            grid.innerHTML = '';
+        window.openAccessModal = async (email) => {
+    window.currentManageEmail = (email || '').toLowerCase();
+    document.getElementById('accessModalUser').innerText = window.currentManageEmail;
+    const grid = document.getElementById('clientPermissionsGrid');
+    grid.innerHTML = '<div class="col-span-full p-8 text-center text-gray-400 text-sm">Loading projects...</div>';
 
-            const clients = Object.keys(window.repoData).filter(c => c.toLowerCase() !== 'index.html');
-            
-            if(clients.length === 0) {
-                grid.innerHTML = '<div class="col-span-full p-8 text-center text-gray-400 text-sm">No clients available. Go to Staging Repo and click "Sync Network" first.</div>';
-            } else {
-                clients.forEach(client => {
-                    grid.innerHTML += `
-                        <label class="flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-2xl cursor-pointer hover:bg-white/5 transition-all">
-                            <div class="flex items-center gap-3">
-                                <i data-feather="folder" class="w-4 h-4 text-blue-400"></i>
-                                <span class="font-bold text-gray-200 text-sm truncate">/${client}</span>
-                            </div>
-                            <input type="checkbox" value="${client}" class="client-checkbox w-5 h-5 rounded border-gray-600 bg-black/50 cursor-pointer">
-                        </label>
-                    `;
-                });
-            }
-            
-            document.getElementById('accessModal').classList.remove('hidden');
-            feather.replace();
-        };
+    let assigned = [];
+    try {
+        // Refresh repo list so modal always includes all current folders
+        await loadSamples(true);
+
+        currentIdToken = await auth.currentUser.getIdToken();
+        const permsRes = await fetch(API_ADMIN, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
+            body: JSON.stringify({ action: "getProjects", email: window.currentManageEmail })
+        });
+        const permsData = await permsRes.json().catch(() => ({}));
+        if (permsRes.ok && permsData.success) assigned = permsData.projects || [];
+    } catch (e) {
+        console.error("Failed to preload permissions:", e);
+    }
+
+    const assignedSet = new Set((assigned || []).map(x => String(x)));
+    grid.innerHTML = '';
+    const clients = Object.keys(window.repoData || {}).filter(c => c.toLowerCase() !== 'index.html');
+
+    if (clients.length === 0) {
+        grid.innerHTML = '<div class="col-span-full p-8 text-center text-gray-400 text-sm">No clients found in staging repository.</div>';
+    } else {
+        clients.forEach(client => {
+            const checked = assignedSet.has(client) ? 'checked' : '';
+            grid.innerHTML += `
+                <label class="flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-2xl cursor-pointer hover:bg-white/5 transition-all">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <i data-feather="folder" class="w-4 h-4 text-blue-400 shrink-0"></i>
+                        <span class="font-bold text-gray-200 text-sm truncate">/${client}</span>
+                    </div>
+                    <input type="checkbox" value="${client}" ${checked} class="client-checkbox w-5 h-5 rounded border-gray-600 bg-black/50 cursor-pointer shrink-0">
+                </label>
+            `;
+        });
+    }
+
+    document.getElementById('accessModal').classList.remove('hidden');
+    feather.replace();
+};
 
         window.closeAccessModal = () => {
             document.getElementById('accessModal').classList.add('hidden');
@@ -1046,40 +1127,88 @@
         };
 
         document.getElementById('savePermissionsBtn').addEventListener('click', async () => {
-            if(!window.currentManageEmail) return;
-            const btn = document.getElementById('savePermissionsBtn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<i data-feather="loader" class="animate-spin w-4 h-4"></i> Saving...';
-            feather.replace();
+    if (!window.currentManageEmail) return;
 
-            const checkboxes = document.querySelectorAll('.client-checkbox');
-            const selectedProjects = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+    const btn = document.getElementById('savePermissionsBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i data-feather="loader" class="animate-spin w-4 h-4"></i> Saving...';
+    feather.replace();
 
-            try {
-                // IMPORTANT: Ensure your backend handles action: "setProjects" to process this array
-                const res = await fetch(API_ADMIN, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
-                    body: JSON.stringify({ action: "setProjects", email: window.currentManageEmail, projects: selectedProjects })
-                });
-                const data = await res.json();
-                if(data.success) {
-                    closeAccessModal();
-                } else {
-                    alert("Error: " + data.error);
-                }
-            } catch(e) { alert("Network error while saving permissions."); }
-            btn.innerHTML = originalText;
+    const checkboxes = document.querySelectorAll('.client-checkbox');
+    const selectedProjects = Array.from(checkboxes)
+        .filter(cb => cb.checked)
+        .map(cb => cb.value);
+
+    try {
+        currentIdToken = await auth.currentUser.getIdToken();
+
+        const payload = {
+            action: "setProjects",
+            email: window.currentManageEmail,
+            projects: selectedProjects
+        };
+
+        console.log("Saving permissions payload:", payload);
+
+        const res = await fetch(API_ADMIN, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentIdToken}`
+            },
+            body: JSON.stringify(payload)
         });
+
+        const data = await res.json().catch(() => ({}));
+        console.log("Save permissions response:", res.status, data);
+
+        if (!res.ok || !data.success) {
+            throw new Error(data.error || `HTTP ${res.status}`);
+        }
+
+        closeAccessModal();
+        await loadUsers();
+        await loadSamples(true);
+    } catch (e) {
+        alert("Permissions save error: " + e.message);
+    } finally {
+        btn.innerHTML = originalText;
+        feather.replace();
+    }
+});
 
         document.getElementById('createUserForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = e.target.querySelector('button'); btn.innerText = "Provisioning...";
-            await fetch(API_ADMIN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` }, body: JSON.stringify({ action: "create", email: document.getElementById('newEmail').value, password: document.getElementById('newPassword').value }) });
-            document.getElementById('createUserForm').reset();
-            btn.innerHTML = `<i data-feather="shield" class="w-4 h-4 text-green-400"></i> Authorize Access`; feather.replace();
-            loadUsers();
+    e.preventDefault();
+    const btn = e.target.querySelector('button');
+    const originalHtml = btn.innerHTML;
+    btn.innerText = "Provisioning...";
+
+    try {
+        currentIdToken = await auth.currentUser.getIdToken();
+        const res = await fetch(API_ADMIN, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
+            body: JSON.stringify({
+                action: "create",
+                email: document.getElementById('newEmail').value.trim(),
+                password: document.getElementById('newPassword').value
+            })
         });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            throw new Error(data.error || `HTTP ${res.status}`);
+        }
+
+        document.getElementById('createUserForm').reset();
+        await loadUsers();
+    } catch (e) {
+        alert("Create user error: " + e.message);
+    } finally {
+        btn.innerHTML = originalHtml;
+        feather.replace();
+    }
+});
     </script>
 </body>
 </html>
