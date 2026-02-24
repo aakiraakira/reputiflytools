@@ -377,17 +377,39 @@
                     </form>
                 </div>
 
-                <div class="glass-card p-10 rounded-[32px] flex flex-col h-[550px]">
-                    <div class="flex justify-between items-center mb-8">
-                        <div class="flex items-center gap-4">
-                            <div class="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center border border-blue-500/20 shadow-[0_0_30px_rgba(59,130,246,0.15)]">
-                                <i data-feather="users" class="w-7 h-7 text-blue-400"></i>
-                            </div>
-                            <h3 class="font-bold text-2xl">Active Staff</h3>
-                        </div>
-                        <button onclick="loadUsers()" class="p-3 btn-hero-glass rounded-full"><i data-feather="refresh-cw" class="w-5 h-5 text-gray-400"></i></button>
+                <div class="flex flex-col gap-8">
+                    <div id="accessModal" class="fixed inset-0 z-[100] flex items-center justify-center hidden bg-black/80 backdrop-blur-sm transition-opacity">
+        <div class="glass-panel rounded-[2.5rem] p-8 max-w-2xl w-full mx-4 border border-blue-500/30 shadow-[0_0_50px_rgba(59,130,246,0.15)] flex flex-col max-h-[80vh]">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h3 class="text-2xl font-bold text-white mb-1">Manage Permissions</h3>
+                    <p class="text-gray-400 text-sm font-mono" id="accessModalUser">user@example.com</p>
+                </div>
+                <button onclick="closeAccessModal()" class="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors"><i data-feather="x" class="w-5 h-5 text-gray-400"></i></button>
+            </div>
+            <div class="overflow-y-auto hide-scrollbar flex-1 pr-2 bg-black/20 rounded-[1.5rem] p-2 border border-white/5">
+                <div id="clientPermissionsGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     </div>
-                    <div id="usersList" class="flex-1 space-y-3 overflow-y-auto pr-2 hide-scrollbar"></div>
+            </div>
+            <div class="mt-6 pt-6 border-t border-white/10 flex justify-end gap-4">
+                <button onclick="closeAccessModal()" class="btn-hero-glass px-6 py-3">Cancel</button>
+                <button id="savePermissionsBtn" class="btn-liquid-glow px-8 py-3">Save Access</button>
+            </div>
+        </div>
+    </div>
+
+                    <div class="glass-card p-10 rounded-[32px] flex flex-col flex-1 min-h-[350px]">
+                        <div class="flex justify-between items-center mb-8">
+                            <div class="flex items-center gap-4">
+                                <div class="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center border border-blue-500/20 shadow-[0_0_30px_rgba(59,130,246,0.15)]">
+                                    <i data-feather="users" class="w-7 h-7 text-blue-400"></i>
+                                </div>
+                                <h3 class="font-bold text-2xl">Active Staff</h3>
+                            </div>
+                            <button onclick="loadUsers()" class="p-3 btn-hero-glass rounded-full"><i data-feather="refresh-cw" class="w-5 h-5 text-gray-400"></i></button>
+                        </div>
+                        <div id="usersList" class="flex-1 space-y-3 overflow-y-auto pr-2 hide-scrollbar"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -971,7 +993,12 @@
                                 <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center"><i data-feather="user" class="w-5 h-5 text-gray-300"></i></div>
                                 <span class="text-base ${isSuper ? 'text-[#FF8A00] font-bold' : 'text-gray-200 font-medium'}">${u.email} ${isSuper ? '<span class="ml-2 text-[9px] bg-[#FF8A00]/20 text-[#FF8A00] px-2 py-0.5 rounded-full border border-[#FF8A00]/30 tracking-widest">OWNER</span>' : ''}</span>
                             </div>
-                            ${!isSuper ? `<button onclick="deleteUser('${u.uid}')" class="text-red-400 hover:text-red-300 bg-red-500/10 p-2.5 rounded-xl border border-red-500/20 transition-colors"><i data-feather="user-minus" class="w-5 h-5"></i></button>` : ''}
+                            ${!isSuper ? `
+                            <div class="flex items-center gap-2">
+                                <button onclick="openAccessModal('${u.email}')" class="text-blue-400 hover:text-blue-300 bg-blue-500/10 p-2.5 rounded-xl border border-blue-500/20 transition-colors tooltip" title="Manage Folders"><i data-feather="sliders" class="w-5 h-5"></i></button>
+                                <button onclick="deleteUser('${u.uid}')" class="text-red-400 hover:text-red-300 bg-red-500/10 p-2.5 rounded-xl border border-red-500/20 transition-colors tooltip" title="Revoke User"><i data-feather="user-minus" class="w-5 h-5"></i></button>
+                            </div>
+                            ` : ''}
                         </div>`;
                 });
                 feather.replace();
@@ -983,6 +1010,67 @@
             await fetch(API_ADMIN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` }, body: JSON.stringify({ action: "delete", targetUid: uid }) });
             loadUsers();
         };
+        window.currentManageEmail = null;
+
+        window.openAccessModal = (email) => {
+            window.currentManageEmail = email;
+            document.getElementById('accessModalUser').innerText = email;
+            const grid = document.getElementById('clientPermissionsGrid');
+            grid.innerHTML = '';
+
+            const clients = Object.keys(window.repoData).filter(c => c.toLowerCase() !== 'index.html');
+            
+            if(clients.length === 0) {
+                grid.innerHTML = '<div class="col-span-full p-8 text-center text-gray-400 text-sm">No clients available. Go to Staging Repo and click "Sync Network" first.</div>';
+            } else {
+                clients.forEach(client => {
+                    grid.innerHTML += `
+                        <label class="flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-2xl cursor-pointer hover:bg-white/5 transition-all">
+                            <div class="flex items-center gap-3">
+                                <i data-feather="folder" class="w-4 h-4 text-blue-400"></i>
+                                <span class="font-bold text-gray-200 text-sm truncate">/${client}</span>
+                            </div>
+                            <input type="checkbox" value="${client}" class="client-checkbox w-5 h-5 rounded border-gray-600 bg-black/50 cursor-pointer">
+                        </label>
+                    `;
+                });
+            }
+            
+            document.getElementById('accessModal').classList.remove('hidden');
+            feather.replace();
+        };
+
+        window.closeAccessModal = () => {
+            document.getElementById('accessModal').classList.add('hidden');
+            window.currentManageEmail = null;
+        };
+
+        document.getElementById('savePermissionsBtn').addEventListener('click', async () => {
+            if(!window.currentManageEmail) return;
+            const btn = document.getElementById('savePermissionsBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i data-feather="loader" class="animate-spin w-4 h-4"></i> Saving...';
+            feather.replace();
+
+            const checkboxes = document.querySelectorAll('.client-checkbox');
+            const selectedProjects = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+
+            try {
+                // IMPORTANT: Ensure your backend handles action: "setProjects" to process this array
+                const res = await fetch(API_ADMIN, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
+                    body: JSON.stringify({ action: "setProjects", email: window.currentManageEmail, projects: selectedProjects })
+                });
+                const data = await res.json();
+                if(data.success) {
+                    closeAccessModal();
+                } else {
+                    alert("Error: " + data.error);
+                }
+            } catch(e) { alert("Network error while saving permissions."); }
+            btn.innerHTML = originalText;
+        });
 
         document.getElementById('createUserForm').addEventListener('submit', async (e) => {
             e.preventDefault();
