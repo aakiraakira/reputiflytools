@@ -26,9 +26,13 @@
             background: linear-gradient(135deg, #E6397F, #FF8A00);
             transition: all 0.3s ease;
         }
-        .btn-gradient:hover {
+        .btn-gradient:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 10px 20px -10px #FF8A00;
+        }
+        .btn-gradient:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
         .input-dark {
             background: rgba(0, 0, 0, 0.4);
@@ -80,23 +84,44 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
 
-        onAuthStateChanged(auth, (user) => {
-            if (user) window.location.href = 'deploy.html';
+        const btn = document.getElementById('loginBtn');
+        const err = document.getElementById('errorMsg');
+
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                btn.innerText = "Routing User...";
+                btn.disabled = true;
+                try {
+                    const token = await user.getIdToken();
+                    const res = await fetch("https://listsamples-5resuz4f5a-as.a.run.app", {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const data = await res.json();
+                    
+                    if (data.userRole === 'superadmin' || data.userRole === 'staff') {
+                        window.location.href = 'deploy.html';
+                    } else {
+                        window.location.href = 'client.html';
+                    }
+                } catch (error) {
+                    window.location.href = 'deploy.html';
+                }
+            }
         });
 
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const btn = document.getElementById('loginBtn');
-            const err = document.getElementById('errorMsg');
             btn.innerText = "Authenticating...";
+            btn.disabled = true;
             err.classList.add('hidden');
             
             try {
-                await signInWithEmailAndPassword(auth, document.getElementById('email').value, document.getElementById('password').value);
+                await signInWithEmailAndPassword(auth, document.getElementById('email').value.trim(), document.getElementById('password').value);
             } catch (error) {
-                err.innerText = error.message;
+                err.innerText = "Invalid credentials. Please try again.";
                 err.classList.remove('hidden');
                 btn.innerText = "Login";
+                btn.disabled = false;
             }
         });
     </script>
