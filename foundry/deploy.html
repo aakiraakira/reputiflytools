@@ -1565,58 +1565,109 @@
         document.getElementById('modeZipBtn').addEventListener('click', (e) => { e.preventDefault(); setMode(true); });
         document.getElementById('modeCodeBtn').addEventListener('click', (e) => { e.preventDefault(); setMode(false); });
 
-        document.getElementById('zipInput').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+        const handleBaseUpload = async (files) => {
+            if (files.length === 0) return;
+            const file = files[0];
             document.getElementById('uploadPrompt').classList.add('hidden');
             document.getElementById('zipStatus').classList.remove('hidden');
             document.getElementById('logoStatusDisplay').innerHTML = '<div class="w-full bg-white/5 py-3 rounded-xl text-center"><i data-feather="loader" class="w-5 h-5 animate-spin text-[#FF8A00] inline"></i></div>';
             feather.replace();
 
             try {
-                const zip = new JSZip();
-                const contents = await zip.loadAsync(file);
-                parsedFolderName = file.name.split('-manual-pack')[0].replace('.zip', '').toLowerCase().replace(/[^a-z0-9-]/g, '');
-                document.getElementById('clientNameDisplay').innerText = `/${parsedFolderName}`;
-
                 parsedLogoBase64 = null;
                 let extractedHtml = "";
                 window.baseZipFiles = [];
+                parsedFolderName = file.name ? file.name.split('-manual-pack')[0].replace('.zip', '').toLowerCase().replace(/[^a-z0-9-]/g, '') : "new-project";
 
-                // Smart Directory Flattening (Finds index.html to dynamically determine root path)
-                let rootPath = "";
-                for (const relPath of Object.keys(contents.files)) {
-                    if (relPath.endsWith('index.html') && !relPath.includes('__MACOSX')) {
-                        rootPath = relPath.replace('index.html', '');
-                        break;
-                    }
-                }
+                if (file.name && file.name.endsWith('.zip')) {
+                    const zip = new JSZip();
+                    const contents = await zip.loadAsync(file);
 
-                for (const [relativePath, zipEntry] of Object.entries(contents.files)) {
-                    if (zipEntry.dir || relativePath.includes('__MACOSX')) continue;
-                    if (!relativePath.startsWith(rootPath)) continue;
+                    document.getElementById('clientNameDisplay').innerText = `/${parsedFolderName}`;
 
-                    const cleanPath = relativePath.substring(rootPath.length);
-                    if (!cleanPath) continue; // Skip empty paths
-
-                    // Handle extensionless files and add ts/tsx/jsx support
-                    const nameParts = cleanPath.split('.');
-                    const ext = nameParts.length > 1 ? nameParts.pop().toLowerCase() : '';
-                    const isText = /^(html|css|js|json|md|txt|svg|xml|csv|ts|tsx|jsx)$/i.test(ext);
-
-                    if (cleanPath.match(/^logo\.(png|jpg|jpeg|webp|svg)$/i)) {
-                        parsedLogoBase64 = await zipEntry.async("base64");
-                    }
-                    if (cleanPath === 'index.html' && !extractedHtml) {
-                        extractedHtml = await zipEntry.async("string");
+                    // Smart Directory Flattening (Finds index.html to dynamically determine root path)
+                    let rootPath = "";
+                    for (const relPath of Object.keys(contents.files)) {
+                        if (relPath.endsWith('index.html') && !relPath.includes('__MACOSX')) {
+                            rootPath = relPath.replace('index.html', '');
+                            break;
+                        }
                     }
 
-                    if (isText) {
-                        const text = await zipEntry.async("string");
-                        window.baseZipFiles.push({ name: cleanPath, content: text, isBinary: false });
-                    } else {
-                        const base64Data = await zipEntry.async("base64");
-                        window.baseZipFiles.push({ name: cleanPath, content: base64Data, isBinary: true });
+                    for (const [relativePath, zipEntry] of Object.entries(contents.files)) {
+                        if (zipEntry.dir || relativePath.includes('__MACOSX')) continue;
+                        if (!relativePath.startsWith(rootPath)) continue;
+
+                        const cleanPath = relativePath.substring(rootPath.length);
+                        if (!cleanPath) continue; // Skip empty paths
+
+                        // Handle extensionless files and add ts/tsx/jsx support
+                        const nameParts = cleanPath.split('.');
+                        const ext = nameParts.length > 1 ? nameParts.pop().toLowerCase() : '';
+                        const isText = /^(html|css|js|json|md|txt|svg|xml|csv|ts|tsx|jsx)$/i.test(ext);
+
+                        if (cleanPath.match(/^logo\.(png|jpg|jpeg|webp|svg)$/i)) {
+                            parsedLogoBase64 = await zipEntry.async("base64");
+                        }
+                        if (cleanPath === 'index.html' && !extractedHtml) {
+                            extractedHtml = await zipEntry.async("string");
+                        }
+
+                        if (isText) {
+                            const text = await zipEntry.async("string");
+                            window.baseZipFiles.push({ name: cleanPath, content: text, isBinary: false });
+                        } else {
+                            const base64Data = await zipEntry.async("base64");
+                            window.baseZipFiles.push({ name: cleanPath, content: base64Data, isBinary: true });
+                        }
+                    }
+                } else {
+                    // Folder approach
+                    let commonPrefix = "";
+                    if (files[0].webkitRelativePath) {
+                        const parts = files[0].webkitRelativePath.split('/');
+                        if (parts.length > 1) {
+                            commonPrefix = parts[0] + '/';
+                            parsedFolderName = parts[0].toLowerCase().replace(/[^a-z0-9-]/g, '');
+                        }
+                    }
+                    if (!parsedFolderName) parsedFolderName = "new-client";
+                    document.getElementById('clientNameDisplay').innerText = `/${parsedFolderName}`;
+
+                    for (const f of files) {
+                        let cleanPath = f.webkitRelativePath || f.name;
+                        if (commonPrefix && cleanPath.startsWith(commonPrefix)) {
+                            cleanPath = cleanPath.substring(commonPrefix.length);
+                        }
+                        if (!cleanPath) continue;
+
+                        const nameParts = cleanPath.split('.');
+                        const ext = nameParts.length > 1 ? nameParts.pop().toLowerCase() : '';
+                        const isText = /^(html|css|js|json|md|txt|svg|xml|csv|ts|tsx|jsx)$/i.test(ext);
+
+                        if (cleanPath.match(/^logo\.(png|jpg|jpeg|webp|svg)$/i)) {
+                            parsedLogoBase64 = await new Promise((resolve) => {
+                                const reader = new FileReader();
+                                reader.onload = (e) => resolve(e.target.result.split(',')[1]);
+                                reader.readAsDataURL(f);
+                            });
+                        }
+
+                        if (cleanPath === 'index.html' && !extractedHtml) {
+                            extractedHtml = await f.text();
+                        }
+
+                        if (isText) {
+                            const text = await f.text();
+                            window.baseZipFiles.push({ name: cleanPath, content: text, isBinary: false });
+                        } else {
+                            const base64Data = await new Promise((resolve) => {
+                                const reader = new FileReader();
+                                reader.onload = (e) => resolve(e.target.result.split(',')[1]);
+                                reader.readAsDataURL(f);
+                            });
+                            window.baseZipFiles.push({ name: cleanPath, content: base64Data, isBinary: true });
+                        }
                     }
                 }
 
@@ -1628,17 +1679,40 @@
                     <div class="flex flex-col gap-2 w-full">
                         <div class="w-full ${extractedHtml ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-400'} py-2.5 rounded-xl border text-center flex items-center justify-center gap-2">
                             <i data-feather="${extractedHtml ? 'code' : 'alert-circle'}" class="w-4 h-4"></i>
-                            <span class="text-[11px] font-bold uppercase tracking-wider">${extractedHtml ? 'HTML Auto-Loaded' : 'No HTML Found in ZIP'}</span>
+                            <span class="text-[11px] font-bold uppercase tracking-wider">${extractedHtml ? 'HTML Auto-Loaded' : 'No HTML Found'}</span>
                         </div>
                         <div class="w-full ${parsedLogoBase64 ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-gray-500/10 border-gray-500/20 text-gray-400'} py-2.5 rounded-xl border text-center flex items-center justify-center gap-2">
                             <i data-feather="${parsedLogoBase64 ? 'image' : 'type'}" class="w-4 h-4"></i>
                             <span class="text-[11px] font-bold uppercase tracking-wider">${parsedLogoBase64 ? 'Logo Extracted' : 'Text Logo Enabled'}</span>
                         </div>
+                        <div class="text-[10px] text-gray-500 mt-1 uppercase tracking-widest font-bold w-full text-center">${window.baseZipFiles.length} files queued</div>
                     </div>
                 `;
                 feather.replace();
-            } catch (err) { alert("ZIP Extraction Error."); }
-        });
+            } catch (err) { alert("Pack Extraction Error."); console.error(err); }
+        };
+
+        document.getElementById('zipInput').addEventListener('change', (e) => handleBaseUpload(Array.from(e.target.files)));
+        document.getElementById('baseFolderInput').addEventListener('change', (e) => handleBaseUpload(Array.from(e.target.files)));
+
+        const zipUploadBox = document.getElementById('zipUploadBox');
+        if (zipUploadBox) {
+            zipUploadBox.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zipUploadBox.classList.add('opacity-70', 'border-[#E6397F]', 'bg-[#E6397F]/5');
+            });
+            zipUploadBox.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                zipUploadBox.classList.remove('opacity-70', 'border-[#E6397F]', 'bg-[#E6397F]/5');
+            });
+            zipUploadBox.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zipUploadBox.classList.remove('opacity-70', 'border-[#E6397F]', 'bg-[#E6397F]/5');
+                if (e.dataTransfer.files.length > 0) {
+                    handleBaseUpload(Array.from(e.dataTransfer.files));
+                }
+            });
+        }
 
         document.getElementById('previewBtn').addEventListener('click', () => {
             const code = document.getElementById('htmlContent').value;
@@ -1651,6 +1725,11 @@
             const htmlContent = document.getElementById('htmlContent').value;
             const folderName = isZipMode ? parsedFolderName : document.getElementById('manualFolderName').value.toLowerCase().replace(/[^a-z0-9-]/g, '');
             const version = window.currentEditVersion || "base"; // Auto routes to /base
+
+            if (!folderName || !htmlContent || !currentIdToken) return window.showToast("Missing required data!", "error");
+
+            const confirmMsg = `Are you sure you want to deploy a Base build to /${folderName}?${isZipMode && window.baseZipFiles ? `\nThere are ${window.baseZipFiles.length} files queued for upload.` : ''}`;
+            if (!confirm(confirmMsg)) return;
 
             if (!folderName || !htmlContent || !currentIdToken) return window.showToast("Missing required data!", "error");
 
@@ -1998,6 +2077,9 @@
                 if (revisionFiles.length === 0) return window.showToast("Please upload files first.", "error");
                 finalRevisionFiles = revisionFiles;
             }
+
+            const confirmMsg = `Are you sure you want to deploy revision ${calculatedNextVersion} to /${client}?${finalRevisionFiles.length > 0 ? `\nThere are ${finalRevisionFiles.length} files queued for upload.` : ''}`;
+            if (!confirm(confirmMsg)) return;
 
             const btn = document.getElementById('revSubmitBtn');
             btn.disabled = true;
