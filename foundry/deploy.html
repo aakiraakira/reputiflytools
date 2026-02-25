@@ -824,7 +824,7 @@
                                     class="text-xs font-bold text-white flex items-center gap-2 hover:bg-white/20 transition-colors bg-white/10 border border-white/10 px-4 py-2 rounded-full"><i
                                         data-feather="monitor" class="w-3 h-3 text-[#FF8A00]"></i> Preview</button>
                             </div>
-                            <textarea id="htmlContent" required placeholder=""
+                            <textarea id="htmlContent" placeholder=""
                                 class="code-editor-textarea w-full h-full min-h-[350px] bg-transparent text-gray-300 p-8 font-mono text-[13px] leading-relaxed focus:outline-none focus:bg-white/[0.02] transition-colors resize-none rounded-none"></textarea>
                         </div>
                         <button type="submit" id="submitBtn" class="btn-liquid-glow w-full py-6 text-xl">
@@ -923,7 +923,7 @@
                                                 <i data-feather="file" class="w-4 h-4 text-purple-400 shrink-0"></i>
                                                 <input type="text"
                                                     class="rev-paste-filename input-dark w-full rounded-lg px-3 py-1.5 text-sm font-mono text-white bg-black/50 border-white/10 focus:border-purple-500"
-                                                    placeholder="e.g. index.html" value="index.html" required>
+                                                    placeholder="e.g. index.html" value="index.html">
                                             </div>
                                             <button type="button"
                                                 class="text-gray-500 hover:text-red-400 p-2 rounded-xl hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all hidden rev-paste-remove"
@@ -931,7 +931,7 @@
                                                 onclick="this.closest('.rev-paste-block').remove(); updateRevSubmitState();"><i
                                                     data-feather="trash-2" class="w-4 h-4"></i></button>
                                         </div>
-                                        <textarea required placeholder="Paste HTML/CSS/JS code here..."
+                                        <textarea placeholder="Paste HTML/CSS/JS code here..."
                                             class="rev-paste-content code-editor-textarea w-full h-[300px] bg-black/20 text-gray-300 p-6 font-mono text-[13px] leading-relaxed focus:outline-none focus:bg-white/[0.02] transition-colors resize-none rounded-none"></textarea>
                                     </div>
                                 </div>
@@ -1477,14 +1477,42 @@
 
                 parsedLogoBase64 = null;
                 let extractedHtml = "";
+                window.baseZipFiles = [];
+
+                // Smart Directory Flattening (Finds index.html to dynamically determine root path)
+                let rootPath = "";
+                for (const relPath of Object.keys(contents.files)) {
+                    if (relPath.endsWith('index.html') && !relPath.includes('__MACOSX')) {
+                        rootPath = relPath.replace('index.html', '');
+                        break;
+                    }
+                }
 
                 for (const [relativePath, zipEntry] of Object.entries(contents.files)) {
-                    // Versatile: Catches logo.png, logo.jpg, logo.jpeg, logo.svg, etc.
-                    if (relativePath.match(/logo\.(png|jpg|jpeg|webp|svg)$/i) && !zipEntry.dir) {
+                    if (zipEntry.dir || relativePath.includes('__MACOSX')) continue;
+                    if (!relativePath.startsWith(rootPath)) continue;
+                    
+                    const cleanPath = relativePath.substring(rootPath.length);
+                    if (!cleanPath) continue; // Skip empty paths
+
+                    // Handle extensionless files and add ts/tsx/jsx support
+                    const nameParts = cleanPath.split('.');
+                    const ext = nameParts.length > 1 ? nameParts.pop().toLowerCase() : '';
+                    const isText = /^(html|css|js|json|md|txt|svg|xml|csv|ts|tsx|jsx)$/i.test(ext);
+
+                    if (cleanPath.match(/^logo\.(png|jpg|jpeg|webp|svg)$/i)) {
                         parsedLogoBase64 = await zipEntry.async("base64");
                     }
-                    if (relativePath.endsWith('.html') && !zipEntry.dir && !extractedHtml) {
+                    if (cleanPath === 'index.html' && !extractedHtml) {
                         extractedHtml = await zipEntry.async("string");
+                    }
+
+                    if (isText) {
+                        const text = await zipEntry.async("string");
+                        window.baseZipFiles.push({ name: cleanPath, content: text, isBinary: false });
+                    } else {
+                        const base64Data = await zipEntry.async("base64");
+                        window.baseZipFiles.push({ name: cleanPath, content: base64Data, isBinary: true });
                     }
                 }
 
@@ -1528,10 +1556,20 @@
 
             try {
                 currentIdToken = await auth.currentUser.getIdToken();
+                const payload = { folderName, version, htmlContent };
+                if (isZipMode && window.baseZipFiles && window.baseZipFiles.length > 0) {
+                    payload.files = window.baseZipFiles;
+                    // Sync editor changes back to the main HTML file before sending
+                    const htmlIndex = payload.files.findIndex(f => f.name.endsWith('.html'));
+                    if (htmlIndex > -1 && htmlContent) payload.files[htmlIndex].content = htmlContent;
+                } else if (isZipMode && parsedLogoBase64) {
+                    payload.logoBase64 = parsedLogoBase64;
+                }
+                
                 const response = await fetch(API_DEPLOY, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
-                    body: JSON.stringify({ folderName, version, htmlContent, logoBase64: isZipMode ? parsedLogoBase64 : null })
+                    body: JSON.stringify(payload)
                 });
 
                 const rawText = await response.text();
@@ -1609,15 +1647,18 @@
                             if (zipEntry.dir || relPath.includes('__MACOSX')) continue;
                             if (relPath.startsWith(rootPath)) {
                                 const cleanPath = relPath.substring(rootPath.length);
-                                const ext = cleanPath.split('.').pop().toLowerCase();
+                                if (!cleanPath) continue; // Skip empty paths
                                 
-                                const textExts = ['html', 'css', 'js', 'svg', 'json', 'md', 'txt'];
-                                const imgExts = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'ico'];
+                                // Safe extraction for files lacking an extension
+                                const nameParts = cleanPath.split('.');
+                                const ext = nameParts.length > 1 ? nameParts.pop().toLowerCase() : '';
+                                
+                                const isText = /^(html|css|js|json|md|txt|svg|xml|csv|ts|tsx|jsx)$/i.test(ext);
 
-                                if (textExts.includes(ext)) {
+                                if (isText) {
                                     const text = await zipEntry.async("string");
                                     revisionFiles.push({ name: cleanPath, content: text, isBinary: false });
-                                } else if (imgExts.includes(ext)) {
+                                } else {
                                     const base64Data = await zipEntry.async("base64");
                                     revisionFiles.push({ name: cleanPath, content: base64Data, isBinary: true });
                                 }
@@ -1627,9 +1668,9 @@
                 } else {
                     // Handle loose file uploads
                     const ext = f.name.split('.').pop().toLowerCase();
-                    const imgExts = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'ico'];
+                    const isText = /^(html|css|js|json|md|txt|svg|xml|csv)$/i.test(ext);
                     
-                    if (imgExts.includes(ext)) {
+                    if (!isText) {
                         const base64 = await new Promise((resolve) => {
                             const reader = new FileReader();
                             reader.onload = (e) => resolve(e.target.result.split(',')[1]); // Strip prefix
@@ -1782,11 +1823,11 @@
                     <div class="code-editor-header flex justify-between items-center px-6 py-4 bg-black/40 border-b border-white/5 backdrop-blur-md gap-4">
                         <div class="flex items-center gap-3 w-full max-w-sm">
                             <i data-feather="file" class="w-4 h-4 text-purple-400 shrink-0"></i>
-                            <input type="text" class="rev-paste-filename input-dark w-full rounded-lg px-3 py-1.5 text-sm font-mono text-white bg-black/50 border-white/10 focus:border-purple-500" placeholder="e.g. about.html" required>
+                            <input type="text" class="rev-paste-filename input-dark w-full rounded-lg px-3 py-1.5 text-sm font-mono text-white bg-black/50 border-white/10 focus:border-purple-500" placeholder="e.g. about.html">
                         </div>
                         <button type="button" class="text-gray-500 hover:text-red-400 p-2 rounded-xl hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all rev-paste-remove" title="Remove File" onclick="this.closest('.rev-paste-block').remove(); updateRevSubmitState();"><i data-feather="trash-2" class="w-4 h-4"></i></button>
                     </div>
-                    <textarea required placeholder="Paste HTML/CSS/JS code here..." class="rev-paste-content code-editor-textarea w-full h-[300px] bg-black/20 text-gray-300 p-6 font-mono text-[13px] leading-relaxed focus:outline-none focus:bg-white/[0.02] transition-colors resize-none rounded-none"></textarea>
+                    <textarea placeholder="Paste HTML/CSS/JS code here..." class="rev-paste-content code-editor-textarea w-full h-[300px] bg-black/20 text-gray-300 p-6 font-mono text-[13px] leading-relaxed focus:outline-none focus:bg-white/[0.02] transition-colors resize-none rounded-none"></textarea>
                 `;
                 revPasteContainer.appendChild(block);
                 feather.replace();
@@ -1837,18 +1878,30 @@
                     let outputHtml = '';
                     let copyText = '';
 
-                    finalRevisionFiles.forEach(f => {
-                        let title = f.name;
-                        if (title.toLowerCase() === 'index.html') title = 'Home Page';
-                        else {
-                            title = title.replace('.html', '');
-                            title = title.charAt(0).toUpperCase() + title.slice(1) + ' Page';
-                        }
-                        const url = `https://samples.reputifly.org/${client}/${calculatedNextVersion}/${f.name === 'index.html' ? '' : f.name}`;
+                    // Only generate shareable links for HTML files
+                    const htmlFiles = finalRevisionFiles.filter(f => f.name.toLowerCase().endsWith('.html'));
 
-                        outputHtml += `<div class="mb-2"><span class="text-purple-400 font-bold">${title}:</span> <br><a href="${url}" target="_blank" class="text-blue-400 hover:underline break-all">${url}</a></div>`;
-                        copyText += `${title}:\n${url}\n\n`;
-                    });
+                    if (htmlFiles.length === 0) {
+                        // Fallback: If no HTML files are found, just provide the root directory link
+                        const rootUrl = `https://samples.reputifly.org/${client}/${calculatedNextVersion}/`;
+                        outputHtml = `<div class="mb-2"><span class="text-purple-400 font-bold">App Root Directory:</span> <br><a href="${rootUrl}" target="_blank" class="text-blue-400 hover:underline break-all">${rootUrl}</a></div>`;
+                        copyText = `App Root Directory:\n${rootUrl}\n\n`;
+                    } else {
+                        htmlFiles.forEach(f => {
+                            let title = f.name;
+                            if (title.toLowerCase() === 'index.html') title = 'Home Page';
+                            else {
+                                // Strip folder paths if they exist (e.g. pages/about.html -> about)
+                                const nameParts = title.split('/');
+                                title = nameParts[nameParts.length - 1].replace('.html', '');
+                                title = title.charAt(0).toUpperCase() + title.slice(1) + ' Page';
+                            }
+                            const url = `https://samples.reputifly.org/${client}/${calculatedNextVersion}/${f.name === 'index.html' ? '' : f.name}`;
+
+                            outputHtml += `<div class="mb-2"><span class="text-purple-400 font-bold">${title}:</span> <br><a href="${url}" target="_blank" class="text-blue-400 hover:underline break-all">${url}</a></div>`;
+                            copyText += `${title}:\n${url}\n\n`;
+                        });
+                    }
 
                     document.getElementById('revLinksOutput').innerHTML = outputHtml;
 
@@ -1887,11 +1940,11 @@
                         <div class="code-editor-header flex justify-between items-center px-6 py-4 bg-black/40 border-b border-white/5 backdrop-blur-md gap-4">
                             <div class="flex items-center gap-3 w-full max-w-sm">
                                 <i data-feather="file" class="w-4 h-4 text-purple-400 shrink-0"></i>
-                                <input type="text" class="rev-paste-filename input-dark w-full rounded-lg px-3 py-1.5 text-sm font-mono text-white bg-black/50 border-white/10 focus:border-purple-500" placeholder="e.g. index.html" value="index.html" required>
+                                <input type="text" class="rev-paste-filename input-dark w-full rounded-lg px-3 py-1.5 text-sm font-mono text-white bg-black/50 border-white/10 focus:border-purple-500" placeholder="e.g. index.html" value="index.html">
                             </div>
                             <button type="button" class="text-gray-500 hover:text-red-400 p-2 rounded-xl hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all hidden rev-paste-remove" title="Remove File" onclick="this.closest('.rev-paste-block').remove(); updateRevSubmitState();"><i data-feather="trash-2" class="w-4 h-4"></i></button>
                         </div>
-                        <textarea required placeholder="Paste HTML/CSS/JS code here..." class="rev-paste-content code-editor-textarea w-full h-[300px] bg-black/20 text-gray-300 p-6 font-mono text-[13px] leading-relaxed focus:outline-none focus:bg-white/[0.02] transition-colors resize-none rounded-none"></textarea>
+                        <textarea placeholder="Paste HTML/CSS/JS code here..." class="rev-paste-content code-editor-textarea w-full h-[300px] bg-black/20 text-gray-300 p-6 font-mono text-[13px] leading-relaxed focus:outline-none focus:bg-white/[0.02] transition-colors resize-none rounded-none"></textarea>
                     </div>
                 `;
             }
