@@ -1479,7 +1479,8 @@
                 let extractedHtml = "";
 
                 for (const [relativePath, zipEntry] of Object.entries(contents.files)) {
-                    if (relativePath.endsWith('logo.png') && !zipEntry.dir) {
+                    // Versatile: Catches logo.png, logo.jpg, logo.jpeg, logo.svg, etc.
+                    if (relativePath.match(/logo\.(png|jpg|jpeg|webp|svg)$/i) && !zipEntry.dir) {
                         parsedLogoBase64 = await zipEntry.async("base64");
                     }
                     if (relativePath.endsWith('.html') && !zipEntry.dir && !extractedHtml) {
@@ -1608,16 +1609,37 @@
                             if (zipEntry.dir || relPath.includes('__MACOSX')) continue;
                             if (relPath.startsWith(rootPath)) {
                                 const cleanPath = relPath.substring(rootPath.length);
-                                if (cleanPath.endsWith('.html') || cleanPath.endsWith('.css') || cleanPath.endsWith('.js')) {
+                                const ext = cleanPath.split('.').pop().toLowerCase();
+                                
+                                const textExts = ['html', 'css', 'js', 'svg', 'json', 'md', 'txt'];
+                                const imgExts = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'ico'];
+
+                                if (textExts.includes(ext)) {
                                     const text = await zipEntry.async("string");
-                                    revisionFiles.push({ name: cleanPath, content: text });
+                                    revisionFiles.push({ name: cleanPath, content: text, isBinary: false });
+                                } else if (imgExts.includes(ext)) {
+                                    const base64Data = await zipEntry.async("base64");
+                                    revisionFiles.push({ name: cleanPath, content: base64Data, isBinary: true });
                                 }
                             }
                         }
                     } catch (err) { window.showToast("ZIP parsing error.", "error"); }
                 } else {
-                    const text = await f.text();
-                    revisionFiles.push({ name: f.name, content: text });
+                    // Handle loose file uploads
+                    const ext = f.name.split('.').pop().toLowerCase();
+                    const imgExts = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'ico'];
+                    
+                    if (imgExts.includes(ext)) {
+                        const base64 = await new Promise((resolve) => {
+                            const reader = new FileReader();
+                            reader.onload = (e) => resolve(e.target.result.split(',')[1]); // Strip prefix
+                            reader.readAsDataURL(f);
+                        });
+                        revisionFiles.push({ name: f.name, content: base64, isBinary: true });
+                    } else {
+                        const text = await f.text();
+                        revisionFiles.push({ name: f.name, content: text, isBinary: false });
+                    }
                 }
             }
 
@@ -1626,11 +1648,23 @@
             const innerList = document.getElementById('revExtractedList');
 
             revisionFiles.forEach(fileObj => {
-                const ext = fileObj.name.split('.').pop();
-                const iconColor = ext === 'css' ? 'text-blue-400' : (ext === 'js' ? 'text-yellow-400' : 'text-purple-400');
+                const ext = fileObj.name.split('.').pop().toLowerCase();
+                let iconColor = 'text-gray-400';
+                let iconName = 'file';
+                
+                if (ext === 'html') iconColor = 'text-purple-400';
+                else if (ext === 'css') iconColor = 'text-blue-400';
+                else if (ext === 'js') iconColor = 'text-yellow-400';
+                else if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'ico'].includes(ext)) {
+                    iconColor = 'text-pink-400';
+                    iconName = 'image';
+                } else if (ext === 'json') {
+                    iconColor = 'text-green-400';
+                }
+                
                 innerList.innerHTML += `
                     <div class="flex items-center gap-3 bg-black/40 p-3.5 rounded-[14px] border border-white/5 shadow-inner">
-                        <i data-feather="file" class="w-4 h-4 ${iconColor}"></i>
+                        <i data-feather="${iconName}" class="w-4 h-4 ${iconColor}"></i>
                         <span class="text-sm font-semibold text-gray-200 truncate">${fileObj.name}</span>
                     </div>`;
             });
