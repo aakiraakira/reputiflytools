@@ -1728,58 +1728,57 @@
 
             if (!folderName || !htmlContent || !currentIdToken) return window.showToast("Missing required data!", "error");
 
-            const confirmMsg = `Are you sure you want to deploy a Base build to /${folderName}?${isZipMode && window.baseZipFiles ? `\nThere are ${window.baseZipFiles.length} files queued for upload.` : ''}`;
-            if (!confirm(confirmMsg)) return;
+            const confirmMsg = `Deploying <b>Base build</b> to <span class="text-white font-mono">/${folderName}</span><br><br><span class="text-xs text-gray-400 uppercase tracking-widest font-bold">${isZipMode && window.baseZipFiles ? window.baseZipFiles.length : 1} File(s) Queued</span>`;
 
-            if (!folderName || !htmlContent || !currentIdToken) return window.showToast("Missing required data!", "error");
+            window.openDeployConfirmModal(confirmMsg, async () => {
+                const submitBtn = document.getElementById('submitBtn');
+                submitBtn.disabled = true;
+                document.getElementById('btnText').innerText = "Compiling & Pushing...";
 
-            const submitBtn = document.getElementById('submitBtn');
-            submitBtn.disabled = true;
-            document.getElementById('btnText').innerText = "Compiling & Pushing...";
+                try {
+                    currentIdToken = await auth.currentUser.getIdToken();
+                    const payload = { folderName, version, htmlContent };
+                    if (isZipMode && window.baseZipFiles && window.baseZipFiles.length > 0) {
+                        payload.files = window.baseZipFiles;
+                        // Sync editor changes back to the main HTML file before sending
+                        const htmlIndex = payload.files.findIndex(f => f.name.endsWith('.html'));
+                        if (htmlIndex > -1 && htmlContent) payload.files[htmlIndex].content = htmlContent;
+                    } else if (isZipMode && parsedLogoBase64) {
+                        payload.logoBase64 = parsedLogoBase64;
+                    }
 
-            try {
-                currentIdToken = await auth.currentUser.getIdToken();
-                const payload = { folderName, version, htmlContent };
-                if (isZipMode && window.baseZipFiles && window.baseZipFiles.length > 0) {
-                    payload.files = window.baseZipFiles;
-                    // Sync editor changes back to the main HTML file before sending
-                    const htmlIndex = payload.files.findIndex(f => f.name.endsWith('.html'));
-                    if (htmlIndex > -1 && htmlContent) payload.files[htmlIndex].content = htmlContent;
-                } else if (isZipMode && parsedLogoBase64) {
-                    payload.logoBase64 = parsedLogoBase64;
+                    const response = await fetch(API_DEPLOY, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const rawText = await response.text();
+                    let result = {};
+                    try { result = rawText ? JSON.parse(rawText) : {}; } catch (_) { result = { error: rawText || `HTTP ${response.status}` }; }
+
+                    if (!response.ok || !result.success) {
+                        throw new Error(result.error || `HTTP ${response.status}`);
+                    }
+
+                    document.getElementById('deployForm').classList.add('hidden');
+                    document.getElementById('resultBox').classList.remove('hidden');
+                    document.getElementById('liveLink').href = result.liveUrl;
+
+                    const copyBtn = document.getElementById('copyLinkBtn');
+                    copyBtn.onclick = () => {
+                        navigator.clipboard.writeText(result.liveUrl);
+                        copyBtn.innerHTML = '<i data-feather="check" class="w-5 h-5"></i> Copied!';
+                        feather.replace();
+                        setTimeout(() => { copyBtn.innerHTML = '<i data-feather="copy" class="w-5 h-5"></i> Copy Link'; feather.replace(); }, 2000);
+                    };
+                } catch (err) {
+                    window.showToast("Error: " + (err.message || "Network Error."), "error");
+                } finally {
+                    submitBtn.disabled = false;
+                    document.getElementById('btnText').innerText = "Deploy Base Build";
                 }
-
-                const response = await fetch(API_DEPLOY, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
-                    body: JSON.stringify(payload)
-                });
-
-                const rawText = await response.text();
-                let result = {};
-                try { result = rawText ? JSON.parse(rawText) : {}; } catch (_) { result = { error: rawText || `HTTP ${response.status}` }; }
-
-                if (!response.ok || !result.success) {
-                    throw new Error(result.error || `HTTP ${response.status}`);
-                }
-
-                document.getElementById('deployForm').classList.add('hidden');
-                document.getElementById('resultBox').classList.remove('hidden');
-                document.getElementById('liveLink').href = result.liveUrl;
-
-                const copyBtn = document.getElementById('copyLinkBtn');
-                copyBtn.onclick = () => {
-                    navigator.clipboard.writeText(result.liveUrl);
-                    copyBtn.innerHTML = '<i data-feather="check" class="w-5 h-5"></i> Copied!';
-                    feather.replace();
-                    setTimeout(() => { copyBtn.innerHTML = '<i data-feather="copy" class="w-5 h-5"></i> Copy Link'; feather.replace(); }, 2000);
-                };
-            } catch (err) {
-                window.showToast("Error: " + (err.message || "Network Error."), "error");
-            } finally {
-                submitBtn.disabled = false;
-                document.getElementById('btnText').innerText = "Deploy Base Build";
-            }
+            });
         });
 
         window.resetDeployer = () => {
@@ -2078,65 +2077,66 @@
                 finalRevisionFiles = revisionFiles;
             }
 
-            const confirmMsg = `Are you sure you want to deploy revision ${calculatedNextVersion} to /${client}?${finalRevisionFiles.length > 0 ? `\nThere are ${finalRevisionFiles.length} files queued for upload.` : ''}`;
-            if (!confirm(confirmMsg)) return;
+            const confirmMsg = `Deploying Revision <span class="text-purple-400 font-bold">${calculatedNextVersion}</span> to <span class="text-white font-mono">/${client}</span><br><br><span class="text-xs text-gray-400 uppercase tracking-widest font-bold">${finalRevisionFiles.length} File(s) Queued</span>`;
 
-            const btn = document.getElementById('revSubmitBtn');
-            btn.disabled = true;
-            document.getElementById('revBtnText').innerText = "Pushing Branch...";
+            window.openDeployConfirmModal(confirmMsg, async () => {
+                const btn = document.getElementById('revSubmitBtn');
+                btn.disabled = true;
+                document.getElementById('revBtnText').innerText = "Pushing Branch...";
 
-            try {
-                if (auth.currentUser) currentIdToken = await auth.currentUser.getIdToken();
-                const response = await fetch(API_DEPLOY, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
-                    body: JSON.stringify({ folderName: client, version: calculatedNextVersion, files: finalRevisionFiles })
-                });
-                const result = await response.json();
+                try {
+                    if (auth.currentUser) currentIdToken = await auth.currentUser.getIdToken();
+                    const response = await fetch(API_DEPLOY, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
+                        body: JSON.stringify({ folderName: client, version: calculatedNextVersion, files: finalRevisionFiles })
+                    });
+                    const result = await response.json();
 
-                if (result.success) {
-                    document.getElementById('revForm').classList.add('hidden');
-                    const resBox = document.getElementById('revResultBox');
-                    resBox.classList.remove('hidden');
+                    if (result.success) {
+                        document.getElementById('revForm').classList.add('hidden');
+                        const resBox = document.getElementById('revResultBox');
+                        resBox.classList.remove('hidden');
 
-                    let outputHtml = '';
-                    let copyText = '';
+                        let outputHtml = '';
+                        let copyText = '';
 
-                    // Only generate shareable links for HTML files
-                    const htmlFiles = finalRevisionFiles.filter(f => f.name.toLowerCase().endsWith('.html'));
+                        // Only generate shareable links for HTML files
+                        const htmlFiles = finalRevisionFiles.filter(f => f.name.toLowerCase().endsWith('.html'));
 
-                    if (htmlFiles.length === 0) {
-                        // Fallback: If no HTML files are found, just provide the root directory link
-                        const rootUrl = `https://samples.reputifly.org/${client}/${calculatedNextVersion}/`;
-                        outputHtml = `<div class="mb-2"><span class="text-purple-400 font-bold">App Root Directory:</span> <br><a href="${rootUrl}" target="_blank" class="text-blue-400 hover:underline break-all">${rootUrl}</a></div>`;
-                        copyText = `App Root Directory:\n${rootUrl}\n\n`;
-                    } else {
-                        htmlFiles.forEach(f => {
-                            let title = f.name;
-                            if (title.toLowerCase() === 'index.html') title = 'Home Page';
-                            else {
-                                // Strip folder paths if they exist (e.g. pages/about.html -> about)
-                                const nameParts = title.split('/');
-                                title = nameParts[nameParts.length - 1].replace('.html', '');
-                                title = title.charAt(0).toUpperCase() + title.slice(1) + ' Page';
-                            }
-                            const url = `https://samples.reputifly.org/${client}/${calculatedNextVersion}/${f.name === 'index.html' ? '' : f.name}`;
+                        if (htmlFiles.length === 0) {
+                            // Fallback: If no HTML files are found, just provide the root directory link
+                            const rootUrl = `https://samples.reputifly.org/${client}/${calculatedNextVersion}/`;
+                            outputHtml = `<div class="mb-2"><span class="text-purple-400 font-bold">App Root Directory:</span> <br><a href="${rootUrl}" target="_blank" class="text-blue-400 hover:underline break-all">${rootUrl}</a></div>`;
+                            copyText = `App Root Directory:\n${rootUrl}\n\n`;
+                        } else {
+                            htmlFiles.forEach(f => {
+                                let title = f.name;
+                                if (title.toLowerCase() === 'index.html') title = 'Home Page';
+                                else {
+                                    // Strip folder paths if they exist (e.g. pages/about.html -> about)
+                                    const nameParts = title.split('/');
+                                    title = nameParts[nameParts.length - 1].replace('.html', '');
+                                    title = title.charAt(0).toUpperCase() + title.slice(1) + ' Page';
+                                }
+                                const url = `https://samples.reputifly.org/${client}/${calculatedNextVersion}/${f.name === 'index.html' ? '' : f.name}`;
 
-                            outputHtml += `<div class="mb-2"><span class="text-purple-400 font-bold">${title}:</span> <br><a href="${url}" target="_blank" class="text-blue-400 hover:underline break-all">${url}</a></div>`;
-                            copyText += `${title}:\n${url}\n\n`;
-                        });
-                    }
+                                outputHtml += `<div class="mb-2"><span class="text-purple-400 font-bold">${title}:</span> <br><a href="${url}" target="_blank" class="text-blue-400 hover:underline break-all">${url}</a></div>`;
+                                copyText += `${title}:\n${url}\n\n`;
+                            });
+                        }
 
-                    document.getElementById('revLinksOutput').innerHTML = outputHtml;
+                        document.getElementById('revLinksOutput').innerHTML = outputHtml;
 
-                    document.getElementById('revCopyBtn').onclick = () => {
-                        navigator.clipboard.writeText(copyText.trim());
-                        document.getElementById('revCopyBtn').innerHTML = '<i data-feather="check" class="w-5 h-5"></i> Copied Format!';
-                        feather.replace();
-                        setTimeout(() => { document.getElementById('revCopyBtn').innerHTML = '<i data-feather="copy" class="w-5 h-5"></i> Copy Links for WhatsApp'; feather.replace(); }, 2000);
-                    };
-                } else window.showToast("Error: " + result.error, "error");
-            } catch (err) { window.showToast("Network Error.", "error"); }
+                        document.getElementById('revCopyBtn').onclick = () => {
+                            navigator.clipboard.writeText(copyText.trim());
+                            document.getElementById('revCopyBtn').innerHTML = '<i data-feather="check" class="w-5 h-5"></i> Copied Format!';
+                            feather.replace();
+                            setTimeout(() => { document.getElementById('revCopyBtn').innerHTML = '<i data-feather="copy" class="w-5 h-5"></i> Copy Links for WhatsApp'; feather.replace(); }, 2000);
+                        };
+                    } else window.showToast("Error: " + result.error, "error");
+                } catch (err) { window.showToast("Network Error.", "error"); }
+            });
         });
 
         window.resetRevision = () => {
@@ -2961,6 +2961,27 @@
             }, 2000);
         });
     </script>
+    </script>
+    <!-- Deploy Confirm Modal -->
+    <div id="deployConfirmModal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div class="fixed inset-0 bg-black/80 backdrop-blur-sm" onclick="closeDeployConfirmModal()"></div>
+        <div
+            class="glass-card animate-scale-in relative w-full max-w-md p-8 rounded-[2rem] border border-white/10 shadow-2xl flex flex-col items-center text-center">
+            <div
+                class="w-16 h-16 rounded-full bg-purple-500/20 border border-purple-500/30 flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(168,85,247,0.3)]">
+                <i data-feather="upload-cloud" class="w-8 h-8 text-purple-400"></i>
+            </div>
+            <h3 class="text-xl font-bold text-white mb-2">Confirm Deployment</h3>
+            <div id="deployConfirmText" class="text-sm text-gray-300 mb-8 leading-relaxed"></div>
+            <div class="flex gap-4 w-full">
+                <button onclick="closeDeployConfirmModal()"
+                    class="flex-1 py-3 px-4 rounded-xl text-sm font-bold text-gray-400 hover:text-white hover:bg-white/5 border border-transparent transition-all">Cancel</button>
+                <button id="deployConfirmBtn"
+                    class="flex-1 bg-gradient-to-r from-purple-500 to-[#E6397F] py-3 px-4 rounded-xl text-sm font-bold text-white shadow-lg hover:shadow-[0_0_20px_rgba(168,85,247,0.4)] transition-all">Start
+                    Push</button>
+            </div>
+        </div>
+    </div>
     <div id="toastContainer"></div>
     <script>
         // Danger Modal Logic
@@ -2980,6 +3001,26 @@
         document.getElementById('dangerConfirmBtn').addEventListener('click', () => {
             if (pendingDangerAction) pendingDangerAction();
             closeDangerModal();
+        });
+
+        // Deploy Confirm Modal Logic
+        let pendingDeployAction = null;
+
+        window.openDeployConfirmModal = (htmlText, action) => {
+            document.getElementById('deployConfirmText').innerHTML = htmlText;
+            pendingDeployAction = action;
+            document.getElementById('deployConfirmModal').classList.remove('hidden');
+            feather.replace();
+        };
+
+        window.closeDeployConfirmModal = () => {
+            document.getElementById('deployConfirmModal').classList.add('hidden');
+            pendingDeployAction = null;
+        };
+
+        document.getElementById('deployConfirmBtn').addEventListener('click', () => {
+            if (pendingDeployAction) pendingDeployAction();
+            closeDeployConfirmModal();
         });
         // Global Toast System
         window.showToast = (message, type = 'error') => {
