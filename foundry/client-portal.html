@@ -1,0 +1,2767 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Reputifly | Visual Workspace</title>
+
+    <link rel="icon" type="image/png" href="https://reputifly.com/wp-content/uploads/2026/01/IMG_2123.jpg">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
+        rel="stylesheet">
+    <script src="https://unpkg.com/feather-icons"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        // NEW: Import Storage functions
+        import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-storage.js";
+
+        window.firebaseApp = {
+            initializeApp, getAuth, onAuthStateChanged,
+            getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs,
+            getStorage, ref, uploadString, getDownloadURL, onSnapshot
+        };
+        window.dispatchEvent(new Event('firebaseLoaded'));
+    </script>
+
+    <style>
+        :root {
+            --bg-main: #0B0A14;
+            --accent-primary: #E6397F;
+            --accent-secondary: #FF8A00;
+            --glass-border: rgba(255, 255, 255, 0.08);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-main);
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        /* --- UI COMPONENTS --- */
+        .liquid-glow {
+            background: radial-gradient(circle at top, rgba(255, 255, 255, 0.4) 0%, transparent 60%),
+                linear-gradient(90deg, #E6397F, #FF8A00);
+            box-shadow:
+                0 6px 20px rgba(230, 57, 127, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.4);
+            border: none;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            color: white;
+            font-weight: 700;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+
+        .liquid-glow:hover {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 15px 30px rgba(255, 138, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        }
+
+        .liquid-glow.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+            filter: grayscale(1);
+        }
+
+        .liquid-glow.small {
+            padding: 0 16px;
+            height: 32px;
+            font-size: 12px;
+        }
+
+        .btn-glass {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #ccc;
+            border-radius: 9999px;
+            transition: all 0.2s ease;
+            font-weight: 600;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 0 18px;
+            cursor: pointer;
+        }
+
+        .btn-glass:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        /* --- PREMIUM DROPDOWN STYLING --- */
+        /* --- PREMIUM DROPDOWN STYLING (CENTERED) --- */
+        .dropdown-menu {
+            background: rgba(18, 18, 24, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+            padding: 6px;
+            min-width: 260px;
+            /* Made slightly wider for better text fit */
+
+            /* CENTERING LOGIC */
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%) translateY(10px);
+            /* Start slightly down */
+
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Hover State to Show Menu */
+        .group:hover .dropdown-menu {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) translateY(0);
+            /* Move to final position */
+        }
+
+        /* Ensure the wrapper positions correctly */
+        #sharingMenu .absolute {
+            left: 50%;
+            right: auto;
+            transform: translateX(-50%);
+            width: max-content;
+            /* Ensures div doesn't collapse */
+        }
+
+        /* (Keep the rest of .dropdown-item styles the same) */
+        .dropdown-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px 14px;
+            margin-bottom: 2px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+            background: transparent;
+            text-align: left;
+            width: 100%;
+        }
+
+        .dropdown-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .dropdown-item h5 {
+            color: white;
+            font-weight: 600;
+            font-size: 13px;
+            margin: 0 0 2px 0;
+        }
+
+        .dropdown-item p {
+            color: #888;
+            font-size: 11px;
+            margin: 0;
+            line-height: 1.3;
+        }
+
+        .dropdown-item:hover h5 {
+            color: #fff;
+        }
+
+        .dropdown-item:hover p {
+            color: #aaa;
+        }
+
+        .icon-box {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .bg-green-glow {
+            background: rgba(34, 197, 94, 0.1);
+            color: #4ade80;
+        }
+
+        .bg-blue-glow {
+            background: rgba(59, 130, 246, 0.1);
+            color: #60a5fa;
+        }
+
+        .btn-share {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            border-radius: 9999px;
+            font-weight: 600;
+            font-size: 13px;
+            height: 40px;
+            padding: 0 20px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .btn-share:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: white;
+        }
+
+        .hidden-force {
+            display: none !important;
+        }
+
+        .input-dark {
+            background: #050505;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: white;
+            border-radius: 12px;
+            padding: 14px 18px;
+            width: 100%;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            outline: none;
+            transition: all 0.3s ease;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .input-dark:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 1px rgba(230, 57, 127, 0.5), inset 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        /* --- MODALS --- */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(5, 5, 8, 0.95);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-card {
+            background: #121218;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 24px;
+            padding: 40px;
+            width: 90%;
+            max-width: 500px;
+            text-align: center;
+            box-shadow: 0 50px 100px -20px rgba(0, 0, 0, 0.8);
+            transform: scale(0.95);
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .modal-overlay.active .modal-card {
+            transform: scale(1);
+        }
+
+        .icon-circle {
+            width: 64px;
+            height: 64px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px auto;
+        }
+
+        /* --- TUTORIAL STEPS --- */
+        .step-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            text-align: left;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            margin-bottom: 12px;
+        }
+
+        .step-icon {
+            width: 40px;
+            height: 40px;
+            background: rgba(230, 57, 127, 0.1);
+            color: #E6397F;
+            border-radius: 10px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* --- RICH TEXT EDITOR STYLES --- */
+        .editor-container {
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            overflow: hidden;
+            background: #050505;
+            text-align: left;
+        }
+
+        .editor-toolbar {
+            background: rgba(255, 255, 255, 0.03);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 8px 12px;
+            display: flex;
+            gap: 6px;
+        }
+
+        .toolbar-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #aaa;
+            transition: all 0.2s;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+        }
+
+        .toolbar-btn:hover,
+        .toolbar-btn.active {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .toolbar-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .editor-content {
+            padding: 16px;
+            min-height: 120px;
+            max-height: 200px;
+            overflow-y: auto;
+            color: white;
+            font-size: 14px;
+            line-height: 1.6;
+            outline: none;
+        }
+
+        .editor-content b,
+        .editor-content strong {
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .editor-content i,
+        .editor-content em {
+            font-style: italic;
+        }
+
+        .editor-content u {
+            text-decoration: underline;
+        }
+
+        .editor-content a {
+            color: #E6397F;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .link-drawer {
+            background: #1a1a24;
+            padding: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            display: none;
+            animation: slideDown 0.2s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                transform: translateY(-10px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        /* --- NAV CAPSULE & TOGGLES --- */
+        .nav-capsule {
+            position: absolute;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 95%;
+            max-width: 1000px;
+            height: 68px;
+            background: rgba(20, 20, 30, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 50;
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+            transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55), opacity 0.3s ease;
+        }
+
+        .nav-capsule.nav-hidden {
+            transform: translateX(-50%) translateY(-200%);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .undo-redo-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #888;
+            border: 1px solid transparent;
+            background: transparent;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .undo-redo-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .undo-redo-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            hover: none;
+        }
+
+        .toggle-btn {
+            position: absolute;
+            z-index: 60;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(20, 20, 30, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s ease;
+            opacity: 0.7;
+        }
+
+        .toggle-btn:hover {
+            opacity: 1;
+            transform: scale(1.1);
+            background: #E6397F;
+            border-color: #E6397F;
+        }
+
+        #navToggleBtn {
+            top: 38px;
+            right: 24px;
+        }
+
+        #mobileToggleBtn {
+            top: 38px;
+            right: 74px;
+        }
+
+        @media (max-width: 768px) {
+            #mobileToggleBtn {
+                display: none;
+            }
+
+            #navToggleBtn {
+                top: auto;
+                bottom: 24px;
+                left: 24px;
+                right: auto;
+                background: rgba(230, 57, 127, 0.9);
+                border-color: #E6397F;
+                opacity: 1;
+            }
+        }
+
+        .loader {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .pulse-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 1px solid var(--accent-primary);
+            opacity: 0;
+            animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+
+        @keyframes pulse-ring {
+            0% {
+                transform: scale(0.8);
+                opacity: 1;
+            }
+
+            100% {
+                transform: scale(1.5);
+                opacity: 0;
+            }
+        }
+
+        /* --- TOAST NOTIFICATION --- */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: #1a1a24;
+            border: 1px solid #E6397F;
+            padding: 16px 24px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            z-index: 200;
+            opacity: 0;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        .toast-content h4 {
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            margin: 0;
+        }
+
+        .toast-content p {
+            color: #aaa;
+            font-size: 12px;
+            margin: 2px 0 0 0;
+        }
+
+        /* --- AUTOCOMPLETE DROPDOWN --- */
+        .input-wrapper {
+            position: relative;
+        }
+
+        .autocomplete-list {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            width: 100%;
+            background: #1a1a24;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            margin-top: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 50;
+            display: none;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .autocomplete-list.active {
+            display: block;
+        }
+
+        .autocomplete-item {
+            padding: 10px 16px;
+            font-size: 12px;
+            color: #ccc;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .autocomplete-item:hover {
+            background: rgba(230, 57, 127, 0.1);
+            color: white;
+        }
+
+        .autocomplete-item span.meta {
+            color: #666;
+            font-size: 10px;
+            font-family: monospace;
+        }
+
+        /* SHARE MODAL SPECIFIC */
+        .copy-box {
+            background: #050505;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            font-family: monospace;
+            color: #E6397F;
+            font-size: 12px;
+            overflow: hidden;
+        }
+    </style>
+</head>
+
+<body>
+
+    <button id="mobileToggleBtn" class="toggle-btn" onclick="toggleMobileView()" title="Toggle Mobile View">
+        <i data-feather="smartphone" class="w-5 h-5"></i>
+    </button>
+    <button id="navToggleBtn" class="toggle-btn" onclick="toggleHeader()" title="Show/Hide Header">
+        <i data-feather="eye" class="w-5 h-5"></i>
+    </button>
+
+    <div id="cloudLoader" class="modal-overlay" style="z-index: 300;">
+        <div class="flex flex-col items-center">
+            <div class="loader mb-4" style="width: 40px; height: 40px;"></div>
+            <h2 class="text-xl font-bold">Loading Project...</h2>
+        </div>
+    </div>
+
+    <div id="shareModal" class="modal-overlay" onclick="closeModal('shareModal', event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="icon-circle">
+                <i data-feather="share-2" class="w-8 h-8 text-pink-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Share Link</h1>
+            <p class="text-gray-400 text-sm mb-6">Send this link to share the current progress.</p>
+
+            <div class="copy-box" id="shareLinkBox">
+                Generating...
+            </div>
+
+            <button onclick="copyShareLink()" class="liquid-glow w-full py-3 text-sm shadow-lg mb-3">
+                <i data-feather="copy" class="w-4 h-4"></i> Copy Link
+            </button>
+            <button onclick="closeModal('shareModal')" class="text-xs text-gray-500 hover:text-white">Close</button>
+        </div>
+    </div>
+
+    <div id="setupScreen" class="modal-overlay" style="z-index: 200;">
+        <div class="modal-card">
+            <div class="icon-circle relative">
+                <div class="pulse-ring"></div>
+                <i data-feather="lock" class="w-8 h-8 text-pink-500 relative z-10"></i>
+            </div>
+            <h1 class="text-2xl font-bold font-['Space_Grotesk'] mb-3 text-white">Select a Project First</h1>
+            <p class="text-gray-400 text-sm mb-8 leading-relaxed px-2">You cannot access the remote editor directly.
+                Please return to your client dashboard and select a specific revision to start editing.</p>
+            <button onclick="window.location.href='client.html'"
+                class="liquid-glow w-full py-4 text-sm shadow-lg font-bold flex items-center justify-center gap-2"><i
+                    data-feather="arrow-left" class="w-4 h-4"></i> Return to Dashboard</button>
+        </div>
+    </div>
+
+    <div id="helpModal" class="modal-overlay" style="z-index: 150;">
+        <div class="modal-card">
+            <div class="icon-circle">
+                <i data-feather="help-circle" class="w-8 h-8 text-pink-500"></i>
+            </div>
+            <h1 class="text-2xl font-bold font-['Space_Grotesk'] mb-2 text-white">How it Works</h1>
+            <p class="text-gray-400 text-sm mb-8">Follow these steps to update the website.</p>
+
+            <div class="step-row">
+                <div class="step-icon"><i data-feather="type" class="w-5 h-5"></i></div>
+                <div>
+                    <h4 class="font-bold text-sm text-white">Edit Text</h4>
+                    <p class="text-xs text-gray-400 mt-1">Click any text on the page to change wording, bolding, or
+                        links.</p>
+                </div>
+            </div>
+            <div class="step-row">
+                <div class="step-icon"><i data-feather="image" class="w-5 h-5"></i></div>
+                <div>
+                    <h4 class="font-bold text-sm text-white">Swap Images</h4>
+                    <p class="text-xs text-gray-400 mt-1">Click any image to upload a replacement. We handle the
+                        formatting.</p>
+                </div>
+            </div>
+            <div class="step-row">
+                <div class="step-icon"><i data-feather="download-cloud" class="w-5 h-5"></i></div>
+                <div>
+                    <h4 class="font-bold text-sm text-white">Save & Send</h4>
+                    <p class="text-xs text-gray-400 mt-1">When finished, click <strong>Download Zip</strong> (or Share).
+                    </p>
+                </div>
+            </div>
+
+            <button onclick="closeModal('helpModal')" class="liquid-glow w-full py-4 text-sm shadow-lg mt-4">Got it,
+                Let's Go!</button>
+        </div>
+    </div>
+
+    <nav class="nav-capsule" id="mainHeader">
+        <div class="flex items-center gap-3">
+            <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png"
+                class="h-6 w-auto brightness-125">
+
+            <button id="navHelpBtn" onclick="openModal('helpModal')"
+                class="hidden-force w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white transition-all ml-1"
+                title="Help">
+                <i data-feather="help-circle" class="w-4 h-4"></i>
+            </button>
+
+            <button id="navExitBtn" onclick="exitProject()"
+                class="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white hover:bg-red-500/20 hover:border-red-500/50 transition-all ml-1"
+                title="Exit Project">
+                <i data-feather="log-out" class="w-3.5 h-3.5"></i>
+            </button>
+
+            <div class="h-4 w-px bg-white/10 hidden md:block ml-2"></div>
+            <span class="text-xs font-bold text-gray-500 font-mono hidden md:block truncate max-w-[150px]"
+                id="domainDisplay">...</span>
+
+            <button type="button" onclick="performUndo()" id="undoBtn" class="undo-redo-btn" disabled
+                title="Undo (Ctrl+Z)">
+                <i data-feather="arrow-left" class="w-4 h-4"></i>
+            </button>
+            <button type="button" onclick="performRedo()" id="redoBtn" class="undo-redo-btn" disabled
+                title="Redo (Ctrl+Y)">
+                <i data-feather="arrow-right" class="w-4 h-4"></i>
+            </button>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <div id="navLoadMenu" class="relative group z-50">
+                <button class="btn-glass h-10 pr-4">
+                    <i data-feather="layout" class="w-4 h-4"></i>
+                    <span class="hidden sm:inline">Load HTML</span>
+                    <i data-feather="chevron-down" class="w-3 h-3 ml-1 opacity-50"></i>
+                </button>
+
+                <div
+                    class="absolute top-full left-1/2 transform -translate-x-1/2 mt-3 w-48 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 translate-y-2 group-hover:translate-y-0">
+                    <div
+                        class="bg-[#121218] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col backdrop-blur-xl ring-1 ring-white/5">
+                        <div
+                            class="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#121218] border-l border-t border-white/10 transform rotate-45">
+                        </div>
+
+                        <button onclick="document.getElementById('fileInput').click()"
+                            class="relative z-10 text-left px-4 py-3 text-xs font-medium text-gray-300 hover:bg-white/5 hover:text-white flex items-center gap-3 transition-colors border-b border-white/5">
+                            <i data-feather="upload" class="w-4 h-4 text-pink-500"></i> Upload File
+                        </button>
+                        <button
+                            onclick="openModal('pasteModal'); setTimeout(() => document.getElementById('pasteInput').focus(), 100);"
+                            class="relative z-10 text-left px-4 py-3 text-xs font-medium text-gray-300 hover:bg-white/5 hover:text-white flex items-center gap-3 transition-colors">
+                            <i data-feather="clipboard" class="w-4 h-4 text-orange-500"></i> Paste Code
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- NEW: Pages Explorer -- HIDDEN IN CREATOR MODE -->
+            <div id="navPagesMenu" class="relative group z-50 hidden">
+                <button class="btn-glass h-10 pr-4">
+                    <i data-feather="file-text" class="w-4 h-4 text-blue-400"></i>
+                    <span class="hidden sm:inline font-bold" id="currentPageName">Loading...</span>
+                    <i data-feather="chevron-down" class="w-3 h-3 ml-1 opacity-50"></i>
+                </button>
+
+                <div
+                    class="absolute top-full left-1/2 transform -translate-x-1/2 mt-3 w-56 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 translate-y-2 group-hover:translate-y-0">
+                    <div
+                        class="bg-[#121218] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col backdrop-blur-xl ring-1 ring-white/5">
+                        <div
+                            class="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#121218] border-l border-t border-white/10 transform rotate-45">
+                        </div>
+                        <div id="pagesListContainer" class="max-h-[300px] overflow-y-auto">
+                            <!-- Pages will be injected securely here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button id="adminCopyBtn" onclick="copySourceCode()"
+                class="hidden-force liquid-glow h-10 px-6 text-xs bg-purple-600 border-purple-500 mr-2 shadow-[0_0_20px_rgba(147,51,234,0.3)]">
+                <i data-feather="code" class="w-4 h-4"></i> <span class="font-bold ml-2">Copy Source Code</span>
+            </button>
+            <button id="adminDownloadBtn" onclick="downloadProject()"
+                class="hidden-force liquid-glow h-10 px-6 text-xs bg-blue-600 border-blue-500 mr-2 shadow-[0_0_20px_rgba(37,99,235,0.3)]">
+                <i data-feather="download" class="w-4 h-4"></i> <span class="font-bold ml-2">Download Zip</span>
+            </button>
+
+            <button id="navShareBtn" onclick="createShareableLink()" class="btn-share mr-2">
+                <i data-feather="share-2" class="w-4 h-4"></i> <span class="hidden sm:inline">Share</span>
+            </button>
+
+            <div id="sharingMenu" class="relative group z-50 hidden">
+                <button class="liquid-glow h-10 px-5 text-xs disabled transition-all" id="mainShareBtn">
+                    <i data-feather="check-circle" class="w-4 h-4"></i>
+                    <span class="hidden sm:inline font-bold">Finish / Download</span>
+                    <i data-feather="chevron-down" class="w-3 h-3 ml-2 opacity-70"></i>
+                </button>
+
+                <div class="absolute top-full left-1/2 -translate-x-1/2 mt-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200"
+                    style="padding-top: 10px;">
+                    <div class="dropdown-menu">
+                        <button id="notifyOption" onclick="notifyTeam()" class="dropdown-item group/item">
+                            <div class="icon-box bg-green-glow group-hover/item:bg-green-500/20 transition-colors">
+                                <i data-feather="send" class="w-4 h-4"></i>
+                            </div>
+                            <div>
+                                <h5>Notify Completion</h5>
+                                <p>Send changes directly to us.<br>No download required.</p>
+                            </div>
+                        </button>
+
+                        <div class="h-px bg-white/5 my-1"></div>
+
+                        <button onclick="downloadProject()" class="dropdown-item group/item">
+                            <div class="icon-box bg-blue-glow group-hover/item:bg-blue-500/20 transition-colors">
+                                <i data-feather="download-cloud" class="w-4 h-4"></i>
+                            </div>
+                            <div>
+                                <h5>Download Zip</h5>
+                                <p>Download the files manually.<br>Required for new images.</p>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+    <div id="notifySuccessModal" class="modal-overlay" onclick="closeModal('notifySuccessModal', event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="icon-circle" style="background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.2);">
+                <i data-feather="check-circle" class="w-10 h-10 text-green-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Changes Sent!</h1>
+            <p class="text-gray-400 text-sm mb-6">We have received your update notification. You can now close this tab.
+            </p>
+            <button onclick="closeModal('notifySuccessModal')"
+                class="w-full py-3 text-sm font-bold rounded-full bg-white/5 hover:bg-white/10 text-white transition-colors">
+                Close Editor
+            </button>
+        </div>
+    </div>
+
+    <div id="notifyErrorModal" class="modal-overlay" onclick="closeModal('notifyErrorModal', event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="icon-circle" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2);">
+                <i data-feather="alert-triangle" class="w-10 h-10 text-red-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Could Not Send</h1>
+            <p class="text-gray-400 text-sm mb-6">We couldn't notify the team automatically. Please download the ZIP
+                instead.</p>
+            <button onclick="downloadProject(); closeModal('notifyErrorModal')"
+                class="liquid-glow w-full py-3 text-sm font-bold shadow-lg">
+                <i data-feather="download-cloud" class="w-4 h-4 mr-2"></i> Download Zip Now
+            </button>
+        </div>
+    </div>
+
+    <div id="editor-frame-container"
+        style="flex: 1; position: relative; width: 100%; height: 100%; transition: all 0.3s ease;">
+        <div id="empty-state" onclick="document.getElementById('fileInput').click()"
+            class="absolute inset-0 z-10 bg-[#0B0A14] flex flex-col items-center justify-center cursor-pointer">
+            <div class="relative z-20 flex flex-col items-center">
+                <div
+                    class="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-5 border border-white/10 shadow-2xl transition-transform duration-300 hover:scale-110">
+                    <i data-feather="upload-cloud" class="w-8 h-8 text-gray-400"></i>
+                </div>
+
+                <h2 class="text-2xl font-bold mb-2 text-white font-['Space_Grotesk'] tracking-tight">No Page Loaded</h2>
+                <p class="text-gray-500 text-sm mb-6">Click anywhere to <span class="text-white font-bold">Upload
+                        HTML</span></p>
+
+                <div class="flex items-center gap-3 text-xs text-gray-700 font-bold tracking-widest uppercase my-2">
+                    <span class="w-8 h-px bg-white/5"></span>
+                    <span>OR</span>
+                    <span class="w-8 h-px bg-white/5"></span>
+                </div>
+
+                <button
+                    onclick="event.stopPropagation(); openModal('pasteModal'); setTimeout(() => document.getElementById('pasteInput').focus(), 100);"
+                    class="liquid-glow mt-4 px-8 py-3 text-xs shadow-lg flex items-center gap-2">
+                    <i data-feather="clipboard" class="w-3 h-3"></i> Paste Code Directly
+                </button>
+            </div>
+        </div>
+        <iframe id="editorFrame"
+            style="width: 100%; height: 100%; border: none; display: block; background: white; transition: all 0.3s ease;"></iframe>
+    </div>
+
+    <div class="modal-overlay" id="imageModal" onclick="closeModal('imageModal', event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-lg font-bold font-['Space_Grotesk']">Change Image</h3>
+                <button onclick="closeModal('imageModal')" class="text-gray-500 hover:text-white"><i data-feather="x"
+                        class="w-5 h-5"></i></button>
+            </div>
+            <div class="border-2 border-dashed border-white/10 rounded-2xl p-8 hover:bg-white/5 hover:border-pink-500/50 cursor-pointer transition-all mb-6 group"
+                onclick="document.getElementById('imgUpload').click()" id="dropZone">
+                <div id="dropContent">
+                    <div
+                        class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
+                        <i data-feather="image" class="w-6 h-6 text-pink-500"></i>
+                    </div>
+                    <p class="text-sm font-bold text-white">Upload, Drag or Paste (Ctrl+V)</p>
+                    <p class="text-[10px] text-gray-400 mt-1">Auto-converts to WebP</p>
+                </div>
+            </div>
+            <div class="relative mb-6">
+                <div class="absolute inset-0 flex items-center">
+                    <div class="w-full border-t border-white/10"></div>
+                </div>
+                <div class="relative flex justify-center text-xs uppercase"><span
+                        class="bg-[#121218] px-2 text-gray-500 font-bold">Or URL</span></div>
+            </div>
+            <div class="flex gap-3">
+                <input type="text" id="urlInput" class="input-dark flex-grow" placeholder="https://...">
+                <button onclick="applyUrl()"
+                    class="liquid-glow px-6 py-0 text-xs shadow-lg hover:shadow-pink-500/20 whitespace-nowrap">Apply</button>
+            </div>
+        </div>
+    </div>
+    <div id="exitModal" class="modal-overlay" onclick="closeModal('exitModal', event)">
+        <div class="modal-card" style="max-width: 400px;" onclick="event.stopPropagation()">
+            <div class="icon-circle" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2);">
+                <i data-feather="log-out" class="w-10 h-10 text-red-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Exit Project?</h1>
+            <p class="text-gray-400 text-sm mb-6">Any unsaved progress will be lost. This will clear the current
+                workspace.</p>
+
+            <div class="flex gap-3">
+                <button onclick="confirmExit()" class="liquid-glow w-full py-3 text-sm font-bold shadow-lg"
+                    style="background: #ef4444; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);">
+                    Yes, Exit
+                </button>
+                <button onclick="closeModal('exitModal')"
+                    class="w-full py-3 text-sm font-bold rounded-full bg-white/5 hover:bg-white/10 text-white transition-colors">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+    <div id="exitModal" class="modal-overlay" onclick="closeModal('exitModal', event)">
+        <div class="modal-card" style="max-width: 400px;" onclick="event.stopPropagation()">
+            <div class="icon-circle" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2);">
+                <i data-feather="log-out" class="w-10 h-10 text-red-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Exit Project?</h1>
+            <p class="text-gray-400 text-sm mb-6">Any unsaved progress will be lost. This will clear the current
+                workspace.</p>
+
+            <div class="flex gap-3">
+                <button onclick="confirmExit()" class="liquid-glow w-full py-3 text-sm font-bold shadow-lg"
+                    style="background: #ef4444; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);">
+                    Yes, Exit
+                </button>
+                <button onclick="closeModal('exitModal')"
+                    class="w-full py-3 text-sm font-bold rounded-full bg-white/5 hover:bg-white/10 text-white transition-colors">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+    <div id="expiredModal" class="modal-overlay" style="z-index: 9999; background: #0B0A14;">
+        <div class="modal-card text-center border-red-900/30" onclick="event.stopPropagation()">
+            <div
+                class="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
+                <i data-feather="lock" class="w-8 h-8 text-red-500"></i>
+            </div>
+            <h1 class="text-2xl font-bold text-white brand-font mb-2">Version Closed</h1>
+            <p class="text-gray-400 text-sm mb-6 leading-relaxed">
+                The changes for this page have been uploaded and finalized. <br>
+                No further edits can be made to this version.
+            </p>
+            <div class="bg-white/5 rounded-lg p-4 text-xs text-gray-500 border border-white/5">
+                Please contact your administrator if you need a new link.
+            </div>
+        </div>
+    </div>
+    <div id="pasteModal" class="modal-overlay" onclick="closeModal('pasteModal', event)">
+        <div class="modal-card" style="max-width: 600px;" onclick="event.stopPropagation()">
+            <div class="icon-circle">
+                <i data-feather="clipboard" class="w-8 h-8 text-pink-500"></i>
+            </div>
+            <h1 class="text-xl font-bold font-['Space_Grotesk'] mb-2 text-white">Paste Source Code</h1>
+            <p class="text-gray-400 text-sm mb-6">Paste your raw HTML code below to load it into the editor.</p>
+
+            <textarea id="pasteInput"
+                class="input-dark font-mono text-xs mb-6 h-64 resize-none focus:ring-2 focus:ring-pink-500/50"
+                placeholder="<!DOCTYPE html><html>..."></textarea>
+
+            <button onclick="loadPastedHTML()" class="liquid-glow w-full py-3 text-sm shadow-lg mb-3">
+                <i data-feather="play" class="w-4 h-4"></i> Load Project
+            </button>
+            <button onclick="closeModal('pasteModal')" class="text-xs text-gray-500 hover:text-white">Cancel</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="textModal" onclick="closeModal('textModal', event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-lg font-bold font-['Space_Grotesk']">Edit Content</h3>
+                <button onclick="closeModal('textModal')" class="text-gray-500 hover:text-white"><i data-feather="x"
+                        class="w-5 h-5"></i></button>
+            </div>
+
+            <div class="text-left mb-6">
+                <label
+                    class="text-[10px] uppercase font-bold text-gray-500 mb-2 block ml-1 tracking-wider">Content</label>
+                <div class="editor-container">
+                    <div class="editor-toolbar">
+                        <button class="toolbar-btn" onmousedown="formatDoc('bold')" title="Bold"><i
+                                data-feather="bold"></i></button>
+                        <button class="toolbar-btn" onmousedown="formatDoc('italic')" title="Italic"><i
+                                data-feather="italic"></i></button>
+                        <button class="toolbar-btn" onmousedown="formatDoc('underline')" title="Underline"><i
+                                data-feather="underline"></i></button>
+                        <div class="w-px h-4 bg-white/20 my-auto mx-1"></div>
+                        <button class="toolbar-btn" onmousedown="toggleLinkInput()" title="Link Selection"><i
+                                data-feather="link"></i></button>
+                        <button class="toolbar-btn" onmousedown="formatDoc('unlink')" title="Remove Link"><i
+                                data-feather="link-2"></i></button>
+                    </div>
+                    <div id="inlineLinkDrawer" class="link-drawer">
+                        <div class="flex gap-2">
+                            <input type="text" id="inlineLinkInput" class="input-dark py-2"
+                                placeholder="https://google.com">
+                            <button onclick="applyInlineLink()" class="liquid-glow small shadow-lg whitespace-nowrap"
+                                style="padding: 0 16px; height: 32px; font-size: 12px;">Add</button>
+                            <button onclick="closeLinkDrawer()" class="text-gray-400 hover:text-white"><i
+                                    data-feather="x" class="w-4 h-4"></i></button>
+                        </div>
+                    </div>
+                    <div id="richEditor" class="editor-content" contenteditable="true"></div>
+                </div>
+            </div>
+
+            <div id="blockLinkSection" class="text-left mb-6 hidden">
+                <label
+                    class="text-[10px] uppercase font-bold text-gray-500 mb-2 block ml-1 tracking-wider text-pink-500">Button
+                    / Link Destination</label>
+                <div class="relative">
+                    <i data-feather="external-link" class="absolute left-3 top-3.5 w-4 h-4 text-gray-500"></i>
+                    <input type="text" id="blockLinkInput" class="input-dark pl-10" placeholder="https://...">
+                </div>
+            </div>
+
+            <button onclick="applyTextUpdate()" class="liquid-glow w-full py-3 text-sm font-bold shadow-lg">Update
+                Content</button>
+        </div>
+    </div>
+    <div id="successModal" class="modal-overlay" onclick="closeModal('successModal', event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="icon-circle" style="background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.2);">
+                <i data-feather="check" class="w-10 h-10 text-green-500"></i>
+            </div>
+            <h1 class="text-2xl font-bold font-['Space_Grotesk'] mb-2 text-white">Download Complete!</h1>
+            <div class="bg-white/5 border border-white/10 rounded-xl p-4 mb-6 text-left">
+                <p class="text-gray-400 text-xs uppercase font-bold mb-2 tracking-wider">Next Step</p>
+                <p class="text-sm text-white leading-relaxed">
+                    Please <strong>email the ZIP file</strong> you just downloaded to our team. We need this file to
+                    publish your changes live.
+                </p>
+            </div>
+
+            <button onclick="closeModal('successModal')" class="liquid-glow w-full py-3 text-sm font-bold shadow-lg">
+                Got it, I'll send it now
+            </button>
+        </div>
+    </div>
+
+    <div id="downloadToast" class="toast">
+        <div class="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center text-green-500">
+            <i data-feather="check" class="w-5 h-5"></i>
+        </div>
+        <div class="toast-content text-left">
+            <h4>Download Started!</h4>
+            <p>Please email this ZIP file to us to apply changes.</p>
+        </div>
+    </div>
+
+    <input type="file" id="fileInput" accept=".html" class="hidden" onchange="loadTemplate(this)">
+    <input type="file" id="imgUpload" accept="image/*" class="hidden" onchange="handleImageUpload(this)">
+
+    <script>
+        feather.replace();
+        // --- SUPER STORAGE (IndexedDB Wrapper) ---
+        // Allows saving huge files (500MB+) locally
+        const dbPromise = new Promise((resolve, reject) => {
+            const request = indexedDB.open('reputifly-db', 1);
+            request.onupgradeneeded = (e) => {
+                e.target.result.createObjectStore('drafts');
+            };
+            request.onsuccess = (e) => resolve(e.target.result);
+            request.onerror = (e) => reject(e);
+        });
+
+        async function saveToBigStorage(key, value) {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('drafts', 'readwrite');
+                const store = tx.objectStore('drafts');
+                const req = store.put(value, key);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function loadFromBigStorage(key) {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('drafts', 'readonly');
+                const store = tx.objectStore('drafts');
+                const req = store.get(key);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+        async function clearBigStorage() {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('drafts', 'readwrite');
+                const store = tx.objectStore('drafts');
+                const req = store.clear(); // Wipes the database
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        // --- FIREBASE CONFIG (INTEGRATED) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyB4_6wJOcQddUFz8BemeG9HQgbuZtoHp20",
+            authDomain: "reputifly-automation.firebaseapp.com",
+            projectId: "reputifly-automation",
+            storageBucket: "reputifly-automation.firebasestorage.app",
+            messagingSenderId: "1095726999398",
+            appId: "1:1095726999398:web:4e26ec90770da0244c0aa7"
+        };
+
+        let db = null;
+        let isCloudMode = false;
+        let storage = null; // New Storage Variable
+        let currentProjectId = null;
+
+        window.addEventListener('firebaseLoaded', () => {
+            try {
+                if (window.firebaseApp) {
+                    const app = window.firebaseApp.initializeApp(firebaseConfig);
+                    window.firebaseAuth = window.firebaseApp.getAuth(app);
+                    db = window.firebaseApp.getFirestore(app);
+                    storage = window.firebaseApp.getStorage(app); // Initialize Storage
+
+                    const urlParams = new URLSearchParams(window.location.search);
+
+                    // --- OPTIMIZATION: Manual Load Only ---
+                    if (!urlParams.get('id')) {
+                        const pInput = document.getElementById('projectNameInput');
+                        if (pInput) {
+                            // 1. Single Click: Allows typing new project (0 Reads)
+                            // 2. Double Click: Loads history (Cost: 15 Reads)
+                            pInput.addEventListener('dblclick', () => {
+                                // Only fetch if we haven't already
+                                if (projectHistory.length === 0) {
+                                    const originalPlaceholder = pInput.placeholder;
+                                    pInput.placeholder = "Loading history...";
+                                    fetchProjectHistory().then(() => {
+                                        pInput.placeholder = originalPlaceholder;
+                                        // Force dropdown to show immediately after loading
+                                        pInput.dispatchEvent(new Event('focus'));
+                                        renderProjects(''); // Show list immediately
+                                    });
+                                }
+                            });
+                        }
+                    }
+                    // --------------------------------------
+
+                    if (urlParams.get('id')) {
+                        let hasChecked = false;
+                        window.firebaseApp.onAuthStateChanged(window.firebaseAuth, (user) => {
+                            if (!hasChecked) {
+                                hasChecked = true;
+                                checkUrlForProject();
+                            }
+                        });
+                    }
+                }
+            } catch (e) { console.error("Firebase init error", e); }
+        });
+
+        let projectDomain = localStorage.getItem('reputifly_domain') || "";
+        let savedHTML = localStorage.getItem('reputifly_html') || "";
+        let currentElement = null;
+        let assetsToZip = [];
+        window.zipBuffer = {}; // Memory storage for images
+        let headerLocked = false;
+        let isMobileView = false;
+        let savedSelection = null;
+        let restoreScrollY = 0;
+
+        let historyStack = [];
+        let historyIndex = -1;
+
+        // --- CORE HTML CLEANING FUNCTION (UPDATED TO PRESERVE STYLES) ---
+        function getCleanHTML() {
+            if (!document.getElementById('editorFrame').contentDocument) return "";
+
+            const docClone = document.getElementById('editorFrame').contentDocument.cloneNode(true);
+
+            // Clean GSAP inline styles
+            const dirtyElements = docClone.querySelectorAll('*[style]');
+            dirtyElements.forEach(el => {
+                const style = el.getAttribute('style');
+                if (style && (style.includes('opacity') || style.includes('transform') || style.includes('visibility'))) {
+                    el.style.removeProperty('opacity');
+                    el.style.removeProperty('transform');
+                    el.style.removeProperty('translate');
+                    el.style.removeProperty('rotate');
+                    el.style.removeProperty('scale');
+                    el.style.removeProperty('visibility');
+                    if (el.getAttribute('style') === '') el.removeAttribute('style');
+                }
+            });
+
+            // FIX: Only remove the style tag with our specific ID
+            const editorStyle = docClone.getElementById('reputifly-editor-css');
+            if (editorStyle) editorStyle.remove();
+
+            return docClone.documentElement.outerHTML;
+        }
+
+        // --- CLOUD LOGIC VIA GITHUB ---
+        async function checkUrlForProject() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const projectId = urlParams.get('id');
+            const version = urlParams.get('v') || 'base';
+
+            // --- UI ELEMENT REFERENCES ---
+            const shareBtn = document.getElementById('navShareBtn');
+            const shareMenu = document.getElementById('sharingMenu');
+            const adminBtn = document.getElementById('adminCopyBtn');
+            const adminDlBtn = document.getElementById('adminDownloadBtn');
+            const exitBtn = document.getElementById('navExitBtn');
+            const helpBtn = document.getElementById('navHelpBtn');
+            const loadMenu = document.getElementById('navLoadMenu');
+
+            if (projectId) {
+                isCloudMode = true;
+                currentProjectId = projectId;
+
+                document.getElementById('cloudLoader').classList.add('active');
+                setupTelemetry(projectId);
+                document.getElementById('setupScreen').classList.remove('active');
+
+                // ALWAYS HIDE "LOAD/UPLOAD" in Cloud Mode
+                if (loadMenu) loadMenu.style.display = 'none';
+
+                // --- CLIENT VIEW ---
+                if (shareMenu) {
+                    shareMenu.outerHTML = `
+                <button id="notifyOption" onclick="notifyTeam()" class="liquid-glow h-10 px-6 text-xs bg-green-600 border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all hover:scale-105 mr-4">
+                    <i data-feather="send" class="w-4 h-4"></i>
+                    <span class="font-bold ml-2">Save & Deploy</span>
+                </button>
+            `;
+                    feather.replace();
+                }
+
+                if (shareBtn) shareBtn.style.display = 'none';
+                if (adminBtn) adminBtn.style.display = 'none';
+                if (adminDlBtn) adminDlBtn.style.display = 'none';
+                if (exitBtn) exitBtn.style.display = 'none';
+                if (helpBtn) helpBtn.classList.remove('hidden-force');
+
+                // ----------------------------------------
+                // GITHUB LOADING LOGIC
+                // ----------------------------------------
+
+                try {
+                    const navPagesMenu = document.getElementById('navPagesMenu');
+                    const pagesList = document.getElementById('pagesListContainer');
+
+                    // 1. Fetch available files in this branch
+                    const API_LIST = "https://listrepofiles-5resuz4f5a-as.a.run.app";
+                    let token = "";
+                    if (window.firebaseAuth && window.firebaseAuth.currentUser) {
+                        token = await window.firebaseAuth.currentUser.getIdToken();
+                    }
+
+                    const res = await fetch(API_LIST, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ folderName: projectId, version: version })
+                    });
+                    const listRes = { data: await res.json() };
+
+                    let fileToLoad = 'index.html'; // Default
+                    let availableFiles = [];
+
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const filesParam = urlParams.get('files');
+                    let allowedFiles = filesParam ? filesParam.split(',') : null;
+
+                    if (listRes.data.success && listRes.data.files && listRes.data.files.length > 0) {
+                        availableFiles = listRes.data.files;
+
+                        // Restrict available files to those selected in the dashboard modal
+                        if (allowedFiles) {
+                            availableFiles = availableFiles.filter(f => allowedFiles.includes(f));
+                        }
+
+                        // If index.html isn't there, load the first available file
+                        if (!availableFiles.includes(fileToLoad)) {
+                            fileToLoad = availableFiles.length > 0 ? availableFiles[0] : null;
+                        }
+                    } else {
+                        throw new Error("No files found in this project branch.");
+                    }
+
+                    if (!fileToLoad) throw new Error("No allowed files found to load.");
+
+                    // 2. Populate the Pages Dropdown
+                    if (navPagesMenu && pagesList) {
+                        pagesList.innerHTML = availableFiles.map(file => {
+                            let displayName = file;
+                            if (file.toLowerCase() === 'index.html') {
+                                displayName = 'Home';
+                            } else {
+                                displayName = file.replace('.html', '')
+                                    .split('-')
+                                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                                    .join(' ');
+                            }
+                            return `
+                                <button onclick="loadSpecificPage('${file}')" 
+                                    class="w-full text-left px-4 py-3 text-xs font-medium text-gray-300 hover:bg-white/5 hover:text-white transition-colors border-b border-white/5 flex items-center gap-2">
+                                    <i data-feather="file" class="w-3 h-3 opacity-50"></i>
+                                    ${displayName}
+                                </button>
+                            `;
+                        }).join('');
+                        feather.replace();
+                        navPagesMenu.classList.remove('hidden');
+                    }
+
+                    // 3. Load the initial/default file
+                    await loadSpecificPage(fileToLoad, true); // true = initial load
+
+                } catch (e) {
+                    console.error("Error loading project:", e);
+                    handleExpiredProject(); // Use the existing nuke UI
+                } finally {
+                    document.getElementById('cloudLoader').classList.remove('active');
+                }
+            } else {
+                // --- CREATOR MODE (No ID in URL) ---
+                if (shareBtn) shareBtn.style.display = 'flex';
+                if (shareMenu) shareMenu.style.display = 'none';
+                if (adminBtn) adminBtn.style.display = 'none';
+                if (adminDlBtn) adminDlBtn.style.display = 'none';
+            }
+        }
+
+        async function loadSpecificPage(fileName, isInitial = false) {
+            // MULTI-PAGE FIX: Save current page state before loading new one
+            if (!isInitial && window.projectMeta && window.projectMeta.page && typeof getCleanHTML === 'function') {
+                try {
+                    window.editedPagesState = window.editedPagesState || {};
+                    window.editedPagesState[window.projectMeta.page] = getCleanHTML();
+                } catch (e) {
+                    console.warn("Failed to save current page state", e);
+                }
+            }
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const projectId = urlParams.get('id');
+            const version = urlParams.get('v') || 'base';
+
+            if (!isInitial) {
+                document.getElementById('cloudLoader').classList.add('active');
+            }
+
+            try {
+                const API_GET = "https://getrepofile-5resuz4f5a-as.a.run.app";
+                let token = "";
+                if (window.firebaseAuth && window.firebaseAuth.currentUser) {
+                    token = await window.firebaseAuth.currentUser.getIdToken();
+                }
+
+                const res = await fetch(API_GET, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ folderName: projectId, version: version, fileName: fileName })
+                });
+                const response = { data: await res.json() };
+
+                if (response.data.success && response.data.html) {
+                    projectDomain = projectId; // Just setting it so domain doesn't complain
+                    const displayEl = document.getElementById('domainDisplay');
+                    if (displayEl) displayEl.innerText = projectId + (version !== 'base' ? ` (${version})` : '');
+                    localStorage.setItem('reputifly_domain', projectDomain);
+
+                    projectMeta.name = projectId;
+                    projectMeta.page = fileName;
+
+                    document.getElementById('currentPageName').innerText = fileName;
+
+                    loadContentIntoFrame(response.data.html);
+                    pushHistory(response.data.html);
+
+                    if (isInitial) {
+                        setTimeout(() => { openModal('helpModal'); }, 500);
+                    }
+
+                } else {
+                    throw new Error("HTML fetch failed.");
+                }
+            } catch (e) {
+                console.error(`Error loading page ${fileName}:`, e);
+                alert(`Failed to load ${fileName}.`);
+            } finally {
+                if (!isInitial) {
+                    document.getElementById('cloudLoader').classList.remove('active');
+                }
+            }
+        }
+
+        // Helper to handle real-time revocation
+        function setupRealtimeListener(projectId) {
+            const docRef = window.firebaseApp.doc(db, "projects", projectId);
+            window.firebaseApp.onSnapshot(docRef, (snapshot) => {
+                if (!snapshot.exists()) {
+                    handleExpiredProject();
+                }
+            });
+        }
+
+        // Helper to nuke the UI when expired
+        function handleExpiredProject() {
+            document.getElementById('cloudLoader').classList.remove('active');
+            document.getElementById('expiredModal').classList.add('active');
+
+            // Remove controls
+            const loadMenu = document.getElementById('navLoadMenu');
+            if (loadMenu) loadMenu.remove();
+            const shareBtn = document.getElementById('navShareBtn');
+            if (shareBtn) shareBtn.remove();
+
+            const pagesMenu = document.getElementById('navPagesMenu');
+            if (pagesMenu) pagesMenu.remove();
+
+            document.getElementById('mainHeader').classList.add('pointer-events-none', 'opacity-50');
+            const frameContainer = document.getElementById('editor-frame-container');
+            if (frameContainer) {
+                frameContainer.innerHTML = '';
+                frameContainer.style.background = '#0B0A14';
+            }
+        }
+        function copySourceCode() {
+            // 1. Get the raw HTML (which currently has Firebase URLs)
+            let html = getCleanHTML();
+
+            // 2. Parse it into a virtual document so we can edit it
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, "text/html");
+
+            // 3. Find all images that have a "WordPress Export Link"
+            const images = doc.querySelectorAll('img[data-export-src]');
+
+            images.forEach(img => {
+                // SWAP: Replace the Firebase URL with the WordPress URL
+                img.src = img.dataset.exportSrc;
+
+                // CLEANUP: Remove the helper tags so the code is clean
+                delete img.dataset.exportSrc;
+                delete img.dataset.filename;
+                delete img.dataset.isBig;
+
+                // Standard WP Cleanup (removes srcset so WP can regenerate it)
+                if (img.src.includes('wp-content/uploads')) img.removeAttribute('srcset');
+                img.removeAttribute('style');
+            });
+
+            // 4. Turn the virtual document back into a String
+            html = doc.documentElement.outerHTML;
+
+            // 5. Copy the CLEAN WordPress code to clipboard
+            navigator.clipboard.writeText(html).then(() => {
+                const btn = document.getElementById('adminCopyBtn');
+                // Visual Feedback
+                btn.innerHTML = `<i data-feather="check" class="w-4 h-4"></i> <span class="font-bold ml-2">Copied WP Code!</span>`;
+                btn.classList.add('bg-green-600', 'border-green-500');
+
+                setTimeout(() => {
+                    btn.innerHTML = `<i data-feather="code" class="w-4 h-4"></i> <span class="font-bold ml-2">Copy Source Code</span>`;
+                    btn.classList.remove('bg-green-600', 'border-green-500');
+                    feather.replace();
+                }, 2000);
+            });
+        }
+        async function notifyTeam() {
+            if (!db || !storage) return alert("System Error: Cloud not connected.");
+
+            const btn = document.getElementById('notifyOption');
+
+            // --- ANTI-SPAM: BLOCK DOUBLE CLICKS ---
+            if (btn.dataset.loading === "true") return;
+            btn.dataset.loading = "true";
+            btn.style.opacity = "0.5";
+            btn.style.pointerEvents = "none";
+            // -------------------------------------
+
+            // --- FIX: ADAPTIVE UI LOADER ---
+            // Checks if we are in "Dropdown Mode" (Admin) or "Button Mode" (Client)
+            const iconBox = btn.querySelector('.icon-box');
+            let originalContent = "";
+
+            if (iconBox) {
+                // Scenario A: Admin Dropdown (Has .icon-box container)
+                originalContent = iconBox.innerHTML;
+                iconBox.innerHTML = `<div class="loader w-4 h-4 border-green-500"></div>`;
+            } else {
+                // Scenario B: Client Button (Direct button)
+                originalContent = btn.innerHTML;
+                // Swap the whole button content to show a white loader
+                btn.innerHTML = `<div class="flex items-center justify-center"><div class="loader w-4 h-4 border-white mr-2"></div> <span class="font-bold">Sending...</span></div>`;
+            }
+
+            try {
+                const html = getCleanHTML();
+
+                // 1. DETECT IMAGE CHANGES
+                const frameDoc = document.getElementById('editorFrame').contentDocument;
+                const newImageCount = frameDoc.querySelectorAll('img[data-filename]').length;
+
+                // 2. ENSURE PROJECT ID EXISTS
+                if (!currentProjectId) {
+                    console.log("Creating new project ID for notification...");
+                    const metaPayload = {
+                        domain: projectDomain || "pending-domain",
+                        projectName: projectMeta.name || "Untitled",
+                        pageName: projectMeta.page || "Home",
+                        createdAt: window.firebaseApp.serverTimestamp(),
+                        updatedAt: window.firebaseApp.serverTimestamp(),
+                        status: 'Review Ready'
+                    };
+                    const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), metaPayload);
+                    currentProjectId = docRef.id;
+
+                    // FIX: UPDATE URL SILENTLY
+                    const newUrl = `${window.location.pathname}?id=${currentProjectId}`;
+                    window.history.pushState({ path: newUrl }, '', newUrl);
+                } else {
+                    const projectRef = window.firebaseApp.doc(db, "projects", currentProjectId);
+                    await window.firebaseApp.updateDoc(projectRef, {
+                        updatedAt: window.firebaseApp.serverTimestamp(),
+                        status: 'Review Ready'
+                    });
+                }
+
+                // 3. FORCE UPLOAD HTML TO FIREBASE STORAGE
+                const storageRef = window.firebaseApp.ref(storage, `project-files/${currentProjectId}.html`);
+                await window.firebaseApp.uploadString(storageRef, html);
+
+                // 4. PREPARE EMAIL
+                const subjectStatus = newImageCount > 0
+                    ? `📸 Edit: ${projectMeta.name} - ${projectMeta.page} (${projectDomain})`
+                    : `📝 Edit: ${projectMeta.name} - ${projectMeta.page} (${projectDomain})`;
+
+                const bodyStatus = newImageCount > 0
+                    ? `⚠️ CONTAINS ${newImageCount} NEW IMAGE(S).\nYou need to download the ZIP.`
+                    : `✅ TEXT ONLY.\nNo new images were uploaded.`;
+
+                const adminLink = `${window.location.origin}${window.location.pathname}?id=${currentProjectId}&role=admin`;
+
+                // 5. SEND EMAIL via REPUTIFLY API
+                const response = await fetch('https://asia-southeast1-b2b-software.cloudfunctions.net/reputifly', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        // System Fields
+                        _to: "runikojane@gmail.com",
+                        _subject: subjectStatus,
+                        _sender_name: "Reputifly Editor", // Optional, helps with branding if needed
+
+                        // Data Fields (Will be formatted as a table)
+                        "Project Name": projectMeta.name || "Untitled",
+                        "Page Name": projectMeta.page || "Home",
+                        "Domain": projectDomain || "No Domain",
+                        "Edit Status": newImageCount > 0 ? `Has ${newImageCount} New Images` : "Text Only",
+                        "Editor Link": adminLink,
+                        "Message": "Client has finished editing. Please review the changes."
+                    })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    openModal('notifySuccessModal');
+                } else {
+                    throw new Error("Form submission failed");
+                }
+
+            } catch (e) {
+                console.error("Notify failed:", e);
+                openModal('notifyErrorModal');
+            } finally {
+                // --- RESTORE BUTTON ---
+                if (iconBox) {
+                    iconBox.innerHTML = originalContent;
+                } else {
+                    btn.innerHTML = originalContent;
+                }
+                feather.replace();
+
+                btn.dataset.loading = "false";
+                btn.style.opacity = "1";
+                btn.style.pointerEvents = "auto";
+            }
+        }
+        function updateSharingMenu() {
+            // FORCE ENABLE NOTIFY (Storage implementation handles big files)
+            const notifyBtn = document.getElementById('notifyOption');
+            if (notifyBtn) {
+                notifyBtn.style.opacity = '1';
+                notifyBtn.style.pointerEvents = 'auto';
+                notifyBtn.querySelector('h5').innerText = "Notify Completion";
+                notifyBtn.querySelector('p').innerHTML = "Send changes directly to us.<br>No download required.";
+            }
+        }
+        // Event listener for the menu
+        document.addEventListener('mouseover', (e) => {
+            if (e.target.closest('#sharingMenu')) updateSharingMenu();
+        });
+
+        async function createShareableLink() {
+            if (!db) return alert("Firebase not configured properly.");
+            if (!document.getElementById('editorFrame').contentDocument) return alert("Load a page first.");
+
+            const btn = document.getElementById('navShareBtn');
+
+            // --- ANTI-SPAM START ---
+            if (btn.innerText === "Saving...") return;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "Saving...";
+            btn.style.pointerEvents = "none";
+            // ----------------------
+
+            try {
+                const html = getCleanHTML();
+
+                // 1. Prepare Metadata
+                const metaPayload = {
+                    domain: projectDomain,
+                    projectName: projectMeta.name,
+                    pageName: projectMeta.page,
+                    updatedAt: window.firebaseApp.serverTimestamp()
+                };
+
+                let docId = currentProjectId;
+
+                // 2. Save Metadata
+                if (currentProjectId) {
+                    const projectRef = window.firebaseApp.doc(db, "projects", currentProjectId);
+                    await window.firebaseApp.updateDoc(projectRef, metaPayload);
+                } else {
+                    metaPayload.createdAt = window.firebaseApp.serverTimestamp();
+                    const docRef = await window.firebaseApp.addDoc(window.firebaseApp.collection(db, "projects"), metaPayload);
+                    docId = docRef.id;
+                    currentProjectId = docId;
+
+                    // --- FIX: UPDATE URL SILENTLY ---
+                    // Prevents creating "Untitled (1)" if they refresh immediately
+                    const newUrl = `${window.location.pathname}?id=${docId}`;
+                    window.history.pushState({ path: newUrl }, '', newUrl);
+                    // --------------------------------
+                }
+
+                // 3. Save Heavy HTML to STORAGE (Not Firestore)
+                // This is much cheaper and supports larger files
+                if (storage) {
+                    const storageRef = window.firebaseApp.ref(storage, `project-files/${docId}.html`);
+                    await window.firebaseApp.uploadString(storageRef, html);
+                } else {
+                    // Fallback for legacy (optional)
+                    const contentRef = window.firebaseApp.doc(db, "pages_content", docId);
+                    await window.firebaseApp.setDoc(contentRef, { html: html }, { merge: true });
+                }
+
+                const link = window.location.origin + window.location.pathname + "?id=" + docId;
+                document.getElementById('shareLinkBox').innerText = link;
+                openModal('shareModal');
+
+            } catch (e) {
+                console.error(e);
+                alert("Error saving to cloud. See console.");
+            } finally {
+                // --- RESTORE BUTTON ---
+                btn.innerHTML = originalText;
+                btn.style.pointerEvents = "auto";
+                feather.replace();
+            }
+        }
+
+        function copyShareLink() {
+            const text = document.getElementById('shareLinkBox').innerText;
+            navigator.clipboard.writeText(text);
+
+            // VISUAL FEEDBACK (No Alert)
+            const btn = document.querySelector('#shareModal .liquid-glow');
+            const oldHtml = btn.innerHTML;
+
+            // Change button text temporarily
+            btn.innerHTML = `<i data-feather="check" class="w-4 h-4"></i> Copied!`;
+            btn.classList.add('bg-green-600', 'border-green-500'); // Optional: Green color
+
+            feather.replace(); // Refresh icon
+
+            setTimeout(() => {
+                btn.innerHTML = oldHtml;
+                btn.classList.remove('bg-green-600', 'border-green-500');
+            }, 2000);
+        }
+
+        // --- GLOBAL PASTE LISTENER ---
+        // --- GLOBAL PASTE LISTENER (FIXED) ---
+        document.addEventListener('paste', (e) => {
+            const clipboardData = e.clipboardData || window.clipboardData;
+            if (!clipboardData) return;
+
+            const items = clipboardData.items;
+            const isImageModalOpen = document.getElementById('imageModal').classList.contains('active');
+
+            // Loop correctly through clipboard items
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.kind === 'file' && item.type.includes('image/')) {
+                    if (isImageModalOpen) {
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        // Visual Feedback immediately
+                        const dropContent = document.getElementById('dropContent');
+                        dropContent.innerHTML = `
+                            <div class="flex flex-col items-center animate-pulse">
+                                <div class="loader w-8 h-8 border-pink-500 mb-3"></div>
+                                <span class="text-sm font-bold text-white">Paste Detected!</span>
+                                <span class="text-xs text-gray-400">Processing...</span>
+                            </div>
+                        `;
+
+                        const file = item.getAsFile();
+                        processNewImage(file);
+                        return; // Stop after finding the first image
+                    }
+                }
+            }
+        });
+
+        // --- DRAG & DROP HTML LOADER ---
+        const emptyState = document.getElementById('empty-state');
+        emptyState.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            emptyState.style.background = '#1a1a24';
+            emptyState.style.borderColor = '#E6397F';
+        });
+        emptyState.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            emptyState.style.background = '#0B0A14';
+        });
+        emptyState.addEventListener('drop', (e) => {
+            e.preventDefault();
+            emptyState.style.background = '#0B0A14';
+
+            if (e.dataTransfer.files.length > 0) {
+                const file = e.dataTransfer.files[0];
+                if (file.name.endsWith('.html')) {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        let content = ev.target.result;
+                        content = content.replace(/body\s*>\s*header\s*\{\s*display:\s*none\s*!important;?\s*\}/gi, "");
+                        content = content.replace(/,\s*body\s*>\s*header/gi, "");
+                        localStorage.setItem('reputifly_html', content);
+                        loadContentIntoFrame(content);
+                        pushHistory(content);
+                    };
+                    reader.readAsText(file);
+                } else {
+                    alert("Please drop an HTML file.");
+                }
+            }
+        });
+
+        document.getElementById('richEditor').addEventListener('paste', function (e) {
+            e.preventDefault();
+            const text = (e.clipboardData || window.clipboardData).getData('text');
+            document.execCommand('insertText', false, text);
+        });
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+
+            if (urlParams.get('id')) {
+                return;
+            }
+
+            if (!projectDomain) {
+                document.getElementById('setupScreen').classList.add('active');
+            }
+
+            const emptyState = document.getElementById('empty-state');
+            const originalEmptyContent = emptyState.innerHTML;
+
+
+            // 2. Fallback to Standard Storage
+            if (!contentToLoad) {
+                contentToLoad = localStorage.getItem('reputifly_html');
+            }
+
+            // 3. Load whatever we found
+            if (contentToLoad) {
+                loadContentIntoFrame(contentToLoad);
+                pushHistory(contentToLoad);
+                // The empty-state div will be hidden by loadContentIntoFrame automatically
+            } else {
+                // 4. NOTHING FOUND: Put the "Upload" UI back
+                emptyState.innerHTML = originalEmptyContent;
+                feather.replace(); // Re-render the icons we just put back
+            }
+        });
+
+        // --- HISTORY MANAGEMENT ---
+        function pushHistory(htmlContent) {
+            if (historyIndex < historyStack.length - 1) {
+                historyStack = historyStack.slice(0, historyIndex + 1);
+            }
+            historyStack.push(htmlContent);
+            historyIndex++;
+            updateUndoRedoUI();
+        }
+
+        function performUndo() {
+            if (historyIndex > 0) {
+                const frame = document.getElementById('editorFrame');
+                if (frame.contentWindow) restoreScrollY = frame.contentWindow.scrollY;
+
+                historyIndex--;
+                const prevHTML = historyStack[historyIndex];
+                loadContentIntoFrame(prevHTML);
+                localStorage.setItem('reputifly_html', prevHTML);
+                updateUndoRedoUI();
+            }
+        }
+
+        function performRedo() {
+            if (historyIndex < historyStack.length - 1) {
+                const frame = document.getElementById('editorFrame');
+                if (frame.contentWindow) restoreScrollY = frame.contentWindow.scrollY;
+
+                historyIndex++;
+                const nextHTML = historyStack[historyIndex];
+                loadContentIntoFrame(nextHTML);
+                localStorage.setItem('reputifly_html', nextHTML);
+                updateUndoRedoUI();
+            }
+        }
+
+        function updateUndoRedoUI() {
+            document.getElementById('undoBtn').disabled = (historyIndex <= 0);
+            document.getElementById('redoBtn').disabled = (historyIndex >= historyStack.length - 1);
+        }
+
+        // --- RICH TEXT ---
+        function formatDoc(cmd, value = null) {
+            document.execCommand(cmd, false, value);
+            document.getElementById('richEditor').focus();
+        }
+        function saveSelection() {
+            if (window.getSelection) {
+                const sel = window.getSelection();
+                if (sel.getRangeAt && sel.rangeCount) return sel.getRangeAt(0);
+            }
+            return null;
+        }
+        function restoreSelection(range) {
+            if (range && window.getSelection) {
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+        }
+        function toggleLinkInput() {
+            const drawer = document.getElementById('inlineLinkDrawer');
+            if (drawer.style.display === 'block') {
+                closeLinkDrawer();
+            } else {
+                savedSelection = saveSelection();
+                if (!savedSelection || savedSelection.toString().length === 0) {
+                    alert("Please select some text first.");
+                    return;
+                }
+                drawer.style.display = 'block';
+                document.getElementById('inlineLinkInput').focus();
+            }
+        }
+        function closeLinkDrawer() {
+            document.getElementById('inlineLinkDrawer').style.display = 'none';
+            document.getElementById('inlineLinkInput').value = '';
+        }
+        function applyInlineLink() {
+            const url = document.getElementById('inlineLinkInput').value;
+            if (url && savedSelection) {
+                restoreSelection(savedSelection);
+                formatDoc('createLink', url);
+                closeLinkDrawer();
+            }
+        }
+        document.querySelectorAll('.toolbar-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => e.preventDefault());
+        });
+
+        // --- VIEW CONTROLS ---
+        window.parentAutoShow = function () {
+            if (headerLocked) return;
+            document.getElementById('mainHeader').classList.remove('nav-hidden');
+        }
+        window.parentAutoHide = function () {
+            if (headerLocked) return;
+            document.getElementById('mainHeader').classList.add('nav-hidden');
+        }
+
+        function toggleHeader() {
+            const header = document.getElementById('mainHeader');
+            const btn = document.getElementById('navToggleBtn');
+            headerLocked = !headerLocked;
+            if (headerLocked) {
+                header.classList.add('nav-hidden');
+                btn.innerHTML = '<i data-feather="eye" class="w-5 h-5"></i>';
+                btn.style.opacity = "1";
+            } else {
+                header.classList.remove('nav-hidden');
+                btn.innerHTML = '<i data-feather="eye-off" class="w-5 h-5"></i>';
+                btn.style.opacity = "0.5";
+            }
+            feather.replace();
+        }
+
+        function toggleMobileView() {
+            const frameContainer = document.getElementById('editor-frame-container');
+            const frame = document.getElementById('editorFrame');
+            const btn = document.getElementById('mobileToggleBtn');
+            isMobileView = !isMobileView;
+            if (isMobileView) {
+                frame.style.width = "375px"; frame.style.height = "90%";
+                frame.style.margin = "0 auto"; frame.style.border = "4px solid #333";
+                frame.style.borderRadius = "20px"; frame.style.boxShadow = "0 20px 50px rgba(0,0,0,0.5)";
+                frameContainer.style.display = "flex"; frameContainer.style.alignItems = "center";
+                frameContainer.style.justifyContent = "center";
+                btn.style.background = "#E6397F"; btn.style.borderColor = "#E6397F";
+            } else {
+                frame.style.width = "100%"; frame.style.height = "100%";
+                frame.style.margin = "0"; frame.style.border = "none";
+                frame.style.borderRadius = "0";
+                frameContainer.style.display = "block";
+                btn.style.background = "rgba(20, 20, 30, 0.9)"; btn.style.borderColor = "rgba(255,255,255,0.1)";
+            }
+        }
+        // --- HISTORY & AUTOCOMPLETE ---
+        // Removed projectHistory Logic
+
+        function exitProject() {
+            // Open the custom modal instead of the browser popup
+            openModal('exitModal');
+        }
+
+        async function confirmExit() {
+            const btn = document.querySelector('#exitModal .liquid-glow');
+            if (btn) btn.innerHTML = "Clearing...";
+
+            try {
+                // 1. Clear Small Storage
+                localStorage.removeItem('reputifly_domain');
+                localStorage.removeItem('reputifly_html');
+                localStorage.removeItem('reputifly_tutorial_seen');
+
+                // 2. Clear Super Storage (IndexedDB) - CRITICAL
+                await clearBigStorage();
+            } catch (e) {
+                console.error("DB Clear Error", e);
+            }
+
+            // 3. Reload Page
+            window.location.href = window.location.pathname;
+        }
+
+        // Updated clearStorage to use the same logic
+        function clearStorage() {
+            openModal('exitModal'); // Re-use the nice modal
+        }
+        // --- NEW SAFETY CHECK FUNCTION ---
+        function checkPayloadSize() {
+            // Safety check disabled - We are using Storage now
+            const shareBtn = document.getElementById('navShareBtn');
+            if (shareBtn && !currentProjectId) shareBtn.style.display = 'flex';
+        }
+        async function saveProgress() {
+            const html = getCleanHTML();
+            checkPayloadSize();
+
+            // ADDED: Run safety check on every edit
+            checkPayloadSize();
+
+            if (html) {
+                // --- PERFORMANCE MONITOR ---
+                // Warn if project exceeds 15MB (approx 50-60 optimized images)
+                if (html.length > 15 * 1024 * 1024) {
+                    const toast = document.getElementById('downloadToast');
+                    if (toast) {
+                        toast.querySelector('h4').innerText = "⚠️ Project Heavy";
+                        toast.querySelector('p').innerText = "Editor may slow down. Consider finishing soon.";
+                        toast.classList.add('show');
+                        setTimeout(() => toast.classList.remove('show'), 5000);
+                    }
+                }
+
+                try {
+                    // 1. Try Big Storage (Unlimited)
+                    await saveToBigStorage('reputifly_html', html);
+
+                    // If Cloud Mode, save to specific draft ID
+                    if (currentProjectId) {
+                        await saveToBigStorage(`reputifly_draft_${currentProjectId}`, html);
+                    }
+                } catch (e) { console.error("IndexedDB Save Failed", e); }
+
+                // 2. Try Standard Storage (Backup - might fail if >5MB)
+                try {
+                    localStorage.setItem('reputifly_html', html);
+                    if (currentProjectId) {
+                        localStorage.setItem(`reputifly_draft_${currentProjectId}`, html);
+                    }
+                } catch (e) {
+                    // Ignore quota errors here since we likely saved to BigStorage successfully above
+                }
+
+                // 3. Visual Feedback
+                pushHistory(html);
+            }
+        }
+
+        // --- SETUP & LOAD ---
+        // Global var to store metadata
+        let projectMeta = { name: "Untitled", page: "Home" };
+
+        function finishSetup() {
+            const domain = document.getElementById('domainInput').value.trim();
+            const name = document.getElementById('projectNameInput').value.trim();
+            const page = document.getElementById('pageNameInput').value.trim();
+
+            if (!domain) return alert("Please enter the URL.");
+
+            projectDomain = domain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+            projectMeta.name = name || "Untitled";
+            projectMeta.page = page || "Home";
+
+            localStorage.setItem('reputifly_domain', projectDomain);
+
+            const displayEl = document.getElementById('domainDisplay');
+            if (displayEl) displayEl.innerText = projectDomain;
+
+            document.getElementById('setupScreen').classList.remove('active');
+        }
+        function loadPastedHTML() {
+            let content = document.getElementById('pasteInput').value;
+            if (!content || !content.trim()) return alert("Please paste some HTML code first.");
+
+            // Clean the HTML (Standard Protocol)
+            content = content.replace(/body\s*>\s*header\s*\{\s*display:\s*none\s*!important;?\s*\}/gi, "");
+            content = content.replace(/,\s*body\s*>\s*header/gi, "");
+
+            // Save Safely
+            try {
+                saveToBigStorage('reputifly_html', content);
+            } catch (e) { }
+            localStorage.setItem('reputifly_html', content);
+
+            loadContentIntoFrame(content);
+            pushHistory(content);
+
+            document.getElementById('pasteInput').value = "";
+            closeModal('pasteModal');
+        }
+
+        function loadTemplate(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                let content = e.target.result;
+                content = content.replace(/body\s*>\s*header\s*\{\s*display:\s*none\s*!important;?\s*\}/gi, "");
+                content = content.replace(/,\s*body\s*>\s*header/gi, "");
+                localStorage.setItem('reputifly_html', content);
+                loadContentIntoFrame(content);
+                pushHistory(content);
+            };
+            reader.readAsText(file);
+        }
+
+        function loadContentIntoFrame(htmlContent) {
+            const frame = document.getElementById('editorFrame');
+            frame.srcdoc = htmlContent;
+            frame.onload = () => {
+                document.getElementById('empty-state').style.display = 'none';
+
+                // ADDED: Check immediately upon loading
+                checkPayloadSize();
+
+                const mainShareBtn = document.getElementById('mainShareBtn');
+                if (mainShareBtn) mainShareBtn.classList.remove('disabled');
+                // ... rest of your existing code
+
+                if (restoreScrollY > 0) {
+                    frame.contentWindow.scrollTo(0, restoreScrollY);
+                    restoreScrollY = 0;
+                }
+
+                injectEditorScripts(frame);
+            };
+        }
+
+        function injectEditorScripts(iframe) {
+            const doc = iframe.contentDocument;
+            const win = iframe.contentWindow;
+
+            const style = doc.createElement('style');
+            style.id = 'reputifly-editor-css'; // FIX: ID Added so we can remove safely later
+            style.textContent = `
+                img { cursor: pointer !important; transition: outline 0.2s ease; position: relative; }
+                img:hover { outline: 3px solid #E6397F !important; z-index: 99999 !important; }
+                
+                h1:hover, h2:hover, h3:hover, h4:hover, h5:hover, h6:hover, p:hover, li:hover, a:hover, button:hover, label:hover, caption:hover {
+                    cursor: text; 
+                    outline: 1px dashed rgba(255, 138, 0, 0.7);
+                    background: rgba(255, 138, 0, 0.05);
+                }
+                a { pointer-events: auto !important; }
+
+                /* FORCE VISIBILITY FOR EDITOR ONLY */
+                .tes-svc-row, [style*="opacity: 0"], [style*="visibility: hidden"] {
+                    opacity: 1 !important;
+                    visibility: visible !important;
+                    transform: none !important;
+                }
+            `;
+            doc.head.appendChild(style);
+
+            let lastScrollY = 0;
+            win.addEventListener('scroll', () => {
+                const currentScrollY = win.scrollY;
+                if (currentScrollY > lastScrollY && currentScrollY > 50) window.parent.parentAutoHide();
+                else if (currentScrollY < lastScrollY) window.parent.parentAutoShow();
+                lastScrollY = currentScrollY;
+            });
+
+            doc.body.addEventListener('click', (e) => {
+                const link = e.target.closest('a');
+                if (link) e.preventDefault();
+
+                let target = e.target;
+                if (target.tagName !== 'IMG') {
+                    const elements = doc.elementsFromPoint(e.clientX, e.clientY);
+                    const imgUnderneath = elements.find(el => el.tagName === 'IMG');
+                    if (imgUnderneath) target = imgUnderneath;
+                }
+
+                if (target.tagName === 'IMG') {
+                    e.preventDefault(); e.stopPropagation();
+                    currentElement = target;
+                    // FIX: Reset Inputs when opening modal
+                    document.getElementById('urlInput').value = '';
+                    const defaultDrop = `
+                        <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
+                            <i data-feather="image" class="w-6 h-6 text-pink-500"></i>
+                        </div>
+                        <p class="text-sm font-bold text-white">Upload, Drag or Paste (Ctrl+V)</p>
+                        <p class="text-[10px] text-gray-400 mt-1">Auto-converts to WebP</p>`;
+                    document.getElementById('dropContent').innerHTML = defaultDrop;
+                    feather.replace();
+
+                    openModal('imageModal');
+                    return;
+                }
+            });
+
+            function handleTextEdit(e) {
+                let target = e.target;
+                if (target.tagName === 'IMG' || target.tagName === 'HTML' || target.tagName === 'BODY' || target.tagName === 'svg' || target.tagName === 'path') return;
+                let editable = target.closest('h1, h2, h3, h4, h5, h6, p, li, a, button, label, caption, strong, em, b, u, span, div');
+                if (!editable) return;
+
+                const isContainer = Array.from(editable.children).some(child => {
+                    return ['DIV', 'UL', 'OL', 'IMG', 'SECTION', 'FORM', 'TABLE', 'IFRAME', 'HEADER', 'FOOTER'].includes(child.tagName);
+                });
+
+                if ((editable.tagName === 'DIV' || editable.tagName === 'SECTION' || editable.tagName === 'A') && isContainer) return;
+                if (editable.innerText.trim().length === 0) return;
+
+                e.preventDefault(); e.stopPropagation();
+                currentElement = editable;
+                openTextModal(editable);
+            }
+
+            doc.body.addEventListener('contextmenu', handleTextEdit);
+            doc.body.addEventListener('dblclick', handleTextEdit);
+            doc.body.addEventListener('click', (e) => {
+                let t = e.target;
+                if (['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'P', 'SPAN', 'A', 'LI'].includes(t.tagName)) {
+                    handleTextEdit(e);
+                }
+            });
+        }
+
+        // --- MODALS & HELPERS ---
+        function openModal(id) { document.getElementById(id).classList.add('active'); }
+        function closeModal(id, e) {
+            if (e && e.target !== document.getElementById(id) && e.type === 'click') return;
+            document.getElementById(id).classList.remove('active');
+        }
+
+        function openTextModal(element) {
+            const editor = document.getElementById('richEditor');
+            editor.innerHTML = element.innerHTML;
+
+            const linkSection = document.getElementById('blockLinkSection');
+            const linkInput = document.getElementById('blockLinkInput');
+
+            const anchor = element.tagName === 'A' ? element : element.closest('a');
+
+            if (anchor) {
+                linkSection.classList.remove('hidden');
+                linkInput.value = anchor.getAttribute('href');
+                currentElement = anchor;
+            } else {
+                linkSection.classList.add('hidden');
+                linkInput.value = "";
+            }
+
+            closeLinkDrawer();
+            openModal('textModal');
+        }
+
+        function applyTextUpdate() {
+            if (!currentElement) return;
+
+            const editor = document.getElementById('richEditor');
+            currentElement.innerHTML = editor.innerHTML;
+
+            const linkSection = document.getElementById('blockLinkSection');
+            if (!linkSection.classList.contains('hidden')) {
+                const newHref = document.getElementById('blockLinkInput').value;
+                if (newHref) {
+                    currentElement.setAttribute('href', newHref);
+                }
+            }
+
+            saveProgress();
+            closeModal('textModal');
+        }
+
+        function getUniqueFilename(baseName) {
+            let name = baseName;
+            let counter = 1;
+            while (assetsToZip.some(a => a.name === name)) {
+                const parts = baseName.split('.');
+                const ext = parts.pop();
+                name = `${parts.join('.')}-${counter}.${ext}`;
+                counter++;
+            }
+            return name;
+        }
+
+        // --- ASSET LOGIC ---
+        window.pendingClientImages = []; // Array to store { filename, base64 }
+
+        async function processNewImage(file) {
+            if (!currentElement) return;
+            const dropContent = document.getElementById('dropContent');
+            const originalHTML = dropContent.innerHTML;
+
+            // 1. SHOW BIG LOADER (Safe: This is in the modal, not the iframe)
+            dropContent.innerHTML = `
+                <div class="flex flex-col items-center justify-center py-4">
+                    <div class="loader w-8 h-8 border-pink-500 mb-3"></div>
+                    <span class="text-lg font-bold text-white">Optimizing Image...</span>
+                    <span class="text-xs text-gray-400">Please wait</span>
+                </div>
+            `;
+
+            try {
+                // 2. Compress & Resize
+                let base64String = await compressImageSmart(file);
+
+                // 3. Generate Clean Filename
+                let baseName = file.name.split('.')[0].toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9\-]/g, '') + ".webp";
+                if (file.name === 'image.png' || file.name === 'pasted-image.png') {
+                    baseName = `pasted-image-${Date.now()}.webp`;
+                }
+
+                // Append timestamp to ensure uniqueness
+                baseName = `${Date.now()}-${baseName}`;
+
+                // GitHub Path context
+                // We will store uploaded images in a generic 'images' or 'assets' folder within the project branch
+                const githubPath = `images/${baseName}`;
+
+                // 4. ADD TO PENDING IMAGES QUEUE
+                // We only need the raw base64 data to push to GitHub (without the data:image/webp;base64, prefix)
+                const base64Data = base64String.split(',')[1];
+                window.pendingClientImages.push({
+                    path: githubPath,
+                    content: base64Data
+                });
+
+                // 5. UPDATE EDITOR FOR PREVIEW using a local Object URL
+                // Convert Base64 back to Blob for local preview ONLY so it's snappy
+                const byteString = atob(base64Data);
+                const ab = new ArrayBuffer(byteString.length);
+                const ia = new Uint8Array(ab);
+                for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+                const blob = new Blob([ab], { type: 'image/webp' });
+                const localPreviewUrl = URL.createObjectURL(blob);
+
+                currentElement.src = localPreviewUrl;
+                currentElement.removeAttribute('srcset');
+
+                // Set the dataset to the RELATIVE path so the Deployer knows what the final src should be
+                currentElement.dataset.githubPath = `images/${baseName}`;
+                // We use dataset.githubPath instead of dataset.exportSrc to distinguish our new flow
+
+                delete currentElement.dataset.isBig;
+                saveProgress();
+
+                // Success!
+                closeModal('imageModal');
+
+                // Reset the drop zone for next time
+                setTimeout(() => {
+                    dropContent.innerHTML = originalHTML;
+                    document.getElementById('imgUpload').value = '';
+                }, 500);
+
+            } catch (error) {
+                console.error(error);
+                alert("Error processing image. Please try again.");
+                dropContent.innerHTML = originalHTML;
+            }
+        }
+        // Helper function to check dimensions
+        function checkDimensions(file) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.src = URL.createObjectURL(file);
+                img.onload = () => {
+                    // WordPress threshold is 2560px
+                    if (img.width > 2560 || img.height > 2560) resolve(true);
+                    else resolve(false);
+                    URL.revokeObjectURL(img.src);
+                };
+            });
+        }
+
+        function convertToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+            });
+        }
+
+        async function handleImageUpload(input) {
+            const file = input.files[0];
+            if (!file) return;
+            await processNewImage(file);
+        }
+
+        // FIX: Ensure URL images are NOT added to GitHub queue by cleaning dataset
+        function applyUrl() {
+            const url = document.getElementById('urlInput').value;
+            if (url && currentElement) {
+                currentElement.src = url;
+                currentElement.removeAttribute('srcset');
+                // CLEAN DATASET so deployer ignores it
+                delete currentElement.dataset.githubPath;
+                delete currentElement.dataset.filename;
+
+                saveProgress();
+                closeModal('imageModal');
+            }
+        }
+
+        function addToZipQueue(filename, blob) {
+            assetsToZip.push({ name: filename, blob: blob });
+        }
+        function compressImageSmart(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width;
+                        let height = img.height;
+
+                        // STRATEGY: 2500px is the "Safe Zone".
+                        // 1. High enough for Retina/4K screens.
+                        // 2. Low enough to NEVER trigger WordPress "-scaled" renaming.
+                        // 3. Keeps memory usage low (prevents browser crashes).
+                        const SAFE_MAX = 2500;
+
+                        if (width > height) {
+                            if (width > SAFE_MAX) {
+                                height *= SAFE_MAX / width;
+                                width = SAFE_MAX;
+                            }
+                        } else {
+                            if (height > SAFE_MAX) {
+                                width *= SAFE_MAX / height;
+                                height = SAFE_MAX;
+                            }
+                        }
+
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+
+                        // High Quality (0.90) but Efficient WebP
+                        resolve(canvas.toDataURL('image/webp', 0.90));
+                    };
+                };
+            });
+        }
+        // --- TELEMETRY SYSTEM ---
+        let telemetryDebounce = 0;
+
+        function setupTelemetry(id) {
+            // 1. Send initial heartbeat
+            sendHeartbeat(id, false);
+
+            // 2. Listen for activity (Debounced to every 60s)
+            const trigger = () => {
+                const now = Date.now();
+                if (now - telemetryDebounce > 60000) { // 1 minute throttle
+                    sendHeartbeat(id, false);
+                    telemetryDebounce = now;
+                }
+            };
+
+            window.addEventListener('click', trigger);
+            window.addEventListener('keydown', trigger);
+
+            // 3. Track Download (Instant update)
+            const shareMenu = document.getElementById('sharingMenu');
+            if (shareMenu) {
+                shareMenu.addEventListener('click', () => {
+                    sendHeartbeat(id, true);
+                });
+            }
+
+        }
+
+        function sendHeartbeat(id, isDownload) {
+            if (!db) return;
+            const docRef = window.firebaseApp.doc(db, "projects", id);
+            const updateData = { last_active: window.firebaseApp.serverTimestamp() };
+            if (isDownload) updateData.downloaded = true;
+
+            // Fire and forget
+            window.firebaseApp.updateDoc(docRef, updateData).catch(e => console.log("Telemetry silent fail", e));
+        }
+
+        // ==========================================
+        // DEPLOY TO GITHUB LOGIC (CLIENT PORTAL)
+        // ==========================================
+        async function notifyTeam() { // Repurposed from "Notify Completion" to "Save & Deploy"
+            const btn = document.getElementById('notifyOption');
+            let originalText = "";
+
+            if (btn) {
+                originalText = btn.innerHTML;
+                btn.innerHTML = '<div class="loader w-3 h-3 border-white"></div> <span class="ml-2">Deploying...</span>';
+                btn.classList.add('disabled', 'cursor-wait');
+            }
+
+            try {
+                // 1. Get Clean HTML for current page
+                let cleanHTML = getCleanHTML();
+
+                // MULTI-PAGE FIX: Save the current page into our state object
+                window.editedPagesState = window.editedPagesState || {};
+                window.editedPagesState[projectMeta.page || 'index.html'] = cleanHTML;
+
+                // 2. Prepare Images Array
+                const filesPayload = [...window.pendingClientImages];
+
+                // 3. Determine Target Version
+                const urlParams = new URLSearchParams(window.location.search);
+                const projectId = urlParams.get('id');
+                let baseVersion = urlParams.get('v') || 'base';
+
+                let targetVersion = `${baseVersion}-client`;
+                let targetPrefix = `/${projectId}/${targetVersion}`;
+
+                // 4. Build Final Payload for ALL edited pages
+                const finalPagesToDeploy = [];
+                for (let pageName in window.editedPagesState) {
+                    let pageHtml = window.editedPagesState[pageName];
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(pageHtml, "text/html");
+
+                    const images = doc.querySelectorAll('img');
+                    for (let img of images) {
+                        if (img.dataset.githubPath) {
+                            img.src = `${targetPrefix}/${img.dataset.githubPath}`;
+                            delete img.dataset.githubPath;
+                            delete img.dataset.filename;
+                        }
+                        if (img.src.includes('wp-content/uploads')) img.removeAttribute('srcset');
+                        img.removeAttribute('style');
+                    }
+                    finalPagesToDeploy.push({ name: pageName, content: doc.documentElement.outerHTML });
+                }
+
+                // 5. Build Payload
+                const payload = {
+                    folderName: projectId,
+                    version: targetVersion,
+                    files: [
+                        ...finalPagesToDeploy,
+                        ...filesPayload
+                    ]
+                };
+
+                // 6. Call Backend Deployer
+                const API_DEPLOY = "https://githubdeployer-5resuz4f5a-as.a.run.app";
+                let token = "";
+                if (window.firebaseAuth && window.firebaseAuth.currentUser) {
+                    token = await window.firebaseAuth.currentUser.getIdToken();
+                }
+
+                const res = await fetch(API_DEPLOY, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(payload)
+                });
+                const response = { data: await res.json() };
+
+                if (response.data.success) {
+                    // Success!
+                    window.pendingClientImages = []; // Clear queue
+
+                    // Show success state
+                    if (btn) {
+                        btn.innerHTML = '<i data-feather="check" class="w-4 h-4"></i> <span class="ml-2">Deployed!</span>';
+                        btn.classList.replace('bg-green-600', 'bg-blue-600');
+                        btn.classList.replace('border-green-500', 'border-blue-500');
+                        feather.replace();
+                    }
+
+                    // Optional: open a success modal
+                    setTimeout(() => {
+                        alert(`Successfully deployed to ${targetVersion}! Returning you to the portal...`);
+                        window.location.href = 'client.html'; // FORCE Editor Closure explicitly
+                    }, 2000);
+
+                } else {
+                    throw new Error(response.data.error || "Deploy failed");
+                }
+
+            } catch (e) {
+                console.error("Deploy failed:", e);
+                alert("Error saving changes. See console.");
+                if (btn) {
+                    btn.innerHTML = originalText;
+                    btn.classList.remove('disabled', 'cursor-wait');
+                }
+            }
+        }
+
+        async function downloadProject() {
+            const btn = document.getElementById('adminDownloadBtn') || document.getElementById('saveBtn');
+            let originalText = "";
+
+            if (btn) {
+                originalText = btn.innerHTML;
+                btn.innerHTML = '<div class="loader w-3 h-3 border-white"></div> <span class="ml-2">Zipping...</span>';
+                btn.classList.add('disabled', 'cursor-wait');
+            }
+
+            try {
+                const zip = new JSZip();
+                const cleanHTML = getCleanHTML();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(cleanHTML, "text/html");
+                const imgFolder = zip.folder("images_to_upload");
+
+                let usedFilenames = [];
+                let hasImagesToUpload = false;
+
+                const images = doc.querySelectorAll('img');
+
+                for (let img of images) {
+                    // We only care about images the user touched (has exportSrc)
+                    if (img.dataset.exportSrc && img.dataset.filename) {
+                        hasImagesToUpload = true;
+                        let filename = img.dataset.filename;
+
+                        // Handle duplicates
+                        let counter = 1;
+                        let originalName = filename.replace('.webp', '');
+                        while (usedFilenames.includes(filename)) {
+                            filename = `${originalName}-${counter}.webp`;
+                            counter++;
+                        }
+                        usedFilenames.push(filename);
+
+                        // --- ROBUST RETRIEVAL ---
+                        let blob = null;
+
+                        // A. Try Hidden Database First (Fastest, No CORS)
+                        try {
+                            const cachedB64 = await loadFromBigStorage('img_' + img.dataset.filename);
+                            if (cachedB64) {
+                                // Convert Base64 back to Blob
+                                const byteString = atob(cachedB64.split(',')[1]);
+                                const ab = new ArrayBuffer(byteString.length);
+                                const ia = new Uint8Array(ab);
+                                for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+                                blob = new Blob([ab], { type: 'image/webp' });
+                            }
+                        } catch (e) { console.log("Cache miss", e); }
+
+                        // B. Fallback to Network (Slow, might hit CORS)
+                        if (!blob) {
+                            try {
+                                const response = await fetch(img.src);
+                                blob = await response.blob();
+                            } catch (e) { console.error("Network fetch failed", e); }
+                        }
+
+                        if (blob) {
+                            imgFolder.file(filename, blob);
+                            // Set the FINAL HTML src to the WordPress URL
+                            img.src = img.dataset.exportSrc;
+                        }
+
+                        // Cleanup attributes for final HTML
+                        delete img.dataset.exportSrc;
+                        delete img.dataset.filename;
+                        delete img.dataset.isBig;
+                    }
+
+                    // Clean standard WP nonsense
+                    if (img.src.includes('wp-content/uploads')) img.removeAttribute('srcset');
+                    img.removeAttribute('style');
+                }
+
+                if (!hasImagesToUpload) zip.remove("images_to_upload");
+
+                zip.file("index.html", doc.documentElement.outerHTML);
+
+                const content = await zip.generateAsync({ type: "blob" });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(content);
+                a.download = `${projectDomain ? projectDomain.split('.')[0] : 'project'}_update.zip`;
+                a.click();
+
+                openModal('successModal');
+
+            } catch (e) {
+                console.error("Zip failed:", e);
+                alert("Error creating Zip file. See console.");
+            } finally {
+                if (btn) {
+                    btn.innerHTML = originalText;
+                    btn.classList.remove('disabled', 'cursor-wait');
+                }
+                feather.replace();
+            }
+        }
+        document.addEventListener('keydown', (e) => {
+            // Undo: Ctrl+Z or Cmd+Z
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                e.preventDefault();
+                performUndo();
+            }
+            // Redo: Ctrl+Y or Cmd+Shift+Z
+            if (((e.ctrlKey || e.metaKey) && e.key === 'y') || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z')) {
+                e.preventDefault();
+                performRedo();
+            }
+        });
+    </script>
+</body>
+
+</html>
