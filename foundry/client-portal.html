@@ -1440,6 +1440,19 @@
             }
 
             try {
+                // NEW: BYPASS GITHUB FETCH IF WE ALREADY EDITED THIS PAGE TODAY
+                window.editedPagesState = window.editedPagesState || {};
+                if (window.editedPagesState[fileName]) {
+                    window.projectMeta.page = fileName;
+                    document.getElementById('currentPageName').innerText = fileName;
+                    loadContentIntoFrame(window.editedPagesState[fileName]);
+                    
+                    if (!isInitial) {
+                        document.getElementById('cloudLoader').classList.remove('active');
+                    }
+                    return; // Stop the function here so we don't fetch from Git
+                }
+
                 const API_GET = "https://getrepofile-5resuz4f5a-as.a.run.app";
                 let token = "";
                 if (window.firebaseAuth && window.firebaseAuth.currentUser) {
@@ -2570,6 +2583,9 @@
                 let baseVersion = urlParams.get('v') || 'base';
 
                 let targetVersion = `${baseVersion}-client`;
+                // Prevent recursive "-client-client" naming if they edit an already edited branch
+                targetVersion = targetVersion.replace('-client-client', '-client');
+                
                 let targetPrefix = `/${projectId}/${targetVersion}`;
 
                 // 4. Build Final Payload for ALL edited pages
@@ -2759,6 +2775,28 @@
             if (((e.ctrlKey || e.metaKey) && e.key === 'y') || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z')) {
                 e.preventDefault();
                 performRedo();
+            }
+        });
+
+        // --- PREVENT ACCIDENTAL CLOSURE ---
+        window.addEventListener('beforeunload', function (e) {
+            // Check if they have done anything worthy of saving
+            const hasEditedPages = window.editedPagesState && Object.keys(window.editedPagesState).length > 0;
+            const hasPendingImages = window.pendingClientImages && window.pendingClientImages.length > 0;
+            
+            // Also check if the current page has unsaved iframe changes compared to load
+            let currentFrameChanged = false;
+            try {
+                const currentHtml = getCleanHTML();
+                if (currentHtml && historyStack.length > 0 && currentHtml !== historyStack[0]) {
+                    currentFrameChanged = true;
+                }
+            } catch(err) {}
+
+            if (hasEditedPages || hasPendingImages || currentFrameChanged) {
+                // Standard browser requirement to trigger the "Leave Site?" prompt
+                e.preventDefault();
+                e.returnValue = ''; 
             }
         });
     </script>
