@@ -2100,8 +2100,8 @@
                     <td class="text-right">
                         <div class="flex items-center justify-end gap-1 opacity-70 group-hover:opacity-100 transition">
                             ${toggleBtn}
+                            <button onclick="window.openSnippetModal('${client.uid}')" class="icon-action text-yellow-400 hover:bg-yellow-400/10 hover:border-yellow-400/20" title="Get Integration Snippet"><i data-feather="code" class="w-4 h-4"></i></button>
                             <button onclick="window.triggerWeeklyReport('${client.email}')" class="icon-action text-blue-400 hover:bg-blue-400/10 hover:border-blue-400/20" title="Send Report"><i data-feather="mail" class="w-4 h-4"></i></button>
-<button onclick="window.triggerPasswordReset('${client.email}')" class="icon-action text-pink-400 hover:bg-pink-400/10 hover:border-pink-400/20" title="Send Password Reset"><i data-feather="key" class="w-4 h-4"></i></button>
 <button onclick="window.manageClientAction('${client.uid}', 'delete')" class="icon-action icon-action-delete" title="Delete account"><i data-feather="trash-2" class="w-4 h-4"></i></button>
                         </div>
                     </td>
@@ -2492,6 +2492,78 @@
                 }
                 showToast('Error: ' + e.message, 'error');
             }
+        };
+
+        // ==========================================
+        // API SNIPPETS
+        // ==========================================
+        window.openSnippetModal = (uid) => {
+            const client = allClients.find(c => c.uid === uid);
+            if (!client) return;
+
+            const isDirectEmail = client.directEmailEnabled;
+
+            const codeBlock = document.getElementById('snippet-code-content');
+
+            if (isDirectEmail) {
+                // Direct Email Transactional Snippet
+                codeBlock.textContent = `// Replaces an auto-reply. Instantly emails the user directly.
+// Only works if sent from: ${client.allowedDomains ? client.allowedDomains.join(', ') : 'No Domains Whitelisted!'}
+const formData = new FormData();
+formData.append('_to', '${client.email}');
+formData.append('_send_to', 'customer@example.com'); // Must provide recipient
+formData.append('_subject', 'Your Receipt');
+formData.append('_sender_name', 'My Awesome Company');
+
+// Example custom HTML design
+const htmlBody = \`
+  <div style="font-family: Arial; padding: 20px;">
+    <h2>Here is your info!</h2>
+    <p>Thanks for your purchase.</p>
+  </div>
+\`;
+formData.append('_auto_reply_content', htmlBody);
+
+fetch('https://asia-southeast1-b2b-software.cloudfunctions.net/reputifly', {
+    method: 'POST',
+    body: formData
+}).then(res => res.json()).then(console.log);`;
+            } else {
+                // Standard Lead Capture Snippet
+                codeBlock.textContent = `// Standard Lead Capture (Adds to your CRM)
+const formData = new FormData();
+formData.append('_to', '${client.email}');
+formData.append('Name', 'John Doe');
+formData.append('Phone', '12345678');
+// Add any other fields you want to collect
+
+fetch('https://asia-southeast1-b2b-software.cloudfunctions.net/reputifly', {
+    method: 'POST',
+    body: formData
+}).then(res => res.json()).then(console.log);`;
+            }
+
+            document.getElementById('snippet-modal').classList.add('open');
+        };
+
+        window.closeSnippetModal = () => {
+            document.getElementById('snippet-modal').classList.remove('open');
+            const btn = document.getElementById('copy-snippet-btn');
+            btn.innerHTML = '<i data-feather="copy" class="w-4 h-4"></i> Copy Code';
+            btn.classList.remove('bg-green-500', 'text-white', 'border-green-400');
+            btn.classList.add('bg-white/5', 'text-gray-300', 'border-white/10');
+            feather.replace();
+        };
+
+        window.copySnippet = () => {
+            const code = document.getElementById('snippet-code-content').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                const btn = document.getElementById('copy-snippet-btn');
+                btn.innerHTML = '<i data-feather="check" class="w-4 h-4"></i> Copied!';
+                btn.classList.remove('bg-white/5', 'text-gray-300', 'border-white/10');
+                btn.classList.add('bg-green-500', 'text-white', 'border-green-400');
+                feather.replace();
+            });
         };
 
         // ==========================================
@@ -3384,6 +3456,38 @@
 
             <!-- Content (injected via JS) -->
             <div id="ai-insights-content" class="hidden"></div>
+        </div>
+    </div>
+
+    <!-- API SNIPPET MODAL -->
+    <div id="snippet-modal" class="modal-backdrop z-[10005]">
+        <div class="modal-content w-full max-w-2xl bg-[#0f172a] border-slate-700 shadow-2xl relative">
+            <button onclick="closeSnippetModal()"
+                class="absolute top-4 right-4 text-slate-400 hover:text-white transition p-2 rounded-lg hover:bg-slate-800">
+                <i data-feather="x" class="w-5 h-5"></i>
+            </button>
+            <div class="mb-6">
+                <h3 class="text-xl font-bold text-white flex items-center gap-2 mb-2">
+                    <i data-feather="code" class="w-5 h-5 text-yellow-400"></i> API Integration Snippet
+                </h3>
+                <p class="text-sm text-slate-400">Copy and paste this Javascript fetch request into your website or
+                    application to connect your form to Reputifly.</p>
+            </div>
+
+            <div class="relative bg-[#1e293b] rounded-xl border border-slate-700 overflow-hidden group">
+                <div class="flex items-center justify-between px-4 py-2 bg-slate-800/50 border-b border-slate-700">
+                    <span class="text-xs font-mono text-slate-400">javascript</span>
+                    <button id="copy-snippet-btn" onclick="copySnippet()"
+                        class="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all bg-white/5 text-gray-300 border border-white/10 hover:bg-white/10 hover:text-white">
+                        <i data-feather="copy" class="w-4 h-4"></i> Copy Code
+                    </button>
+                </div>
+                <div class="p-4 overflow-x-auto">
+                    <pre><code id="snippet-code-content" class="text-sm font-mono text-emerald-400 leading-relaxed">
+// Code will be generated here
+                    </code></pre>
+                </div>
+            </div>
         </div>
     </div>
 </body>
