@@ -995,6 +995,8 @@
                                 <th>Reviews</th>
                                 <th>Telegram</th>
                                 <th>AI</th>
+                                <th>Direct Email</th>
+                                <th>TG-Only</th>
                                 <th>Daily Limit</th>
                                 <th>Joined</th>
                                 <th class="text-right">Actions</th>
@@ -1217,6 +1219,35 @@
                 <button onclick="closeReviewModal()"
                     class="px-4 py-2 text-sm text-gray-400 hover:text-white transition">Cancel</button>
                 <button onclick="saveReviewSettings()" class="btn-liquid-glow">Confirm & Enable</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DIRECT EMAIL SETTINGS MODAL -->
+    <div id="direct-email-modal" class="modal-backdrop" style="z-index: 10004;">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold text-white brand-font">Direct Email Settings <span
+                        id="direct-email-modal-client" class="hidden"></span></h3>
+                <button onclick="window.closeDirectEmailModal()" class="text-gray-500 hover:text-white"><i
+                        data-feather="x"></i></button>
+            </div>
+
+            <div class="mb-4">
+                <label class="block text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">Allowed
+                    Domain(s)</label>
+                <input type="text" id="direct-email-domain-input" class="form-input"
+                    placeholder="e.g. cleaning-app.firebaseapp.com" autocomplete="off">
+                <p class="text-[10px] text-gray-500 mt-2">
+                    <i data-feather="info" class="w-3 h-3 inline"></i>
+                    Only requests from this domain can use the Direct Email API. Multiple domains comma-separated.
+                </p>
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <button onclick="window.closeDirectEmailModal()"
+                    class="px-4 py-2 text-sm text-gray-400 hover:text-white transition">Cancel</button>
+                <button onclick="window.saveDirectEmailSettings()" class="btn-liquid-glow">Enable Direct Email</button>
             </div>
         </div>
     </div>
@@ -2038,6 +2069,24 @@
                             <div class="toggle-knob"></div>
                         </div>
                     </td>
+                    <td>
+                        <div class="flex flex-col justify-center">
+                            ${client.allowedDomains && client.allowedDomains.length > 0
+                        ? `<div class="flex items-center gap-1.5 text-[9px] text-emerald-400 font-bold uppercase tracking-widest mb-2"><div class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>${client.allowedDomains[0].length > 18 ? client.allowedDomains[0].substring(0, 18) + '...' : client.allowedDomains[0]}</div>`
+                        : `<div class="flex items-center gap-1.5 text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-2"><div class="w-1.5 h-1.5 rounded-full bg-gray-600"></div>No Domain</div>`
+                    }
+                            <div id="toggle-directemail-${client.uid}" class="toggle-switch ${client.directEmailEnabled ? 'active' : ''} ${client.directEmailEnabled ? 'bg-orange-500' : ''}" 
+                                 onclick="window.handleDirectEmailToggle('${client.uid}', ${!!client.directEmailEnabled}, this)">
+                                <div class="toggle-knob"></div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <div id="toggle-tgonly-${client.uid}" class="toggle-switch ${client.telegramOnlyEnabled ? 'active' : ''} ${client.telegramOnlyEnabled ? 'bg-cyan-500' : ''}" 
+                             onclick="window.handleTelegramOnlyToggle('${client.uid}', ${!!client.telegramOnlyEnabled}, this)">
+                            <div class="toggle-knob"></div>
+                        </div>
+                    </td>
                     
                     <td>
                         <button onclick="window.editClientLimit('${client.uid}', '${client.customDailyLimit || 0}')" 
@@ -2342,6 +2391,134 @@
                     el.classList.toggle('bg-purple-500', currentStatus);
                 }
                 showToast('Failed to update AI setting: ' + err.message, 'error');
+            }
+        };
+
+        // ==========================================
+        // TOGGLE: DIRECT EMAIL
+        // ==========================================
+        let currentDirectEmailClient = null;
+
+        window.handleDirectEmailToggle = (uid, currentStatus, el) => {
+            currentDirectEmailClient = uid;
+
+            if (currentStatus) {
+                // Turning OFF — direct toggle
+                const toggleEl = el || document.getElementById(`toggle-directemail-${uid}`);
+                if (toggleEl) {
+                    toggleEl.classList.remove('active');
+                    toggleEl.classList.remove('bg-orange-500');
+                }
+                window.saveDirectEmailSettings(false, null, toggleEl);
+            } else {
+                // Turning ON — open modal to configure domain
+                window.openDirectEmailModal(uid);
+            }
+        };
+
+        window.openDirectEmailModal = (uid) => {
+            currentDirectEmailClient = uid;
+            const modal = document.getElementById('direct-email-modal');
+            const title = document.getElementById('direct-email-modal-client');
+            const domainInput = document.getElementById('direct-email-domain-input');
+
+            title.textContent = uid;
+
+            // Pre-fill existing domains
+            const client = allClients.find(c => c.uid === uid);
+            domainInput.value = client && client.allowedDomains ? client.allowedDomains.join(', ') : '';
+
+            modal.classList.add('open');
+            if (window.feather) feather.replace();
+        };
+
+        window.closeDirectEmailModal = () => {
+            document.getElementById('direct-email-modal').classList.remove('open');
+            currentDirectEmailClient = null;
+        };
+
+        window.saveDirectEmailSettings = async (forceEnabled = null, domainsValue = null, toggleEl = null) => {
+            try {
+                if (!currentDirectEmailClient) return;
+                const uid = currentDirectEmailClient;
+
+                let enabled, domains;
+
+                if (forceEnabled !== null) {
+                    // Direct toggle off
+                    enabled = forceEnabled;
+                    domains = [];
+                } else {
+                    // Modal save
+                    enabled = true;
+                    const domainInput = document.getElementById('direct-email-domain-input');
+                    const raw = domainInput.value.trim();
+                    if (!raw) {
+                        showToast("Please enter at least one domain.", "error");
+                        return;
+                    }
+                    domains = raw.split(',').map(d => d.trim()).filter(d => d.length > 0);
+                    window.closeDirectEmailModal();
+                }
+
+                showToast(enabled ? "Enabling Direct Email..." : "Disabling Direct Email...", "info");
+
+                const token = await getAuthToken();
+                const resp = await fetch(`${API_BASE}/manageClient`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({
+                        uid: uid,
+                        action: 'update_direct_email_settings',
+                        value: { enabled, domains }
+                    })
+                });
+
+                const data = await resp.json();
+                if (data.success) {
+                    showToast(data.message, 'success');
+                } else {
+                    if (toggleEl && !enabled) {
+                        toggleEl.classList.add('active');
+                        toggleEl.classList.add('bg-orange-500');
+                    }
+                    showToast(data.error || 'Failed to save settings.', 'error');
+                }
+            } catch (e) {
+                console.error('Direct Email Settings Error:', e);
+                if (toggleEl && forceEnabled === false) {
+                    toggleEl.classList.add('active');
+                    toggleEl.classList.add('bg-orange-500');
+                }
+                showToast('Error: ' + e.message, 'error');
+            }
+        };
+
+        // ==========================================
+        // TOGGLE: TELEGRAM-ONLY
+        // ==========================================
+        window.handleTelegramOnlyToggle = async (uid, currentStatus, el) => {
+            const newStatus = !currentStatus;
+            if (el) {
+                el.classList.toggle('active', newStatus);
+                el.classList.toggle('bg-cyan-500', newStatus);
+            }
+            try {
+                const token = await getAuthToken();
+                await fetch(`${API_BASE}/manageClient`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ uid: uid, action: 'update_telegram_only_settings', value: { enabled: newStatus } })
+                });
+                const client = allClients.find(c => c.uid === uid);
+                if (client) client.telegramOnlyEnabled = newStatus;
+                showToast(`Telegram-Only mode ${newStatus ? 'enabled' : 'disabled'}`, 'success');
+            } catch (err) {
+                if (el) {
+                    el.classList.toggle('active', currentStatus);
+                    el.classList.toggle('bg-cyan-500', currentStatus);
+                }
+                showToast('Failed to update TG-Only setting', 'error');
             }
         };
 
