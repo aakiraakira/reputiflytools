@@ -1787,6 +1787,7 @@
                     <textarea id="deployCommitMsg" rows="3" placeholder="Briefly describe your changes..."
                         class="w-full input-dark rounded-2xl p-4 text-sm resize-none"></textarea>
                 </div>
+
                 <div class="flex gap-3">
                     <button onclick="closeDeployConfirmModal()"
                         class="flex-1 btn-hero-glass py-3.5 text-sm font-bold justify-center rounded-xl">Cancel</button>
@@ -1841,6 +1842,7 @@
         const API_DUPLICATE = "https://duplicateproject-5resuz4f5a-as.a.run.app";
         const API_ADMIN = "https://manageteam-5resuz4f5a-as.a.run.app";
         const API_WP_EXPORT = "https://asia-southeast1-reputifly-automation.cloudfunctions.net/exportBranchFiles";
+        const API_WP_EXPERIMENTAL = "https://asia-southeast1-reputifly-automation.cloudfunctions.net/experimentalWpDeploy";
 
         const SUPER_ADMIN_UID = "wyeWdXkzCNf4ghrLxmoyvVbURAv2";
 
@@ -1937,6 +1939,10 @@
             const modal = document.getElementById('deployConfirmModal');
             document.getElementById('deployConfirmModalText').innerHTML = msgHtml;
             document.getElementById('deployCommitMsg').value = ''; // clear previous
+            
+            // Uncheck WP CDN toggle by default
+            const wpToggle = document.getElementById('useWpCdnToggle');
+            if (wpToggle) wpToggle.checked = false;
 
             const nameGroup = document.getElementById('deployConfirmNameGroup');
             const nameInput = document.getElementById('deployConfirmName');
@@ -3461,6 +3467,15 @@
                 onClick: `closeRepoActionsModal(); openWpExportModal('${client}', '${ver}')`
             }));
 
+            items.push(repoActionItemHtml({
+                kind: 'button',
+                label: 'Experimental WP',
+                desc: 'Auto-uploads images to WP CDN and returns the rewritten HTML.',
+                icon: 'server',
+                tone: 'primary',
+                onClick: `closeRepoActionsModal(); executeExperimentalWpExport('${client}', '${ver}')`
+            }));
+
             if (isBase) {
                 items.push(repoActionItemHtml({
                     kind: 'button',
@@ -3916,6 +3931,203 @@
                 btn.innerHTML = originalHtml;
                 btn.disabled = false;
                 if (window.feather) feather.replace();
+            }
+        };
+
+        // ==========================================
+        // EXPERIMENTAL WP EXPORT (AUTO UPLOAD CDN)
+        // ==========================================
+        window.executeExperimentalWpExport = async (client, ver) => {
+            // Show modal in processing state right away
+            document.getElementById('wpExportFormArea').classList.add('hidden');
+            document.getElementById('wpExportSuccessArea').classList.remove('hidden');
+            document.getElementById('wpExportSuccessArea').classList.add('flex');
+            
+            const titleEl = document.querySelector('#wpExportSuccessArea h3');
+            const descEl = document.querySelector('#wpExportSuccessArea p');
+            const originalTitle = titleEl.innerText;
+            const originalDesc = descEl.innerText;
+            
+            titleEl.innerHTML = '<i data-feather="loader" class="animate-spin inline w-6 h-6 mr-2 text-purple-400"></i> Processing...';
+            descEl.innerText = 'Fetching files and uploading images to WP CDN. This may take a minute...';
+            if (window.feather) feather.replace();
+            
+            const modal = document.getElementById('wpExportModal');
+            const content = document.getElementById('wpExportModalContent');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => content.classList.remove('scale-95'), 10);
+
+            try {
+                if (!auth.currentUser) throw new Error("Not authenticated");
+                const token = await auth.currentUser.getIdToken();
+
+                // 1. Fetch entire branch
+                const response = await fetch(API_WP_EXPORT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ folderName: client, version: ver })
+                });
+
+                const resData = await response.json();
+                if (!resData.success) throw new Error(resData.error || "Failed to fetch files.");
+
+                const files = resData.files;
+                
+                // WP Credentials (Hardcoded for Experimental)
+                const WP_URL = "https://reputifly3.sg-host.com/wp-json/wp/v2/media";
+                const WP_AUTH = "Basic " + btoa("julian:6ZMS Y66m DHcE Ghgr pGH3 HKVh");
+
+                const getMimeType = (filename) => {
+                    const ext = filename.split('.').pop().toLowerCase();
+                    const mimes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml' };
+                    return mimes[ext] || 'application/octet-stream';
+                };
+
+                const b64toBlob = (b64Data, contentType='') => {
+                    const byteCharacters = atob(b64Data);
+                    const byteArrays = [];
+                    for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+                        const slice = byteCharacters.slice(offset, offset + 512);
+                        const byteNumbers = new Array(slice.length);
+                        for (let i = 0; i < slice.length; i++) {
+                            byteNumbers[i] = slice.charCodeAt(i);
+                        }
+                        byteArrays.push(new Uint8Array(byteNumbers));
+                    }
+                    return new Blob(byteArrays, {type: contentType});
+                };
+
+                const imageMap = {};
+                const htmlFiles = [];
+                const zip = new JSZip();
+
+                // 2. Upload images to WP and collect HTML files
+                let imgCount = 0;
+                for (const file of files) {
+                    const isImage = file.path.match(/\.(png|jpe?g|webp|gif|svg|ico)$/i);
+                    const isHtml = file.path.endsWith('.html');
+                    
+                    if (isImage) {
+                        imgCount++;
+                        descEl.innerText = `Uploading image ${imgCount}...`;
+                        
+                        const ext = file.path.split('.').pop();
+                        const baseName = file.path.split('/').pop().replace(`.${ext}`, '');
+                        const uniqueHash = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+                        const wpFileName = `${baseName}-${uniqueHash}.${ext}`.replace(/[^a-zA-Z0-9.-]/g, '-');
+                        
+                        let base64Data = file.content;
+                        if (base64Data.includes('base64,')) base64Data = base64Data.split('base64,')[1];
+                        
+                        const blob = b64toBlob(base64Data, getMimeType(wpFileName));
+                        
+                        const wpRes = await fetch(WP_URL, {
+                            method: "POST",
+                            headers: {
+                                "Authorization": WP_AUTH,
+                                "Content-Disposition": `attachment; filename="${wpFileName}"`
+                            },
+                            body: blob
+                        });
+                        
+                        if (!wpRes.ok) {
+                            console.warn("CORS or Upload error on WP:", await wpRes.text());
+                            throw new Error("WP Upload Failed. Install a 'Allow CORS' plugin on your WP site.");
+                        }
+                        
+                        const wpData = await wpRes.json();
+                        const cleanPath = file.path.replace(/^\.\/|^\//, '');
+                        try {
+                            const decodedPath = decodeURIComponent(cleanPath);
+                            imageMap[decodedPath] = wpData.source_url;
+                        } catch(e) {}
+                        imageMap[cleanPath] = wpData.source_url;
+                        
+                    } else if (isHtml) {
+                        const binaryString = atob(file.content);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                        const decoder = new TextDecoder('utf-8');
+                        htmlFiles.push({ path: file.path, content: decoder.decode(bytes) });
+                    }
+                }
+
+                descEl.innerText = 'Rewriting HTML paths...';
+
+                // 3. Rewrite HTML
+                const finalHtmlPages = [];
+                for (const htmlFile of htmlFiles) {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(htmlFile.content, "text/html");
+
+                    const images = doc.querySelectorAll('img');
+                    images.forEach(img => {
+                        const originalSrc = img.getAttribute('src');
+                        if (originalSrc && !originalSrc.startsWith('http') && !originalSrc.startsWith('data:')) {
+                            let cleanSrc = originalSrc.replace(/^\.\/|^\//, '');
+                            try { cleanSrc = decodeURIComponent(cleanSrc); } catch(e) {}
+
+                            if (imageMap[cleanSrc]) {
+                                img.setAttribute('src', imageMap[cleanSrc]);
+                            }
+                        }
+                        img.removeAttribute('srcset');
+                    });
+
+                    // Update inline CSS backgrounds
+                    const elementsWithBg = doc.querySelectorAll('[style*="background-image"]');
+                    elementsWithBg.forEach(el => {
+                        let style = el.getAttribute('style');
+                        Object.keys(imageMap).forEach(localPath => {
+                            if (style.includes(localPath)) {
+                                style = style.split(localPath).join(imageMap[localPath]);
+                            }
+                        });
+                        el.setAttribute('style', style);
+                    });
+
+                    const htmlName = htmlFile.path.split('/').pop();
+                    const finalCode = doc.documentElement.outerHTML;
+                    zip.file(`${htmlName}`, finalCode); // Add HTML to ZIP
+                    
+                    finalHtmlPages.push({ name: htmlName, code: finalCode });
+                }
+
+                // 4. Trigger ZIP Download (HTML only)
+                descEl.innerText = 'Generating ZIP...';
+                const contentBlob = await zip.generateAsync({ type: "blob" });
+                triggerBlobDownload(contentBlob, `${client}-${ver}-WP-CDN-Code.zip`);
+
+                // 5. Setup UI
+                titleEl.innerText = 'Export Complete!';
+                descEl.innerText = 'Images are live on WP CDN. Copy the code below.';
+
+                const selectEl = document.getElementById('wpPageSelect');
+                selectEl.innerHTML = '';
+                finalHtmlPages.forEach((page, idx) => {
+                    const opt = document.createElement('option');
+                    opt.value = idx;
+                    opt.textContent = page.name;
+                    selectEl.appendChild(opt);
+                });
+
+                const codeViewer = document.getElementById('wpCodeViewer');
+                if (finalHtmlPages.length > 0) {
+                    codeViewer.value = finalHtmlPages[0].code;
+                }
+
+                selectEl.onchange = (e) => {
+                    codeViewer.value = finalHtmlPages[e.target.value].code;
+                };
+
+                window.showToast("Experimental WP Export Complete!", "success");
+
+            } catch (error) {
+                console.error("Experimental WP Export Error:", error);
+                titleEl.innerText = 'Export Failed';
+                descEl.innerHTML = `<span class="text-red-400">${error.message}</span>`;
+                window.showToast("Export failed: " + error.message, "error");
             }
         };
 
