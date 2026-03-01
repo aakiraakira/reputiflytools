@@ -378,12 +378,56 @@
         let currentPageIdx = 0;
         let activeZoneInfo = null;
 
+        // --- INDEXED DB MINI-WRAPPER ---
+        const dbName = 'ReputiflyDB';
+        const storeName = 'revisions';
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(dbName, 1);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(storeName)) db.createObjectStore(storeName);
+                };
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function saveToDB(key, data) {
+            try {
+                const db = await initDB();
+                const tx = db.transaction(storeName, 'readwrite');
+                tx.objectStore(storeName).put(data, key);
+            } catch (err) { console.error("DB Save Error:", err); }
+        }
+
+        async function loadFromDB(key) {
+            try {
+                const db = await initDB();
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction(storeName, 'readonly');
+                    const request = tx.objectStore(storeName).get(key);
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+            } catch (err) { return null; }
+        }
+
+        async function deleteFromDB(key) {
+            try {
+                const db = await initDB();
+                const tx = db.transaction(storeName, 'readwrite');
+                tx.objectStore(storeName).delete(key);
+            } catch (err) { console.error("DB Delete Error:", err); }
+        }
+
         // --- ROUTER (Decode Payload) ---
         const urlParams = new URLSearchParams(window.location.search);
         const encodedData = urlParams.get('payload');
         const firestoreId = urlParams.get('id');
 
-        function loadAppData(parsed) {
+        async function loadAppData(parsed) {
             appState.project = parsed.p || "Website";
             appState.pages = parsed.pgs || [];
             document.getElementById('projectNameDisplay').innerText = `${appState.project} Revisions`;
@@ -395,14 +439,11 @@
                 });
             });
 
-            // Recover local state
+            // Recover local state from IndexedDB
             const key = firestoreId || 'local_draft';
-            const saved = localStorage.getItem(`revision_state_${key}`);
-            if (saved) {
-                try {
-                    const parsedData = JSON.parse(saved);
-                    appState.data = { ...appState.data, ...parsedData };
-                } catch (e) { }
+            const savedData = await loadFromDB(`revision_state_${key}`);
+            if (savedData) {
+                appState.data = { ...appState.data, ...savedData };
             }
 
             renderClientTabs();
@@ -423,9 +464,9 @@
             feather.replace();
 
             const fetchScope = () => {
-                window.getDoc(window.doc(window.db, "revision_scopes", firestoreId)).then(docSnap => {
+                window.getDoc(window.doc(window.db, "revision_scopes", firestoreId)).then(async docSnap => {
                     if (docSnap.exists()) {
-                        loadAppData(docSnap.data());
+                        await loadAppData(docSnap.data());
                     } else {
                         alert("Scope not found or link has expired.");
                         document.getElementById('clientView').classList.add('hidden');
@@ -446,15 +487,19 @@
         } else if (encodedData) {
             document.getElementById('clientView').classList.remove('hidden');
             document.getElementById('clientView').classList.add('flex');
-            try {
-                const decodedStr = decodeURIComponent(escape(atob(encodedData)));
-                loadAppData(JSON.parse(decodedStr));
-            } catch (e) {
-                alert("The revision link is broken or corrupted.");
-                document.getElementById('clientView').classList.add('hidden');
-                document.getElementById('clientView').classList.remove('flex');
-                document.getElementById('adminView').classList.remove('hidden');
-            }
+            
+            const initEncoded = async () => {
+                try {
+                    const decodedStr = decodeURIComponent(escape(atob(encodedData)));
+                    await loadAppData(JSON.parse(decodedStr));
+                } catch (e) {
+                    alert("The revision link is broken or corrupted.");
+                    document.getElementById('clientView').classList.add('hidden');
+                    document.getElementById('clientView').classList.remove('flex');
+                    document.getElementById('adminView').classList.remove('hidden');
+                }
+            };
+            initEncoded();
         } else {
             document.getElementById('adminView').classList.remove('hidden');
         }
@@ -641,7 +686,7 @@
         // --- INTERACTION LOGIC ---
         function saveLocalState() {
             const key = firestoreId || 'local_draft';
-            localStorage.setItem(`revision_state_${key}`, JSON.stringify(appState.data));
+            saveToDB(`revision_state_${key}`, appState.data);
         }
 
         function updateGlobalText(key, val) {
@@ -1108,6 +1153,10 @@
                 });
 
                 if (!apiRes.ok) throw new Error("Failed to dispatch email to developers.");
+
+                // Clear the IndexedDB draft so the client starts fresh next time
+                const storageKey = firestoreId || 'local_draft';
+                deleteFromDB(`revision_state_${storageKey}`);
 
                 // Success UI
                 document.getElementById('loadingTitle').innerText = "Mission Accomplished";
