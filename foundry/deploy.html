@@ -3934,6 +3934,34 @@
             }
         };
 
+        // Auto-Optimizer Engine: Converts heavy PNG/JPG to WebP format instantly (Used exclusively for WP CDN)
+        window.compressImageBase64 = (base64Str, filename) => {
+            return new Promise((resolve) => {
+                const ext = filename.split('.').pop().toLowerCase();
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    const MAX_SIZE = 2500;
+                    if (width > MAX_SIZE || height > MAX_SIZE) {
+                        if (width > height) { height *= MAX_SIZE / width; width = MAX_SIZE; } 
+                        else { width *= MAX_SIZE / height; height = MAX_SIZE; }
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    const newDataUrl = canvas.toDataURL('image/webp', 0.85);
+                    const newBase64 = newDataUrl.split(',')[1];
+                    const newName = filename.replace(/\.(png|jpe?g)$/i, ".webp");
+                    resolve({ name: newName, content: newBase64 });
+                };
+                img.onerror = () => resolve({ name: filename, content: base64Str });
+                img.src = base64Str.includes('data:') ? base64Str : `data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,${base64Str}`;
+            });
+        };
+
         // ==========================================
         // EXPERIMENTAL WP EXPORT (AUTO UPLOAD CDN)
         // ==========================================
@@ -4010,16 +4038,28 @@
                     
                     if (isImage) {
                         imgCount++;
-                        descEl.innerText = `Uploading image ${imgCount}...`;
-                        
-                        const ext = file.path.split('.').pop();
-                        const baseName = file.path.split('/').pop().replace(`.${ext}`, '');
-                        const uniqueHash = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-                        const wpFileName = `${baseName}-${uniqueHash}.${ext}`.replace(/[^a-zA-Z0-9.-]/g, '-');
+                        descEl.innerText = `Processing image ${imgCount}...`;
                         
                         let base64Data = file.content;
                         if (base64Data.includes('base64,')) base64Data = base64Data.split('base64,')[1];
                         
+                        let ext = file.path.split('.').pop().toLowerCase();
+                        let baseName = file.path.split('/').pop();
+                        baseName = baseName.substring(0, baseName.lastIndexOf('.'));
+                        
+                        // Optimize PNG/JPG to WebP specifically for WordPress scale
+                        if (file.path.match(/\.(png|jpe?g)$/i)) {
+                            descEl.innerText = `Optimizing image ${imgCount} (WebP)...`;
+                            const optResult = await window.compressImageBase64(base64Data, file.path.split('/').pop());
+                            base64Data = optResult.content;
+                            ext = 'webp';
+                            baseName = optResult.name.replace('.webp', '');
+                        }
+                        
+                        const uniqueHash = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+                        const wpFileName = `${baseName}-${uniqueHash}.${ext}`.replace(/[^a-zA-Z0-9.-]/g, '-');
+                        
+                        descEl.innerText = `Uploading ${wpFileName}...`;
                         const blob = b64toBlob(base64Data, getMimeType(wpFileName));
                         
                         const wpRes = await fetch(WP_URL, {
@@ -4120,6 +4160,33 @@
                 selectEl.onchange = (e) => {
                     codeViewer.value = finalHtmlPages[e.target.value].code;
                 };
+
+                const copyBtn = document.getElementById('wpCopyCodeBtn');
+                if (copyBtn) {
+                    const newCopyBtn = copyBtn.cloneNode(true);
+                    copyBtn.parentNode.replaceChild(newCopyBtn, copyBtn);
+                    newCopyBtn.onclick = () => {
+                        navigator.clipboard.writeText(document.getElementById('wpCodeViewer').value);
+                        newCopyBtn.innerHTML = '<i data-feather="check" class="w-4 h-4 text-green-400"></i>';
+                        if (window.feather) feather.replace();
+                        setTimeout(() => {
+                            newCopyBtn.innerHTML = '<i data-feather="copy" class="w-4 h-4"></i>';
+                            if (window.feather) feather.replace();
+                        }, 2000);
+                    };
+                }
+
+                const previewBtn = document.getElementById('wpPreviewCodeBtn');
+                if (previewBtn) {
+                    const newPreviewBtn = previewBtn.cloneNode(true);
+                    previewBtn.parentNode.replaceChild(newPreviewBtn, previewBtn);
+                    newPreviewBtn.onclick = () => {
+                        const code = document.getElementById('wpCodeViewer').value;
+                        if (!code) return;
+                        const blob = new Blob([code], { type: 'text/html' });
+                        window.open(URL.createObjectURL(blob), '_blank');
+                    };
+                }
 
                 window.showToast("Experimental WP Export Complete!", "success");
 
