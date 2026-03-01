@@ -1653,6 +1653,56 @@
             </div>
         </div>
 
+        <div id="wpExportModal"
+            class="fixed inset-0 z-[100] flex items-center justify-center hidden bg-black/80 backdrop-blur-sm transition-opacity px-4">
+            <div class="glass-panel rounded-[2rem] p-8 max-w-lg w-full mx-4 border border-pink-500/30 shadow-[0_0_50px_rgba(236,72,153,0.15)] transform scale-95 transition-transform"
+                id="wpExportModalContent">
+                
+                <div id="wpExportFormArea">
+                    <div
+                        class="w-16 h-16 bg-pink-500/20 rounded-full flex items-center justify-center mb-6 mx-auto border border-pink-500/30">
+                        <i data-feather="layout" class="w-8 h-8 text-pink-500"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold text-center mb-2 text-white">WordPress Export</h3>
+                    <p class="text-gray-400 text-center text-sm mb-6">Enter the live URL. We'll flatten images and rewrite paths automatically.</p>
+
+                    <div class="mb-6">
+                        <label class="block text-[11px] font-bold text-gray-500 mb-2 uppercase tracking-widest">Target Live URL</label>
+                        <input type="url" id="wpTargetUrl" class="w-full input-dark rounded-xl p-4 text-sm font-mono" placeholder="https://clientwebsite.com">
+                    </div>
+
+                    <div class="flex gap-4">
+                        <button onclick="closeWpExportModal()" class="flex-1 btn-hero-glass py-4 text-sm justify-center">Cancel</button>
+                        <button id="executeWpExportBtn" class="flex-1 btn-liquid-glow py-4 text-sm justify-center">Download ZIP</button>
+                    </div>
+                </div>
+
+                <div id="wpExportSuccessArea" class="hidden flex-col">
+                    <div
+                        class="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mb-4 mx-auto border border-green-500/30">
+                        <i data-feather="check" class="w-8 h-8 text-green-500"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold text-center mb-2 text-white">Export Complete!</h3>
+                    <p class="text-gray-400 text-center text-xs mb-4">ZIP downloaded. Upload the images, then copy your page code below.</p>
+                    
+                    <div class="mb-4">
+                        <select id="wpPageSelect" class="w-full input-dark rounded-xl p-3 text-sm font-bold cursor-pointer border border-pink-500/30 focus:border-pink-500 text-pink-400">
+                        </select>
+                    </div>
+                    
+                    <div class="relative group mb-6">
+                        <textarea id="wpCodeViewer" readonly class="w-full h-[250px] input-dark rounded-xl p-4 font-mono text-[11px] leading-relaxed text-gray-300 resize-none bg-black/60 focus:ring-1 focus:ring-pink-500" placeholder="HTML code will appear here..."></textarea>
+                        <button id="wpCopyCodeBtn" class="absolute top-3 right-3 p-2.5 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl backdrop-blur-md transition-colors text-white" title="Copy Code">
+                            <i data-feather="copy" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+
+                    <button onclick="closeWpExportModal()" class="w-full btn-hero-glass py-4 text-sm justify-center">Done</button>
+                </div>
+
+            </div>
+        </div>
+
         <div id="cloneModal"
             class="fixed inset-0 z-[100] flex items-center justify-center hidden bg-black/80 backdrop-blur-sm transition-opacity">
             <div class="glass-panel rounded-[2rem] p-8 max-w-md w-full mx-4 border border-[#FF8A00]/30 shadow-[0_0_50px_rgba(255,138,0,0.15)] transform scale-95 transition-transform"
@@ -1770,6 +1820,7 @@
         const API_CLONE = "https://asia-southeast1-reputifly-automation.cloudfunctions.net/cloneVersion";
         const API_DUPLICATE = "https://duplicateproject-5resuz4f5a-as.a.run.app";
         const API_ADMIN = "https://manageteam-5resuz4f5a-as.a.run.app";
+        const API_WP_EXPORT = "https://asia-southeast1-reputifly-automation.cloudfunctions.net/exportBranchFiles";
 
         const SUPER_ADMIN_UID = "wyeWdXkzCNf4ghrLxmoyvVbURAv2";
 
@@ -3381,6 +3432,15 @@
                 onClick: `closeRepoActionsModal(); downloadVersionZip('${client}', '${ver}')`
             }));
 
+            items.push(repoActionItemHtml({
+                kind: 'button',
+                label: 'WP Export',
+                desc: 'Flatten images and rewrite paths for direct WordPress upload.',
+                icon: 'layout',
+                tone: 'primary',
+                onClick: `closeRepoActionsModal(); openWpExportModal('${client}', '${ver}')`
+            }));
+
             if (isBase) {
                 items.push(repoActionItemHtml({
                     kind: 'button',
@@ -3624,6 +3684,210 @@
                     const fileBlob = await fileRes.blob();
                     zipFolder.file(item.name, fileBlob);
                 }
+            }
+        };
+
+        // ==========================================
+        // WORDPRESS EXPORT ENGINE
+        // ==========================================
+        let currentWpClient = "";
+        let currentWpVersion = "";
+
+        window.openWpExportModal = (client, ver) => {
+            currentWpClient = client;
+            currentWpVersion = ver;
+            
+            const modal = document.getElementById('wpExportModal');
+            const content = document.getElementById('wpExportModalContent');
+            
+            // Reset to form view
+            document.getElementById('wpExportFormArea').classList.remove('hidden');
+            document.getElementById('wpExportSuccessArea').classList.add('hidden');
+            document.getElementById('wpExportSuccessArea').classList.remove('flex');
+            
+            // Auto-predict domain based on client ID
+            document.getElementById('wpTargetUrl').value = `https://${client.replace('-client', '')}.com`;
+            
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => content.classList.remove('scale-95'), 10);
+            
+            const execBtn = document.getElementById('executeWpExportBtn');
+            execBtn.onclick = () => window.executeWpExport(client, ver);
+        };
+
+        window.closeWpExportModal = () => {
+            const modal = document.getElementById('wpExportModal');
+            const content = document.getElementById('wpExportModalContent');
+            content.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 200);
+        };
+
+        window.executeWpExport = async (client, ver) => {
+            let targetUrl = document.getElementById('wpTargetUrl').value.trim();
+            if (!targetUrl) return window.showToast("Please enter a target URL", "error");
+            
+            if (!targetUrl.startsWith('http')) targetUrl = 'https://' + targetUrl;
+            targetUrl = targetUrl.replace(/\/$/, '');
+
+            const btn = document.getElementById('executeWpExportBtn');
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i data-feather="loader" class="animate-spin w-4 h-4 mr-2"></i> Processing...';
+            btn.disabled = true;
+            if (window.feather) feather.replace();
+
+            try {
+                if (!auth.currentUser) throw new Error("Not authenticated");
+                const token = await auth.currentUser.getIdToken();
+
+                const response = await fetch(API_WP_EXPORT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ folderName: client, version: ver })
+                });
+
+                const resData = await response.json();
+                if (!resData.success) throw new Error(resData.error || "Failed to fetch files.");
+
+                const files = resData.files; 
+                
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const wpUploadPrefix = `${targetUrl}/wp-content/uploads/${year}/${month}/`;
+
+                const zip = new JSZip();
+                const wpImagesFolder = zip.folder("Mass-Upload-To-WP-Media");
+
+                const imageMap = {}; 
+                const usedNames = new Set();
+                const htmlFiles = [];
+
+                // Helper to mimic WordPress filename sanitization perfectly (Preserving Case)
+                const sanitizeWpName = (name) => {
+                    try { name = decodeURIComponent(name); } catch(e) {}
+                    return name.replace(/[^a-zA-Z0-9.]/g, '-') // Allow A-Z, replace non-alphanumeric with hyphens
+                               .replace(/-+/g, '-')            // Remove consecutive hyphens
+                               .replace(/^-|-$/g, '');         // Remove leading/trailing hyphens
+                };
+
+                for (const file of files) {
+                    const isImage = file.path.match(/\.(png|jpe?g|webp|gif|svg|ico)$/i);
+                    const isHtml = file.path.endsWith('.html');
+                    
+                    if (isImage) {
+                        let baseName = file.path.split('/').pop();
+                        baseName = sanitizeWpName(baseName); // Sanitize the extracted filename immediately
+                        
+                        let finalName = baseName;
+                        let counter = 1;
+                        
+                        while (usedNames.has(finalName)) {
+                            const parts = baseName.split('.');
+                            const ext = parts.pop();
+                            finalName = `${parts.join('.')}-${counter}.${ext}`;
+                            counter++;
+                        }
+                        
+                        usedNames.add(finalName);
+                        // Map the ORIGINAL raw GitHub path to the new sanitized, flattened name
+                        imageMap[file.path] = finalName;
+                        
+                        wpImagesFolder.file(finalName, file.content, { base64: true });
+                    } else if (isHtml) {
+                        const binaryString = atob(file.content);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                        const decoder = new TextDecoder('utf-8');
+                        htmlFiles.push({ path: file.path, content: decoder.decode(bytes) });
+                    } else {
+                        let baseName = file.path.split('/').pop();
+                        baseName = sanitizeWpName(baseName);
+                        zip.file(baseName, file.content, { base64: true });
+                    }
+                }
+
+                const finalHtmlPages = [];
+
+                for (const htmlFile of htmlFiles) {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(htmlFile.content, "text/html");
+
+                    const images = doc.querySelectorAll('img');
+                    images.forEach(img => {
+                        const originalSrc = img.getAttribute('src');
+                        if (originalSrc && !originalSrc.startsWith('http') && !originalSrc.startsWith('data:')) {
+                            let cleanSrc = originalSrc.replace(/^\.\/|^\//, '');
+                            
+                            try { cleanSrc = decodeURIComponent(cleanSrc); } catch(e) {}
+
+                            if (imageMap[cleanSrc]) {
+                                img.setAttribute('src', wpUploadPrefix + imageMap[cleanSrc]);
+                            } else {
+                                let filename = cleanSrc.split('/').pop();
+                                filename = sanitizeWpName(filename);
+                                img.setAttribute('src', wpUploadPrefix + filename);
+                            }
+                        }
+                        img.removeAttribute('srcset');
+                    });
+
+                    const htmlName = htmlFile.path.split('/').pop();
+                    const finalCode = doc.documentElement.outerHTML;
+                    zip.file(`wp-ready-${htmlName}`, finalCode);
+                    
+                    finalHtmlPages.push({ name: htmlName, code: finalCode });
+                }
+
+                const content = await zip.generateAsync({ type: "blob" });
+                triggerBlobDownload(content, `${client}-${ver}-WP-Export.zip`);
+
+                // Show Success & Code Viewer UI
+                document.getElementById('wpExportFormArea').classList.add('hidden');
+                document.getElementById('wpExportSuccessArea').classList.remove('hidden');
+                document.getElementById('wpExportSuccessArea').classList.add('flex');
+
+                const selectEl = document.getElementById('wpPageSelect');
+                selectEl.innerHTML = '';
+                finalHtmlPages.forEach((page, idx) => {
+                    const opt = document.createElement('option');
+                    opt.value = idx;
+                    opt.textContent = page.name;
+                    selectEl.appendChild(opt);
+                });
+
+                const codeViewer = document.getElementById('wpCodeViewer');
+                if (finalHtmlPages.length > 0) {
+                    codeViewer.value = finalHtmlPages[0].code;
+                }
+
+                selectEl.onchange = (e) => {
+                    codeViewer.value = finalHtmlPages[e.target.value].code;
+                };
+
+                const copyBtn = document.getElementById('wpCopyCodeBtn');
+                copyBtn.onclick = () => {
+                    navigator.clipboard.writeText(codeViewer.value);
+                    copyBtn.innerHTML = '<i data-feather="check" class="w-4 h-4 text-green-400"></i>';
+                    if (window.feather) feather.replace();
+                    setTimeout(() => {
+                        copyBtn.innerHTML = '<i data-feather="copy" class="w-4 h-4"></i>';
+                        if (window.feather) feather.replace();
+                    }, 2000);
+                };
+
+                window.showToast("WordPress Export Complete!", "success");
+
+            } catch (error) {
+                console.error("WP Export Error:", error);
+                window.showToast("Export failed: " + error.message, "error");
+            } finally {
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+                if (window.feather) feather.replace();
             }
         };
 
