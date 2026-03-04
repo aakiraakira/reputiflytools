@@ -769,9 +769,15 @@
                 <i data-feather="log-out" class="w-3.5 h-3.5"></i>
             </button>
 
-            <div class="h-4 w-px bg-white/10 hidden md:block ml-2"></div>
-            <span class="text-xs font-bold text-gray-500 font-mono hidden md:block truncate max-w-[150px]"
-                id="domainDisplay">...</span>
+            <!-- MANUAL SAVE BUTTON / INDICATOR -->
+            <button type="button" onclick="saveProgress()" id="manualSaveBtn"
+                class="hidden md:flex items-center gap-1.5 px-3 py-1 h-8 rounded-full bg-white/5 border border-white/10 text-xs font-bold text-gray-400 hover:text-white hover:bg-white/10 active:scale-90 transition-all duration-300 ml-1 group"
+                title="Save (Ctrl+S)">
+                <span id="manualSaveIcon"><i data-feather="save" class="w-3.5 h-3.5"></i></span>
+                <span id="manualSaveText">Save</span>
+            </button>
+
+            <div class="h-4 w-px bg-white/10 hidden md:block ml-1 mx-1"></div>
 
             <button type="button" onclick="performUndo()" id="undoBtn" class="undo-redo-btn" disabled
                 title="Undo (Ctrl+Z)">
@@ -884,27 +890,29 @@
         </div>
     </nav>
     <div id="notifySuccessModal" class="modal-overlay" onclick="closeModal('notifySuccessModal', event)">
-        <div class="modal-card" onclick="event.stopPropagation()">
+        <div class="modal-card" onclick="event.stopPropagation()" style="max-width: 480px;">
             <div class="icon-circle" style="background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.2);">
                 <i data-feather="check-circle" class="w-10 h-10 text-green-500"></i>
             </div>
             <h1 class="text-2xl font-bold font-['Space_Grotesk'] mb-2 text-white">Successfully Deployed!</h1>
             <p class="text-gray-400 text-sm mb-4">Your edits have been safely pushed to the staging server.</p>
 
-            <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 mb-6 text-left">
+            <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 mb-4 text-left">
                 <p class="text-blue-400 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-2"><i
                         data-feather="clock" class="w-3 h-3"></i> Notice</p>
                 <p class="text-sm text-blue-100 leading-relaxed">Please allow up to <strong class="text-white">3
                         minutes</strong> for the global servers to build and reflect your changes on the live link.</p>
             </div>
 
-            <div class="copy-box mb-6" id="deployLinkBox" style="user-select: all;">
-                Generating...
+            <!-- PER-PAGE LINKS -->
+            <div id="deployedPagesLinks" class="mb-4 space-y-2 text-left max-h-[200px] overflow-y-auto">
+                <!-- Populated by JS -->
             </div>
 
             <div class="flex gap-3">
-                <button onclick="copyDeployLink()" class="liquid-glow flex-1 py-3 text-sm shadow-lg font-bold">
-                    <i data-feather="copy" class="w-4 h-4 mr-2"></i> Copy Link
+                <button onclick="closeModal('notifySuccessModal')"
+                    class="liquid-glow flex-1 py-3 text-sm shadow-lg font-bold">
+                    <i data-feather="edit-3" class="w-4 h-4 mr-2"></i> Continue Editing
                 </button>
                 <button onclick="window.location.href='client.html'"
                     class="flex-1 py-3 text-sm font-bold rounded-full bg-white/5 hover:bg-white/10 text-white transition-colors border border-white/10">
@@ -1050,6 +1058,25 @@
             </div>
         </div>
     </div>
+
+    <!-- NOT LOGGED IN MODAL -->
+    <div id="notLoggedInModal" class="modal-overlay" style="z-index: 9999; background: #0B0A14;">
+        <div class="modal-card text-center border-amber-900/30" onclick="event.stopPropagation()">
+            <div
+                class="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-4">
+                <i data-feather="log-in" class="w-8 h-8 text-amber-500"></i>
+            </div>
+            <h1 class="text-2xl font-bold text-white brand-font mb-2">Login Required</h1>
+            <p class="text-gray-400 text-sm mb-6 leading-relaxed">
+                You need to be logged in to access the editor.<br>
+                Please sign in through the client portal first.
+            </p>
+            <a href="client.html"
+                class="liquid-glow w-full py-3 text-sm font-bold shadow-lg inline-flex items-center justify-center gap-2">
+                <i data-feather="arrow-left" class="w-4 h-4"></i> Go to Login
+            </a>
+        </div>
+    </div>
     <div id="pasteModal" class="modal-overlay" onclick="closeModal('pasteModal', event)">
         <div class="modal-card" style="max-width: 600px;" onclick="event.stopPropagation()">
             <div class="icon-circle">
@@ -1106,6 +1133,27 @@
                     </div>
                     <div id="richEditor" class="editor-content" contenteditable="true"></div>
                 </div>
+                <!-- TEXT-TRANSFORM HINT -->
+                <div id="textTransformHint"
+                    class="hidden mt-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                    <p class="text-[10px] text-amber-400 font-medium flex items-center gap-1">
+                        <i data-feather="info" class="w-3 h-3"></i>
+                        <span id="textTransformHintText">This text auto-capitalizes via CSS. Type normally.</span>
+                    </p>
+                </div>
+            </div>
+
+            <!-- COUNTER / DATA-ATTRIBUTE EDITOR -->
+            <div id="counterSection" class="text-left mb-6 hidden">
+                <label
+                    class="text-[10px] uppercase font-bold text-gray-500 mb-2 block ml-1 tracking-wider text-orange-400">Counter
+                    / Number Value</label>
+                <div class="relative">
+                    <i data-feather="hash" class="absolute left-3 top-3.5 w-4 h-4 text-gray-500"></i>
+                    <input type="text" id="counterValueInput" class="input-dark pl-10" placeholder="e.g. 500">
+                </div>
+                <p class="text-[10px] text-gray-500 mt-1 ml-1">This element uses a data attribute for its display value.
+                </p>
             </div>
 
             <div id="blockLinkSection" class="text-left mb-6 hidden">
@@ -1253,7 +1301,14 @@
                         window.firebaseApp.onAuthStateChanged(window.firebaseAuth, (user) => {
                             if (!hasChecked) {
                                 hasChecked = true;
-                                checkUrlForProject();
+                                if (user) {
+                                    checkUrlForProject();
+                                } else {
+                                    // NOT LOGGED IN: Show login required modal
+                                    document.getElementById('cloudLoader').classList.remove('active');
+                                    document.getElementById('notLoggedInModal').classList.add('active');
+                                    feather.replace();
+                                }
                             }
                         });
                     }
@@ -1274,30 +1329,73 @@
         let historyStack = [];
         let historyIndex = -1;
 
-        // --- CORE HTML CLEANING FUNCTION (UPDATED TO PRESERVE STYLES) ---
+        // --- ORIGINAL STYLES SNAPSHOT (For smart cleaning) ---
+        window._originalInlineStyles = window._originalInlineStyles || new Map();
+
+        // --- GLOBAL KEYBOARD SHORTCUTS ---
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                saveProgress();
+            }
+        });
+
+        function snapshotOriginalStyles(iframeDoc) {
+            window._originalInlineStyles = new Map();
+            const allStyled = iframeDoc.querySelectorAll('*[style]');
+            allStyled.forEach((el, idx) => {
+                el.dataset._repIdx = idx;
+                window._originalInlineStyles.set(String(idx), el.getAttribute('style'));
+            });
+        }
+
+        // --- CORE HTML CLEANING FUNCTION (ROBUST V2) ---
         function getCleanHTML() {
             if (!document.getElementById('editorFrame').contentDocument) return "";
 
             const docClone = document.getElementById('editorFrame').contentDocument.cloneNode(true);
 
-            // Clean GSAP inline styles
-            const dirtyElements = docClone.querySelectorAll('*[style]');
-            dirtyElements.forEach(el => {
-                const style = el.getAttribute('style');
-                if (style && (style.includes('opacity') || style.includes('transform') || style.includes('visibility'))) {
-                    el.style.removeProperty('opacity');
-                    el.style.removeProperty('transform');
-                    el.style.removeProperty('translate');
-                    el.style.removeProperty('rotate');
-                    el.style.removeProperty('scale');
-                    el.style.removeProperty('visibility');
-                    if (el.getAttribute('style') === '') el.removeAttribute('style');
+            // SMART GSAP CLEANING: Only remove animation-injected styles, preserve intentional ones
+            const styledElements = docClone.querySelectorAll('*[style]');
+            styledElements.forEach(el => {
+                const currentStyle = el.getAttribute('style');
+                if (!currentStyle) return;
+
+                const idx = el.dataset._repIdx;
+                const originalStyle = idx !== undefined ? window._originalInlineStyles.get(idx) : null;
+
+                // If this element had these styles ORIGINALLY, don't touch them
+                const hadOpacity = originalStyle && originalStyle.includes('opacity');
+                const hadTransform = originalStyle && (originalStyle.includes('transform') || originalStyle.includes('translate') || originalStyle.includes('rotate') || originalStyle.includes('scale'));
+                const hadVisibility = originalStyle && originalStyle.includes('visibility');
+
+                // Only remove properties that were NOT in the original HTML (i.e., injected by GSAP/ScrollTrigger)
+                if (!hadOpacity && currentStyle.includes('opacity')) el.style.removeProperty('opacity');
+                if (!hadTransform) {
+                    if (currentStyle.includes('transform')) el.style.removeProperty('transform');
+                    if (currentStyle.includes('translate')) el.style.removeProperty('translate');
+                    if (currentStyle.includes('rotate')) el.style.removeProperty('rotate');
+                    if (currentStyle.includes('scale')) el.style.removeProperty('scale');
                 }
+                if (!hadVisibility && currentStyle.includes('visibility')) el.style.removeProperty('visibility');
+
+                // Clean up empty style attributes
+                if (el.getAttribute('style') === '' || el.getAttribute('style') === null) el.removeAttribute('style');
+
+                // Clean up our tracking attribute
+                delete el.dataset._repIdx;
             });
+
+            // Also clean tracking attributes from non-styled elements
+            docClone.querySelectorAll('*[data-_rep-idx]').forEach(el => delete el.dataset._repIdx);
 
             // FIX: Only remove the style tag with our specific ID
             const editorStyle = docClone.getElementById('reputifly-editor-css');
             if (editorStyle) editorStyle.remove();
+
+            // FIX: Remove the injected <base> tag so saved HTML stays clean
+            const injectedBase = docClone.querySelector('base[href*="samples.reputifly.org"]');
+            if (injectedBase) injectedBase.remove();
 
             return docClone.documentElement.outerHTML;
         }
@@ -1320,6 +1418,8 @@
             if (projectId) {
                 isCloudMode = true;
                 currentProjectId = projectId;
+
+                // Fix Domain Display (removed)
 
                 document.getElementById('cloudLoader').classList.add('active');
                 setupTelemetry(projectId);
@@ -1389,13 +1489,14 @@
                     if (listRes.data.success && listRes.data.files && listRes.data.files.length > 0) {
                         availableFiles = listRes.data.files;
 
+                        // MUST-DO FIX: Store ALL pages BEFORE filtering so we deploy the full site
+                        // Only store HTML files — CSS/JS are handled by GitHub upsert
+                        window.allAvailablePages = availableFiles.filter(f => f.endsWith('.html'));
+
                         // Restrict available files to those selected in the dashboard modal
                         if (allowedFiles) {
                             availableFiles = availableFiles.filter(f => allowedFiles.includes(f));
                         }
-
-                        // NEW: Store all available pages to ensure they are all deployed later
-                        window.allAvailablePages = availableFiles;
 
                         // If index.html isn't there, load the first available file
                         if (!availableFiles.includes(fileToLoad)) {
@@ -1410,18 +1511,13 @@
                     // 2. Populate the Pages Dropdown
                     if (navPagesMenu && pagesList) {
                         pagesList.innerHTML = availableFiles.map(file => {
-                            let displayName = file;
-                            if (file.toLowerCase() === 'index.html') {
-                                displayName = 'Home Page';
-                            } else {
-                                displayName = file.replace('.html', '').replace(/-/g, ' ');
-                                displayName = displayName.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') + ' Page';
-                            }
+                            const displayName = getPageDisplayName(file);
                             return `
-                                <button onclick="loadSpecificPage('${file}')" 
+                                <button onclick="loadSpecificPage('${file}')" data-page="${file}"
                                     class="w-full text-left px-4 py-3 text-xs font-medium text-gray-300 hover:bg-white/5 hover:text-white transition-colors border-b border-white/5 flex items-center gap-2">
                                     <i data-feather="file" class="w-3 h-3 opacity-50"></i>
-                                    ${displayName}
+                                    <span class="flex-1">${displayName}</span>
+                                    <i data-feather="check-circle" class="page-dot w-3.5 h-3.5 text-green-500 opacity-0 transition-opacity" data-dot="${file}"></i>
                                 </button>
                             `;
                         }).join('');
@@ -2146,11 +2242,39 @@
             const shareBtn = document.getElementById('navShareBtn');
             if (shareBtn && !currentProjectId) shareBtn.style.display = 'flex';
         }
+
+        // --- HELPER: Friendly page name from filename ---
+        function getPageDisplayName(fileName) {
+            if (fileName.toLowerCase() === 'index.html') return 'Home';
+            let name = fileName.replace('.html', '').replace(/-/g, ' ');
+            return name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        }
+
+        // --- HELPER: Show orange dots on edited pages ---
+        function updatePageDots() {
+            const state = window.editedPagesState || {};
+            document.querySelectorAll('.page-dot[data-dot]').forEach(dot => {
+                const fileName = dot.getAttribute('data-dot');
+                dot.style.opacity = state[fileName] ? '1' : '0';
+            });
+        }
+
+        // --- HELPER: Copy a single page URL ---
+        function copyPageUrl(url, btn) {
+            navigator.clipboard.writeText(url).then(() => {
+                const original = btn.innerHTML;
+                btn.innerHTML = '<i data-feather="check" class="w-3 h-3"></i>';
+                btn.classList.add('text-green-400');
+                feather.replace();
+                setTimeout(() => {
+                    btn.innerHTML = original;
+                    btn.classList.remove('text-green-400');
+                    feather.replace();
+                }, 1500);
+            });
+        }
         async function saveProgress() {
             const html = getCleanHTML();
-            checkPayloadSize();
-
-            // ADDED: Run safety check on every edit
             checkPayloadSize();
 
             if (html) {
@@ -2158,7 +2282,36 @@
                 window.editedPagesState = window.editedPagesState || {};
                 window.editedPagesState[window.projectMeta.page || 'index.html'] = html;
 
-                // --- PERFORMANCE MONITOR ---
+                // AUTO-SAVE INDICATOR: Slick background "pull" animation
+                const saveBtn = document.getElementById('manualSaveBtn');
+                const saveIcon = document.getElementById('manualSaveIcon');
+                const saveText = document.getElementById('manualSaveText');
+                if (saveBtn && saveIcon && saveText) {
+                    saveBtn.classList.remove('text-gray-500', 'hover:text-white', 'hover:bg-white/5');
+                    saveBtn.classList.add('text-white', 'bg-green-500', 'shadow-[0_0_15px_rgba(34,197,94,0.5)]', 'scale-105');
+                    saveText.innerText = 'Saved';
+                    saveIcon.innerHTML = '<i data-feather="check" class="w-3.5 h-3.5"></i>';
+                    feather.replace();
+
+                    // Snap scale back to normal quickly (the "pull" effect)
+                    setTimeout(() => {
+                        if (saveBtn.classList.contains('scale-105')) {
+                            saveBtn.classList.remove('scale-105');
+                        }
+                    }, 150);
+
+                    clearTimeout(window._saveFlashTimeout);
+                    window._saveFlashTimeout = setTimeout(() => {
+                        saveBtn.classList.remove('text-white', 'bg-green-500', 'shadow-[0_0_15px_rgba(34,197,94,0.5)]', 'scale-105');
+                        saveBtn.classList.add('text-gray-500', 'hover:text-white', 'hover:bg-white/5');
+                        saveText.innerText = 'Save';
+                        saveIcon.innerHTML = '<i data-feather="save" class="w-3.5 h-3.5"></i>';
+                        feather.replace();
+                    }, 2000);
+                }
+
+                // UPDATE UNSAVED DOT: Mark this page as modified in the dropdown
+                updatePageDots();
                 // Warn if project exceeds 15MB (approx 50-60 optimized images)
                 if (html.length > 15 * 1024 * 1024) {
                     const toast = document.getElementById('downloadToast');
@@ -2258,7 +2411,21 @@
 
         function loadContentIntoFrame(htmlContent) {
             const frame = document.getElementById('editorFrame');
-            frame.srcdoc = htmlContent;
+
+            // ROBUSTNESS: Inject <base> tag for cloud projects so external CSS/JS resolve correctly
+            let finalHtml = htmlContent;
+            if (isCloudMode && currentProjectId) {
+                const urlParams = new URLSearchParams(window.location.search);
+                const version = urlParams.get('v') || 'base';
+                const basePath = version === 'base' ? currentProjectId : `${currentProjectId}/${version}`;
+                const baseUrl = `https://samples.reputifly.org/${basePath}/`;
+
+                // Remove any existing <base> first, then inject ours right after <head>
+                finalHtml = finalHtml.replace(/<base[^>]*>/gi, '');
+                finalHtml = finalHtml.replace(/<head([^>]*)>/i, `<head$1><base href="${baseUrl}">`);
+            }
+
+            frame.srcdoc = finalHtml;
             frame.onload = () => {
                 document.getElementById('empty-state').style.display = 'none';
 
@@ -2282,6 +2449,24 @@
             const doc = iframe.contentDocument;
             const win = iframe.contentWindow;
 
+            // CTRL+S SUPPORT FOR IFRAME
+            win.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                    e.preventDefault();
+                    saveProgress();
+                }
+            });
+
+            // ROBUSTNESS: Snapshot original inline styles BEFORE animations run
+            snapshotOriginalStyles(doc);
+
+            // ROBUSTNESS: Kill GSAP/ScrollTrigger/AOS to prevent them from overwriting user edits
+            try {
+                if (win.gsap) { win.gsap.killAll && win.gsap.killAll(); }
+                if (win.ScrollTrigger) { win.ScrollTrigger.killAll && win.ScrollTrigger.killAll(); }
+                if (win.AOS) { win.AOS.refreshHard && win.AOS.refreshHard(); }
+            } catch (e) { /* libs not present, fine */ }
+
             const style = doc.createElement('style');
             style.id = 'reputifly-editor-css'; // FIX: ID Added so we can remove safely later
             style.textContent = `
@@ -2300,6 +2485,12 @@
                     opacity: 1 !important;
                     visibility: visible !important;
                     transform: none !important;
+                }
+
+                /* COUNTER ELEMENTS: Show a subtle indicator */
+                [data-count]:hover, [data-value]:hover, [data-target]:hover, [data-number]:hover {
+                    outline: 2px dashed rgba(251, 146, 60, 0.7) !important;
+                    cursor: pointer !important;
                 }
             `;
             doc.head.appendChild(style);
@@ -2377,25 +2568,81 @@
             document.getElementById(id).classList.remove('active');
         }
 
+        // Store reference to counter attribute key if editing one
+        let _currentCounterAttr = null;
+        let _currentCounterElement = null;
+
         function openTextModal(element) {
             const editor = document.getElementById('richEditor');
             editor.innerHTML = element.innerHTML;
 
+            // --- TEXT-TRANSFORM AWARENESS ---
+            const hintEl = document.getElementById('textTransformHint');
+            const hintText = document.getElementById('textTransformHintText');
+            hintEl.classList.add('hidden');
+
+            try {
+                const iframeDoc = document.getElementById('editorFrame').contentDocument;
+                const iframeWin = document.getElementById('editorFrame').contentWindow;
+                const computed = iframeWin.getComputedStyle(element);
+                const tt = computed.textTransform;
+                if (tt && tt !== 'none') {
+                    hintEl.classList.remove('hidden');
+                    const labels = { uppercase: 'UPPERCASE', lowercase: 'lowercase', capitalize: 'Title Case' };
+                    hintText.innerText = `ℹ️ CSS auto-formats this text to ${labels[tt] || tt}. Type naturally.`;
+                }
+            } catch (e) { }
+
+            // --- COUNTER / DATA-ATTRIBUTE DETECTION ---
+            const counterSection = document.getElementById('counterSection');
+            const counterInput = document.getElementById('counterValueInput');
+            _currentCounterAttr = null;
+            _currentCounterElement = null;
+            counterSection.classList.add('hidden');
+
+            // Check the element itself AND its direct children for counter attributes
+            const counterAttrs = ['data-count', 'data-value', 'data-target', 'data-number', 'data-end', 'data-to'];
+            let counterEl = null;
+            let foundAttr = null;
+            for (const attr of counterAttrs) {
+                if (element.hasAttribute(attr)) {
+                    counterEl = element; foundAttr = attr; break;
+                }
+                const child = element.querySelector(`[${attr}]`);
+                if (child) {
+                    counterEl = child; foundAttr = attr; break;
+                }
+            }
+            if (counterEl && foundAttr) {
+                counterSection.classList.remove('hidden');
+                counterInput.value = counterEl.getAttribute(foundAttr);
+                _currentCounterAttr = foundAttr;
+                _currentCounterElement = counterEl;
+            }
+
+            // --- LINK DETECTION (ROBUST: Check any parent anchor, not just direct) ---
             const linkSection = document.getElementById('blockLinkSection');
             const linkInput = document.getElementById('blockLinkInput');
 
             const anchor = element.tagName === 'A' ? element : element.closest('a');
+            // Also check if the element is INSIDE a linked parent (button inside <a>, etc)
+            const parentAnchor = !anchor ? element.parentElement?.closest('a') : null;
+            const resolvedAnchor = anchor || parentAnchor;
 
-            if (anchor) {
+            if (resolvedAnchor) {
                 linkSection.classList.remove('hidden');
-                linkInput.value = anchor.getAttribute('href');
-                currentElement = anchor;
+                linkInput.value = resolvedAnchor.getAttribute('href');
+                // Don't reassign currentElement to the anchor — keep editing the text element
+                // But store the anchor ref separately for link updates
+                window._currentLinkAnchor = resolvedAnchor;
             } else {
                 linkSection.classList.add('hidden');
                 linkInput.value = "";
+                window._currentLinkAnchor = null;
             }
 
             closeLinkDrawer();
+            feather.replace();
             openModal('textModal');
         }
 
@@ -2405,11 +2652,29 @@
             const editor = document.getElementById('richEditor');
             currentElement.innerHTML = editor.innerHTML;
 
+            // --- APPLY COUNTER VALUE ---
+            if (_currentCounterAttr && _currentCounterElement) {
+                const newVal = document.getElementById('counterValueInput').value;
+                if (newVal !== null && newVal !== '') {
+                    _currentCounterElement.setAttribute(_currentCounterAttr, newVal);
+                    // Also update the visible text if it's the same element
+                    if (_currentCounterElement === currentElement || currentElement.contains(_currentCounterElement)) {
+                        // If innerText is purely numeric, update it too
+                        const visibleText = _currentCounterElement.innerText.trim();
+                        if (/^[\d,.+%]+$/.test(visibleText)) {
+                            _currentCounterElement.innerText = newVal;
+                        }
+                    }
+                }
+            }
+
+            // --- APPLY LINK ---
             const linkSection = document.getElementById('blockLinkSection');
             if (!linkSection.classList.contains('hidden')) {
                 const newHref = document.getElementById('blockLinkInput').value;
-                if (newHref) {
-                    currentElement.setAttribute('href', newHref);
+                const targetAnchor = window._currentLinkAnchor || (currentElement.tagName === 'A' ? currentElement : null);
+                if (newHref && targetAnchor) {
+                    targetAnchor.setAttribute('href', newHref);
                 }
             }
 
@@ -2450,6 +2715,30 @@
                 // 2. Compress & Resize
                 let base64String = await compressImageSmart(file);
 
+                const base64Data = base64String.split(',')[1];
+                const byteString = atob(base64Data);
+                const ab = new ArrayBuffer(byteString.length);
+                const ia = new Uint8Array(ab);
+                for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+                const blob = new Blob([ab], { type: 'image/webp' });
+
+                const originalKb = (file.size / 1024).toFixed(1);
+                const newKb = (blob.size / 1024).toFixed(1);
+
+                // INTERACTIVE UX: Show compression ratio dynamically!
+                dropContent.innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-4">
+                        <div class="w-10 h-10 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center mb-3">
+                            <i data-feather="check" class="w-5 h-5"></i>
+                        </div>
+                        <span class="text-lg font-bold text-white mb-1">Optimized!</span>
+                        <span class="text-xs text-green-400 font-bold mb-3">${originalKb} KB <i data-feather="arrow-right" class="w-3 h-3 inline mx-1"></i> ${newKb} KB WebP</span>
+                        <div class="loader w-3 h-3 border-pink-500 mb-2"></div>
+                        <span class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Uploading to Cloud...</span>
+                    </div>
+                `;
+                feather.replace();
+
                 // 3. Generate Clean Filename
                 const uniqueHash = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
                 let baseName = file.name.split('.')[0].toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9\-]/g, '');
@@ -2460,13 +2749,6 @@
                 const wpFileName = `${baseName}-${uniqueHash}.webp`;
 
                 // 4. UPLOAD DIRECTLY TO WORDPRESS
-                const base64Data = base64String.split(',')[1];
-                const byteString = atob(base64Data);
-                const ab = new ArrayBuffer(byteString.length);
-                const ia = new Uint8Array(ab);
-                for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
-                const blob = new Blob([ab], { type: 'image/webp' });
-
                 // WordPress REST API details
                 const WP_URL = "https://reputifly3.sg-host.com/wp-json/wp/v2/media";
                 const WP_AUTH = "Basic " + btoa("julian:6ZMS Y66m DHcE Ghgr pGH3 HKVh");
@@ -2704,30 +2986,38 @@
                 // 4B. Fetch unmodified pages so they aren't lost from the deployment
                 if (window.allAvailablePages) {
                     const editedPageNames = Object.keys(window.editedPagesState);
-                    for (const pageName of window.allAvailablePages) {
-                        if (!editedPageNames.includes(pageName)) {
-                            // Fetch from GitHub
-                            const API_GET = "https://getrepofile-5resuz4f5a-as.a.run.app";
-                            let token = "";
-                            if (window.firebaseAuth && window.firebaseAuth.currentUser) {
-                                token = await window.firebaseAuth.currentUser.getIdToken();
+                    const uneditedPages = window.allAvailablePages.filter(p => !editedPageNames.includes(p));
+                    let fetchedSyncCount = 0;
+
+                    for (const pageName of uneditedPages) {
+                        fetchedSyncCount++;
+                        if (btn) {
+                            btn.innerHTML = `<div class="loader w-3 h-3 border-white"></div> <span class="ml-2 font-mono">Syncing untouched pages (${fetchedSyncCount}/${uneditedPages.length})...</span>`;
+                        }
+
+                        // Fetch from GitHub
+                        const API_GET = "https://getrepofile-5resuz4f5a-as.a.run.app";
+                        let token = "";
+                        if (window.firebaseAuth && window.firebaseAuth.currentUser) {
+                            token = await window.firebaseAuth.currentUser.getIdToken();
+                        }
+                        try {
+                            const fetchRes = await fetch(API_GET, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                body: JSON.stringify({ folderName: projectId, version: baseVersion, fileName: pageName })
+                            });
+                            const getHtmlRes = await fetchRes.json();
+                            if (getHtmlRes.success && getHtmlRes.html) {
+                                finalPagesToDeploy.push({ name: pageName, content: getHtmlRes.html });
                             }
-                            try {
-                                const fetchRes = await fetch(API_GET, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                    body: JSON.stringify({ folderName: projectId, version: baseVersion, fileName: pageName })
-                                });
-                                const getHtmlRes = await fetchRes.json();
-                                if (getHtmlRes.success && getHtmlRes.html) {
-                                    finalPagesToDeploy.push({ name: pageName, content: getHtmlRes.html });
-                                }
-                            } catch (e) {
-                                console.warn(`Could not fetch unchanged page ${pageName} for deployment:`, e);
-                            }
+                        } catch (e) {
+                            console.warn(`Could not fetch unchanged page ${pageName} for deployment:`, e);
                         }
                     }
                 }
+
+                if (btn) btn.innerHTML = '<div class="loader w-3 h-3 border-white"></div> <span class="ml-2">Pushing to GitHub servers...</span>';
 
                 // 5. Build Payload
                 const payload = {
@@ -2770,15 +3060,41 @@
                         feather.replace();
                     }
 
-                    // Populate and open the success modal
-                    const liveLink = `https://samples.reputifly.org${targetPrefix}/`;
-                    document.getElementById('deployLinkBox').innerText = liveLink;
+                    // Populate per-page links in the success modal
+                    const baseUrl = `https://samples.reputifly.org${targetPrefix}/`;
+                    const linksContainer = document.getElementById('deployedPagesLinks');
+                    if (linksContainer) {
+                        let linksHtml = '';
+                        for (const page of finalPagesToDeploy) {
+                            const pageName = page.name;
+                            const displayName = getPageDisplayName(pageName);
+                            const pageUrl = pageName === 'index.html' ? baseUrl : baseUrl + pageName;
+                            linksHtml += `
+                                <div class="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 group hover:border-green-500/30 transition-colors">
+                                    <div class="flex items-center gap-2 min-w-0 flex-1">
+                                        <i data-feather="globe" class="w-3.5 h-3.5 text-green-500 flex-shrink-0"></i>
+                                        <span class="text-xs font-bold text-white truncate">${displayName}</span>
+                                    </div>
+                                    <div class="flex items-center gap-1 flex-shrink-0 ml-2">
+                                        <button onclick="copyPageUrl('${pageUrl}', this)" class="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-green-500/20 text-gray-400 hover:text-green-400 transition-all font-medium">
+                                            <i data-feather="copy" class="w-3 h-3"></i>
+                                        </button>
+                                        <a href="${pageUrl}" target="_blank" class="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-blue-500/20 text-gray-400 hover:text-blue-400 transition-all font-medium">
+                                            <i data-feather="external-link" class="w-3 h-3"></i>
+                                        </a>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        linksContainer.innerHTML = linksHtml;
+                    }
 
                     // Clear the exit warning so they can leave safely
                     window.editedPagesState = {};
                     window.pendingClientImages = [];
 
                     openModal('notifySuccessModal');
+                    feather.replace();
 
                 } else {
                     throw new Error(response.data.error || "Deploy failed");
