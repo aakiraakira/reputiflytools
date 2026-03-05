@@ -270,8 +270,8 @@
     <div class="w-full max-w-3xl glass-panel rounded-[2.5rem] p-6 sm:p-10 relative z-10 shadow-2xl">
 
         <div class="text-center mb-8">
-            <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png"
-                alt="Reputifly" class="h-14 sm:h-16 mx-auto mb-6 drop-shadow-[0_0_15px_rgba(230,57,127,0.3)]">
+            <img src="https://reputifly.com/wp-content/uploads/2026/02/ChatGPT-Image-Feb-12-2026-07_47_26-PM-e1770896902562.png"
+                alt="Reputifly" class="h-10 sm:h-12 mx-auto mb-6 drop-shadow-[0_0_15px_rgba(230,57,127,0.3)]">
             <h1 class="text-3xl sm:text-4xl font-bold mb-3 tracking-tight">Asset Uploader</h1>
             <p class="text-sm text-gray-400 max-w-md mx-auto leading-relaxed">Securely upload your assets to our global
                 CDN network to generate direct links.</p>
@@ -351,7 +351,175 @@
 
     <div id="toastContainer"></div>
 
-    <script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyB4_6wJOcQddUFz8BemeG9HQgbuZtoHp20",
+            authDomain: "reputifly-automation.firebaseapp.com",
+            projectId: "reputifly-automation",
+            storageBucket: "reputifly-automation.firebasestorage.app",
+            messagingSenderId: "1095726999398",
+            appId: "1:1095726999398:web:4e26ec90770da0244c0aa7"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+
+        // Expose token resolver to global scope so standard <script> functions can authenticate uploads
+        window.firebaseAuthTokenResolver = async () => {
+            if (!auth.currentUser) throw new Error("Not authenticated");
+            return await auth.currentUser.getIdToken();
+        };
+
+        let currentUserRole = null;
+        let authReady = false;
+
+        // Create authentication blocker overlay (now functions as a login portal)
+        const authOverlay = document.createElement('div');
+        authOverlay.className = 'fixed inset-0 bg-[#05050A] z-[99999] flex flex-col items-center justify-center transition-opacity duration-300';
+        authOverlay.innerHTML = `
+            <div id="authLoadingState" class="flex flex-col items-center">
+                <div class="loader mb-4" style="width: 40px; height: 40px; border: 3px solid rgba(230,57,127,0.3); border-top-color: #E6397F; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                <h2 class="text-xl font-bold font-['Space_Grotesk'] text-white">Verifying Access...</h2>
+            </div>
+            
+            <div id="authLoginState" class="hidden w-full max-w-sm glass-panel rounded-3xl p-8 relative overflow-hidden text-center">
+                <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#E6397F] to-[#FF8A00]"></div>
+                <img src="https://reputifly.com/wp-content/uploads/2026/02/ChatGPT-Image-Feb-12-2026-07_47_26-PM-e1770896902562.png" 
+                     class="h-8 mx-auto mb-4" alt="Reputifly">
+                <h2 class="text-2xl font-bold font-['Space_Grotesk'] text-white">System Access</h2>
+                <p class="text-gray-400 text-sm mt-1 mb-6">Asset Uploader requires Staff login.</p>
+                
+                <form id="deployerLoginForm" class="space-y-4 text-left">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wide">Email</label>
+                        <input type="email" id="deployerEmail" required class="w-full bg-black/40 border border-white/10 text-white rounded-xl p-3 text-sm focus:border-primary focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wide">Password</label>
+                        <input type="password" id="deployerPassword" required class="w-full bg-black/40 border border-white/10 text-white rounded-xl p-3 text-sm focus:border-primary focus:outline-none">
+                    </div>
+                    <button type="submit" id="deployerLoginBtn" class="w-full btn-liquid-glow py-3 rounded-xl mt-4 shadow-lg">Login</button>
+                    <p id="deployerErrorMsg" class="text-red-400 text-xs text-center hidden mt-2"></p>
+                </form>
+            </div>
+            
+            <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+        `;
+        document.body.appendChild(authOverlay);
+
+        // Handle Inline Login
+        setTimeout(() => {
+            const loginForm = document.getElementById('deployerLoginForm');
+            if (loginForm) {
+                loginForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const btn = document.getElementById('deployerLoginBtn');
+                    const err = document.getElementById('deployerErrorMsg');
+                    btn.innerHTML = '<i data-feather="loader" class="w-4 h-4 animate-spin"></i> Authenticating...';
+                    btn.disabled = true;
+                    err.classList.add('hidden');
+                    feather.replace();
+
+                    try {
+                        await signInWithEmailAndPassword(
+                            auth,
+                            document.getElementById('deployerEmail').value.trim(),
+                            document.getElementById('deployerPassword').value
+                        );
+                        // onAuthStateChanged will automatically pick this up and verify roles
+                    } catch (error) {
+                        err.innerText = "Invalid credentials. Please try again.";
+                        err.classList.remove('hidden');
+                        btn.innerHTML = 'Login';
+                        btn.disabled = false;
+                    }
+                });
+            }
+        }, 100);
+
+        // Header Auth Status UI
+        const headerAuthUI = document.createElement('div');
+        headerAuthUI.className = 'absolute top-6 right-8 flex items-center gap-4 z-50 opacity-0 transition-opacity duration-500';
+        headerAuthUI.innerHTML = `
+            <div class="flex flex-col items-end">
+                <span class="text-xs text-gray-400 font-medium">Logged in as</span>
+                <span id="userEmailDisplay" class="text-sm font-bold text-white tracking-wide"></span>
+            </div>
+            <button id="signOutBtn" class="btn-hero-glass py-2 px-4 text-xs hover:border-red-500/50 hover:text-red-400">
+                <i data-feather="log-out" class="w-3.5 h-3.5"></i> Sign Out
+            </button>
+        `;
+        document.body.appendChild(headerAuthUI);
+
+        // Security Check
+        onAuthStateChanged(auth, async (user) => {
+            const loadState = document.getElementById('authLoadingState');
+            const loginState = document.getElementById('authLoginState');
+
+            if (!user) {
+                // Not logged in -> Show the inline login form instead of redirecting
+                if (loadState) loadState.classList.add('hidden');
+                if (loginState) loginState.classList.remove('hidden');
+                return;
+            }
+
+            // If they just logged in, show the loader while checking RBAC
+            if (loadState) loadState.classList.remove('hidden');
+            if (loginState) loginState.classList.add('hidden');
+
+            try {
+                const token = await user.getIdToken();
+                // We use the existing listSamples endpoint to check roles
+                const res = await fetch("https://listsamples-5resuz4f5a-as.a.run.app", {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (!res.ok) throw new Error("Verification failed.");
+
+                const data = await res.json();
+                currentUserRole = data.userRole;
+
+                if (currentUserRole === 'superadmin' || currentUserRole === 'staff') {
+                    // Access Granted
+                    authReady = true;
+                    document.getElementById('userEmailDisplay').textContent = user.email;
+                    headerAuthUI.classList.remove('opacity-0');
+                    authOverlay.style.opacity = '0';
+                    setTimeout(() => authOverlay.remove(), 300);
+
+                    // Add signout listener
+                    document.getElementById('signOutBtn').addEventListener('click', () => {
+                        signOut(auth).then(() => {
+                            window.location.reload(); // Reload instead of redirecting
+                        });
+                    });
+                } else {
+                    // Access Denied
+                    authOverlay.innerHTML = `
+                        <i data-feather="lock" class="w-12 h-12 text-red-500 mb-4"></i>
+                        <h2 class="text-2xl font-bold font-['Space_Grotesk'] text-white mb-2">Access Denied</h2>
+                        <p class="text-gray-400 text-sm max-w-sm text-center mb-6">You must be an administrator or staff member to use the asset uploader.</p>
+                        <button onclick="document.getElementById('signOutBtn').click()" class="btn-liquid-glow py-3 px-8 text-sm">Sign Out & Switch Account</button>
+                    `;
+                    // Hidden sign out button for the switch account shortcut
+                    const hiddenSignOut = document.createElement('button');
+                    hiddenSignOut.id = 'signOutBtn';
+                    hiddenSignOut.style.display = 'none';
+                    hiddenSignOut.onclick = () => signOut(auth).then(() => window.location.reload());
+                    authOverlay.appendChild(hiddenSignOut);
+                    feather.replace();
+                }
+
+            } catch (error) {
+                console.error("Auth Error:", error);
+                // On error, revert to login screen
+                signOut(auth).then(() => window.location.reload());
+            }
+        });
+
         // Initialize Icons
         feather.replace();
 
@@ -607,7 +775,7 @@
             return new Blob(byteArrays, { type: contentType });
         };
 
-        // Image upload (UNCHANGED)
+        // Image upload (Using Cloud Function Proxy)
         async function uploadToServer(file, fileId) {
             let base64Data = await getBase64(file);
             if (base64Data.includes('base64,')) base64Data = base64Data.split('base64,')[1];
@@ -625,58 +793,68 @@
 
             const uniqueHash = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
             const wpFileName = `${baseName}-${uniqueHash}.${ext}`.replace(/[^a-zA-Z0-9.-]/g, '-');
+            const mimeType = getMimeType(wpFileName);
 
-            const blob = b64toBlob(base64Data, getMimeType(wpFileName));
+            // Send to secure Cloud Function Proxy
+            // Because we moved Firebase Auth initialization inside the script block as `auth`
+            const token = await window.firebaseAuthTokenResolver();
 
-            // WordPress REST API details
-            const WP_URL = "https://reputifly3.sg-host.com/wp-json/wp/v2/media";
-            const WP_AUTH = "Basic " + btoa("julian:6ZMS Y66m DHcE Ghgr pGH3 HKVh");
-
-            const wpRes = await fetch(WP_URL, {
+            const res = await fetch("https://uploadtowordpress-5resuz4f5a-as.a.run.app", {
                 method: "POST",
                 headers: {
-                    "Authorization": WP_AUTH,
-                    "Content-Disposition": `attachment; filename="${wpFileName}"`
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
                 },
-                body: blob
+                body: JSON.stringify({
+                    fileName: wpFileName,
+                    fileContentBase64: base64Data,
+                    mimeType: mimeType
+                })
             });
 
-            if (!wpRes.ok) {
-                throw new Error("WP Upload Failed (Check CORS or Auth).");
+            const data = await res.json();
+
+            if (!res.ok || !data.success) {
+                throw new Error(data.error || "Upload failed via proxy.");
             }
 
-            const wpData = await wpRes.json();
-            return wpData.source_url;
+            return data.source_url;
         }
 
-        // ==========================================
         // RAW UPLOAD (Videos, PDFs, ZIPs, etc.)
-        // Skips image optimization — uploads file directly
-        // ==========================================
+        // Uses the same secure Cloud Function Proxy
         async function uploadRawToServer(file, fileId) {
+            let base64Data = await getBase64(file);
+            if (base64Data.includes('base64,')) base64Data = base64Data.split('base64,')[1];
+
             const ext = file.name.split('.').pop().toLowerCase();
             const baseName = file.name.substring(0, file.name.lastIndexOf('.'));
             const uniqueHash = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
             const wpFileName = `${baseName}-${uniqueHash}.${ext}`.replace(/[^a-zA-Z0-9.-]/g, '-');
+            const mimeType = getMimeType(wpFileName);
 
-            const WP_URL = "https://reputifly3.sg-host.com/wp-json/wp/v2/media";
-            const WP_AUTH = "Basic " + btoa("julian:6ZMS Y66m DHcE Ghgr pGH3 HKVh");
+            const token = await window.firebaseAuthTokenResolver();
 
-            const wpRes = await fetch(WP_URL, {
+            const res = await fetch("https://uploadtowordpress-5resuz4f5a-as.a.run.app", {
                 method: "POST",
                 headers: {
-                    "Authorization": WP_AUTH,
-                    "Content-Disposition": `attachment; filename="${wpFileName}"`
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
                 },
-                body: file  // Upload raw File object directly — no base64 conversion needed
+                body: JSON.stringify({
+                    fileName: wpFileName,
+                    fileContentBase64: base64Data,
+                    mimeType: mimeType
+                })
             });
 
-            if (!wpRes.ok) {
-                throw new Error("WP Upload Failed (Check CORS or Auth).");
+            const data = await res.json();
+
+            if (!res.ok || !data.success) {
+                throw new Error(data.error || "Upload failed via proxy.");
             }
 
-            const wpData = await wpRes.json();
-            return wpData.source_url;
+            return data.source_url;
         }
 
         // Helpers (UNCHANGED)
