@@ -350,6 +350,11 @@
     <div id="hoverPreview" class="hover-preview"></div>
 
     <div id="toastContainer"></div>
+    <div id="customContextMenu" class="hidden fixed z-[100000] bg-[#160D1E]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.8)] py-1.5 min-w-[160px] transform transition-opacity duration-200 opacity-0">
+        <button id="contextPasteBtn" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-white/5 flex items-center gap-2.5 transition-colors">
+            <i data-feather="clipboard" class="w-4 h-4"></i> Paste Files
+        </button>
+    </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -530,6 +535,8 @@
         const filesHeader = document.getElementById('filesHeader');
         const fileCountBadge = document.getElementById('fileCountBadge');
         const copyAllBtn = document.getElementById('copyAllBtn');
+        const contextMenu = document.getElementById('customContextMenu');
+        const contextPasteBtn = document.getElementById('contextPasteBtn');
 
         // Global State
         let uploadedFiles = [];
@@ -571,6 +578,77 @@
         dropZone.addEventListener('click', (e) => {
             if (e.target.tagName !== 'BUTTON') {
                 fileInput.click();
+            }
+        });
+        // ==========================================
+        // CONTEXT MENU & PASTE LOGIC
+        // ==========================================
+        
+        // 1. Show custom context menu on right-click
+        dropZone.addEventListener('contextmenu', (e) => {
+            e.preventDefault(); // Prevent standard browser menu
+            
+            // Position the menu at the cursor
+            contextMenu.style.left = `${e.clientX}px`;
+            contextMenu.style.top = `${e.clientY}px`;
+            
+            // Show the menu
+            contextMenu.classList.remove('hidden');
+            // Small delay to allow display to apply before fading in
+            setTimeout(() => {
+                contextMenu.classList.remove('opacity-0');
+            }, 10);
+        });
+
+        // 2. Hide context menu when clicking anywhere else
+        document.addEventListener('click', (e) => {
+            if (!contextMenu.classList.contains('hidden') && !e.target.closest('#customContextMenu')) {
+                contextMenu.classList.add('opacity-0');
+                setTimeout(() => {
+                    contextMenu.classList.add('hidden');
+                }, 200); // Matches the duration-200 class
+            }
+        });
+
+        // 3. Handle the custom 'Paste Files' button click
+        contextPasteBtn.addEventListener('click', async () => {
+            try {
+                // Request clipboard access
+                const clipboardItems = await navigator.clipboard.read();
+                const files = [];
+                
+                for (const item of clipboardItems) {
+                    const imageTypes = item.types.filter(type => type.startsWith('image/'));
+                    for (const type of imageTypes) {
+                        const blob = await item.getType(type);
+                        const extension = type.split('/')[1] || 'png';
+                        // Convert clipboard blob to a File object your system understands
+                        const file = new File([blob], `pasted-image-${Date.now()}.${extension}`, { type: type });
+                        files.push(file);
+                    }
+                }
+                
+                if (files.length > 0) {
+                    handleFiles(files);
+                } else {
+                    showToast("No images found in clipboard.", "error");
+                }
+            } catch (err) {
+                console.error("Clipboard error:", err);
+                showToast("Clipboard access denied or empty.", "error");
+            }
+            
+            // Hide menu after clicking
+            contextMenu.classList.add('opacity-0');
+            setTimeout(() => contextMenu.classList.add('hidden'), 200);
+        });
+
+        // 4. Bonus: Global keyboard Paste support (Ctrl+V / Cmd+V) anywhere on the page
+        document.addEventListener('paste', (e) => {
+            const files = e.clipboardData.files;
+            if (files.length > 0) {
+                e.preventDefault();
+                handleFiles(files);
             }
         });
 
