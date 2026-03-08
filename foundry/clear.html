@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reputifly | Storage Cleanup Utility</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/feather-icons"></script>
+
+    <style>
+        body {
+            background-color: #05050A;
+            background-image: radial-gradient(circle at 50% 0%, #2A0815 0%, #05050A 70%);
+            background-attachment: fixed;
+            font-family: 'Inter', sans-serif;
+            color: #F0F0F0;
+            -webkit-font-smoothing: antialiased;
+        }
+        h1, h2, h3 { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.02em; }
+        .glass-panel {
+            background: rgba(15, 15, 20, 0.7);
+            backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-top: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.8);
+        }
+        .btn-danger {
+            background: linear-gradient(90deg, #EF4444, #B91C1C);
+            box-shadow: 0 10px 30px -10px rgba(239, 68, 68, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+            transition: all 0.3s ease;
+        }
+        .btn-danger:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 40px -10px rgba(239, 68, 68, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        }
+        .btn-danger:disabled { filter: grayscale(100%); cursor: not-allowed; opacity: 0.7; }
+    </style>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+        import { getFirestore, collection, getDocs, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        import { getStorage, ref, listAll, deleteObject } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-storage.js";
+
+        // Must match your tracking.html config exactly
+        const firebaseConfig = {
+            apiKey: "AIzaSyDqpzqEVtrEtQvvmcMie_Et7xiNh8QU_Ao",
+            authDomain: "reputifly-editor.firebaseapp.com",
+            projectId: "reputifly-editor",
+            storageBucket: "reputifly-editor.firebasestorage.app",
+            messagingSenderId: "455384979132",
+            appId: "1:455384979132:web:9079ec81182115b16622b9"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
+
+        let storageFilesToClear = [];
+        let firestoreDocsToClear = [];
+
+        window.scanEnvironment = async function() {
+            const scanBtn = document.getElementById('scanBtn');
+            const statusText = document.getElementById('statusText');
+            
+            scanBtn.disabled = true;
+            scanBtn.innerHTML = `<i data-feather="loader" class="w-4 h-4 animate-spin"></i> Scanning...`;
+            feather.replace();
+
+            try {
+                // 1. Scan Storage (Images)
+                statusText.innerText = "Scanning Firebase Storage (/shared-annotations)...";
+                const folderRef = ref(storage, 'shared-annotations');
+                const storageRes = await listAll(folderRef);
+                storageFilesToClear = storageRes.items;
+                document.getElementById('imgCount').innerText = storageFilesToClear.length;
+
+                // 2. Scan Firestore (Tracker Links)
+                statusText.innerText = "Scanning Firestore Database (viewer_shares)...";
+                const querySnapshot = await getDocs(collection(db, "viewer_shares"));
+                firestoreDocsToClear = [];
+                querySnapshot.forEach((doc) => {
+                    firestoreDocsToClear.push(doc.id);
+                });
+                document.getElementById('linkCount').innerText = firestoreDocsToClear.length;
+
+                statusText.innerText = "Scan complete. Ready to purge.";
+                statusText.classList.replace('text-gray-400', 'text-green-400');
+                
+                if (storageFilesToClear.length > 0 || firestoreDocsToClear.length > 0) {
+                    document.getElementById('nukeBtn').disabled = false;
+                }
+
+            } catch (error) {
+                console.error(error);
+                statusText.innerText = "Error during scan: " + error.message;
+                statusText.classList.replace('text-gray-400', 'text-red-400');
+            } finally {
+                scanBtn.innerHTML = `<i data-feather="search" class="w-4 h-4"></i> Rescan Data`;
+                scanBtn.disabled = false;
+                feather.replace();
+            }
+        };
+
+        window.nukeData = async function() {
+            if (!confirm("Are you sure? This will permanently delete all shared client tracker links and their uploaded images. Clients will no longer be able to view their trackers.")) return;
+
+            const nukeBtn = document.getElementById('nukeBtn');
+            const statusText = document.getElementById('statusText');
+            
+            nukeBtn.disabled = true;
+            statusText.classList.replace('text-green-400', 'text-red-400');
+
+            try {
+                // 1. Delete Storage Files
+                let deletedFiles = 0;
+                for (const itemRef of storageFilesToClear) {
+                    statusText.innerText = `Deleting images... (${deletedFiles + 1}/${storageFilesToClear.length})`;
+                    await deleteObject(itemRef);
+                    deletedFiles++;
+                    document.getElementById('imgCount').innerText = storageFilesToClear.length - deletedFiles;
+                }
+
+                // 2. Delete Firestore Docs
+                let deletedDocs = 0;
+                for (const docId of firestoreDocsToClear) {
+                    statusText.innerText = `Deleting tracker links... (${deletedDocs + 1}/${firestoreDocsToClear.length})`;
+                    await deleteDoc(doc(db, "viewer_shares", docId));
+                    deletedDocs++;
+                    document.getElementById('linkCount').innerText = firestoreDocsToClear.length - deletedDocs;
+                }
+
+                statusText.innerText = "Cleanup complete. All tracker data has been permanently deleted.";
+                statusText.classList.replace('text-red-400', 'text-green-400');
+                
+                storageFilesToClear = [];
+                firestoreDocsToClear = [];
+
+            } catch (error) {
+                console.error(error);
+                statusText.innerText = "Error during deletion: " + error.message;
+            } finally {
+                nukeBtn.innerHTML = `<i data-feather="trash-2" class="w-4 h-4"></i> Purge All Tracker Data`;
+                feather.replace();
+            }
+        };
+
+        // Auto-scan on load
+        window.addEventListener('DOMContentLoaded', () => {
+            feather.replace();
+            setTimeout(window.scanEnvironment, 500);
+        });
+    </script>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="w-full max-w-lg glass-panel rounded-3xl p-8 relative overflow-hidden">
+        
+        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#E6397F] to-[#EF4444]"></div>
+
+        <div class="text-center mb-8">
+            <div class="w-16 h-16 bg-red-500/10 border border-red-500/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i data-feather="trash-2" class="w-8 h-8 text-red-500"></i>
+            </div>
+            <h1 class="text-2xl font-bold mb-2">Tracker Cleanup Utility</h1>
+            <p class="text-gray-400 text-sm">Safely delete all images and database links generated exclusively by the Payload Tracker.</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 mb-6">
+            <div class="bg-black/40 border border-white/10 rounded-2xl p-5 text-center">
+                <i data-feather="image" class="w-6 h-6 text-[#E6397F] mx-auto mb-2"></i>
+                <div id="imgCount" class="text-3xl font-bold text-white mb-1">0</div>
+                <div class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Annotated Images</div>
+            </div>
+            <div class="bg-black/40 border border-white/10 rounded-2xl p-5 text-center">
+                <i data-feather="link" class="w-6 h-6 text-[#10B981] mx-auto mb-2"></i>
+                <div id="linkCount" class="text-3xl font-bold text-white mb-1">0</div>
+                <div class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Tracker Links</div>
+            </div>
+        </div>
+
+        <div class="bg-black/60 border border-white/5 rounded-xl p-4 mb-6 text-center text-xs font-mono text-gray-400" id="statusText">
+            Initializing Firebase connection...
+        </div>
+
+        <div class="flex flex-col gap-3">
+            <button id="scanBtn" onclick="scanEnvironment()" class="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold py-3.5 px-4 rounded-xl text-sm transition-all flex items-center justify-center gap-2">
+                <i data-feather="search" class="w-4 h-4"></i> Rescan Data
+            </button>
+            <button id="nukeBtn" onclick="nukeData()" disabled class="w-full btn-danger text-white font-bold py-3.5 px-4 rounded-xl text-sm transition-all flex items-center justify-center gap-2">
+                <i data-feather="alert-triangle" class="w-4 h-4"></i> Purge All Tracker Data
+            </button>
+        </div>
+
+    </div>
+
+</body>
+</html>
