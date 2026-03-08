@@ -13,8 +13,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-        import { getFirestore, collection, addDoc, doc, getDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
-        // IMPORT STORAGE TO FIX DATA LOSS BUG
+        import { getFirestore, collection, addDoc, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-storage.js";
 
         const firebaseConfig = {
@@ -32,8 +31,8 @@
         window.addDoc = addDoc;
         window.doc = doc;
         window.getDoc = getDoc;
+        window.setDoc = setDoc; 
         
-        // INITIALIZE STORAGE
         window.storage = getStorage(app);
         window.storageRef = ref;
         window.uploadBytes = uploadBytes;
@@ -123,22 +122,10 @@
 
         .image-zoom-container:hover .zoom-icon { opacity: 1; }
 
-        /* Checklist Styles */
-        .task-card {
-            transition: all 0.3s ease;
-        }
-        .task-card.completed {
-            border-color: rgba(16, 185, 129, 0.3);
-            background: rgba(16, 185, 129, 0.03);
-        }
-        .task-card.completed .task-title {
-            text-decoration: line-through;
-            color: #9CA3AF;
-        }
-        .task-card.completed img {
-            opacity: 0.6;
-            filter: grayscale(80%);
-        }
+        .task-card { transition: all 0.3s ease; }
+        .task-card.completed { border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.03); }
+        .task-card.completed .task-title { text-decoration: line-through; color: #9CA3AF; }
+        .task-card.completed img { opacity: 0.6; filter: grayscale(80%); }
         
         .custom-checkbox {
             appearance: none;
@@ -154,10 +141,7 @@
             align-items: center;
             justify-content: center;
         }
-        .custom-checkbox:checked {
-            background: #10B981;
-            border-color: #10B981;
-        }
+        .custom-checkbox:checked { background: #10B981; border-color: #10B981; }
         .custom-checkbox:checked::after {
             content: '';
             width: 6px;
@@ -167,10 +151,7 @@
             transform: rotate(45deg);
             margin-bottom: 2px;
         }
-        .custom-checkbox:disabled {
-            cursor: not-allowed;
-            opacity: 0.7;
-        }
+        .custom-checkbox:disabled { cursor: not-allowed; opacity: 0.7; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col p-4 sm:p-6 relative overflow-x-hidden">
@@ -227,7 +208,7 @@
                     <div id="progressText" class="text-xs font-mono text-white">0/0</div>
                 </div>
 
-                <button id="shareBtn" onclick="generateShareLink()" class="btn-liquid py-2.5 px-4 sm:px-6 text-sm flex items-center gap-2 shadow-lg shrink-0">
+                <button id="shareBtn" onclick="generateShareLink()" class="btn-liquid py-2.5 px-4 sm:px-6 text-sm flex items-center justify-center gap-2 shadow-lg shrink-0 w-auto min-w-[140px]">
                     <i data-feather="link" class="w-4 h-4 hidden sm:block"></i> Share Link
                 </button>
                 <button id="exitBtn" onclick="location.href = window.location.pathname" class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold py-2.5 px-4 rounded-full text-sm transition-all hidden items-center gap-2 shrink-0">
@@ -256,10 +237,10 @@
     <div id="shareModal" class="fixed inset-0 z-[300] hidden items-center justify-center bg-black/95 backdrop-blur-md p-4 transition-all opacity-0">
         <div class="w-full max-w-md bg-[#160D1E] border border-white/10 rounded-3xl p-8 shadow-2xl relative text-center">
             <div class="w-16 h-16 rounded-full bg-[#E6397F]/10 flex items-center justify-center mx-auto mb-6 border border-[#E6397F]/30">
-                <i data-feather="check" class="w-8 h-8 text-[#E6397F]"></i>
+                <i data-feather="check" class="w-8 h-8 text-[#E6397F]" id="modalIcon"></i>
             </div>
-            <h3 class="text-2xl font-bold text-white mb-2">Share Link Ready</h3>
-            <p class="text-gray-400 text-sm mb-6">This link is read-only. Annotated images have been safely uploaded for the client to view.</p>
+            <h3 class="text-2xl font-bold text-white mb-2" id="modalTitle">Share Link Ready</h3>
+            <p class="text-gray-400 text-sm mb-6" id="modalDesc">This link is read-only. Annotated images have been safely uploaded for the client to view.</p>
             
             <div class="flex flex-col sm:flex-row gap-2 mb-6">
                 <input type="text" id="shareUrlInput" class="flex-1 bg-black/40 border border-white/10 rounded-xl p-3 text-xs font-mono text-gray-300 outline-none truncate" readonly>
@@ -285,13 +266,26 @@
     <script>
         feather.replace();
 
+        // =========================================================
+        // CONFIGURATION: Redirect Fix for "Revision Portal"
+        // =========================================================
+        // If your clients view the tracker on a specific URL (e.g., /tracker/), 
+        // you can hardcode it here. By default, it auto-detects and removes 'revision-portal' 
+        // replacing it with 'tracker'. Change this line if needed.
+        let CLIENT_VIEWER_BASE_URL = window.location.href.split('?')[0];
+        if (CLIENT_VIEWER_BASE_URL.includes("revision-portal")) {
+            CLIENT_VIEWER_BASE_URL = CLIENT_VIEWER_BASE_URL.replace("revision-portal", "tracker");
+        }
+        // =========================================================
+
         let parsedProjectData = {
             project: "Unknown Project",
             pages: [] 
         };
         let isViewerMode = false;
+        let currentShareId = null; 
+        let activePageIdx = 0; 
 
-        // --- MOBILE MENU LOGIC ---
         function toggleMobileMenu() {
             const sidebar = document.getElementById('sidebar');
             const overlay = document.getElementById('sidebarOverlay');
@@ -299,7 +293,7 @@
             if (sidebar.classList.contains('-translate-x-full')) {
                 sidebar.classList.remove('-translate-x-full');
                 overlay.classList.remove('hidden');
-                document.body.style.overflow = 'hidden'; // Prevent background scrolling
+                document.body.style.overflow = 'hidden'; 
             } else {
                 sidebar.classList.add('-translate-x-full');
                 overlay.classList.add('hidden');
@@ -307,15 +301,12 @@
             }
         }
 
-        // --- URL CHECKER (VIEW MODE) ---
         const urlParams = new URLSearchParams(window.location.search);
         const shareId = urlParams.get('share');
 
         if (shareId) {
             isViewerMode = true;
             document.getElementById('uploadView').classList.add('hidden');
-            
-            // Show loading in dashboard
             document.getElementById('dashboardView').classList.remove('hidden');
             document.getElementById('dashboardView').classList.add('flex');
             document.getElementById('shareBtn').classList.add('hidden');
@@ -356,7 +347,6 @@
             else window.addEventListener('firebaseReady', fetchSharedPayload);
         }
 
-        // --- FILE UPLOAD & ZIP EXTRACTION (ADMIN ONLY) ---
         if (!isViewerMode) {
             const dropzone = document.getElementById('zipUpload').parentElement;
             
@@ -423,7 +413,6 @@
             }
         }
 
-        // --- MARKDOWN PARSER ---
         function parseMarkdownPayload(mdText, imagesDict) {
             const result = { pageName: "Unknown Page", liveUrl: null, directives: null, sections: [] };
 
@@ -436,8 +425,7 @@
             const urlMatch = mdText.match(/\*\*Live Page URL:\*\* (.*)/);
             if (urlMatch) result.liveUrl = urlMatch[1].trim();
 
-            // Correctly parse Page-Wide Directives
-            const directiveRegex = /## ⚠️ PAGE-WIDE DIRECTIVES \(EXECUTE THESE FIRST\)\n([\s\S]*?)\n---/;
+            const directiveRegex = /## ⚠️ PAGE-WIDE DIRECTIVES \(EXECUTE THESE FIRST\)\n([\s\S]*?)\n---/ || /## ⚠️ PAGE-WIDE DIRECTIVES\n([\s\S]*?)\n---/;
             const dirMatch = mdText.match(directiveRegex);
             if (dirMatch && dirMatch[1].trim() !== "") result.directives = dirMatch[1].trim();
 
@@ -450,7 +438,7 @@
                 const notesMatch = chunk.match(/\*\*General Notes:\*\* (.*)/);
                 const notes = notesMatch ? notesMatch[1].trim() : null;
 
-                const sectionObj = { name: sectionName, notes: notes, tasks: [] };
+                const sectionObj = { name: sectionName, notes: notes, adminComment: "", tasks: [] };
 
                 const taskChunks = chunk.split("### TASK ").slice(1);
                 taskChunks.forEach(taskRaw => {
@@ -471,10 +459,10 @@
                         title: taskTitle.split(':')[0], 
                         type: taskTitle.includes("Visual Fix") ? "Fix" : "Asset",
                         imageKey: imageKey,
-                        imageData: imageKey && !isViewerMode ? imagesDict[imageKey] : null, // Base64 data from zip
+                        imageData: imageKey && !isViewerMode ? imagesDict[imageKey] : null,
                         comment: comment,
                         wpUrl: wpUrl,
-                        completed: false // Checklist init
+                        completed: false 
                     });
                 });
                 result.sections.push(sectionObj);
@@ -482,7 +470,6 @@
             return result;
         }
 
-        // --- CHECKLIST & PROGRESS LOGIC ---
         function toggleTaskCompletion(pIdx, sIdx, tIdx) {
             if (isViewerMode) return; 
             
@@ -501,7 +488,12 @@
             }
             
             updateProgressBar();
+            renderTabs(); 
         }
+        
+        window.updateAdminComment = function(pIdx, sIdx, val) {
+            parsedProjectData.pages[pIdx].sections[sIdx].adminComment = val;
+        };
 
         function updateProgressBar() {
             let total = 0;
@@ -521,20 +513,36 @@
             document.getElementById('progressText').innerText = `${completed}/${total}`;
         }
 
-        // --- UI RENDERING ---
         function renderTabs() {
             const list = document.getElementById('pagesList');
             list.innerHTML = '';
             parsedProjectData.pages.forEach((page, idx) => {
+                let totalTasks = 0;
+                let completedTasks = 0;
+                
+                page.sections.forEach(s => {
+                    if (s.tasks) {
+                        s.tasks.forEach(t => {
+                            totalTasks++;
+                            if (t.completed) completedTasks++;
+                        });
+                    }
+                });
+                
+                const isCompleted = totalTasks > 0 && totalTasks === completedTasks;
+                const iconName = isCompleted ? 'check-circle' : 'file';
+                const iconColorClass = isCompleted ? 'text-[#10B981]' : 'text-gray-400';
+
                 const btn = document.createElement('button');
-                btn.className = `tab-btn ${idx === 0 ? 'active' : ''}`;
-                btn.innerHTML = `<i data-feather="file" class="w-4 h-4 shrink-0"></i> <span class="truncate font-bold">${page.pageName}</span>`;
+                btn.className = `tab-btn ${idx === activePageIdx ? 'active' : ''} ${isCompleted ? 'bg-[#10B981]/5 border border-[#10B981]/20' : ''}`;
+                btn.innerHTML = `<i data-feather="${iconName}" class="w-4 h-4 shrink-0 ${iconColorClass}"></i> <span class="truncate font-bold ${isCompleted ? 'text-[#10B981]' : ''}">${page.pageName}</span>`;
+                
                 btn.onclick = () => {
+                    activePageIdx = idx;
                     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
                     renderPage(idx);
                     
-                    // Automatically close the mobile drawer when a page is selected
                     if (window.innerWidth < 768) {
                         toggleMobileMenu();
                     }
@@ -552,7 +560,6 @@
             const liveLinkHtml = page.liveUrl ? `<a href="${page.liveUrl}" target="_blank" rel="noopener noreferrer" class="sm:ml-auto flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2.5 rounded-full text-xs text-gray-400 hover:text-white transition-all w-full sm:w-auto mt-4 sm:mt-0"><i data-feather="external-link" class="w-3 h-3"></i> View Live URL</a>` : '';
             container.innerHTML += `<div class="flex flex-col sm:flex-row sm:items-center mb-8 border-b border-white/10 pb-4"><h2 class="text-2xl sm:text-3xl font-bold text-white tracking-tight break-words w-full sm:w-auto pr-4">${page.pageName}</h2>${liveLinkHtml}</div>`;
 
-            // Render Page-Wide Directives if they exist
             if (page.directives) {
                 container.innerHTML += `
                     <div class="bg-[#FF8A00]/10 border border-[#FF8A00]/30 rounded-2xl p-4 sm:p-6 mb-8 relative shadow-[0_0_30px_rgba(255,138,0,0.05)] w-full overflow-hidden">
@@ -579,6 +586,22 @@
                         </div>
                     `;
                 }
+                
+                if (!isViewerMode) {
+                    sectionHtml += `
+                        <div class="mb-6 w-full">
+                            <label class="block text-[10px] font-bold text-[#E6397F] mb-2 uppercase tracking-widest flex items-center gap-1.5"><i data-feather="message-square" class="w-3 h-3"></i> Agency Note to Client (Optional)</label>
+                            <textarea class="w-full bg-black/40 border border-[#E6397F]/30 focus:border-[#E6397F] rounded-xl p-3 text-sm text-white outline-none resize-y min-h-[60px] transition-colors" placeholder="Explain any alternative implementations, pushbacks, or provide context here..." oninput="updateAdminComment(${idx}, ${sIdx}, this.value)">${sec.adminComment || ''}</textarea>
+                        </div>
+                    `;
+                } else if (sec.adminComment && sec.adminComment.trim() !== '') {
+                    sectionHtml += `
+                        <div class="mb-6 w-full bg-[#E6397F]/10 border border-[#E6397F]/30 rounded-xl p-4 shadow-inner">
+                            <label class="block text-[10px] font-bold text-[#E6397F] mb-2 uppercase tracking-widest flex items-center gap-1.5"><i data-feather="info" class="w-3 h-3"></i> Note from Agency</label>
+                            <div class="text-gray-200 text-sm whitespace-pre-wrap break-words leading-relaxed">${sec.adminComment}</div>
+                        </div>
+                    `;
+                }
 
                 if (sec.tasks.length > 0) {
                     sectionHtml += `<div class="space-y-6 w-full">`;
@@ -586,7 +609,6 @@
                         const badgeColor = task.type === 'Fix' ? 'text-[#FF8A00] bg-[#FF8A00]/10 border-[#FF8A00]/30' : 'text-[#10B981] bg-[#10B981]/10 border-[#10B981]/30';
                         const badgeIcon = task.type === 'Fix' ? 'edit-3' : 'plus-square';
                         
-                        // Use imageData (base64) if available (admin mode), otherwise fallback to wpUrl (CDN link for viewer mode)
                         const imgSource = task.imageData || task.wpUrl || '';
                         const completedClass = task.completed ? 'completed' : '';
                         const checkedAttr = task.completed ? 'checked' : '';
@@ -634,9 +656,7 @@
             feather.replace();
         }
 
-        // --- UTILITY: BASE64 TO BLOB ---
         function b64toBlob(b64Data, contentType='', sliceSize=512) {
-            // Check if it has a data URI prefix, remove it if present
             const base64String = b64Data.includes(',') ? b64Data.split(',')[1] : b64Data;
             const byteCharacters = atob(base64String);
             const byteArrays = [];
@@ -653,7 +673,7 @@
             return new Blob(byteArrays, {type: contentType});
         }
 
-        // --- FIREBASE SHARE LOGIC (BUG FIXED) ---
+        // --- UPGRADED REAL-TIME SYNC LOGIC ---
         async function generateShareLink() {
             const btn = document.getElementById('shareBtn');
             const originalText = btn.innerHTML;
@@ -661,52 +681,88 @@
             btn.disabled = true;
             feather.replace();
 
+            let operationFailed = false;
+
             try {
-                // 1. Create a deep copy of the payload to manipulate safely
                 const lightweightPayload = JSON.parse(JSON.stringify(parsedProjectData));
-                
-                // 2. Upload Annotated Base64 Images to Firebase Storage to Fix Data Loss
-                for (let p of lightweightPayload.pages) {
-                    for (let s of p.sections) {
-                        for (let t of s.tasks) {
-                            // If we have local base64 data (annotated image), upload it!
+                const imageTasksToUpload = [];
+
+                // 1. Gather all required image uploads
+                for (let pIdx = 0; pIdx < lightweightPayload.pages.length; pIdx++) {
+                    let p = lightweightPayload.pages[pIdx];
+                    for (let sIdx = 0; sIdx < p.sections.length; sIdx++) {
+                        let s = p.sections[sIdx];
+                        for (let tIdx = 0; tIdx < s.tasks.length; tIdx++) {
+                            let t = s.tasks[tIdx];
+                            let originalT = parsedProjectData.pages[pIdx].sections[sIdx].tasks[tIdx];
+                            
                             if (t.imageData) {
-                                try {
-                                    const blob = b64toBlob(t.imageData, 'image/webp');
-                                    const safeProjectName = lightweightPayload.project.replace(/[^a-zA-Z0-9]/g, '-');
-                                    const uniqueName = `shared-annotations/${safeProjectName}-${Date.now()}-${Math.random().toString(36).substring(7)}.webp`;
-                                    
-                                    const storageRef = window.storageRef(window.storage, uniqueName);
-                                    await window.uploadBytes(storageRef, blob);
-                                    const downloadUrl = await window.getDownloadURL(storageRef);
-                                    
-                                    // OVERWRITE the wpUrl with the new Firebase Storage URL showing the annotations
-                                    t.wpUrl = downloadUrl; 
-                                } catch (uploadError) {
-                                    console.error("Failed to upload annotated image. Falling back to original.", uploadError);
-                                }
+                                imageTasksToUpload.push({ t, originalT, project: lightweightPayload.project });
+                            } else {
+                                delete t.imageData;
                             }
-                            // 3. Strip the heavy Base64 data so Firestore doesn't crash
-                            delete t.imageData; 
                         }
                     }
                 }
 
-                // 4. Upload lightweight payload to Firestore
-                const docRef = await window.addDoc(window.collection(window.db, "viewer_shares"), lightweightPayload);
-                
-                // 5. Generate URL & Show Modal
-                const shareUrl = `${window.location.origin}${window.location.pathname}?share=${docRef.id}`;
+                // 2. Upload images sequentially with UI Progress updates to prevent freezes
+                for (let i = 0; i < imageTasksToUpload.length; i++) {
+                    const { t, originalT, project } = imageTasksToUpload[i];
+                    
+                    btn.innerHTML = `<i data-feather="loader" class="w-4 h-4 animate-spin"></i> Uploading Image ${i + 1} of ${imageTasksToUpload.length}...`;
+                    feather.replace();
+
+                    try {
+                        const blob = b64toBlob(t.imageData, 'image/webp');
+                        const safeProjectName = project.replace(/[^a-zA-Z0-9]/g, '-');
+                        const uniqueName = `shared-annotations/${safeProjectName}-${Date.now()}-${Math.random().toString(36).substring(7)}.webp`;
+                        
+                        const storageRef = window.storageRef(window.storage, uniqueName);
+                        await window.uploadBytes(storageRef, blob);
+                        const downloadUrl = await window.getDownloadURL(storageRef);
+                        
+                        t.wpUrl = downloadUrl; 
+                        originalT.wpUrl = downloadUrl; 
+                    } catch (uploadError) {
+                        console.error("Failed to upload annotated image.", uploadError);
+                    } finally {
+                        delete t.imageData; 
+                        delete originalT.imageData; 
+                    }
+                }
+
+                btn.innerHTML = `<i data-feather="loader" class="w-4 h-4 animate-spin"></i> Saving Tracker...`;
+                feather.replace();
+
+                // 3. Save to Firestore and Output URL
+                if (currentShareId) {
+                    await window.setDoc(window.doc(window.db, "viewer_shares", currentShareId), lightweightPayload);
+                    document.getElementById('modalTitle').innerText = "Updates Synced Live";
+                    document.getElementById('modalDesc').innerText = "The client's tracker has been updated. They just need to refresh their existing link.";
+                } else {
+                    const docRef = await window.addDoc(window.collection(window.db, "viewer_shares"), lightweightPayload);
+                    currentShareId = docRef.id;
+                    const shareUrl = `${CLIENT_VIEWER_BASE_URL}?share=${currentShareId}`;
+                    document.getElementById('shareUrlInput').value = shareUrl;
+                }
+
+                btn.innerHTML = `<i data-feather="refresh-cw" class="w-4 h-4 hidden sm:block"></i> Sync Client Updates`;
+                btn.classList.add('shadow-[0_0_30px_rgba(16,185,129,0.3)]');
+
                 const modal = document.getElementById('shareModal');
-                document.getElementById('shareUrlInput').value = shareUrl;
                 modal.classList.remove('hidden');
                 modal.classList.add('flex');
                 setTimeout(() => modal.classList.remove('opacity-0'), 10);
 
             } catch (err) {
+                operationFailed = true;
                 alert("Error generating share link: " + err.message);
+                console.error(err);
             } finally {
-                btn.innerHTML = originalText;
+                // Safely handle UI reset without ReferenceErrors
+                if (operationFailed) {
+                    btn.innerHTML = originalText;
+                }
                 btn.disabled = false;
                 feather.replace();
             }
@@ -735,7 +791,6 @@
             }, 300);
         }
 
-        // --- IMAGE MODAL ---
         function openImageModal(src) {
             if (!src) return;
             const modal = document.getElementById('imageModal');
