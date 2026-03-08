@@ -14,6 +14,8 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
         import { getFirestore, collection, addDoc, doc, getDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        // IMPORT STORAGE TO FIX DATA LOSS BUG
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-storage.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDqpzqEVtrEtQvvmcMie_Et7xiNh8QU_Ao",
@@ -30,6 +32,13 @@
         window.addDoc = addDoc;
         window.doc = doc;
         window.getDoc = getDoc;
+        
+        // INITIALIZE STORAGE
+        window.storage = getStorage(app);
+        window.storageRef = ref;
+        window.uploadBytes = uploadBytes;
+        window.getDownloadURL = getDownloadURL;
+        
         window.dispatchEvent(new Event('firebaseReady'));
     </script>
 
@@ -73,9 +82,15 @@
             cursor: pointer;
         }
 
-        .btn-liquid:hover {
+        .btn-liquid:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 15px 40px -10px rgba(255, 138, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        }
+        
+        .btn-liquid:disabled {
+            filter: grayscale(100%);
+            cursor: not-allowed;
+            opacity: 0.7;
         }
 
         .tab-btn {
@@ -192,37 +207,49 @@
     <div id="dashboardView" class="w-full max-w-[1500px] mx-auto hidden flex-col h-[92vh] z-10 relative">
         <div class="flex flex-col sm:flex-row justify-between items-center gap-4 mb-6 shrink-0 glass-panel rounded-3xl p-5 px-6">
             <div class="flex items-center gap-4 w-full sm:w-auto overflow-hidden">
-                <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-8 sm:h-10 shrink-0" alt="Reputifly">
+                <button onclick="toggleMobileMenu()" class="md:hidden w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-[#E6397F]/20 hover:text-[#E6397F] hover:border-[#E6397F]/50 transition-all shrink-0">
+                    <i data-feather="menu" class="w-5 h-5"></i>
+                </button>
+
+                <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-8 sm:h-10 shrink-0 hidden sm:block" alt="Reputifly">
                 <div class="w-px h-8 bg-white/10 hidden sm:block"></div>
                 <div class="flex flex-col min-w-0">
                     <h1 class="text-lg sm:text-xl font-bold text-white tracking-tight truncate flex items-center gap-2" id="projectNameDisplay">Loading Project...</h1>
                     <span id="viewModeBadge" class="text-xs text-green-400 font-mono tracking-widest uppercase flex items-center gap-1"><i data-feather="check-circle" class="w-3 h-3"></i> Admin Tracker Mode</span>
                 </div>
             </div>
-            <div class="flex items-center gap-3 w-full sm:w-auto">
-                <div class="hidden sm:flex items-center gap-3 mr-4">
-                    <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Progress</div>
-                    <div class="w-32 h-2 bg-white/10 rounded-full overflow-hidden">
+            <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
+                <div class="flex items-center gap-3 mr-4">
+                    <div class="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest">Progress</div>
+                    <div class="w-24 sm:w-32 h-2 bg-white/10 rounded-full overflow-hidden">
                         <div id="progressBar" class="h-full bg-[#10B981] transition-all duration-500" style="width: 0%;"></div>
                     </div>
                     <div id="progressText" class="text-xs font-mono text-white">0/0</div>
                 </div>
 
-                <button id="shareBtn" onclick="generateShareLink()" class="btn-liquid py-2.5 px-6 text-sm flex items-center gap-2 shadow-lg">
-                    <i data-feather="link" class="w-4 h-4"></i> Generate Share Link
+                <button id="shareBtn" onclick="generateShareLink()" class="btn-liquid py-2.5 px-4 sm:px-6 text-sm flex items-center gap-2 shadow-lg shrink-0">
+                    <i data-feather="link" class="w-4 h-4 hidden sm:block"></i> Share Link
                 </button>
-                <button id="exitBtn" onclick="location.href = window.location.pathname" class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold py-2.5 px-4 rounded-full text-sm transition-all flex items-center gap-2 hidden sm:flex">
+                <button id="exitBtn" onclick="location.href = window.location.pathname" class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold py-2.5 px-4 rounded-full text-sm transition-all hidden items-center gap-2 shrink-0">
                     <i data-feather="log-out" class="w-4 h-4"></i>
                 </button>
             </div>
         </div>
 
-        <div class="flex flex-col md:flex-row gap-6 flex-1 min-h-0">
-            <div class="w-full md:w-64 shrink-0 glass-panel rounded-3xl p-4 flex flex-row md:flex-col gap-2 overflow-x-auto md:overflow-y-auto hide-scrollbar" id="pagesList">
-                </div>
+        <div class="flex flex-col md:flex-row gap-6 flex-1 min-h-0 relative">
+            
+            <div id="sidebarOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[40] hidden md:hidden transition-opacity" onclick="toggleMobileMenu()"></div>
 
-            <div class="flex-1 glass-panel rounded-3xl p-6 overflow-y-auto hide-scrollbar relative bg-[#0a0a0f]" id="contentArea">
+            <div id="sidebar" class="fixed inset-y-0 left-0 z-[50] w-[280px] md:w-64 transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 glass-panel md:rounded-3xl p-4 flex flex-col gap-2 overflow-y-auto hide-scrollbar shrink-0 bg-[#160D1E] md:bg-transparent border-r border-white/10 md:border-none shadow-2xl md:shadow-none h-full md:h-auto">
+                <div class="flex justify-between items-center md:hidden mb-6 px-2 mt-4 border-b border-white/10 pb-4">
+                    <span class="text-white font-bold text-lg flex items-center gap-2"><i data-feather="layers" class="w-5 h-5 text-[#E6397F]"></i> Project Pages</span>
+                    <button onclick="toggleMobileMenu()" class="text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 p-2 rounded-full transition-all"><i data-feather="x" class="w-4 h-4"></i></button>
                 </div>
+                <div id="pagesList" class="flex flex-col gap-2"></div>
+            </div>
+
+            <div class="flex-1 glass-panel rounded-3xl p-4 sm:p-6 overflow-y-auto hide-scrollbar relative bg-[#0a0a0f] w-full" id="contentArea">
+            </div>
         </div>
     </div>
 
@@ -232,11 +259,11 @@
                 <i data-feather="check" class="w-8 h-8 text-[#E6397F]"></i>
             </div>
             <h3 class="text-2xl font-bold text-white mb-2">Share Link Ready</h3>
-            <p class="text-gray-400 text-sm mb-6">This link is read-only. Clients can view progress but cannot edit the checklist.</p>
+            <p class="text-gray-400 text-sm mb-6">This link is read-only. Annotated images have been safely uploaded for the client to view.</p>
             
-            <div class="flex gap-2 mb-6">
-                <input type="text" id="shareUrlInput" class="flex-1 bg-black/40 border border-white/10 rounded-xl p-3 text-xs font-mono text-gray-300 outline-none" readonly>
-                <button onclick="copyShareLink()" class="btn-liquid px-6 py-3 text-sm shrink-0 flex items-center gap-2"><i data-feather="copy" class="w-4 h-4"></i> Copy</button>
+            <div class="flex flex-col sm:flex-row gap-2 mb-6">
+                <input type="text" id="shareUrlInput" class="flex-1 bg-black/40 border border-white/10 rounded-xl p-3 text-xs font-mono text-gray-300 outline-none truncate" readonly>
+                <button onclick="copyShareLink()" class="btn-liquid px-6 py-3 text-sm shrink-0 flex items-center justify-center gap-2"><i data-feather="copy" class="w-4 h-4"></i> Copy</button>
             </div>
             
             <button onclick="closeShareModal()" class="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white py-3 rounded-xl transition-all text-sm font-bold">Close</button>
@@ -264,6 +291,22 @@
         };
         let isViewerMode = false;
 
+        // --- MOBILE MENU LOGIC ---
+        function toggleMobileMenu() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            
+            if (sidebar.classList.contains('-translate-x-full')) {
+                sidebar.classList.remove('-translate-x-full');
+                overlay.classList.remove('hidden');
+                document.body.style.overflow = 'hidden'; // Prevent background scrolling
+            } else {
+                sidebar.classList.add('-translate-x-full');
+                overlay.classList.add('hidden');
+                document.body.style.overflow = '';
+            }
+        }
+
         // --- URL CHECKER (VIEW MODE) ---
         const urlParams = new URLSearchParams(window.location.search);
         const shareId = urlParams.get('share');
@@ -277,6 +320,7 @@
             document.getElementById('dashboardView').classList.add('flex');
             document.getElementById('shareBtn').classList.add('hidden');
             document.getElementById('exitBtn').classList.remove('hidden');
+            document.getElementById('exitBtn').classList.add('flex');
             
             const badge = document.getElementById('viewModeBadge');
             badge.innerHTML = `<i data-feather="eye" class="w-3 h-3"></i> Client View (Read-Only)`;
@@ -392,6 +436,7 @@
             const urlMatch = mdText.match(/\*\*Live Page URL:\*\* (.*)/);
             if (urlMatch) result.liveUrl = urlMatch[1].trim();
 
+            // Correctly parse Page-Wide Directives
             const directiveRegex = /## ⚠️ PAGE-WIDE DIRECTIVES \(EXECUTE THESE FIRST\)\n([\s\S]*?)\n---/;
             const dirMatch = mdText.match(directiveRegex);
             if (dirMatch && dirMatch[1].trim() !== "") result.directives = dirMatch[1].trim();
@@ -426,7 +471,7 @@
                         title: taskTitle.split(':')[0], 
                         type: taskTitle.includes("Visual Fix") ? "Fix" : "Asset",
                         imageKey: imageKey,
-                        imageData: imageKey && !isViewerMode ? imagesDict[imageKey] : null, // Viewer mode drops base64
+                        imageData: imageKey && !isViewerMode ? imagesDict[imageKey] : null, // Base64 data from zip
                         comment: comment,
                         wpUrl: wpUrl,
                         completed: false // Checklist init
@@ -439,7 +484,7 @@
 
         // --- CHECKLIST & PROGRESS LOGIC ---
         function toggleTaskCompletion(pIdx, sIdx, tIdx) {
-            if (isViewerMode) return; // Prevent edits in viewer mode
+            if (isViewerMode) return; 
             
             const task = parsedProjectData.pages[pIdx].sections[sIdx].tasks[tIdx];
             task.completed = !task.completed;
@@ -476,18 +521,23 @@
             document.getElementById('progressText').innerText = `${completed}/${total}`;
         }
 
-        // --- UI RENDERING (ORIGINAL LAYOUT BUT POLISHED) ---
+        // --- UI RENDERING ---
         function renderTabs() {
             const list = document.getElementById('pagesList');
             list.innerHTML = '';
             parsedProjectData.pages.forEach((page, idx) => {
                 const btn = document.createElement('button');
                 btn.className = `tab-btn ${idx === 0 ? 'active' : ''}`;
-                btn.innerHTML = `<i data-feather="file" class="w-4 h-4"></i> <span class="truncate font-bold">${page.pageName}</span>`;
+                btn.innerHTML = `<i data-feather="file" class="w-4 h-4 shrink-0"></i> <span class="truncate font-bold">${page.pageName}</span>`;
                 btn.onclick = () => {
                     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
                     renderPage(idx);
+                    
+                    // Automatically close the mobile drawer when a page is selected
+                    if (window.innerWidth < 768) {
+                        toggleMobileMenu();
+                    }
                 };
                 list.appendChild(btn);
             });
@@ -499,38 +549,39 @@
             const container = document.getElementById('contentArea');
             container.innerHTML = '';
 
-            const liveLinkHtml = page.liveUrl ? `<a href="${page.liveUrl}" target="_blank" rel="noopener noreferrer" class="ml-auto flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-full text-xs text-gray-400 hover:text-white transition-all"><i data-feather="external-link" class="w-3 h-3"></i> View Live URL</a>` : '';
-            container.innerHTML += `<div class="flex items-center mb-8 border-b border-white/10 pb-4"><h2 class="text-3xl font-bold text-white tracking-tight">${page.pageName}</h2>${liveLinkHtml}</div>`;
+            const liveLinkHtml = page.liveUrl ? `<a href="${page.liveUrl}" target="_blank" rel="noopener noreferrer" class="sm:ml-auto flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2.5 rounded-full text-xs text-gray-400 hover:text-white transition-all w-full sm:w-auto mt-4 sm:mt-0"><i data-feather="external-link" class="w-3 h-3"></i> View Live URL</a>` : '';
+            container.innerHTML += `<div class="flex flex-col sm:flex-row sm:items-center mb-8 border-b border-white/10 pb-4"><h2 class="text-2xl sm:text-3xl font-bold text-white tracking-tight break-words w-full sm:w-auto pr-4">${page.pageName}</h2>${liveLinkHtml}</div>`;
 
+            // Render Page-Wide Directives if they exist
             if (page.directives) {
                 container.innerHTML += `
-                    <div class="bg-[#FF8A00]/10 border border-[#FF8A00]/30 rounded-2xl p-6 mb-8 relative overflow-hidden shadow-[0_0_30px_rgba(255,138,0,0.05)]">
+                    <div class="bg-[#FF8A00]/10 border border-[#FF8A00]/30 rounded-2xl p-4 sm:p-6 mb-8 relative shadow-[0_0_30px_rgba(255,138,0,0.05)] w-full overflow-hidden">
                         <div class="absolute top-0 right-0 bg-[#FF8A00]/20 text-[#FF8A00] text-[10px] font-bold px-3 py-1 rounded-bl-xl uppercase tracking-widest border-b border-l border-[#FF8A00]/30">Global</div>
-                        <h3 class="text-[#FF8A00] font-bold text-lg mb-3 flex items-center gap-2"><i data-feather="alert-triangle" class="w-5 h-5"></i> Page-Wide Directives</h3>
-                        <div class="text-white text-sm whitespace-pre-wrap leading-relaxed bg-black/40 p-4 rounded-xl border border-white/5">${page.directives}</div>
+                        <h3 class="text-[#FF8A00] font-bold text-lg mb-3 flex items-center gap-2"><i data-feather="alert-triangle" class="w-5 h-5 shrink-0"></i> Page-Wide Directives</h3>
+                        <div class="text-gray-200 text-sm whitespace-pre-wrap leading-relaxed bg-black/40 p-4 rounded-xl border border-white/5 break-words">${page.directives}</div>
                     </div>
                 `;
             }
 
             page.sections.forEach((sec, sIdx) => {
                 let sectionHtml = `
-                    <div class="bg-white/[0.02] border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
-                        <h3 class="font-bold text-2xl text-white mb-6 flex items-center gap-2 border-b border-white/5 pb-4">
-                            <i data-feather="layout" class="w-6 h-6 text-[#E6397F]"></i> ${sec.name}
+                    <div class="bg-white/[0.02] border border-white/10 rounded-2xl p-4 sm:p-6 mb-8 shadow-xl overflow-hidden w-full">
+                        <h3 class="font-bold text-xl sm:text-2xl text-white mb-6 flex items-center gap-2 border-b border-white/5 pb-4 break-words">
+                            <i data-feather="layout" class="w-5 h-5 sm:w-6 sm:h-6 text-[#E6397F] shrink-0"></i> ${sec.name}
                         </h3>
                 `;
 
                 if (sec.notes) {
                     sectionHtml += `
-                        <div class="mb-6">
+                        <div class="mb-6 w-full">
                             <label class="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-widest">General Section Notes</label>
-                            <div class="markdown-quote text-sm whitespace-pre-wrap">${sec.notes}</div>
+                            <div class="markdown-quote text-sm whitespace-pre-wrap break-words">${sec.notes}</div>
                         </div>
                     `;
                 }
 
                 if (sec.tasks.length > 0) {
-                    sectionHtml += `<div class="space-y-6">`;
+                    sectionHtml += `<div class="space-y-6 w-full">`;
                     sec.tasks.forEach((task, tIdx) => {
                         const badgeColor = task.type === 'Fix' ? 'text-[#FF8A00] bg-[#FF8A00]/10 border-[#FF8A00]/30' : 'text-[#10B981] bg-[#10B981]/10 border-[#10B981]/30';
                         const badgeIcon = task.type === 'Fix' ? 'edit-3' : 'plus-square';
@@ -541,36 +592,35 @@
                         const checkedAttr = task.completed ? 'checked' : '';
                         const disabledAttr = isViewerMode ? 'disabled' : '';
 
-                        // Reverting to the ORIGINAL task layout structure:
                         sectionHtml += `
-                            <div id="task-card-${idx}-${sIdx}-${tIdx}" class="task-card image-card flex flex-col sm:flex-row relative items-stretch p-5 gap-6 bg-black/40 border border-white/10 rounded-xl ${completedClass}">
+                            <div id="task-card-${idx}-${sIdx}-${tIdx}" class="task-card image-card flex flex-col lg:flex-row relative items-stretch p-4 sm:p-5 gap-6 bg-black/40 border border-white/10 rounded-xl w-full ${completedClass}">
                                 
-                                <div class="w-full sm:w-[350px] h-56 shrink-0 rounded-lg overflow-hidden border border-white/10 bg-black relative image-zoom-container cursor-pointer" onclick="openImageModal('${imgSource}')">
+                                <div class="w-full lg:w-[350px] h-48 sm:h-56 shrink-0 rounded-lg overflow-hidden border border-white/10 bg-black relative image-zoom-container cursor-pointer" onclick="openImageModal('${imgSource}')">
                                     <img src="${imgSource}" class="w-full h-full object-contain" alt="${task.imageKey}">
                                     <div class="absolute inset-0 bg-black/40 opacity-0 zoom-icon transition-opacity flex items-center justify-center">
                                         <i data-feather="zoom-in" class="w-8 h-8 text-white"></i>
                                     </div>
-                                    <div class="absolute bottom-2 right-2 bg-black/80 px-2 py-1 rounded text-[10px] font-mono text-gray-400 border border-white/10">${task.imageKey}</div>
+                                    <div class="absolute bottom-2 right-2 bg-black/80 px-2 py-1 rounded text-[10px] font-mono text-gray-400 border border-white/10 max-w-[90%] truncate">${task.imageKey}</div>
                                 </div>
                                 
-                                <div class="flex-1 flex flex-col justify-center">
+                                <div class="flex-1 flex flex-col justify-center min-w-0 w-full">
                                     <div class="flex items-start justify-between mb-4 gap-4">
-                                        <div>
-                                            <div class="flex items-center gap-3 mb-2">
-                                                <span class="font-bold text-white text-xl task-title transition-colors">Task ${task.title}</span>
-                                                <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${badgeColor} flex items-center gap-1"><i data-feather="${badgeIcon}" class="w-3 h-3"></i> ${task.type}</span>
+                                        <div class="min-w-0">
+                                            <div class="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
+                                                <span class="font-bold text-white text-lg sm:text-xl task-title transition-colors truncate">Task ${task.title}</span>
+                                                <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${badgeColor} flex items-center gap-1 shrink-0"><i data-feather="${badgeIcon}" class="w-3 h-3"></i> ${task.type}</span>
                                             </div>
                                         </div>
-                                        <div class="flex flex-col items-center gap-1 shrink-0 bg-white/5 p-2 rounded-lg border border-white/10" onclick="if(!isViewerMode) toggleTaskCompletion(${idx}, ${sIdx}, ${tIdx})">
+                                        <div class="flex flex-col items-center gap-1 shrink-0 bg-white/5 p-2 rounded-lg border border-white/10 cursor-pointer hover:bg-white/10 transition-colors" onclick="if(!isViewerMode) toggleTaskCompletion(${idx}, ${sIdx}, ${tIdx})">
                                             <input type="checkbox" id="checkbox-${idx}-${sIdx}-${tIdx}" class="custom-checkbox pointer-events-none" ${checkedAttr} ${disabledAttr}>
                                             <span class="text-[9px] uppercase tracking-widest text-gray-400 font-bold">${isViewerMode ? 'Status' : 'Mark Done'}</span>
                                         </div>
                                     </div>
 
                                     <label class="block text-[10px] font-bold text-gray-500 mb-1 uppercase tracking-wider">Exact Client Comment:</label>
-                                    <div class="text-white bg-white/5 border border-white/10 rounded-lg p-4 text-sm leading-relaxed whitespace-pre-wrap">${task.comment || '<span class="text-gray-500 italic">No specific comment provided.</span>'}</div>
+                                    <div class="text-white bg-white/5 border border-white/10 rounded-lg p-3 sm:p-4 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap break-words">${task.comment || '<span class="text-gray-500 italic">No specific comment provided.</span>'}</div>
                                     
-                                    ${task.wpUrl ? `<a href="${task.wpUrl}" target="_blank" class="mt-4 text-xs text-[#E6397F] hover:text-[#FF8A00] transition-colors flex items-center gap-1 w-max"><i data-feather="link" class="w-3 h-3"></i> View Raw Asset URL</a>` : ''}
+                                    ${task.wpUrl ? `<a href="${task.wpUrl}" target="_blank" class="mt-4 text-[10px] sm:text-xs text-[#E6397F] hover:text-[#FF8A00] transition-colors flex items-center gap-1 w-max break-all"><i data-feather="link" class="w-3 h-3 shrink-0"></i> View Raw Asset URL</a>` : ''}
                                 </div>
                             </div>
                         `;
@@ -584,7 +634,26 @@
             feather.replace();
         }
 
-        // --- FIREBASE SHARE LOGIC ---
+        // --- UTILITY: BASE64 TO BLOB ---
+        function b64toBlob(b64Data, contentType='', sliceSize=512) {
+            // Check if it has a data URI prefix, remove it if present
+            const base64String = b64Data.includes(',') ? b64Data.split(',')[1] : b64Data;
+            const byteCharacters = atob(base64String);
+            const byteArrays = [];
+
+            for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+                const slice = byteCharacters.slice(offset, offset + sliceSize);
+                const byteNumbers = new Array(slice.length);
+                for (let i = 0; i < slice.length; i++) {
+                    byteNumbers[i] = slice.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                byteArrays.push(byteArray);
+            }
+            return new Blob(byteArrays, {type: contentType});
+        }
+
+        // --- FIREBASE SHARE LOGIC (BUG FIXED) ---
         async function generateShareLink() {
             const btn = document.getElementById('shareBtn');
             const originalText = btn.innerHTML;
@@ -593,22 +662,41 @@
             feather.replace();
 
             try {
-                // Create a lightweight copy of the payload (STRIP BASE64 IMAGES)
-                // We rely entirely on wpUrl (WP CDN links) for the shared view to keep the DB doc small.
+                // 1. Create a deep copy of the payload to manipulate safely
                 const lightweightPayload = JSON.parse(JSON.stringify(parsedProjectData));
-                lightweightPayload.pages.forEach(p => {
-                    p.sections.forEach(s => {
-                        s.tasks.forEach(t => { delete t.imageData; });
-                    });
-                });
+                
+                // 2. Upload Annotated Base64 Images to Firebase Storage to Fix Data Loss
+                for (let p of lightweightPayload.pages) {
+                    for (let s of p.sections) {
+                        for (let t of s.tasks) {
+                            // If we have local base64 data (annotated image), upload it!
+                            if (t.imageData) {
+                                try {
+                                    const blob = b64toBlob(t.imageData, 'image/webp');
+                                    const safeProjectName = lightweightPayload.project.replace(/[^a-zA-Z0-9]/g, '-');
+                                    const uniqueName = `shared-annotations/${safeProjectName}-${Date.now()}-${Math.random().toString(36).substring(7)}.webp`;
+                                    
+                                    const storageRef = window.storageRef(window.storage, uniqueName);
+                                    await window.uploadBytes(storageRef, blob);
+                                    const downloadUrl = await window.getDownloadURL(storageRef);
+                                    
+                                    // OVERWRITE the wpUrl with the new Firebase Storage URL showing the annotations
+                                    t.wpUrl = downloadUrl; 
+                                } catch (uploadError) {
+                                    console.error("Failed to upload annotated image. Falling back to original.", uploadError);
+                                }
+                            }
+                            // 3. Strip the heavy Base64 data so Firestore doesn't crash
+                            delete t.imageData; 
+                        }
+                    }
+                }
 
-                // Upload to Firestore
+                // 4. Upload lightweight payload to Firestore
                 const docRef = await window.addDoc(window.collection(window.db, "viewer_shares"), lightweightPayload);
                 
-                // Generate URL
+                // 5. Generate URL & Show Modal
                 const shareUrl = `${window.location.origin}${window.location.pathname}?share=${docRef.id}`;
-                
-                // Show Modal
                 const modal = document.getElementById('shareModal');
                 document.getElementById('shareUrlInput').value = shareUrl;
                 modal.classList.remove('hidden');
