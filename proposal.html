@@ -686,7 +686,7 @@
             }
         };
 
-        // NEW: Sync to Live Action
+        // NEW: Sync to Live Action (CLIENT-PUSH)
         window.syncLibraryToLive = async () => {
             const btn = document.getElementById('syncLiveBtn');
             const originalHtml = btn.innerHTML;
@@ -695,18 +695,69 @@
             feather.replace();
 
             try {
-                // Change URL if your region or project ID is different, but this matches your previous setup
+                // 1. Compile the Library directly in the browser (exactly like the Export function)
+                const sectionsSnap = await getDocs(query(collection(db, "library_sections"), orderBy("createdAt", "asc")));
+                const manifest = { sections: [], defaultSelection: [] };
+                const htmlBundle = {}; 
+                let totalDesigns = 0;
+
+                for (const sectionDoc of sectionsSnap.docs) {
+                    const sectionData = sectionDoc.data();
+                    const categoryName = sectionData.name;
+                    const categoryId = categoryName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '');
+
+                    const designsSnap = await getDocs(query(collection(db, "library_sections", sectionDoc.id, "designs"), orderBy("createdAt", "asc")));
+
+                    designsSnap.forEach((designDoc) => {
+                        const designData = designDoc.data();
+                        const designName = designData.name || "Unnamed";
+                        const designCode = designData.previewCode || designData.code || "";
+
+                        if (!designCode.trim()) return;
+
+                        const cleanName = designName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '');
+                        const filename = `${categoryId}_${cleanName}`;
+                        const fullHtml = `<!DOCTYPE html>\n<html>\n<head>\n<title>${designName}</title>\n</head>\n<body>\n${designCode}\n</body>\n</html>`;
+
+                        htmlBundle[`${filename}.html`] = fullHtml;
+
+                        manifest.sections.push({
+                            id: filename,
+                            category: categoryId,
+                            categoryLabel: categoryName,
+                            name: designName,
+                            description: `${categoryName} variant: ${designName}. Auto-synced from library.`,
+                            filename: `${filename}.html`
+                        });
+                        totalDesigns++;
+                    });
+                }
+
+                const defaultCategories = ['hero', 'services', 'about', 'testimonials', 'cta', 'contact'];
+                defaultCategories.forEach(cat => {
+                    const match = manifest.sections.find(s => s.category.includes(cat));
+                    if (match) manifest.defaultSelection.push(match.id);
+                });
+
+                if (totalDesigns === 0) throw new Error("No designs found to sync. Save a design first.");
+
+                // 2. Push the compiled bundle directly to the Cloud Function
                 const API_URL = "https://asia-southeast1-reputifly-automation.cloudfunctions.net/syncLibrary";
                 
                 const response = await fetch(API_URL, {
-                    method: 'POST', // or GET depending on function rules
-                    headers: { 'Content-Type': 'application/json' }
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        manifest: manifest,
+                        htmlBundle: htmlBundle,
+                        totalDesigns: totalDesigns
+                    })
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
-                    customAlert("Live Sync Complete", data.message || "Your library is now live and will be used for the next generation!");
+                    customAlert("Live Sync Complete", data.message || `Successfully synced ${totalDesigns} sections to the live generator!`);
                 } else {
                     throw new Error(data.error || "Unknown server error.");
                 }
