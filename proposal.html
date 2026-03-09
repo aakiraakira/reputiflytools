@@ -33,7 +33,7 @@
         const db = getFirestore(app);
 
         // --- GLOBAL VARIABLES ---
-        
+
         // ADDED: Global Font Tag for injection
         const INTER_FONT_TAG = "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap' rel='stylesheet'>";
 
@@ -553,14 +553,14 @@
                 </head>
                 <body>
                     ${orderedContent.map((item, index) => {
-    // FIX: Inject Font and Body Style into the individual iframe content
-    const contentWithFont = INTER_FONT_TAG + 
-        "<style>body{margin:0; font-family:'Inter',sans-serif; overflow:hidden;}</style>" + 
-        item.html;
+                // FIX: Inject Font and Body Style into the individual iframe content
+                const contentWithFont = INTER_FONT_TAG +
+                    "<style>body{margin:0; font-family:'Inter',sans-serif; overflow:hidden;}</style>" +
+                    item.html;
 
-    const safeHtml = contentWithFont.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-    return `<iframe srcdoc="${safeHtml}" scrolling="no" onload="resizeIframe(this)"></iframe>`;
-}).join('')}
+                const safeHtml = contentWithFont.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+                return `<iframe srcdoc="${safeHtml}" scrolling="no" onload="resizeIframe(this)"></iframe>`;
+            }).join('')}
                 </body>
                 </html>
             `;
@@ -608,6 +608,114 @@
                 customAlert("Error", "Submission failed. Please try again.");
                 btn.innerHTML = `Submit <i data-feather="send" class="w-4 h-4 ml-2"></i>`;
                 btn.disabled = false;
+                feather.replace();
+            }
+        };
+
+        window.exportAllLibrary = async () => {
+            const btn = document.getElementById('exportAllBtn');
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<i data-feather="loader" class="animate-spin w-4 h-4"></i> Exporting...`;
+            feather.replace();
+
+            try {
+                const sectionsSnap = await getDocs(query(collection(db, "library_sections"), orderBy("createdAt", "asc")));
+
+                const manifest = { sections: [], defaultSelection: [] };
+                const zip = new JSZip();
+                const folder = zip.folder("sectionHtml");
+                let totalDesigns = 0;
+
+                for (const sectionDoc of sectionsSnap.docs) {
+                    const sectionData = sectionDoc.data();
+                    const categoryName = sectionData.name;
+                    const categoryId = categoryName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '');
+
+                    const designsSnap = await getDocs(query(collection(db, "library_sections", sectionDoc.id, "designs"), orderBy("createdAt", "asc")));
+
+                    designsSnap.forEach((designDoc) => {
+                        const designData = designDoc.data();
+                        const designName = designData.name || "Unnamed";
+                        const designCode = designData.previewCode || designData.code || "";
+
+                        if (!designCode.trim()) return;
+
+                        const cleanName = designName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '');
+                        const filename = `${categoryId}_${cleanName}`;
+
+                        const fullHtml = `<!DOCTYPE html>\n<html>\n<head>\n<title>${designName}</title>\n</head>\n<body>\n${designCode}\n</body>\n</html>`;
+
+                        folder.file(`${filename}.html`, fullHtml);
+
+                        manifest.sections.push({
+                            id: filename,
+                            category: categoryId,
+                            categoryLabel: categoryName,
+                            name: designName,
+                            description: `${categoryName} variant: ${designName}. Auto-exported from library.`,
+                            filename: `${filename}.html`
+                        });
+                        totalDesigns++;
+                    });
+                }
+
+                const defaultCategories = ['hero', 'services', 'about', 'testimonials', 'cta', 'contact'];
+                defaultCategories.forEach(cat => {
+                    const match = manifest.sections.find(s => s.category.includes(cat));
+                    if (match) manifest.defaultSelection.push(match.id);
+                });
+
+                zip.file("sectionManifest.json", JSON.stringify(manifest, null, 2));
+
+                const content = await zip.generateAsync({ type: "blob" });
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(content);
+                a.download = `Reputifly_Library_Export_${totalDesigns}_sections.zip`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+
+                customAlert("Success", `Exported ${totalDesigns} sections and manifest.`);
+            } catch (e) {
+                console.error(e);
+                customAlert("Error", "Could not export library.");
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+                feather.replace();
+            }
+        };
+
+        // NEW: Sync to Live Action
+        window.syncLibraryToLive = async () => {
+            const btn = document.getElementById('syncLiveBtn');
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<i data-feather="loader" class="animate-spin w-4 h-4"></i> Syncing to Cloud...`;
+            feather.replace();
+
+            try {
+                // Change URL if your region or project ID is different, but this matches your previous setup
+                const API_URL = "https://asia-southeast1-reputifly-automation.cloudfunctions.net/syncLibrary";
+                
+                const response = await fetch(API_URL, {
+                    method: 'POST', // or GET depending on function rules
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    customAlert("Live Sync Complete", data.message || "Your library is now live and will be used for the next generation!");
+                } else {
+                    throw new Error(data.error || "Unknown server error.");
+                }
+            } catch (e) {
+                console.error(e);
+                customAlert("Sync Failed", "Could not sync library: " + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
                 feather.replace();
             }
         };
@@ -831,6 +939,33 @@
     Snippet</span>`;
             mainActionBtn.onclick = openAddDesignModal;
             mainActionBtn.classList.remove('hidden');
+
+            // NEW: Export All Button
+            let exportBtn = document.getElementById('exportAllBtn');
+            if (!exportBtn) {
+                exportBtn = document.createElement('button');
+                exportBtn.id = 'exportAllBtn';
+                exportBtn.className = 'ml-4 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-full font-bold shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2 text-sm';
+                exportBtn.innerHTML = `<i data-feather="download-cloud" class="w-4 h-4"></i> Export All Sections`;
+                exportBtn.onclick = exportAllLibrary;
+                mainActionBtn.parentNode.insertBefore(exportBtn, mainActionBtn.nextSibling);
+                feather.replace();
+            }
+            exportBtn.classList.remove('hidden');
+
+            // NEW: Sync to Live Automation Button
+            let syncBtn = document.getElementById('syncLiveBtn');
+            if (!syncBtn) {
+                syncBtn = document.createElement('button');
+                syncBtn.id = 'syncLiveBtn';
+                syncBtn.className = 'ml-4 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-400 hover:to-emerald-500 text-white rounded-full font-bold shadow-lg shadow-green-500/20 transition-all flex items-center gap-2 text-sm';
+                syncBtn.innerHTML = `<i data-feather="refresh-cw" class="w-4 h-4"></i> Sync to Live`;
+                syncBtn.onclick = syncLibraryToLive;
+                // Insert it right after the main action button
+                mainActionBtn.parentNode.insertBefore(syncBtn, mainActionBtn.nextSibling);
+                feather.replace();
+            }
+            syncBtn.classList.remove('hidden');
 
             const shareBtn = document.getElementById('shareProposalBtn');
             if (shareBtn) shareBtn.classList.add('hidden');
@@ -1586,18 +1721,18 @@
         };
 
         window.openPreview = (id, design) => {
-    currentDesignData = design;
-    currentDesignId = id; // Set global for edits
-    const frame = document.getElementById('previewFrame');
-    document.getElementById('previewTitle').textContent = design.name;
-    document.getElementById('previewModal').classList.add('active');
+            currentDesignData = design;
+            currentDesignId = id; // Set global for edits
+            const frame = document.getElementById('previewFrame');
+            document.getElementById('previewTitle').textContent = design.name;
+            document.getElementById('previewModal').classList.add('active');
 
-    const d = frame.contentWindow.document;
-    d.open();
-    // FIX: Inject Font Tag + Basic Body Style + Design Code
-    d.write(INTER_FONT_TAG + "<style>body{font-family:'Inter',sans-serif; margin:0;}</style>" + design.code); 
-    d.close();
-};
+            const d = frame.contentWindow.document;
+            d.open();
+            // FIX: Inject Font Tag + Basic Body Style + Design Code
+            d.write(INTER_FONT_TAG + "<style>body{font-family:'Inter',sans-serif; margin:0;}</style>" + design.code);
+            d.close();
+        };
 
         window.editCurrentDesign = () => {
             // Check if we are editing merged content (checking title or a flag)
@@ -1803,24 +1938,24 @@
         /* BRIDGE: Map Brand Vars to Standard Tokens */
         /* Must be last to override section defaults */
         [data-section] {
-            --primary: var(--brand-primary);
-            --accent: var(--brand-accent);
-            --bg: var(--brand-bg);
-            --text: var(--brand-text);
+            --primary: var(--brand-primary) !important;
+            --accent: var(--brand-accent) !important;
+            --bg: var(--brand-bg) !important;
+            --text: var(--brand-text) !important;
             
-            --surface: var(--brand-surface);
-            --border: var(--brand-border);
-            --muted: var(--brand-muted);
-            --on-primary: var(--brand-on-primary);
-            --primary-hover: var(--brand-primary-hover);
-            --focus: var(--brand-focus);
+            --surface: var(--brand-surface) !important;
+            --border: var(--brand-border) !important;
+            --muted: var(--brand-muted) !important;
+            --on-primary: var(--brand-on-primary) !important;
+            --primary-hover: var(--brand-primary-hover) !important;
+            --focus: var(--brand-focus) !important;
             
-            --radius: var(--brand-radius);
-            --shadow: var(--brand-shadow);
-            --glass-blur: var(--brand-glass-blur);
+            --radius: var(--brand-radius) !important;
+            --shadow: var(--brand-shadow) !important;
+            --glass-blur: var(--brand-glass-blur) !important;
             
-            --font-body: var(--brand-font-body);
-            --font-heading: var(--brand-font-heading);
+            --font-body: var(--brand-font-body) !important;
+            --font-heading: var(--brand-font-heading) !important;
         }
     </style>
 </head>
@@ -2758,25 +2893,25 @@ Return your response as valid JSON.`;
         }
 
         function copyShareInput() {
-    const input = document.getElementById('shareLinkInput');
-    input.select();
-    navigator.clipboard.writeText(input.value).then(() => {
-        const btn = document.getElementById('shareMainBtn');
-        
-        // OLD (BROKEN): 
-        // btn.innerHTML = `< i data-feather="check" class="w-4 h-4 mr-2" ></i > Copied!`;
-        
-        // NEW (FIXED):
-        btn.innerHTML = `<i data-feather="check" class="w-4 h-4 mr-2"></i> Copied!`;
-        
-        feather.replace();
+            const input = document.getElementById('shareLinkInput');
+            input.select();
+            navigator.clipboard.writeText(input.value).then(() => {
+                const btn = document.getElementById('shareMainBtn');
 
-        setTimeout(() => {
-            document.getElementById('shareModal').classList.remove('active');
-            btn.innerHTML = 'Copy Link'; 
-        }, 1000); 
-    });
-}
+                // OLD (BROKEN): 
+                // btn.innerHTML = `< i data-feather="check" class="w-4 h-4 mr-2" ></i > Copied!`;
+
+                // NEW (FIXED):
+                btn.innerHTML = `<i data-feather="check" class="w-4 h-4 mr-2"></i> Copied!`;
+
+                feather.replace();
+
+                setTimeout(() => {
+                    document.getElementById('shareModal').classList.remove('active');
+                    btn.innerHTML = 'Copy Link';
+                }, 1000);
+            });
+        }
     </script>
     <div id="customAlertModal" class="modal-overlay" style="z-index: 210;">
         <div class="modal-card text-center">
