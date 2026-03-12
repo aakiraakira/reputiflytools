@@ -404,6 +404,10 @@
                                     data-feather="code" class="w-4 h-4"></i> Download JSON Context</button>
 
                             <div class="h-px bg-white/10 my-2"></div>
+                            <div class="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-white/5 mb-2 hover:border-orange-500/30 transition-colors">
+                                <label class="text-xs text-gray-400 cursor-pointer select-none font-bold" for="allowClientAddPages">Allow Client to Add Pages</label>
+                                <input type="checkbox" id="allowClientAddPages" onchange="updateClientPermissions()" class="accent-orange-500 w-4 h-4 cursor-pointer">
+                            </div>
                             <button onclick="toggleClientEdit()" id="clientEditToggleBtn"
                                 class="btn-secondary w-full justify-start text-sm text-orange-400 border-orange-500/20 hover:bg-orange-500/10"><i
                                     data-feather="unlock" class="w-4 h-4"></i> Enable Client Edit Mode</button>
@@ -829,6 +833,11 @@
                     scopeData = (meta.scope && meta.scope.pages) ? meta.scope.pages : [];
                     // Check toggle state for admin UI
                     isClientEditEnabled = meta.clientEditEnabled || false;
+                    const allowAddCheckbox = document.getElementById('allowClientAddPages');
+                    if (allowAddCheckbox) {
+                        allowAddCheckbox.checked = meta.clientCanAddPages || false;
+                    }
+                    
                     const toggleBtn = document.getElementById('clientEditToggleBtn');
                     if (toggleBtn) {
                         if (isClientEditEnabled) {
@@ -968,8 +977,20 @@
             btn.innerHTML = originalText;
         };
 
-        // Track the edit state locally
+        // Track the edit states locally
         let isClientEditEnabled = false;
+
+        window.updateClientPermissions = async () => {
+            if (!currentProjectID) return;
+            const canAdd = document.getElementById('allowClientAddPages').checked;
+            try {
+                const docRef = window.doc(window.db, "project_metadata", currentProjectID);
+                await window.setDoc(docRef, { clientCanAddPages: canAdd }, { merge: true });
+                if (isClientEditEnabled) showToast("Client Permissions Updated! ⚙️");
+            } catch (e) {
+                console.error("Error updating permissions:", e);
+            }
+        };
 
         window.toggleClientEdit = async () => {
             const btn = document.getElementById('clientEditToggleBtn');
@@ -979,8 +1000,12 @@
             try {
                 const docRef = window.doc(window.db, "project_metadata", currentProjectID);
                 isClientEditEnabled = !isClientEditEnabled;
+                const canAdd = document.getElementById('allowClientAddPages').checked;
                 
-                await window.setDoc(docRef, { clientEditEnabled: isClientEditEnabled }, { merge: true });
+                await window.setDoc(docRef, { 
+                    clientEditEnabled: isClientEditEnabled,
+                    clientCanAddPages: canAdd
+                }, { merge: true });
                 
                 if (isClientEditEnabled) {
                     btn.innerHTML = `<i data-feather="lock" class="w-4 h-4 text-red-400"></i> Revoke Client Edit Access`;
@@ -1047,6 +1072,16 @@
                         document.getElementById('saveScopeBtn').classList.add('hidden');
                         document.querySelector('button[onclick="addPage()"]').classList.add('hidden');
                         return;
+                    }
+
+                    // 3. Client Permissions Check (Hide Add Page button)
+                    const addPageBtn = document.querySelector('button[onclick="addPage()"]');
+                    if (addPageBtn) {
+                        if (meta.clientCanAddPages) {
+                            addPageBtn.classList.remove('hidden');
+                        } else {
+                            addPageBtn.classList.add('hidden');
+                        }
                     }
                     
                     scopeData = (meta.scope && meta.scope.pages) ? meta.scope.pages : [];
