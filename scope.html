@@ -404,6 +404,9 @@
                                     data-feather="code" class="w-4 h-4"></i> Download JSON Context</button>
 
                             <div class="h-px bg-white/10 my-2"></div>
+                            <button onclick="toggleClientEdit()" id="clientEditToggleBtn"
+                                class="btn-secondary w-full justify-start text-sm text-orange-400 border-orange-500/20 hover:bg-orange-500/10"><i
+                                    data-feather="unlock" class="w-4 h-4"></i> Enable Client Edit Mode</button>
                             <button onclick="copyClientLink()"
                                 class="btn-secondary w-full justify-start text-sm text-blue-400 border-blue-500/20 hover:bg-blue-500/10"><i
                                     data-feather="link" class="w-4 h-4"></i> Copy Client Link</button>
@@ -632,15 +635,24 @@
             const urlParams = new URLSearchParams(window.location.search);
             const clientProject = urlParams.get('client_view');
             const employeeProject = urlParams.get('employee_view');
+            const clientEditProject = urlParams.get('client_edit');
 
-            if (clientProject || employeeProject) {
+            if (clientProject || employeeProject || clientEditProject) {
                 const auth = document.getElementById('authScreen');
                 if (auth) auth.remove();
-                const app = document.getElementById('appContainer');
-                if (app) app.remove();
                 
-                if (clientProject) initClientView(clientProject);
-                if (employeeProject) initEmployeeView(employeeProject);
+                if (clientEditProject) {
+                    // Do NOT remove appContainer for edit mode, just hide dashboard
+                    const app = document.getElementById('appContainer');
+                    if (app) app.classList.remove('hidden');
+                    document.getElementById('dashboardView').classList.add('hidden');
+                    initClientEditView(clientEditProject);
+                } else {
+                    const app = document.getElementById('appContainer');
+                    if (app) app.remove();
+                    if (clientProject) initClientView(clientProject);
+                    if (employeeProject) initEmployeeView(employeeProject);
+                }
                 return;
             }
 
@@ -815,6 +827,21 @@
                 if (docSnap.exists()) {
                     const meta = docSnap.data();
                     scopeData = (meta.scope && meta.scope.pages) ? meta.scope.pages : [];
+                    // Check toggle state for admin UI
+                    isClientEditEnabled = meta.clientEditEnabled || false;
+                    const toggleBtn = document.getElementById('clientEditToggleBtn');
+                    if (toggleBtn) {
+                        if (isClientEditEnabled) {
+                            toggleBtn.innerHTML = `<i data-feather="lock" class="w-4 h-4 text-red-400"></i> Revoke Client Edit Access`;
+                            toggleBtn.classList.replace('text-orange-400', 'text-red-400');
+                            toggleBtn.classList.replace('border-orange-500/20', 'border-red-500/20');
+                        } else {
+                            toggleBtn.innerHTML = `<i data-feather="unlock" class="w-4 h-4"></i> Enable Client Edit Mode`;
+                            toggleBtn.classList.replace('text-red-400', 'text-orange-400');
+                            toggleBtn.classList.replace('border-red-500/20', 'border-orange-500/20');
+                        }
+                    }
+
                     const sigCard = document.getElementById('signatureStatusCard');
                     if (meta.scope && meta.scope.signature) {
                         sigCard.classList.remove('hidden');
@@ -940,6 +967,98 @@
             } catch (e) { console.error("Save Error:", e); showToast("Error Saving. See Console."); }
             btn.innerHTML = originalText;
         };
+
+        // Track the edit state locally
+        let isClientEditEnabled = false;
+
+        window.toggleClientEdit = async () => {
+            const btn = document.getElementById('clientEditToggleBtn');
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = "Updating...";
+            
+            try {
+                const docRef = window.doc(window.db, "project_metadata", currentProjectID);
+                isClientEditEnabled = !isClientEditEnabled;
+                
+                await window.setDoc(docRef, { clientEditEnabled: isClientEditEnabled }, { merge: true });
+                
+                if (isClientEditEnabled) {
+                    btn.innerHTML = `<i data-feather="lock" class="w-4 h-4 text-red-400"></i> Revoke Client Edit Access`;
+                    btn.classList.replace('text-orange-400', 'text-red-400');
+                    btn.classList.replace('border-orange-500/20', 'border-red-500/20');
+                    
+                    const url = `${window.location.origin}${window.location.pathname}?client_edit=${encodeURIComponent(currentProjectID)}`;
+                    navigator.clipboard.writeText(url);
+                    showToast("Access Granted & Link Copied! 🔓");
+                } else {
+                    btn.innerHTML = `<i data-feather="unlock" class="w-4 h-4"></i> Enable Client Edit Mode`;
+                    btn.classList.replace('text-red-400', 'text-orange-400');
+                    btn.classList.replace('border-red-500/20', 'border-orange-500/20');
+                    showToast("Access Revoked! 🔒");
+                }
+                feather.replace();
+            } catch (e) {
+                console.error(e);
+                showToast("Error updating access");
+                btn.innerHTML = originalHtml;
+            }
+        };
+
+        async function initClientEditView(projectName) {
+            currentProjectID = decodeURIComponent(projectName);
+            
+            // 1. Hide Admin Nav and Controls completely
+            const header = document.querySelector('header');
+            if(header) header.classList.add('hidden');
+            document.getElementById('editorView').classList.remove('hidden');
+            
+            const backBtn = document.querySelector('#editorView button[onclick="showDashboard()"]');
+            if(backBtn) backBtn.classList.add('hidden');
+            const deleteBtn = document.querySelector('button[onclick="deleteCurrentProject()"]');
+            if(deleteBtn) deleteBtn.classList.add('hidden');
+            const dupBtn = document.querySelector('button[onclick^="duplicateProject"]');
+            if(dupBtn) dupBtn.classList.add('hidden');
+            const clientLinkBtn = document.querySelector('button[onclick="copyClientLink()"]');
+            if(clientLinkBtn) clientLinkBtn.classList.add('hidden');
+            const empLinkBtn = document.querySelector('button[onclick="copyEmployeeLink()"]');
+            if(empLinkBtn) empLinkBtn.classList.add('hidden');
+            const toggleBtn = document.getElementById('clientEditToggleBtn');
+            if(toggleBtn) toggleBtn.classList.add('hidden');
+            
+            // Hide AI features (Client doesn't have API key)
+            const fillDescBtn = document.getElementById('fillDescBtn');
+            if(fillDescBtn) fillDescBtn.classList.add('hidden');
+            document.querySelectorAll('.btn-ai').forEach(b => b.classList.add('hidden'));
+            const modifyAiBtn = document.querySelector('button[onclick="openModifyAIModal()"]');
+            if(modifyAiBtn) modifyAiBtn.classList.add('hidden');
+            
+            document.getElementById('editProjectTitle').innerText = currentProjectID;
+            document.getElementById('editProjectDomain').innerText = "Client Edit Mode";
+            document.getElementById('scopeBuilderArea').innerHTML = '<div class="text-center p-10 text-gray-500">Checking Access...</div>';
+
+            try {
+                const docSnap = await window.getDoc(window.doc(window.db, "project_metadata", currentProjectID));
+                if (docSnap.exists()) {
+                    const meta = docSnap.data();
+                    
+                    // 2. Database Security Check
+                    if (!meta.clientEditEnabled) {
+                        document.getElementById('scopeBuilderArea').innerHTML = '<div class="text-center p-10 text-red-500 font-bold">Access Denied or Revoked.</div>';
+                        document.getElementById('saveScopeBtn').classList.add('hidden');
+                        document.querySelector('button[onclick="addPage()"]').classList.add('hidden');
+                        return;
+                    }
+                    
+                    scopeData = (meta.scope && meta.scope.pages) ? meta.scope.pages : [];
+                    renderScopeBuilder();
+                } else {
+                    document.getElementById('scopeBuilderArea').innerHTML = '<div class="text-center p-10 text-red-500 font-bold">Project Not Found.</div>';
+                }
+            } catch (e) {
+                console.error("Error loading scope:", e);
+                showToast("Could not load project");
+            }
+        }
 
         window.copyClientLink = () => {
             const url = `${window.location.origin}${window.location.pathname}?client_view=${encodeURIComponent(currentProjectID)}`;
