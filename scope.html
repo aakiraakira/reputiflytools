@@ -19,8 +19,10 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
         import { getFirestore, collection, onSnapshot, doc, setDoc, getDoc, addDoc, serverTimestamp, query, orderBy, deleteDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
         import { getStorage, ref, listAll, deleteObject } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-storage.js";
+        import { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 
-        const firebaseConfig = {
+        // 1. Editor Database Config (For saving scopes)
+        const editorConfig = {
             apiKey: "AIzaSyDqpzqEVtrEtQvvmcMie_Et7xiNh8QU_Ao",
             authDomain: "reputifly-editor.firebaseapp.com",
             projectId: "reputifly-editor",
@@ -29,9 +31,28 @@
             appId: "1:455384979132:web:9079ec81182115b16622b9"
         };
 
-        const app = initializeApp(firebaseConfig);
+        // 2. Automation Auth Config (From deployer.html)
+        const authConfig = {
+            apiKey: "AIzaSyB4_6wJOcQddUFz8BemeG9HQgbuZtoHp20",
+            authDomain: "reputifly-automation.firebaseapp.com",
+            projectId: "reputifly-automation",
+            storageBucket: "reputifly-automation.firebasestorage.app",
+            messagingSenderId: "1095726999398",
+            appId: "1:1095726999398:web:4e26ec90770da0244c0aa7"
+        };
+
+        // Initialize both apps
+        const app = initializeApp(editorConfig);
+        const authApp = initializeApp(authConfig, "authApp"); // Secondary app explicitly for Auth
+
         window.db = getFirestore(app);
         window.storage = getStorage(app);
+        
+        // Bind Auth to the Automation App so your credentials and Cloud Function work
+        window.auth = getAuth(authApp);
+        window.onAuthStateChanged = onAuthStateChanged;
+        window.signOut = signOut;
+        window.signInWithEmailAndPassword = signInWithEmailAndPassword;
         window.storageRef = ref;
         window.listAll = listAll;
         window.deleteObject = deleteObject;
@@ -315,20 +336,7 @@
 
     <canvas id="exportCanvas" style="display: none;"></canvas>
 
-    <div id="authScreen"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-[#050507] p-4 transition-opacity duration-500">
-        <div class="glass-panel p-8 w-full max-w-sm text-center">
-            <div
-                class="w-16 h-16 rounded-full bg-pink-500/10 flex items-center justify-center mx-auto mb-6 border border-pink-500/20">
-                <i data-feather="lock" class="w-6 h-6 text-pink-500"></i>
-            </div>
-            <h1 class="text-2xl font-bold brand-font text-white mb-2">Scope Manager</h1>
-            <p class="text-gray-500 text-sm mb-6">Enter admin access code</p>
-            <input type="password" id="passcodeInput"
-                class="input-field text-center text-lg tracking-[5px] font-bold mb-4" placeholder="••••••">
-            <button onclick="authenticate()" class="btn-primary w-full">Unlock</button>
-        </div>
-    </div>
+     
 
     <div id="appContainer" class="hidden min-h-screen pb-20">
         <header class="border-b border-white/5 bg-[#050507]/80 backdrop-blur-xl sticky top-0 z-40">
@@ -653,7 +661,7 @@
     <div id="toast"><i data-feather="info" class="w-4 h-4 text-pink-500"></i><span id="toastMsg">...</span></div>
 
     <script>
-        const ADMIN_PASS = "738081";
+         
         let projects = [];
         let metaMap = {};
         let currentProjectID = null;
@@ -669,12 +677,9 @@
             const employeeProject = urlParams.get('employee_view');
             const clientEditProject = urlParams.get('client_edit');
 
+            // 1. CLIENT / EMPLOYEE BYPASS: If these params exist, skip login entirely
             if (clientProject || employeeProject || clientEditProject) {
-                const auth = document.getElementById('authScreen');
-                if (auth) auth.remove();
-                
                 if (clientEditProject) {
-                    // Do NOT remove appContainer for edit mode, just hide dashboard
                     const app = document.getElementById('appContainer');
                     if (app) app.classList.remove('hidden');
                     document.getElementById('dashboardView').classList.add('hidden');
@@ -685,29 +690,140 @@
                     if (clientProject) initClientView(clientProject);
                     if (employeeProject) initEmployeeView(employeeProject);
                 }
-                return;
+                return; // Exits script, no auth required
             }
 
-            const savedPass = localStorage.getItem('scope_admin_auth');
-            if (savedPass === ADMIN_PASS) {
-                const authScreen = document.getElementById('authScreen');
-                if (authScreen) authScreen.classList.add('hidden');
-                document.getElementById('appContainer').classList.remove('hidden');
-                initFirebaseListeners();
-            }
+            // 2. MAIN APP: Enforce Staff Login
+            initAdminAuth();
         });
 
-        function authenticate() {
-            const val = document.getElementById('passcodeInput').value;
-            if (val === ADMIN_PASS) {
-                localStorage.setItem('scope_admin_auth', ADMIN_PASS);
-                document.getElementById('authScreen').classList.add('hidden');
-                document.getElementById('appContainer').classList.remove('hidden');
-                initFirebaseListeners();
-            } else {
-                showToast("Incorrect Code");
-            }
+        function initAdminAuth() {
+            // Inject the Login UI
+            const authOverlay = document.createElement('div');
+            authOverlay.className = 'fixed inset-0 bg-[#050507] z-[99999] flex flex-col items-center justify-center transition-opacity duration-300';
+            authOverlay.innerHTML = `
+                <div id="authLoadingState" class="flex flex-col items-center">
+                    <div class="w-10 h-10 border-[3px] border-pink-500/30 border-t-pink-500 rounded-full animate-spin mb-4"></div>
+                    <h2 class="text-xl font-bold brand-font text-white">Verifying Access...</h2>
+                </div>
+                
+                <div id="authLoginState" class="hidden w-full max-w-sm glass-panel rounded-2xl p-8 relative overflow-hidden text-center border border-white/10">
+                    <div class="w-16 h-16 rounded-full bg-pink-500/10 flex items-center justify-center mx-auto mb-6 border border-pink-500/20">
+                        <i data-feather="lock" class="w-6 h-6 text-pink-500"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold brand-font text-white mb-2">Scope Manager</h2>
+                    <p class="text-gray-400 text-sm mb-6">Staff login required.</p>
+                    
+                    <form id="scopeLoginForm" class="space-y-4 text-left">
+                        <div>
+                            <input type="email" id="scopeEmail" required placeholder="Email Address" class="input-field text-sm">
+                        </div>
+                        <div>
+                            <input type="password" id="scopePassword" required placeholder="Password" class="input-field text-sm">
+                        </div>
+                        <button type="submit" id="scopeLoginBtn" class="w-full btn-primary py-3 mt-2">Login</button>
+                        <p id="scopeErrorMsg" class="text-red-400 text-xs text-center hidden mt-2"></p>
+                    </form>
+                </div>
+            `;
+            document.body.appendChild(authOverlay);
+
+            // Inject a Sign Out button floating top right
+            const headerAuthUI = document.createElement('div');
+            headerAuthUI.className = 'fixed top-4 right-6 flex items-center gap-4 z-[60] opacity-0 transition-opacity duration-500 pointer-events-none';
+            headerAuthUI.innerHTML = `
+                <button id="signOutBtn" class="text-xs font-bold text-gray-400 hover:text-red-400 bg-black/40 hover:bg-red-500/10 border border-white/10 py-2 px-3 rounded-lg transition pointer-events-auto flex items-center gap-2">
+                    <i data-feather="log-out" class="w-3 h-3"></i> Sign Out
+                </button>
+            `;
+            document.body.appendChild(headerAuthUI);
+            feather.replace();
+
+            // Handle Login Form Submission
+            setTimeout(() => {
+                const loginForm = document.getElementById('scopeLoginForm');
+                if (loginForm) {
+                    loginForm.addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        const btn = document.getElementById('scopeLoginBtn');
+                        const err = document.getElementById('scopeErrorMsg');
+                        btn.innerHTML = 'Authenticating...';
+                        btn.disabled = true;
+                        err.classList.add('hidden');
+
+                        try {
+                            await window.signInWithEmailAndPassword(
+                                window.auth,
+                                document.getElementById('scopeEmail').value.trim(),
+                                document.getElementById('scopePassword').value
+                            );
+                        } catch (error) {
+                            err.innerText = "Invalid credentials. Please try again.";
+                            err.classList.remove('hidden');
+                            btn.innerHTML = 'Login';
+                            btn.disabled = false;
+                        }
+                    });
+                }
+            }, 100);
+
+            // Listen for Auth State Changes & Verify Role via Cloud Function
+            window.onAuthStateChanged(window.auth, async (user) => {
+                const loadState = document.getElementById('authLoadingState');
+                const loginState = document.getElementById('authLoginState');
+
+                if (!user) {
+                    if (loadState) loadState.classList.add('hidden');
+                    if (loginState) loginState.classList.remove('hidden');
+                    return;
+                }
+
+                if (loadState) loadState.classList.remove('hidden');
+                if (loginState) loginState.classList.add('hidden');
+
+                try {
+                    const token = await user.getIdToken();
+                    const res = await fetch("https://listsamples-5resuz4f5a-as.a.run.app", {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+
+                    if (!res.ok) throw new Error("Verification failed.");
+
+                    const data = await res.json();
+
+                    if (data.userRole === 'superadmin' || data.userRole === 'staff') {
+                        // Access Granted
+                        headerAuthUI.classList.remove('opacity-0');
+                        authOverlay.style.opacity = '0';
+                        setTimeout(() => authOverlay.remove(), 300);
+                        
+                        document.getElementById('appContainer').classList.remove('hidden');
+                        initFirebaseListeners();
+
+                        document.getElementById('signOutBtn').addEventListener('click', () => {
+                            window.signOut(window.auth).then(() => window.location.reload());
+                        });
+                    } else {
+                        // Access Denied
+                        authOverlay.innerHTML = `
+                            <div class="glass-panel p-8 text-center max-w-sm w-full">
+                                <i data-feather="lock" class="w-10 h-10 text-red-500 mx-auto mb-4"></i>
+                                <h2 class="text-2xl font-bold brand-font text-white mb-2">Access Denied</h2>
+                                <p class="text-gray-400 text-sm mb-6">You must be an administrator or staff member to manage scopes.</p>
+                                <button id="forceSignOutBtn" class="btn-primary py-2 px-6 w-full">Sign Out & Switch Account</button>
+                            </div>
+                        `;
+                        feather.replace();
+                        document.getElementById('forceSignOutBtn').onclick = () => window.signOut(window.auth).then(() => window.location.reload());
+                    }
+                } catch (error) {
+                    console.error("Auth Error:", error);
+                    window.signOut(window.auth).then(() => window.location.reload());
+                }
+            });
         }
+
+         
 
         // --- FIREBASE ---
         function initFirebaseListeners() {
