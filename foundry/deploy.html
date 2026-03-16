@@ -3460,6 +3460,15 @@
 
             items.push(repoActionItemHtml({
                 kind: 'button',
+                label: 'Append Files (Hotfix)',
+                desc: 'Add new files or overwrite existing files directly into this version branch.',
+                icon: 'plus-circle',
+                tone: 'primary',
+                onClick: `closeRepoActionsModal(); window.openAppendModal('${client}', '${ver}')`
+            }));
+
+            items.push(repoActionItemHtml({
+                kind: 'button',
                 label: 'WP Export',
                 desc: 'Flatten images and rewrite paths for direct WordPress upload.',
                 icon: 'layout',
@@ -4877,6 +4886,207 @@
                 btn.innerText = 'Copy Details';
             }, 2000);
         });
+
+        // ==========================================
+        // APPEND (HOTFIX) LOGIC
+        // ==========================================
+        let appendTargetFolder = null;
+        let appendTargetVersion = null;
+        let appendFiles = [];
+
+        window.openAppendModal = (folder, version) => {
+            appendTargetFolder = folder;
+            appendTargetVersion = version;
+            appendFiles = [];
+            
+            document.getElementById('appendTargetLabel').innerText = version === 'base' ? `/${folder}` : `/${folder}/${version}`;
+            document.getElementById('appendFileList').innerHTML = '';
+            document.getElementById('appendConfirmBtn').disabled = true;
+            document.getElementById('appendConfirmBtn').innerHTML = '<i data-feather="zap" class="w-4 h-4"></i> Confirm & Push Append';
+
+            const modal = document.getElementById('appendModal');
+            const content = document.getElementById('appendModalContent');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            requestAnimationFrame(() => {
+                modal.classList.remove('opacity-0');
+                if (content) content.classList.remove('scale-95');
+            });
+            if (window.feather) feather.replace();
+        };
+
+        window.closeAppendModal = () => {
+            const modal = document.getElementById('appendModal');
+            const content = document.getElementById('appendModalContent');
+            modal.classList.add('opacity-0');
+            if (content) content.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 300);
+        };
+
+        window.handleAppendFiles = (files) => {
+            for (let i = 0; i < files.length; i++) {
+                appendFiles.push({
+                    file: files[i],
+                    id: Date.now() + i,
+                    newName: files[i].name
+                });
+            }
+            window.renderAppendFiles();
+        };
+
+        window.renderAppendFiles = () => {
+            const list = document.getElementById('appendFileList');
+            list.innerHTML = '';
+            
+            document.getElementById('appendConfirmBtn').disabled = appendFiles.length === 0;
+
+            appendFiles.forEach(item => {
+                const el = document.createElement('div');
+                el.className = 'flex items-center gap-3 bg-black/40 border border-white/5 p-3 rounded-2xl hover:border-white/10 transition-colors';
+                el.innerHTML = `
+                    <div class="w-10 h-10 rounded-xl bg-white/5 border border-white/5 flex items-center justify-center shrink-0">
+                        <i data-feather="file" class="w-4 h-4 text-[#E6397F]"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <input type="text" value="${item.newName}" class="w-full bg-transparent text-sm font-bold text-white outline-none border-b border-transparent focus:border-[#E6397F] pb-1 transition-colors" oninput="window.updateAppendFileName(${item.id}, this.value)" placeholder="Enter file name...">
+                        <div class="text-[10px] text-gray-500 font-mono truncate">Original: ${item.file.name}</div>
+                    </div>
+                    <button onclick="window.removeAppendFile(${item.id})" class="text-gray-500 hover:text-red-400 bg-white/5 p-2.5 rounded-xl hover:bg-red-500/10 transition-colors shrink-0">
+                        <i data-feather="x" class="w-4 h-4"></i>
+                    </button>
+                `;
+                list.appendChild(el);
+            });
+            if (window.feather) feather.replace();
+        };
+
+        window.updateAppendFileName = (id, newVal) => {
+            const item = appendFiles.find(f => f.id === id);
+            if (item) item.newName = newVal.trim();
+        };
+
+        window.removeAppendFile = (id) => {
+            appendFiles = appendFiles.filter(f => f.id !== id);
+            window.renderAppendFiles();
+        };
+
+        window.executeAppend = async () => {
+            if (appendFiles.length === 0) return;
+            
+            const btn = document.getElementById('appendConfirmBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i data-feather="loader" class="w-4 h-4 animate-spin"></i> Packaging payload...';
+            if (window.feather) feather.replace();
+
+            try {
+                // 1. Package files into JSZip using their newly typed names
+                const zip = new JSZip();
+                for (const item of appendFiles) {
+                    const finalName = item.newName || item.file.name;
+                    zip.file(finalName, item.file);
+                }
+
+                const zipBlob = await zip.generateAsync({ type: 'blob' });
+                const zipFile = new File([zipBlob], "append-hotfix.zip", { type: "application/zip" });
+
+                btn.innerHTML = '<i data-feather="loader" class="w-4 h-4 animate-spin"></i> Extracting...';
+                
+                // 2. Unzip and prepare array for the Cloud Function
+                const unzipped = await JSZip.loadAsync(zipFile);
+                const fileArray = [];
+                for (const relativePath of Object.keys(unzipped.files)) {
+                    const zipEntry = unzipped.files[relativePath];
+                    if (!zipEntry.dir && !relativePath.startsWith('__MACOSX/') && !relativePath.includes('.DS_Store')) {
+                        
+                        const ext = relativePath.split('.').pop().toLowerCase();
+                        const isText = /^(html|css|js|json|md|txt|svg|xml|csv|ts|tsx|jsx)$/i.test(ext);
+                        
+                        let contentStr;
+                        if (isText) {
+                            contentStr = await zipEntry.async("string");
+                        } else {
+                            contentStr = await zipEntry.async("base64");
+                        }
+                        
+                        fileArray.push({
+                            name: relativePath, 
+                            content: contentStr,
+                            isBinary: !isText
+                        });
+                    }
+                }
+
+                // 3. Send to Cloud Function WITH appendMode: true
+                btn.innerHTML = '<i data-feather="loader" class="w-4 h-4 animate-spin"></i> Pushing to server...';
+                
+                const token = await auth.currentUser.getIdToken();
+                
+                const payload = {
+                    folderName: appendTargetFolder,
+                    version: appendTargetVersion,
+                    files: fileArray,
+                    appendMode: true 
+                };
+
+                const res = await fetch('https://githubdeployer-5resuz4f5a-as.a.run.app', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) {
+                    throw new Error(data.error || 'Deployment failed');
+                }
+
+                window.showToast("Append Successful! 🔥", "success");
+                window.closeAppendModal();
+                
+                // Refresh staging view after Github catches up
+                setTimeout(() => window.loadSamples(), 2000);
+
+            } catch (err) {
+                console.error(err);
+                window.showToast(err.message, "error");
+                btn.innerHTML = '<i data-feather="zap" class="w-4 h-4"></i> Confirm & Push Append';
+                btn.disabled = false;
+                if (window.feather) feather.replace();
+            }
+        };
+
+        // Initialize dropzone events
+        setTimeout(() => {
+            const fileInput = document.getElementById('appendFileInput');
+            if (fileInput) {
+                fileInput.addEventListener('change', (e) => {
+                    window.handleAppendFiles(e.target.files);
+                    e.target.value = ''; 
+                });
+            }
+
+            const appendDropzone = document.getElementById('appendDropzone');
+            if (appendDropzone) {
+                ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eName => {
+                    appendDropzone.addEventListener(eName, e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    });
+                });
+                ['dragenter', 'dragover'].forEach(eName => {
+                    appendDropzone.addEventListener(eName, () => appendDropzone.classList.add('border-[#E6397F]', 'bg-[#E6397F]/5'));
+                });
+                ['dragleave', 'drop'].forEach(eName => {
+                    appendDropzone.addEventListener(eName, () => appendDropzone.classList.remove('border-[#E6397F]', 'bg-[#E6397F]/5'));
+                });
+                appendDropzone.addEventListener('drop', e => window.handleAppendFiles(e.dataTransfer.files));
+            }
+        }, 500);
     </script>
     <div id="historyModal"
         class="fixed inset-0 z-[150] flex items-center justify-center hidden bg-black/80 backdrop-blur-sm transition-opacity px-4">
@@ -4976,6 +5186,40 @@
                     class="flex-1 btn-hero-glass py-3.5 text-sm font-bold justify-center rounded-xl">Cancel</button>
                 <button id="editorToggleConfirmBtn"
                     class="flex-1 btn-liquid-glow py-3.5 text-sm font-bold justify-center rounded-xl shadow-[0_10px_30px_-10px_rgba(34,197,94,0.5)]">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="appendModal" class="fixed inset-0 z-[160] hidden items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-opacity opacity-0">
+        <div class="glass-panel w-full max-w-lg rounded-[2.5rem] border border-[#E6397F]/30 shadow-[0_0_60px_rgba(230,57,127,0.2)] flex flex-col max-h-[90vh] overflow-hidden relative transform transition-transform duration-300 scale-95" id="appendModalContent">
+            <div class="p-6 border-b border-white/10 flex justify-between items-center bg-white/[0.02]">
+                <div>
+                    <h2 class="text-2xl font-bold font-['Space_Grotesk'] text-white flex items-center gap-2"><i data-feather="plus-circle" class="w-6 h-6 text-[#E6397F]"></i> Append Hotfix</h2>
+                    <p class="text-xs text-gray-400 mt-1">Target: <span id="appendTargetLabel" class="font-mono text-[#E6397F]"></span></p>
+                </div>
+                <button onclick="window.closeAppendModal()" class="text-gray-500 hover:text-white bg-white/5 p-2 rounded-xl transition-colors">
+                    <i data-feather="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            
+            <div class="p-6 overflow-y-auto hide-scrollbar flex-1">
+                <div id="appendDropzone" class="border-2 border-dashed border-white/10 hover:border-[#E6397F]/50 rounded-2xl p-8 text-center bg-white/5 transition-all cursor-pointer mb-6" onclick="document.getElementById('appendFileInput').click()">
+                    <div class="w-12 h-12 rounded-full bg-[#E6397F]/10 flex items-center justify-center mx-auto mb-3">
+                        <i data-feather="upload-cloud" class="w-6 h-6 text-[#E6397F]"></i>
+                    </div>
+                    <p class="text-sm font-bold text-white mb-1">Click or Drag files here</p>
+                    <p class="text-xs text-gray-400">Any file type. Auto-extracts folders.</p>
+                    <input type="file" id="appendFileInput" multiple class="hidden">
+                </div>
+
+                <div id="appendFileList" class="space-y-3">
+                    </div>
+            </div>
+
+            <div class="p-6 border-t border-white/10 bg-black/40">
+                <button id="appendConfirmBtn" onclick="window.executeAppend()" class="w-full btn-liquid-glow py-4 text-sm disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                    <i data-feather="zap" class="w-4 h-4"></i> Confirm & Push Append
+                </button>
             </div>
         </div>
     </div>
