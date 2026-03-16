@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Reputifly | Payload Viewer & Tracker</title>
+    
+    <link rel="icon" type="image/png" href="https://reputifly.com/wp-content/uploads/2026/01/IMG_2123.jpg">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/feather-icons"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-storage.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDqpzqEVtrEtQvvmcMie_Et7xiNh8QU_Ao",
+            authDomain: "reputifly-editor.firebaseapp.com",
+            projectId: "reputifly-editor",
+            storageBucket: "reputifly-editor.firebasestorage.app",
+            messagingSenderId: "455384979132",
+            appId: "1:455384979132:web:9079ec81182115b16622b9"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        window.db = getFirestore(app);
+        window.collection = collection;
+        window.addDoc = addDoc;
+        window.doc = doc;
+        window.getDoc = getDoc;
+        window.setDoc = setDoc; 
+        
+        window.storage = getStorage(app);
+        window.storageRef = ref;
+        window.uploadBytes = uploadBytes;
+        window.getDownloadURL = getDownloadURL;
+        
+        window.dispatchEvent(new Event('firebaseReady'));
+    </script>
+
+    <style>
+        body {
+            background-color: #05050A;
+            background-image: radial-gradient(circle at 50% 0%, #160D1E 0%, #05050A 70%);
+            background-attachment: fixed;
+            font-family: 'Inter', sans-serif;
+            color: #F0F0F0;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        h1, h2, h3 { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.02em; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(230, 57, 127, 0.4); }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+
+        .glass-panel {
+            background: rgba(15, 15, 20, 0.7);
+            backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-top: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.8);
+        }
+
+        .btn-liquid {
+            background: radial-gradient(circle at top, rgba(255, 255, 255, 0.4) 0%, transparent 60%),
+                linear-gradient(90deg, #E6397F, #FF8A00);
+            box-shadow: 0 10px 30px -10px rgba(230, 57, 127, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 -2px 0 rgba(0, 0, 0, 0.2);
+            border: none;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            border-radius: 9999px;
+            color: white;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .btn-liquid:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 40px -10px rgba(255, 138, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        }
+        
+        .btn-liquid:disabled {
+            filter: grayscale(100%);
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .tab-btn {
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-weight: 600;
+            color: #9CA3AF;
+            transition: all 0.2s;
+            text-align: left;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+        }
+
+        .tab-btn.active {
+            background: rgba(230, 57, 127, 0.1);
+            color: #E6397F;
+            border: 1px solid rgba(230, 57, 127, 0.3);
+        }
+
+        .markdown-quote {
+            border-left: 4px solid rgba(255, 138, 0, 0.5);
+            background: rgba(255, 138, 0, 0.05);
+            padding: 12px 16px;
+            border-radius: 0 8px 8px 0;
+            font-style: italic;
+            color: #d1d5db;
+        }
+
+        .image-zoom-container:hover .zoom-icon { opacity: 1; }
+
+        .task-card { transition: all 0.3s ease; }
+        .task-card.completed { border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.03); }
+        .task-card.completed .task-title { text-decoration: line-through; color: #9CA3AF; }
+        .task-card.completed img { opacity: 0.6; filter: grayscale(80%); }
+        
+        .custom-checkbox {
+            appearance: none;
+            width: 24px;
+            height: 24px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 0.4);
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .custom-checkbox:checked { background: #10B981; border-color: #10B981; }
+        .custom-checkbox:checked::after {
+            content: '';
+            width: 6px;
+            height: 12px;
+            border: solid white;
+            border-width: 0 2px 2px 0;
+            transform: rotate(45deg);
+            margin-bottom: 2px;
+        }
+        .custom-checkbox:disabled { cursor: not-allowed; opacity: 0.7; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col p-4 sm:p-6 relative overflow-x-hidden">
+
+    <div class="fixed top-[-20%] left-[-10%] w-[60%] h-[60%] bg-[#E6397F]/10 rounded-full blur-[150px] pointer-events-none z-0"></div>
+    <div class="fixed bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-[#10B981]/10 rounded-full blur-[150px] pointer-events-none z-0"></div>
+
+    <div id="uploadView" class="w-full max-w-2xl mx-auto my-auto glass-panel rounded-[2rem] p-8 z-10 relative shadow-[0_0_80px_rgba(0,0,0,0.8)] transition-all duration-500">
+        <div class="text-center mb-8">
+            <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-12 mx-auto mb-4" alt="Reputifly">
+            <h1 class="text-3xl font-bold mb-2">Payload Tracker</h1>
+            <p class="text-gray-400 text-sm">Upload the master .zip file downloaded from the client portal to track revisions.</p>
+        </div>
+
+        <input type="file" id="zipUpload" accept=".zip" class="hidden">
+        <button onclick="document.getElementById('zipUpload').click()" class="w-full bg-black/40 border border-dashed border-white/20 hover:border-[#E6397F]/50 hover:bg-[#E6397F]/5 hover:shadow-[0_0_30px_rgba(230,57,127,0.1)] p-12 rounded-3xl flex flex-col items-center justify-center gap-4 transition-all duration-300 mb-2 cursor-pointer group relative overflow-hidden">
+            <div id="uploadState" class="flex flex-col items-center gap-4">
+                <div class="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-hover:scale-110 group-hover:bg-[#E6397F]/20 group-hover:border-[#E6397F]/50 transition-all duration-300">
+                    <i data-feather="package" class="w-8 h-8 text-[#E6397F] group-hover:text-white transition-colors"></i>
+                </div>
+                <div class="space-y-1 text-center">
+                    <span class="font-bold text-lg text-white group-hover:text-[#E6397F] transition-colors block">Select Master .ZIP</span>
+                    <p class="text-xs text-gray-500 font-medium">Click to browse or drag & drop</p>
+                </div>
+            </div>
+            
+            <div id="loadingState" class="hidden flex-col items-center gap-4 w-full h-full justify-center absolute inset-0 bg-black/80 backdrop-blur-sm">
+                <i data-feather="loader" class="w-10 h-10 text-[#E6397F] animate-spin"></i>
+                <p class="text-sm font-bold text-white tracking-widest uppercase">Extracting Payload...</p>
+            </div>
+        </button>
+    </div>
+
+    <div id="dashboardView" class="w-full max-w-[1500px] mx-auto hidden flex-col h-[92vh] z-10 relative">
+        <div class="flex flex-col sm:flex-row justify-between items-center gap-4 mb-6 shrink-0 glass-panel rounded-3xl p-5 px-6">
+            <div class="flex items-center gap-4 w-full sm:w-auto overflow-hidden">
+                <button onclick="toggleMobileMenu()" class="md:hidden w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-[#E6397F]/20 hover:text-[#E6397F] hover:border-[#E6397F]/50 transition-all shrink-0">
+                    <i data-feather="menu" class="w-5 h-5"></i>
+                </button>
+
+                <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png" class="h-8 sm:h-10 shrink-0 hidden sm:block" alt="Reputifly">
+                <div class="w-px h-8 bg-white/10 hidden sm:block"></div>
+                <div class="flex flex-col min-w-0">
+                    <h1 class="text-lg sm:text-xl font-bold text-white tracking-tight truncate flex items-center gap-2" id="projectNameDisplay">Loading Project...</h1>
+                    <span id="viewModeBadge" class="text-xs text-green-400 font-mono tracking-widest uppercase flex items-center gap-1"><i data-feather="check-circle" class="w-3 h-3"></i> Admin Tracker Mode</span>
+                </div>
+            </div>
+            <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
+                <div class="flex items-center gap-3 mr-4">
+                    <div class="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest">Progress</div>
+                    <div class="w-24 sm:w-32 h-2 bg-white/10 rounded-full overflow-hidden">
+                        <div id="progressBar" class="h-full bg-[#10B981] transition-all duration-500" style="width: 0%;"></div>
+                    </div>
+                    <div id="progressText" class="text-xs font-mono text-white">0/0</div>
+                </div>
+
+                <button id="shareBtn" onclick="generateShareLink()" class="btn-liquid py-2.5 px-4 sm:px-6 text-sm flex items-center justify-center gap-2 shadow-lg shrink-0 w-auto min-w-[140px]">
+                    <i data-feather="link" class="w-4 h-4 hidden sm:block"></i> Share Link
+                </button>
+                <button id="exitBtn" onclick="location.href = window.location.pathname" class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold py-2.5 px-4 rounded-full text-sm transition-all hidden items-center gap-2 shrink-0">
+                    <i data-feather="log-out" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="flex flex-col md:flex-row gap-6 flex-1 min-h-0 relative">
+            
+            <div id="sidebarOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[40] hidden md:hidden transition-opacity" onclick="toggleMobileMenu()"></div>
+
+            <div id="sidebar" class="fixed inset-y-0 left-0 z-[50] w-[280px] md:w-64 transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 glass-panel md:rounded-3xl p-4 flex flex-col gap-2 overflow-y-auto hide-scrollbar shrink-0 bg-[#160D1E] md:bg-transparent border-r border-white/10 md:border-none shadow-2xl md:shadow-none h-full md:h-auto">
+                <div class="flex justify-between items-center md:hidden mb-6 px-2 mt-4 border-b border-white/10 pb-4">
+                    <span class="text-white font-bold text-lg flex items-center gap-2"><i data-feather="layers" class="w-5 h-5 text-[#E6397F]"></i> Project Pages</span>
+                    <button onclick="toggleMobileMenu()" class="text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 p-2 rounded-full transition-all"><i data-feather="x" class="w-4 h-4"></i></button>
+                </div>
+                <div id="pagesList" class="flex flex-col gap-2"></div>
+            </div>
+
+            <div class="flex-1 glass-panel rounded-3xl p-4 sm:p-6 overflow-y-auto hide-scrollbar relative bg-[#0a0a0f] w-full" id="contentArea">
+            </div>
+        </div>
+    </div>
+
+    <div id="shareModal" class="fixed inset-0 z-[300] hidden items-center justify-center bg-black/95 backdrop-blur-md p-4 transition-all opacity-0">
+        <div class="w-full max-w-md bg-[#160D1E] border border-white/10 rounded-3xl p-8 shadow-2xl relative text-center">
+            <div class="w-16 h-16 rounded-full bg-[#E6397F]/10 flex items-center justify-center mx-auto mb-6 border border-[#E6397F]/30">
+                <i data-feather="check" class="w-8 h-8 text-[#E6397F]" id="modalIcon"></i>
+            </div>
+            <h3 class="text-2xl font-bold text-white mb-2" id="modalTitle">Share Link Ready</h3>
+            <p class="text-gray-400 text-sm mb-6" id="modalDesc">This link is read-only. Annotated images have been safely uploaded for the client to view.</p>
+            
+            <div class="flex flex-col sm:flex-row gap-2 mb-6">
+                <input type="text" id="shareUrlInput" class="flex-1 bg-black/40 border border-white/10 rounded-xl p-3 text-xs font-mono text-gray-300 outline-none truncate" readonly>
+                <button onclick="copyShareLink()" class="btn-liquid px-6 py-3 text-sm shrink-0 flex items-center justify-center gap-2"><i data-feather="copy" class="w-4 h-4"></i> Copy</button>
+            </div>
+            
+            <button onclick="closeShareModal()" class="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white py-3 rounded-xl transition-all text-sm font-bold">Close</button>
+        </div>
+    </div>
+
+    <div id="toastNotification" class="fixed bottom-8 left-1/2 -translate-x-1/2 z-[400] bg-[#E6397F] text-white px-6 py-3 rounded-full shadow-[0_10px_40px_-10px_rgba(230,57,127,0.8)] flex items-center gap-3 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none">
+        <i data-feather="check-circle" class="w-5 h-5"></i>
+        <span class="font-bold text-sm tracking-wide">Link Copied!</span>
+    </div>
+
+    <div id="imageModal" class="fixed inset-0 z-[200] hidden items-center justify-center bg-black/95 backdrop-blur-md p-4" onclick="closeImageModal()">
+        <img id="fullscreenImage" class="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl border border-white/10" src="" alt="Fullscreen view">
+        <button class="absolute top-6 right-6 bg-white/10 hover:bg-white/20 p-3 rounded-full text-white transition-all backdrop-blur">
+            <i data-feather="x" class="w-6 h-6"></i>
+        </button>
+    </div>
+
+    <script>
+        feather.replace();
+
+        // =========================================================
+        // CONFIGURATION: Redirect Fix for "Revision Portal"
+        // =========================================================
+        // If your clients view the tracker on a specific URL (e.g., /tracker/), 
+        // you can hardcode it here. By default, it auto-detects and removes 'revision-portal' 
+        // replacing it with 'tracker'. Change this line if needed.
+        let CLIENT_VIEWER_BASE_URL = window.location.href.split('?')[0];
+        if (CLIENT_VIEWER_BASE_URL.includes("revision-portal")) {
+            CLIENT_VIEWER_BASE_URL = CLIENT_VIEWER_BASE_URL.replace("revision-portal", "tracker");
+        }
+        // =========================================================
+
+        let parsedProjectData = {
+            project: "Unknown Project",
+            pages: [] 
+        };
+        let isViewerMode = false;
+        let isLockedMode = false;
+        let pendingRevisionId = null;
+        let currentShareId = null; 
+        let activePageIdx = 0; 
+
+        function toggleMobileMenu() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            
+            if (sidebar.classList.contains('-translate-x-full')) {
+                sidebar.classList.remove('-translate-x-full');
+                overlay.classList.remove('hidden');
+                document.body.style.overflow = 'hidden'; 
+            } else {
+                sidebar.classList.add('-translate-x-full');
+                overlay.classList.add('hidden');
+                document.body.style.overflow = '';
+            }
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const shareId = urlParams.get('share');
+        const autoLoadId = urlParams.get('auto_load');
+
+        if (shareId) {
+            isViewerMode = true;
+            document.getElementById('uploadView').classList.add('hidden');
+            document.getElementById('dashboardView').classList.remove('hidden');
+            document.getElementById('dashboardView').classList.add('flex');
+            document.getElementById('shareBtn').classList.add('hidden');
+            document.getElementById('exitBtn').classList.remove('hidden');
+            document.getElementById('exitBtn').classList.add('flex');
+            
+            const badge = document.getElementById('viewModeBadge');
+            badge.innerHTML = `<i data-feather="eye" class="w-3 h-3"></i> Client View (Read-Only)`;
+            badge.className = "text-xs text-blue-400 font-mono tracking-widest uppercase flex items-center gap-1";
+            
+            document.getElementById('contentArea').innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full pt-32">
+                    <i data-feather="loader" class="w-10 h-10 text-blue-400 animate-spin mb-4"></i>
+                    <span class="text-white font-bold">Loading Progress Tracker...</span>
+                </div>
+            `;
+            feather.replace();
+
+            const fetchSharedPayload = async () => {
+                try {
+                    const docSnap = await window.getDoc(window.doc(window.db, "viewer_shares", shareId));
+                    if (docSnap.exists()) {
+                        parsedProjectData = docSnap.data();
+                        document.getElementById('projectNameDisplay').innerText = `${parsedProjectData.project} Revisions`;
+                        renderTabs();
+                        if (parsedProjectData.pages.length > 0) renderPage(0);
+                        updateProgressBar();
+                    } else {
+                        alert("Tracker link not found or expired.");
+                        location.href = window.location.pathname;
+                    }
+                } catch (err) {
+                    alert("Error loading shared tracker: " + err.message);
+                }
+            };
+
+            if (window.db) fetchSharedPayload();
+            else window.addEventListener('firebaseReady', fetchSharedPayload);
+        }
+
+        if (!isViewerMode) {
+            if (autoLoadId) {
+                // AUTO-LOAD FROM DASHBOARD
+                pendingRevisionId = autoLoadId;
+                document.getElementById('uploadState').classList.add('hidden');
+                document.getElementById('loadingState').classList.remove('hidden');
+                document.getElementById('loadingState').classList.add('flex');
+                
+                const fetchAndLoadZip = async () => {
+                    try {
+                        const docSnap = await window.getDoc(window.doc(window.db, "pending_revisions", autoLoadId));
+                        if (docSnap.exists()) {
+                            const data = docSnap.data();
+                            isLockedMode = data.locked === true;
+                            
+                            // Visual UI indicator for locked mode
+                            if (isLockedMode) {
+                                const badge = document.getElementById('viewModeBadge');
+                                badge.innerHTML = `<i data-feather="lock" class="w-3 h-3"></i> Locked Tracker (Read-Only)`;
+                                badge.className = "text-xs text-red-400 font-mono tracking-widest uppercase flex items-center gap-1";
+                            }
+
+                            // Fetch the ZIP blob directly from Storage URL
+                            const response = await fetch(data.zipUrl);
+                            if (!response.ok) throw new Error("Failed to download ZIP payload.");
+                            const zipBlob = await response.blob();
+                            
+                            await handleZip(zipBlob);
+                        } else {
+                            alert("Revision record not found or deleted.");
+                            location.href = window.location.pathname;
+                        }
+                    } catch (err) {
+                        alert("Error auto-loading payload: " + err.message);
+                        document.getElementById('uploadState').classList.remove('hidden');
+                        document.getElementById('loadingState').classList.add('hidden');
+                        document.getElementById('loadingState').classList.remove('flex');
+                    }
+                };
+
+                if (window.db) fetchAndLoadZip();
+                else window.addEventListener('firebaseReady', fetchAndLoadZip);
+
+            } else {
+                // NORMAL MANUAL DRAG-AND-DROP UPLOAD
+                const dropzone = document.getElementById('zipUpload').parentElement;
+                
+                ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eName => dropzone.addEventListener(eName, e => { e.preventDefault(); e.stopPropagation(); }));
+                ['dragenter', 'dragover'].forEach(eName => dropzone.addEventListener(eName, () => dropzone.classList.add('border-[#E6397F]')));
+                ['dragleave', 'drop'].forEach(eName => dropzone.addEventListener(eName, () => dropzone.classList.remove('border-[#E6397F]')));
+
+                dropzone.addEventListener('drop', e => { if (e.dataTransfer.files.length) handleZip(e.dataTransfer.files[0]); });
+                document.getElementById('zipUpload').addEventListener('change', e => { if (e.target.files.length) handleZip(e.target.files[0]); });
+            }
+
+            async function handleZip(file) {
+                // Modified to not crash when a fetched Blob (without a .name) is passed
+                if (file.name && !file.name.endsWith('.zip')) { alert("Please upload a valid .zip payload file."); return; }
+
+                document.getElementById('uploadState').classList.add('hidden');
+                document.getElementById('loadingState').classList.remove('hidden');
+                document.getElementById('loadingState').classList.add('flex');
+
+                try {
+                    const masterZip = await JSZip.loadAsync(file);
+                    parsedProjectData.pages = []; 
+
+                    for (let [filename, fileEntry] of Object.entries(masterZip.files)) {
+                        if (filename.endsWith('.zip') && !fileEntry.dir) {
+                            const nestedZipData = await fileEntry.async("blob");
+                            const nestedZip = await JSZip.loadAsync(nestedZipData);
+                            
+                            let mdText = "";
+                            let imagesData = {}; 
+
+                            for (let [nestedName, nestedEntry] of Object.entries(nestedZip.files)) {
+                                if (nestedName === "instructions.md") {
+                                    mdText = await nestedEntry.async("string");
+                                } else if (nestedName.startsWith("images/") && nestedName.endsWith(".webp") && !nestedEntry.dir) {
+                                    const base64 = await nestedEntry.async("base64");
+                                    const imageName = nestedName.replace("images/", "");
+                                    imagesData[imageName] = `data:image/webp;base64,${base64}`;
+                                }
+                            }
+
+                            if (mdText) {
+                                const pageData = parseMarkdownPayload(mdText, imagesData);
+                                parsedProjectData.pages.push(pageData);
+                            }
+                        }
+                    }
+
+                    if (parsedProjectData.pages.length === 0) throw new Error("No valid instructions found.");
+
+                    document.getElementById('uploadView').classList.add('hidden');
+                    document.getElementById('dashboardView').classList.remove('hidden');
+                    document.getElementById('dashboardView').classList.add('flex');
+                    document.getElementById('projectNameDisplay').innerText = `${parsedProjectData.project} Revisions`;
+                    
+                    renderTabs();
+                    if (parsedProjectData.pages.length > 0) renderPage(0);
+                    updateProgressBar();
+
+                } catch (err) {
+                    alert("Error parsing payload: " + err.message);
+                    document.getElementById('uploadState').classList.remove('hidden');
+                    document.getElementById('loadingState').classList.add('hidden');
+                    document.getElementById('loadingState').classList.remove('flex');
+                }
+            }
+        }
+
+        function parseMarkdownPayload(mdText, imagesDict) {
+            const result = { pageName: "Unknown Page", liveUrl: null, directives: null, sections: [] };
+
+            const projectMatch = mdText.match(/\*\*Project:\*\* (.*)/);
+            if (projectMatch) parsedProjectData.project = projectMatch[1].trim(); 
+
+            const pageMatch = mdText.match(/\*\*Page:\*\* (.*)/);
+            if (pageMatch) result.pageName = pageMatch[1].trim();
+
+            const urlMatch = mdText.match(/\*\*Live Page URL:\*\* (.*)/);
+            if (urlMatch) result.liveUrl = urlMatch[1].trim();
+
+            const directiveRegex = /## ⚠️ PAGE-WIDE DIRECTIVES \(EXECUTE THESE FIRST\)\n([\s\S]*?)\n---/ || /## ⚠️ PAGE-WIDE DIRECTIVES\n([\s\S]*?)\n---/;
+            const dirMatch = mdText.match(directiveRegex);
+            if (dirMatch && dirMatch[1].trim() !== "") result.directives = dirMatch[1].trim();
+
+            const sectionChunks = mdText.split("## SECTION: ").slice(1); 
+            
+            sectionChunks.forEach(chunk => {
+                const lines = chunk.split('\n');
+                const sectionName = lines[0].trim();
+                
+                const notesMatch = chunk.match(/\*\*General Notes:\*\* (.*)/);
+                const notes = notesMatch ? notesMatch[1].trim() : null;
+
+                const sectionObj = { name: sectionName, notes: notes, adminComment: "", tasks: [] };
+
+                const taskChunks = chunk.split("### TASK ").slice(1);
+                taskChunks.forEach(taskRaw => {
+                    const taskLines = taskRaw.split('\n');
+                    const taskTitle = taskLines[0].trim(); 
+                    
+                    let imageKey = null;
+                    const imgMatch = taskTitle.match(/\`(.*?\.webp)\`/);
+                    if (imgMatch) imageKey = imgMatch[1];
+
+                    const commentMatch = taskRaw.match(/\*\*Client Comment:\*\* "(.*)"/);
+                    const comment = commentMatch ? commentMatch[1] : "";
+
+                    const urlMatch = taskRaw.match(/\*\*WP CDN Link:\*\* (.*)/);
+                    const wpUrl = urlMatch ? urlMatch[1].trim() : null;
+
+                    sectionObj.tasks.push({
+                        title: taskTitle.split(':')[0], 
+                        type: taskTitle.includes("Visual Fix") ? "Fix" : "Asset",
+                        imageKey: imageKey,
+                        imageData: imageKey && !isViewerMode ? imagesDict[imageKey] : null,
+                        comment: comment,
+                        wpUrl: wpUrl,
+                        completed: false 
+                    });
+                });
+                result.sections.push(sectionObj);
+            });
+            return result;
+        }
+
+        function toggleTaskCompletion(pIdx, sIdx, tIdx) {
+            if (isViewerMode || isLockedMode) return; 
+            
+            const task = parsedProjectData.pages[pIdx].sections[sIdx].tasks[tIdx];
+            task.completed = !task.completed;
+            
+            const cardEl = document.getElementById(`task-card-${pIdx}-${sIdx}-${tIdx}`);
+            const checkboxEl = document.getElementById(`checkbox-${pIdx}-${sIdx}-${tIdx}`);
+            
+            if (task.completed) {
+                cardEl.classList.add('completed');
+                checkboxEl.checked = true;
+            } else {
+                cardEl.classList.remove('completed');
+                checkboxEl.checked = false;
+            }
+            
+            updateProgressBar();
+            renderTabs(); 
+        }
+        
+        window.updateAdminComment = function(pIdx, sIdx, val) {
+            parsedProjectData.pages[pIdx].sections[sIdx].adminComment = val;
+        };
+
+        function updateProgressBar() {
+            let total = 0;
+            let completed = 0;
+            
+            parsedProjectData.pages.forEach(p => {
+                p.sections.forEach(s => {
+                    s.tasks.forEach(t => {
+                        total++;
+                        if (t.completed) completed++;
+                    });
+                });
+            });
+
+            const percentage = total === 0 ? 0 : Math.round((completed / total) * 100);
+            document.getElementById('progressBar').style.width = `${percentage}%`;
+            document.getElementById('progressText').innerText = `${completed}/${total}`;
+        }
+
+        function renderTabs() {
+            const list = document.getElementById('pagesList');
+            list.innerHTML = '';
+            parsedProjectData.pages.forEach((page, idx) => {
+                let totalTasks = 0;
+                let completedTasks = 0;
+                
+                page.sections.forEach(s => {
+                    if (s.tasks) {
+                        s.tasks.forEach(t => {
+                            totalTasks++;
+                            if (t.completed) completedTasks++;
+                        });
+                    }
+                });
+                
+                const isCompleted = totalTasks > 0 && totalTasks === completedTasks;
+                const iconName = isCompleted ? 'check-circle' : 'file';
+                const iconColorClass = isCompleted ? 'text-[#10B981]' : 'text-gray-400';
+
+                const btn = document.createElement('button');
+                btn.className = `tab-btn ${idx === activePageIdx ? 'active' : ''} ${isCompleted ? 'bg-[#10B981]/5 border border-[#10B981]/20' : ''}`;
+                btn.innerHTML = `<i data-feather="${iconName}" class="w-4 h-4 shrink-0 ${iconColorClass}"></i> <span class="truncate font-bold ${isCompleted ? 'text-[#10B981]' : ''}">${page.pageName}</span>`;
+                
+                btn.onclick = () => {
+                    activePageIdx = idx;
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    renderPage(idx);
+                    
+                    if (window.innerWidth < 768) {
+                        toggleMobileMenu();
+                    }
+                };
+                list.appendChild(btn);
+            });
+            feather.replace();
+        }
+
+        function renderPage(idx) {
+            const page = parsedProjectData.pages[idx];
+            const container = document.getElementById('contentArea');
+            container.innerHTML = '';
+
+            const liveLinkHtml = page.liveUrl ? `<a href="${page.liveUrl}" target="_blank" rel="noopener noreferrer" class="sm:ml-auto flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2.5 rounded-full text-xs text-gray-400 hover:text-white transition-all w-full sm:w-auto mt-4 sm:mt-0"><i data-feather="external-link" class="w-3 h-3"></i> View Live URL</a>` : '';
+            container.innerHTML += `<div class="flex flex-col sm:flex-row sm:items-center mb-8 border-b border-white/10 pb-4"><h2 class="text-2xl sm:text-3xl font-bold text-white tracking-tight break-words w-full sm:w-auto pr-4">${page.pageName}</h2>${liveLinkHtml}</div>`;
+
+            if (page.directives) {
+                container.innerHTML += `
+                    <div class="bg-[#FF8A00]/10 border border-[#FF8A00]/30 rounded-2xl p-4 sm:p-6 mb-8 relative shadow-[0_0_30px_rgba(255,138,0,0.05)] w-full overflow-hidden">
+                        <div class="absolute top-0 right-0 bg-[#FF8A00]/20 text-[#FF8A00] text-[10px] font-bold px-3 py-1 rounded-bl-xl uppercase tracking-widest border-b border-l border-[#FF8A00]/30">Global</div>
+                        <h3 class="text-[#FF8A00] font-bold text-lg mb-3 flex items-center gap-2"><i data-feather="alert-triangle" class="w-5 h-5 shrink-0"></i> Page-Wide Directives</h3>
+                        <div class="text-gray-200 text-sm whitespace-pre-wrap leading-relaxed bg-black/40 p-4 rounded-xl border border-white/5 break-words">${page.directives}</div>
+                    </div>
+                `;
+            }
+
+            page.sections.forEach((sec, sIdx) => {
+                let sectionHtml = `
+                    <div class="bg-white/[0.02] border border-white/10 rounded-2xl p-4 sm:p-6 mb-8 shadow-xl overflow-hidden w-full">
+                        <h3 class="font-bold text-xl sm:text-2xl text-white mb-6 flex items-center gap-2 border-b border-white/5 pb-4 break-words">
+                            <i data-feather="layout" class="w-5 h-5 sm:w-6 sm:h-6 text-[#E6397F] shrink-0"></i> ${sec.name}
+                        </h3>
+                `;
+
+                if (sec.notes) {
+                    sectionHtml += `
+                        <div class="mb-6 w-full">
+                            <label class="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-widest">General Section Notes</label>
+                            <div class="markdown-quote text-sm whitespace-pre-wrap break-words">${sec.notes}</div>
+                        </div>
+                    `;
+                }
+                
+                if (!isViewerMode && !isLockedMode) {
+                    sectionHtml += `
+                        <div class="mb-6 w-full">
+                            <label class="block text-[10px] font-bold text-[#E6397F] mb-2 uppercase tracking-widest flex items-center gap-1.5"><i data-feather="message-square" class="w-3 h-3"></i> Agency Note to Client (Optional)</label>
+                            <textarea class="w-full bg-black/40 border border-[#E6397F]/30 focus:border-[#E6397F] rounded-xl p-3 text-sm text-white outline-none resize-y min-h-[60px] transition-colors" placeholder="Explain any alternative implementations, pushbacks, or provide context here..." oninput="updateAdminComment(${idx}, ${sIdx}, this.value)">${sec.adminComment || ''}</textarea>
+                        </div>
+                    `;
+                } else if (sec.adminComment && sec.adminComment.trim() !== '') {
+                    sectionHtml += `
+                        <div class="mb-6 w-full bg-[#E6397F]/10 border border-[#E6397F]/30 rounded-xl p-4 shadow-inner">
+                            <label class="block text-[10px] font-bold text-[#E6397F] mb-2 uppercase tracking-widest flex items-center gap-1.5"><i data-feather="info" class="w-3 h-3"></i> Note from Agency</label>
+                            <div class="text-gray-200 text-sm whitespace-pre-wrap break-words leading-relaxed">${sec.adminComment}</div>
+                        </div>
+                    `;
+                }
+
+                if (sec.tasks.length > 0) {
+                    sectionHtml += `<div class="space-y-6 w-full">`;
+                    sec.tasks.forEach((task, tIdx) => {
+                        const badgeColor = task.type === 'Fix' ? 'text-[#FF8A00] bg-[#FF8A00]/10 border-[#FF8A00]/30' : 'text-[#10B981] bg-[#10B981]/10 border-[#10B981]/30';
+                        const badgeIcon = task.type === 'Fix' ? 'edit-3' : 'plus-square';
+                        
+                        const imgSource = task.imageData || task.wpUrl || '';
+                        const completedClass = task.completed ? 'completed' : '';
+                        const checkedAttr = task.completed ? 'checked' : '';
+                        const disabledAttr = (isViewerMode || isLockedMode) ? 'disabled' : '';
+
+                        sectionHtml += `
+                            <div id="task-card-${idx}-${sIdx}-${tIdx}" class="task-card image-card flex flex-col lg:flex-row relative items-stretch p-4 sm:p-5 gap-6 bg-black/40 border border-white/10 rounded-xl w-full ${completedClass}">
+                                
+                                <div class="w-full lg:w-[350px] h-48 sm:h-56 shrink-0 rounded-lg overflow-hidden border border-white/10 bg-black relative image-zoom-container cursor-pointer" onclick="openImageModal('${imgSource}')">
+                                    <img src="${imgSource}" class="w-full h-full object-contain" alt="${task.imageKey}">
+                                    <div class="absolute inset-0 bg-black/40 opacity-0 zoom-icon transition-opacity flex items-center justify-center">
+                                        <i data-feather="zoom-in" class="w-8 h-8 text-white"></i>
+                                    </div>
+                                    <div class="absolute bottom-2 right-2 bg-black/80 px-2 py-1 rounded text-[10px] font-mono text-gray-400 border border-white/10 max-w-[90%] truncate">${task.imageKey}</div>
+                                </div>
+                                
+                                <div class="flex-1 flex flex-col justify-center min-w-0 w-full">
+                                    <div class="flex items-start justify-between mb-4 gap-4">
+                                        <div class="min-w-0">
+                                            <div class="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
+                                                <span class="font-bold text-white text-lg sm:text-xl task-title transition-colors truncate">Task ${task.title}</span>
+                                                <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${badgeColor} flex items-center gap-1 shrink-0"><i data-feather="${badgeIcon}" class="w-3 h-3"></i> ${task.type}</span>
+                                            </div>
+                                        </div>
+                                        <div class="flex flex-col items-center gap-1 shrink-0 bg-white/5 p-2 rounded-lg border border-white/10 cursor-pointer hover:bg-white/10 transition-colors" onclick="if(!isViewerMode && !isLockedMode) toggleTaskCompletion(${idx}, ${sIdx}, ${tIdx})">
+                                            <input type="checkbox" id="checkbox-${idx}-${sIdx}-${tIdx}" class="custom-checkbox pointer-events-none" ${checkedAttr} ${disabledAttr}>
+                                            <span class="text-[9px] uppercase tracking-widest text-gray-400 font-bold">${(isViewerMode || isLockedMode) ? 'Status' : 'Mark Done'}</span>
+                                        </div>
+                                    </div>
+
+                                    <label class="block text-[10px] font-bold text-gray-500 mb-1 uppercase tracking-wider">Exact Client Comment:</label>
+                                    <div class="text-white bg-white/5 border border-white/10 rounded-lg p-3 sm:p-4 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap break-words">${task.comment || '<span class="text-gray-500 italic">No specific comment provided.</span>'}</div>
+                                    
+                                    ${task.wpUrl ? `<a href="${task.wpUrl}" target="_blank" class="mt-4 text-[10px] sm:text-xs text-[#E6397F] hover:text-[#FF8A00] transition-colors flex items-center gap-1 w-max break-all"><i data-feather="link" class="w-3 h-3 shrink-0"></i> View Raw Asset URL</a>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    });
+                    sectionHtml += `</div>`;
+                }
+                sectionHtml += `</div>`;
+                container.innerHTML += sectionHtml;
+            });
+
+            feather.replace();
+        }
+
+        function b64toBlob(b64Data, contentType='', sliceSize=512) {
+            const base64String = b64Data.includes(',') ? b64Data.split(',')[1] : b64Data;
+            const byteCharacters = atob(base64String);
+            const byteArrays = [];
+
+            for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+                const slice = byteCharacters.slice(offset, offset + sliceSize);
+                const byteNumbers = new Array(slice.length);
+                for (let i = 0; i < slice.length; i++) {
+                    byteNumbers[i] = slice.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                byteArrays.push(byteArray);
+            }
+            return new Blob(byteArrays, {type: contentType});
+        }
+
+        // --- UPGRADED REAL-TIME SYNC LOGIC ---
+        async function generateShareLink() {
+            const btn = document.getElementById('shareBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = `<i data-feather="loader" class="w-4 h-4 animate-spin"></i> Securing Tracker...`;
+            btn.disabled = true;
+            feather.replace();
+
+            let operationFailed = false;
+
+            try {
+                const lightweightPayload = JSON.parse(JSON.stringify(parsedProjectData));
+                const imageTasksToUpload = [];
+
+                // 1. Gather all required image uploads
+                for (let pIdx = 0; pIdx < lightweightPayload.pages.length; pIdx++) {
+                    let p = lightweightPayload.pages[pIdx];
+                    for (let sIdx = 0; sIdx < p.sections.length; sIdx++) {
+                        let s = p.sections[sIdx];
+                        for (let tIdx = 0; tIdx < s.tasks.length; tIdx++) {
+                            let t = s.tasks[tIdx];
+                            let originalT = parsedProjectData.pages[pIdx].sections[sIdx].tasks[tIdx];
+                            
+                            if (t.imageData) {
+                                imageTasksToUpload.push({ t, originalT, project: lightweightPayload.project });
+                            } else {
+                                delete t.imageData;
+                            }
+                        }
+                    }
+                }
+
+                // 2. Upload images sequentially with UI Progress updates to prevent freezes
+                for (let i = 0; i < imageTasksToUpload.length; i++) {
+                    const { t, originalT, project } = imageTasksToUpload[i];
+                    
+                    btn.innerHTML = `<i data-feather="loader" class="w-4 h-4 animate-spin"></i> Uploading Image ${i + 1} of ${imageTasksToUpload.length}...`;
+                    feather.replace();
+
+                    try {
+                        const blob = b64toBlob(t.imageData, 'image/webp');
+                        const safeProjectName = project.replace(/[^a-zA-Z0-9]/g, '-');
+                        const uniqueName = `shared-annotations/${safeProjectName}-${Date.now()}-${Math.random().toString(36).substring(7)}.webp`;
+                        
+                        const storageRef = window.storageRef(window.storage, uniqueName);
+                        await window.uploadBytes(storageRef, blob);
+                        const downloadUrl = await window.getDownloadURL(storageRef);
+                        
+                        t.wpUrl = downloadUrl; 
+                        originalT.wpUrl = downloadUrl; 
+                    } catch (uploadError) {
+                        console.error("Failed to upload annotated image.", uploadError);
+                    } finally {
+                        delete t.imageData; 
+                        delete originalT.imageData; 
+                    }
+                }
+
+                btn.innerHTML = `<i data-feather="loader" class="w-4 h-4 animate-spin"></i> Saving Tracker...`;
+                feather.replace();
+
+                // 3. Save to Firestore and Output URL
+                if (currentShareId) {
+                    await window.setDoc(window.doc(window.db, "viewer_shares", currentShareId), lightweightPayload);
+                    document.getElementById('modalTitle').innerText = "Updates Synced Live";
+                    document.getElementById('modalDesc').innerText = "The client's tracker has been updated. They just need to refresh their existing link.";
+                } else {
+                    const docRef = await window.addDoc(window.collection(window.db, "viewer_shares"), lightweightPayload);
+                    currentShareId = docRef.id;
+                    const shareUrl = `${CLIENT_VIEWER_BASE_URL}?share=${currentShareId}`;
+                    document.getElementById('shareUrlInput').value = shareUrl;
+                }
+
+                btn.innerHTML = `<i data-feather="refresh-cw" class="w-4 h-4 hidden sm:block"></i> Sync Client Updates`;
+                btn.classList.add('shadow-[0_0_30px_rgba(16,185,129,0.3)]');
+
+                const modal = document.getElementById('shareModal');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => modal.classList.remove('opacity-0'), 10);
+
+            } catch (err) {
+                operationFailed = true;
+                alert("Error generating share link: " + err.message);
+                console.error(err);
+            } finally {
+                // Safely handle UI reset without ReferenceErrors
+                if (operationFailed) {
+                    btn.innerHTML = originalText;
+                }
+                btn.disabled = false;
+                feather.replace();
+            }
+        }
+
+        function copyShareLink() {
+            const input = document.getElementById('shareUrlInput');
+            input.select();
+            document.execCommand('copy');
+            
+            const toast = document.getElementById('toastNotification');
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        function closeShareModal() {
+            const modal = document.getElementById('shareModal');
+            modal.classList.add('opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 300);
+        }
+
+        function openImageModal(src) {
+            if (!src) return;
+            const modal = document.getElementById('imageModal');
+            document.getElementById('fullscreenImage').src = src;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeImageModal() {
+            const modal = document.getElementById('imageModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            document.getElementById('fullscreenImage').src = "";
+        }
+    </script>
+</body>
+</html>
