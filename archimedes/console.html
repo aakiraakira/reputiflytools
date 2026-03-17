@@ -672,6 +672,7 @@ onAuthStateChanged(auth, async (user) => {
             window._conn = conn;
             showScreen('screenDashboard');
             populateSettings(conn);
+            applyRoleVisibility(conn.is_admin !== false);
             loadPosts();
             loadCategories();
         } else {
@@ -814,11 +815,14 @@ document.getElementById('btnConnect').addEventListener('click', async () => {
         const profile = await res.json();
         if (!res.ok) throw new Error(profile.message || 'Connection failed');
 
-        const connData = { api_base: apiBase, api_key: apiKey, site_name: profile.site_name || '', site_url: profile.site_url || apiBase };
+        const caps = profile.capabilities || {};
+        const isAdmin = !!(caps.agent_access_manage || caps.deployment_read);
+        const connData = { api_base: apiBase, api_key: apiKey, site_name: profile.site_name || '', site_url: profile.site_url || apiBase, is_admin: isAdmin };
         await saveConnection(currentUser.uid, connData);
         window._conn = { uid: currentUser.uid, ...connData, connected_at: new Date().toISOString() };
         showScreen('screenDashboard');
         populateSettings(window._conn);
+        applyRoleVisibility(isAdmin);
         loadPosts();
         loadCategories();
         toast('Connected to ' + (profile.site_name || 'your site'), 'success');
@@ -860,6 +864,14 @@ function populateSettings(conn) {
     document.getElementById('settingsApiBase').textContent = conn.api_base;
     document.getElementById('settingsApiKey').textContent = conn.api_key.substring(0, 12) + '••••••••';
     document.getElementById('settingsConnectedAt').textContent = conn.connected_at ? new Date(conn.connected_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+}
+
+function applyRoleVisibility(isAdmin) {
+    // Hide Media and Bulk tabs for non-admin (client) users
+    const mediTabBtn = document.querySelector('[onclick*="switchTab(\'media\'"]');
+    const bulkTabBtn = document.querySelector('[onclick*="switchTab(\'bulk\'"]');
+    if (mediTabBtn) mediTabBtn.style.display = isAdmin ? '' : 'none';
+    if (bulkTabBtn) bulkTabBtn.style.display = isAdmin ? '' : 'none';
 }
 
 window.testConnection = async () => {
@@ -909,8 +921,8 @@ async function loadPosts() {
         }
 
         container.innerHTML = posts.map(p => `
-            <div class="post-row flex items-center justify-between gap-3" onclick="openEditor(${p.id})">
-                <div class="flex-1 min-w-0">
+            <div class="post-row flex items-center justify-between gap-3" data-post-id="${p.id}">
+                <div class="flex-1 min-w-0 post-row-main" style="cursor:pointer">
                     <div class="flex items-center gap-2 mb-1">
                         <h4 class="text-sm font-bold text-white truncate">${esc(p.title)}</h4>
                         <span class="status-badge status-${p.status}">${p.status}</span>
@@ -921,15 +933,43 @@ async function loadPosts() {
                     </div>
                 </div>
                 <div class="flex gap-1 shrink-0">
-                    <button class="btn-hero-glass btn-xs" onclick="event.stopPropagation(); quickToggle(${p.id}, '${p.status}')" title="${p.status === 'publish' ? 'Revert to Draft' : 'Publish'}">
-                        <i data-feather="${p.status === 'publish' ? 'eye-off' : 'eye'}" class="w-3 h-3"></i>
-                    </button>
-                    <button class="btn-hero-glass btn-xs text-red-400" onclick="event.stopPropagation(); quickTrash(${p.id})" title="Trash">
-                        <i data-feather="trash-2" class="w-3 h-3"></i>
-                    </button>
+                    ${p.status === 'trash' ? `
+                        <button class="btn-hero-glass btn-xs text-green-400 action-btn" data-action="restore" data-id="${p.id}" title="Restore">
+                            <i data-feather="rotate-ccw" class="w-3 h-3"></i>
+                        </button>
+                        <button class="btn-hero-glass btn-xs text-red-400 action-btn" data-action="delete" data-id="${p.id}" title="Delete Permanently">
+                            <i data-feather="x-circle" class="w-3 h-3"></i>
+                        </button>
+                    ` : `
+                        <button class="btn-hero-glass btn-xs action-btn" data-action="toggle" data-id="${p.id}" data-status="${p.status}" title="${p.status === 'publish' ? 'Revert to Draft' : 'Publish'}">
+                            <i data-feather="${p.status === 'publish' ? 'eye-off' : 'eye'}" class="w-3 h-3"></i>
+                        </button>
+                        <button class="btn-hero-glass btn-xs text-red-400 action-btn" data-action="trash" data-id="${p.id}" title="Trash">
+                            <i data-feather="trash-2" class="w-3 h-3"></i>
+                        </button>
+                    `}
                 </div>
             </div>
         `).join('');
+
+        // Event delegation — single listener, no stopPropagation issues
+        container.onclick = (e) => {
+            const actionBtn = e.target.closest('.action-btn');
+            if (actionBtn) {
+                const id = Number(actionBtn.dataset.id);
+                const action = actionBtn.dataset.action;
+                if (action === 'trash') quickTrash(id);
+                else if (action === 'restore') quickRestore(id);
+                else if (action === 'delete') quickDeletePermanent(id);
+                else if (action === 'toggle') quickToggle(id, actionBtn.dataset.status);
+                return;
+            }
+            const row = e.target.closest('.post-row-main');
+            if (row) {
+                const postId = Number(row.closest('.post-row').dataset.postId);
+                openEditor(postId);
+            }
+        };
         feather.replace();
         updatePostsPagination();
     } catch (err) {
@@ -960,14 +1000,35 @@ window.quickToggle = async (id, current) => {
     try {
         await api('POST', `/posts/${id}`, { status: current === 'publish' ? 'draft' : 'publish' });
         toast(current === 'publish' ? 'Reverted to draft' : 'Published', 'success');
-        loadPosts();
     } catch (err) { toast(err.message, 'error'); }
+    await loadPosts();
 };
 
-window.quickTrash = async (id) => {
+window.quickTrash = (id) => {
     showConfirmModal('Trash Post', 'Move this post to trash?', async () => {
-        try { await api('POST', `/posts/${id}/trash`); toast('Moved to trash', 'success'); loadPosts(); }
-        catch (err) { toast(err.message, 'error'); }
+        try {
+            await api('POST', `/posts/${id}/trash`);
+            toast('Moved to trash', 'success');
+        } catch (err) { toast(err.message, 'error'); }
+        await loadPosts();
+    });
+};
+
+window.quickRestore = async (id) => {
+    try {
+        await api('POST', `/posts/${id}/restore`);
+        toast('Post restored', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+    await loadPosts();
+};
+
+window.quickDeletePermanent = (id) => {
+    showConfirmModal('Delete Permanently', 'This cannot be undone. Permanently delete this post?', async () => {
+        try {
+            await api('DELETE', `/posts/${id}`);
+            toast('Permanently deleted', 'success');
+        } catch (err) { toast(err.message, 'error'); }
+        await loadPosts();
     });
 };
 
@@ -1426,28 +1487,40 @@ window.toast = (msg, type = 'info') => {
 // CONFIRM MODAL
 // ═══════════════════════════════════════════
 let modalCallback = null;
+let modalBusy = false;
 
 function showConfirmModal(title, body, onConfirm) {
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalBody').textContent = body;
     modalCallback = onConfirm;
+    modalBusy = false;
     document.getElementById('modalActions').innerHTML = `
         <button class="btn-hero-glass btn-sm" onclick="closeModal()">Cancel</button>
-        <button class="btn-liquid-glow btn-sm" onclick="confirmModal()">Confirm</button>
+        <button id="modalConfirmBtn" class="btn-liquid-glow btn-sm" onclick="confirmModal()">Confirm</button>
     `;
     document.getElementById('modalBackdrop').classList.remove('hidden');
 }
 
 window.closeModal = (event) => {
-    if (event && event.target !== event.currentTarget && !event.target.closest('button')) return;
+    if (modalBusy) return;
+    if (event && event.target !== event.currentTarget) return;
     document.getElementById('modalBackdrop').classList.add('hidden');
     modalCallback = null;
 };
 
 window.confirmModal = async () => {
-    if (modalCallback) await modalCallback();
+    if (modalBusy || !modalCallback) return;
+    modalBusy = true;
+    const btn = document.getElementById('modalConfirmBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i data-feather="loader" class="w-4 h-4 animate-spin"></i> Working...'; feather.replace(); }
+    try {
+        await modalCallback();
+    } catch (err) {
+        toast(err.message || 'Action failed', 'error');
+    }
     document.getElementById('modalBackdrop').classList.add('hidden');
     modalCallback = null;
+    modalBusy = false;
 };
 
 
