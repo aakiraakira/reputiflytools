@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Archimedes Console | Blog Manager</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Archimedes Console | Content Manager</title>
     <link rel="icon" type="image/png" href="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -121,6 +121,9 @@
         .status-future { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.2); }
         .status-trash { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
 
+        .status-instock { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.2); }
+        .status-outofstock { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+
         .cat-pill {
             padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 600;
             background: rgba(230,57,127,0.1); color: #E6397F; border: 1px solid rgba(230,57,127,0.2);
@@ -182,10 +185,16 @@
         .sidebar-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255,255,255,0.4); margin-bottom: 8px; }
 
         @media (max-width: 768px) {
+            input, textarea, select { font-size: 16px !important; }
             .glass-panel { border-radius: 16px; }
             .input-dark { padding: 12px 14px; border-radius: 14px; }
             .btn-liquid-glow, .btn-hero-glass { padding: 10px 20px; font-size: 13px; }
             .post-row { padding: 12px 16px; }
+            .tab-btn { padding: 8px 14px; font-size: 12px; }
+            .toast { min-width: auto; max-width: calc(100vw - 48px); }
+            .toast-container { left: 24px; right: 24px; bottom: 16px; }
+            .modal-backdrop > div { max-height: 90vh; overflow-y: auto; }
+            .product-price-col { font-size: 14px; }
         }
     </style>
 </head>
@@ -205,7 +214,7 @@
                 <img src="https://media.licdn.com/dms/image/v2/D560BAQEScnUkJITXAg/company-logo_200_200/B56ZajOckKHsAI-/0/1746495195792?e=2147483647&v=beta&t=Z7yQpp5jSwm-De46D45WIC5fY_2w0GVgEWLoEOM1aug" class="w-12 h-12 rounded-full border border-white/10" alt="Logo">
                 <div>
                     <h1 class="text-xl font-bold text-gradient">Archimedes Console</h1>
-                    <p class="text-xs text-gray-500">Blog Management Platform</p>
+                    <p class="text-xs text-gray-500">Content Management Platform</p>
                 </div>
             </div>
 
@@ -302,6 +311,7 @@
             <button class="tab-btn active" onclick="switchTab('posts', this)"><i data-feather="file-text" class="w-4 h-4 inline mr-1"></i>Posts</button>
             <button class="tab-btn" onclick="switchTab('media', this)"><i data-feather="image" class="w-4 h-4 inline mr-1"></i>Media</button>
             <button class="tab-btn" onclick="switchTab('bulk', this)"><i data-feather="layers" class="w-4 h-4 inline mr-1"></i>Bulk</button>
+            <button id="tabBtnProducts" class="tab-btn hidden" onclick="switchTab('products', this)"><i data-feather="shopping-bag" class="w-4 h-4 inline mr-1"></i>Products</button>
             <button class="tab-btn" onclick="switchTab('settings', this)"><i data-feather="settings" class="w-4 h-4 inline mr-1"></i>Settings</button>
         </div>
 
@@ -390,6 +400,38 @@
                 <button class="btn-liquid-glow" onclick="doBulkCreate()">
                     <i data-feather="zap" class="w-4 h-4"></i> Create All Posts
                 </button>
+            </div>
+        </div>
+
+        <!-- TAB: PRODUCTS -->
+        <div id="tabProducts" class="tab-content hidden">
+            <div class="flex flex-col sm:flex-row gap-3 mb-4">
+                <div class="flex-1 relative">
+                    <i data-feather="search" class="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                    <input id="productsSearch" class="input-dark input-dark-sm pl-10" placeholder="Search products..." oninput="debouncedLoadProducts()">
+                </div>
+                <div class="flex gap-2 overflow-x-auto">
+                    <button class="btn-hero-glass btn-xs product-filter-btn active" onclick="filterProducts('any', this)">All</button>
+                    <button class="btn-hero-glass btn-xs product-filter-btn" onclick="filterProducts('publish', this)">Published</button>
+                    <button class="btn-hero-glass btn-xs product-filter-btn" onclick="filterProducts('draft', this)">Drafts</button>
+                    <button class="btn-hero-glass btn-xs product-filter-btn" onclick="filterProducts('trash', this)">Trash</button>
+                </div>
+                <button class="btn-liquid-glow btn-sm whitespace-nowrap" onclick="openProductEditor()">
+                    <i data-feather="plus" class="w-4 h-4"></i> New Product
+                </button>
+            </div>
+
+            <div id="productsList" class="glass-panel overflow-hidden">
+                <div class="p-8 text-center text-gray-500 text-sm">Loading products...</div>
+            </div>
+
+            <div id="productsPagination" class="flex items-center justify-between mt-4">
+                <p id="productsCount" class="text-xs text-gray-500"></p>
+                <div class="flex gap-2">
+                    <button id="btnProductsPrev" class="btn-hero-glass btn-xs" onclick="changeProductsPage(-1)" disabled><i data-feather="chevron-left" class="w-3 h-3"></i></button>
+                    <span id="productsPageInfo" class="text-xs text-gray-500 flex items-center px-2"></span>
+                    <button id="btnProductsNext" class="btn-hero-glass btn-xs" onclick="changeProductsPage(1)"><i data-feather="chevron-right" class="w-3 h-3"></i></button>
+                </div>
             </div>
         </div>
 
@@ -500,9 +542,9 @@
                         <button class="btn-hero-glass btn-xs" onclick="insertTag('h2')" title="Heading 2">H2</button>
                         <button class="btn-hero-glass btn-xs" onclick="insertTag('h3')" title="Heading 3">H3</button>
                         <button class="btn-hero-glass btn-xs" onclick="insertTag('p')" title="Paragraph">P</button>
-                        <button class="btn-hero-glass btn-xs" onclick="insertTag('blockquote')" title="Quote">❝</button>
+                        <button class="btn-hero-glass btn-xs" onclick="insertTag('blockquote')" title="Quote">&#10077;</button>
                         <button class="btn-hero-glass btn-xs" onclick="insertLink()" title="Link"><i data-feather="link" class="w-3 h-3"></i></button>
-                        <button class="btn-hero-glass btn-xs" onclick="insertTag('ul')" title="List">• List</button>
+                        <button class="btn-hero-glass btn-xs" onclick="insertTag('ul')" title="List">&#8226; List</button>
                         <button class="btn-hero-glass btn-xs" onclick="insertImg()" title="Image"><i data-feather="image" class="w-3 h-3"></i></button>
                     </div>
 
@@ -594,6 +636,124 @@
     </div>
 </div>
 
+<!-- ═══════════════════════════════════════════ -->
+<!-- SCREEN: PRODUCT EDITOR                     -->
+<!-- ═══════════════════════════════════════════ -->
+<div id="screenProductEditor" class="screen">
+    <div class="max-w-6xl mx-auto px-4 md:px-6 py-6">
+
+        <!-- PRODUCT EDITOR HEADER -->
+        <div class="flex items-center justify-between mb-6">
+            <button class="btn-hero-glass btn-sm" onclick="closeProductEditor()">
+                <i data-feather="arrow-left" class="w-4 h-4"></i> Back
+            </button>
+            <div class="flex gap-2">
+                <button class="btn-hero-glass btn-sm" onclick="saveProduct('draft')">
+                    <i data-feather="save" class="w-4 h-4"></i><span class="hidden sm:inline"> Save Draft</span>
+                </button>
+                <button id="btnPublishProduct" class="btn-liquid-glow btn-sm" onclick="saveProduct('publish')">
+                    <i data-feather="send" class="w-4 h-4"></i><span class="hidden sm:inline"> Publish</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- MAIN PRODUCT EDITOR -->
+            <div class="lg:col-span-2 space-y-4">
+                <input id="productTitle" class="input-dark text-xl font-bold" style="font-family: 'Space Grotesk', sans-serif; font-size: 24px; padding: 18px 20px;" placeholder="Product Name">
+
+                <div>
+                    <label class="sidebar-label">Description</label>
+                    <textarea id="productDescription" class="input-dark" rows="10" placeholder="Full product description..."></textarea>
+                </div>
+
+                <div>
+                    <label class="sidebar-label">Short Description</label>
+                    <textarea id="productShortDescription" class="input-dark" rows="3" placeholder="Brief product summary..."></textarea>
+                </div>
+            </div>
+
+            <!-- PRODUCT SIDEBAR -->
+            <div class="space-y-4">
+                <div class="glass-panel p-5">
+                    <!-- Pricing -->
+                    <div class="sidebar-section">
+                        <label class="sidebar-label">Pricing</label>
+                        <div class="space-y-2">
+                            <input id="productRegularPrice" class="input-dark input-dark-sm" placeholder="Regular Price" type="text">
+                            <input id="productSalePrice" class="input-dark input-dark-sm" placeholder="Sale Price (optional)" type="text">
+                        </div>
+                    </div>
+
+                    <!-- Inventory -->
+                    <div class="sidebar-section">
+                        <label class="sidebar-label">Inventory</label>
+                        <div class="space-y-2">
+                            <input id="productSku" class="input-dark input-dark-sm" placeholder="SKU">
+                            <input id="productStockQty" class="input-dark input-dark-sm" placeholder="Stock Quantity" type="number">
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs text-gray-400">Manage Stock</span>
+                                <div id="productManageStockToggle" class="toggle-track" onclick="this.classList.toggle('active')">
+                                    <div class="toggle-knob"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Status -->
+                    <div class="sidebar-section">
+                        <label class="sidebar-label">Status</label>
+                        <select id="productStatus" class="input-dark input-dark-sm">
+                            <option value="draft">Draft</option>
+                            <option value="publish">Published</option>
+                        </select>
+                    </div>
+
+                    <!-- Product Categories -->
+                    <div class="sidebar-section">
+                        <label class="sidebar-label">Categories</label>
+                        <div id="productCategoriesList" class="space-y-1 mb-2 max-h-32 overflow-y-auto"></div>
+                        <div class="flex gap-2">
+                            <input id="newProductCategory" class="input-dark input-dark-sm flex-1" placeholder="New category">
+                            <button class="btn-hero-glass btn-xs" onclick="addNewProductCategory()">+</button>
+                        </div>
+                    </div>
+
+                    <!-- Tags -->
+                    <div class="sidebar-section">
+                        <label class="sidebar-label">Tags</label>
+                        <input id="productTags" class="input-dark input-dark-sm" placeholder="tag1, tag2, tag3">
+                        <p class="text-xs text-gray-600 mt-1">Comma separated</p>
+                    </div>
+
+                    <!-- Featured Image -->
+                    <div class="sidebar-section">
+                        <label class="sidebar-label">Featured Image</label>
+                        <div id="productFeaturedImgPreview" class="hidden mb-2">
+                            <img id="productFeaturedImgThumb" class="w-full rounded-xl border border-white/10 mb-2" alt="Featured">
+                            <button class="btn-hero-glass btn-xs w-full justify-center text-red-400" onclick="removeProductFeaturedImage()">
+                                <i data-feather="trash-2" class="w-3 h-3"></i> Remove
+                            </button>
+                        </div>
+                        <button class="btn-hero-glass btn-xs w-full justify-center" onclick="document.getElementById('productFeaturedImgInput').click()">
+                            <i data-feather="image" class="w-3 h-3"></i> Upload Image
+                        </button>
+                        <input type="file" id="productFeaturedImgInput" class="hidden" accept="image/*" onchange="handleProductFeaturedUpload(event)">
+                    </div>
+                </div>
+
+                <!-- Danger Zone (edit mode only) -->
+                <div id="productEditorDangerZone" class="glass-panel p-5 hidden">
+                    <label class="sidebar-label text-red-400">Danger Zone</label>
+                    <button class="btn-hero-glass btn-xs w-full justify-center text-red-400 border-red-500/20" onclick="trashProduct()">
+                        <i data-feather="trash-2" class="w-3 h-3"></i> Move to Trash
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 
 <!-- ═══════════════════════════════════════════ -->
 <!-- MODAL TEMPLATE (reused)                    -->
@@ -672,9 +832,11 @@ onAuthStateChanged(auth, async (user) => {
             window._conn = conn;
             showScreen('screenDashboard');
             populateSettings(conn);
-            applyRoleVisibility(conn.is_admin !== false);
+            const hasProducts = !!(conn.has_products);
+            applyRoleVisibility(conn.is_admin !== false, hasProducts);
             loadPosts();
             loadCategories();
+            if (hasProducts) loadProductCategories();
         } else {
             showScreen('screenSetup');
         }
@@ -817,14 +979,19 @@ document.getElementById('btnConnect').addEventListener('click', async () => {
 
         const caps = profile.capabilities || {};
         const isAdmin = !!(caps.agent_access_manage || caps.deployment_read);
-        const connData = { api_base: apiBase, api_key: apiKey, site_name: profile.site_name || '', site_url: profile.site_url || apiBase, is_admin: isAdmin };
+        const hasProducts = !!(caps.products_manage);
+        const connData = { api_base: apiBase, api_key: apiKey, site_name: profile.site_name || '', site_url: profile.site_url || apiBase, is_admin: isAdmin, has_products: hasProducts };
         await saveConnection(currentUser.uid, connData);
         window._conn = { uid: currentUser.uid, ...connData, connected_at: new Date().toISOString() };
         showScreen('screenDashboard');
         populateSettings(window._conn);
-        applyRoleVisibility(isAdmin);
+        applyRoleVisibility(isAdmin, hasProducts);
         loadPosts();
         loadCategories();
+        if (hasProducts) {
+            loadProductCategories();
+            loadProducts();
+        }
         toast('Connected to ' + (profile.site_name || 'your site'), 'success');
     } catch (err) {
         showSetupStatus('Connection failed: ' + err.message, 'error');
@@ -851,6 +1018,7 @@ window.switchTab = (tab, btn) => {
     document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.remove('hidden');
     btn.classList.add('active');
     if (tab === 'media') loadMedia();
+    if (tab === 'products') loadProducts();
     feather.replace();
 };
 
@@ -866,12 +1034,16 @@ function populateSettings(conn) {
     document.getElementById('settingsConnectedAt').textContent = conn.connected_at ? new Date(conn.connected_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 }
 
-function applyRoleVisibility(isAdmin) {
+function applyRoleVisibility(isAdmin, hasProducts) {
     // Hide Media and Bulk tabs for non-admin (client) users
     const mediTabBtn = document.querySelector('[onclick*="switchTab(\'media\'"]');
     const bulkTabBtn = document.querySelector('[onclick*="switchTab(\'bulk\'"]');
     if (mediTabBtn) mediTabBtn.style.display = isAdmin ? '' : 'none';
     if (bulkTabBtn) bulkTabBtn.style.display = isAdmin ? '' : 'none';
+
+    // Show/hide Products tab
+    const productsTabBtn = document.getElementById('tabBtnProducts');
+    if (productsTabBtn) productsTabBtn.style.display = hasProducts ? '' : 'none';
 }
 
 window.testConnection = async () => {
@@ -929,7 +1101,7 @@ async function loadPosts() {
                     </div>
                     <div class="flex items-center gap-3 text-xs text-gray-500">
                         <span>${p.date ? new Date(p.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</span>
-                        ${(p.categories || []).map(c => `<span class="cat-pill">${esc(c)}</span>`).join('')}
+                        ${(p.categories || []).map(c => `<span class="cat-pill">${esc(typeof c === 'string' ? c : c.name)}</span>`).join('')}
                     </div>
                 </div>
                 <div class="flex gap-1 shrink-0">
@@ -1123,7 +1295,7 @@ window.closeEditor = () => {
 function renderCategoryCheckboxes(selected) {
     const container = document.getElementById('categoriesList');
     const cats = allCategories.length ? allCategories : [];
-    const selectedNames = selected.map(s => s.toLowerCase());
+    const selectedNames = selected.map(s => (typeof s === 'string' ? s : s.name || '').toLowerCase());
     container.innerHTML = cats.map(c => `
         <label class="flex items-center gap-2 text-sm cursor-pointer hover:text-white transition p-1 rounded">
             <input type="checkbox" value="${esc(c.name)}" class="cat-checkbox accent-pink-500" ${selectedNames.includes(c.name.toLowerCase()) ? 'checked' : ''}>
@@ -1289,7 +1461,12 @@ window.savePost = async (statusOverride, silent) => {
         }
 
         if (!silent) {
-            toast(statusOverride === 'publish' ? 'Post published!' : 'Post saved', 'success');
+            const permalink = result.permalink || '';
+            if (statusOverride === 'publish' && permalink) {
+                toastHtml('Post published! <a href="' + esc(permalink) + '" target="_blank" style="color:#e6397f;text-decoration:underline;margin-left:6px;">View Post →</a>', 'success');
+            } else {
+                toast(statusOverride === 'publish' ? 'Post published!' : 'Post saved', 'success');
+            }
             document.getElementById('btnPublish').innerHTML = '<i data-feather="send" class="w-4 h-4"></i><span class="hidden sm:inline"> Update</span>';
             feather.replace();
         }
@@ -1315,6 +1492,10 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
         savePost();
     }
+    if ((e.ctrlKey || e.metaKey) && e.key === 's' && document.getElementById('screenProductEditor').classList.contains('active')) {
+        e.preventDefault();
+        saveProduct();
+    }
 });
 
 
@@ -1336,7 +1517,7 @@ async function loadMedia() {
 
         const data = await api('GET', url);
         mediaTotal = data.total || 0;
-        const items = data.items || [];
+        const items = data.items || data.media || [];
 
         if (items.length === 0) {
             container.innerHTML = '<div class="col-span-full p-8 text-center text-gray-500 text-sm glass-panel"><i data-feather="image" class="w-8 h-8 mx-auto mb-2 opacity-40"></i><p>No media found</p></div>';
@@ -1469,6 +1650,352 @@ window.doBulkCreate = async () => {
 
 
 // ═══════════════════════════════════════════
+// PRODUCTS
+// ═══════════════════════════════════════════
+let productsPage = 1;
+let productsFilter = 'any';
+let productsTotal = 0;
+let allProductCategories = [];
+let editingProductId = null;
+let currentProductFeaturedId = null;
+
+async function loadProducts() {
+    const container = document.getElementById('productsList');
+    container.innerHTML = '<div class="p-6"><div class="skeleton h-12 mb-3"></div><div class="skeleton h-12 mb-3"></div><div class="skeleton h-12"></div></div>';
+
+    try {
+        const search = document.getElementById('productsSearch').value.trim();
+        let url = `/products?page=${productsPage}&per_page=${PER_PAGE}`;
+        if (productsFilter !== 'any') url += `&status=${productsFilter}`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+
+        const data = await api('GET', url);
+        productsTotal = data.total || 0;
+        const products = data.products || data.items || [];
+
+        if (products.length === 0) {
+            container.innerHTML = '<div class="p-8 text-center text-gray-500 text-sm"><i data-feather="shopping-bag" class="w-8 h-8 mx-auto mb-2 opacity-40"></i><p>No products found</p></div>';
+            feather.replace();
+            updateProductsPagination();
+            return;
+        }
+
+        container.innerHTML = products.map(p => renderProductRow(p)).join('');
+
+        // Event delegation for product rows
+        container.onclick = (e) => {
+            const actionBtn = e.target.closest('.product-action-btn');
+            if (actionBtn) {
+                const id = Number(actionBtn.dataset.id);
+                const action = actionBtn.dataset.action;
+                if (action === 'trash') quickTrashProduct(id);
+                else if (action === 'restore') quickRestoreProduct(id);
+                else if (action === 'delete') quickDeleteProductPermanent(id);
+                else if (action === 'toggle') quickToggleProduct(id, actionBtn.dataset.status);
+                return;
+            }
+            const row = e.target.closest('.product-row-main');
+            if (row) {
+                const productId = Number(row.closest('.post-row').dataset.productId);
+                openProductEditor(productId);
+            }
+        };
+        feather.replace();
+        updateProductsPagination();
+    } catch (err) {
+        container.innerHTML = `<div class="p-8 text-center text-red-400 text-sm">${esc(err.message)}</div>`;
+    }
+}
+
+function renderProductRow(p) {
+    const priceDisplay = p.sale_price
+        ? `<del class="text-gray-500">$${esc(p.regular_price || '0')}</del> <ins class="text-green-400 no-underline font-bold">$${esc(p.sale_price)}</ins>`
+        : `<span class="text-white">$${esc(p.regular_price || p.price || '0')}</span>`;
+
+    const stockStatus = p.stock_status || (p.in_stock ? 'instock' : 'outofstock');
+    const stockLabel = stockStatus === 'instock' ? 'In Stock' : 'Out of Stock';
+    const stockBadgeClass = stockStatus === 'instock' ? 'status-instock' : 'status-outofstock';
+
+    const categories = (p.categories || []).map(c => `<span class="cat-pill">${esc(typeof c === 'string' ? c : c.name)}</span>`).join('');
+
+    return `
+        <div class="post-row flex items-center justify-between gap-3" data-product-id="${p.id}">
+            <div class="flex-1 min-w-0 product-row-main" style="cursor:pointer">
+                <div class="flex items-center gap-2 mb-1">
+                    <h4 class="text-sm font-bold text-white truncate">${esc(p.name || p.title || '')}</h4>
+                    <span class="status-badge status-${p.status}">${p.status}</span>
+                    <span class="status-badge ${stockBadgeClass}">${stockLabel}</span>
+                </div>
+                <div class="flex items-center gap-3 text-xs text-gray-500">
+                    <span class="product-price-col">${priceDisplay}</span>
+                    ${categories}
+                    <span class="hidden sm:inline text-gray-600">${p.sku ? 'SKU: ' + esc(p.sku) : ''}</span>
+                </div>
+            </div>
+            <div class="flex gap-1 shrink-0">
+                ${p.status === 'trash' ? `
+                    <button class="btn-hero-glass btn-xs text-green-400 product-action-btn" data-action="restore" data-id="${p.id}" title="Restore">
+                        <i data-feather="rotate-ccw" class="w-3 h-3"></i>
+                    </button>
+                    <button class="btn-hero-glass btn-xs text-red-400 product-action-btn" data-action="delete" data-id="${p.id}" title="Delete Permanently">
+                        <i data-feather="x-circle" class="w-3 h-3"></i>
+                    </button>
+                ` : `
+                    <button class="btn-hero-glass btn-xs product-action-btn" data-action="edit" data-id="${p.id}" title="Edit">
+                        <i data-feather="edit-2" class="w-3 h-3"></i>
+                    </button>
+                    <button class="btn-hero-glass btn-xs product-action-btn" data-action="toggle" data-id="${p.id}" data-status="${p.status}" title="${p.status === 'publish' ? 'Revert to Draft' : 'Publish'}">
+                        <i data-feather="${p.status === 'publish' ? 'eye-off' : 'eye'}" class="w-3 h-3"></i>
+                    </button>
+                    <button class="btn-hero-glass btn-xs text-red-400 product-action-btn" data-action="trash" data-id="${p.id}" title="Trash">
+                        <i data-feather="trash-2" class="w-3 h-3"></i>
+                    </button>
+                `}
+            </div>
+        </div>
+    `;
+}
+
+function updateProductsPagination() {
+    const totalPages = Math.ceil(productsTotal / PER_PAGE) || 1;
+    document.getElementById('productsCount').textContent = `${productsTotal} product${productsTotal !== 1 ? 's' : ''}`;
+    document.getElementById('productsPageInfo').textContent = `Page ${productsPage} of ${totalPages}`;
+    document.getElementById('btnProductsPrev').disabled = productsPage <= 1;
+    document.getElementById('btnProductsNext').disabled = productsPage >= totalPages;
+}
+
+window.filterProducts = (status, btn) => {
+    productsFilter = status; productsPage = 1;
+    document.querySelectorAll('.product-filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadProducts();
+};
+
+window.changeProductsPage = (dir) => { productsPage += dir; loadProducts(); };
+
+let productsSearchTimeout;
+window.debouncedLoadProducts = () => { clearTimeout(productsSearchTimeout); productsSearchTimeout = setTimeout(() => { productsPage = 1; loadProducts(); }, 400); };
+
+window.quickToggleProduct = async (id, current) => {
+    try {
+        await api('POST', `/products/${id}`, { status: current === 'publish' ? 'draft' : 'publish' });
+        toast(current === 'publish' ? 'Reverted to draft' : 'Published', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+    await loadProducts();
+};
+
+window.quickTrashProduct = (id) => {
+    showConfirmModal('Trash Product', 'Move this product to trash?', async () => {
+        try {
+            await api('POST', `/products/${id}/trash`);
+            toast('Moved to trash', 'success');
+        } catch (err) { toast(err.message, 'error'); }
+        await loadProducts();
+    });
+};
+
+window.quickRestoreProduct = async (id) => {
+    try {
+        await api('POST', `/products/${id}/restore`);
+        toast('Product restored', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+    await loadProducts();
+};
+
+window.quickDeleteProductPermanent = (id) => {
+    showConfirmModal('Delete Permanently', 'This cannot be undone. Permanently delete this product?', async () => {
+        try {
+            await api('DELETE', `/products/${id}`);
+            toast('Permanently deleted', 'success');
+        } catch (err) { toast(err.message, 'error'); }
+        await loadProducts();
+    });
+};
+
+window.openProductEditor = async (productId) => {
+    editingProductId = productId || null;
+    currentProductFeaturedId = null;
+
+    // Reset all fields
+    document.getElementById('productTitle').value = '';
+    document.getElementById('productDescription').value = '';
+    document.getElementById('productShortDescription').value = '';
+    document.getElementById('productRegularPrice').value = '';
+    document.getElementById('productSalePrice').value = '';
+    document.getElementById('productSku').value = '';
+    document.getElementById('productStockQty').value = '';
+    document.getElementById('productManageStockToggle').classList.remove('active');
+    document.getElementById('productStatus').value = 'draft';
+    document.getElementById('productTags').value = '';
+    document.getElementById('productFeaturedImgPreview').classList.add('hidden');
+    document.getElementById('productEditorDangerZone').classList.toggle('hidden', !productId);
+    document.getElementById('btnPublishProduct').innerHTML = '<i data-feather="send" class="w-4 h-4"></i><span class="hidden sm:inline">' + (productId ? ' Update' : ' Publish') + '</span>';
+
+    renderProductCategoryCheckboxes([]);
+
+    if (productId) {
+        try {
+            const product = await api('GET', `/products/${productId}`);
+            document.getElementById('productTitle').value = product.name || product.title || '';
+            document.getElementById('productDescription').value = product.description || '';
+            document.getElementById('productShortDescription').value = product.short_description || '';
+            document.getElementById('productRegularPrice').value = product.regular_price || '';
+            document.getElementById('productSalePrice').value = product.sale_price || '';
+            document.getElementById('productSku').value = product.sku || '';
+            document.getElementById('productStockQty').value = product.stock_quantity != null ? product.stock_quantity : '';
+            if (product.manage_stock) document.getElementById('productManageStockToggle').classList.add('active');
+            document.getElementById('productStatus').value = product.status || 'draft';
+            document.getElementById('productTags').value = (product.tags || []).map(t => typeof t === 'string' ? t : t.name).join(', ');
+
+            if (product.featured_image) {
+                currentProductFeaturedId = product.featured_image.id || null;
+                if (product.featured_image.url) {
+                    document.getElementById('productFeaturedImgThumb').src = product.featured_image.url;
+                    document.getElementById('productFeaturedImgPreview').classList.remove('hidden');
+                }
+            } else if (product.images && product.images.length > 0) {
+                currentProductFeaturedId = product.images[0].id || null;
+                if (product.images[0].src || product.images[0].url) {
+                    document.getElementById('productFeaturedImgThumb').src = product.images[0].src || product.images[0].url;
+                    document.getElementById('productFeaturedImgPreview').classList.remove('hidden');
+                }
+            }
+
+            const selectedCats = (product.categories || []);
+            renderProductCategoryCheckboxes(selectedCats);
+
+        } catch (err) { toast('Failed to load product: ' + err.message, 'error'); return; }
+    }
+
+    showScreen('screenProductEditor');
+    feather.replace();
+};
+
+window.closeProductEditor = () => {
+    showScreen('screenDashboard');
+    loadProducts();
+};
+
+window.saveProduct = async (statusOverride, silent) => {
+    const title = document.getElementById('productTitle').value.trim();
+    if (!title && !silent) { toast('Product name is required', 'error'); return; }
+    if (!title && silent) return;
+
+    const manageStock = document.getElementById('productManageStockToggle').classList.contains('active');
+
+    const body = {
+        name: title,
+        title: title,
+        description: document.getElementById('productDescription').value,
+        short_description: document.getElementById('productShortDescription').value,
+        regular_price: document.getElementById('productRegularPrice').value.trim(),
+        sale_price: document.getElementById('productSalePrice').value.trim(),
+        sku: document.getElementById('productSku').value.trim(),
+        manage_stock: manageStock,
+        status: statusOverride || document.getElementById('productStatus').value,
+        categories: getSelectedProductCategories(),
+        tags: document.getElementById('productTags').value.split(',').map(t => t.trim()).filter(Boolean),
+    };
+
+    if (manageStock) {
+        const qty = document.getElementById('productStockQty').value.trim();
+        if (qty !== '') body.stock_quantity = parseInt(qty, 10);
+    }
+
+    if (currentProductFeaturedId) {
+        body.featured_image = currentProductFeaturedId;
+    }
+
+    try {
+        let result;
+        if (editingProductId) {
+            result = await api('POST', `/products/${editingProductId}`, body);
+        } else {
+            result = await api('POST', '/products', body);
+            editingProductId = result.id;
+            document.getElementById('productEditorDangerZone').classList.remove('hidden');
+        }
+
+        if (!silent) {
+            const permalink = result.permalink || '';
+            if (statusOverride === 'publish' && permalink) {
+                toastHtml('Product published! <a href="' + esc(permalink) + '" target="_blank" style="color:#e6397f;text-decoration:underline;margin-left:6px;">View Product →</a>', 'success');
+            } else {
+                toast(statusOverride === 'publish' ? 'Product published!' : 'Product saved', 'success');
+            }
+            document.getElementById('btnPublishProduct').innerHTML = '<i data-feather="send" class="w-4 h-4"></i><span class="hidden sm:inline"> Update</span>';
+            feather.replace();
+        }
+    } catch (err) {
+        if (!silent) toast('Save failed: ' + err.message, 'error');
+    }
+};
+
+window.trashProduct = () => {
+    if (!editingProductId) return;
+    showConfirmModal('Trash Product', 'Move this product to trash?', async () => {
+        try {
+            await api('POST', `/products/${editingProductId}/trash`);
+            toast('Moved to trash', 'success');
+            closeProductEditor();
+        } catch (err) { toast(err.message, 'error'); }
+    });
+};
+
+async function loadProductCategories() {
+    try { const data = await api('GET', '/products/categories'); allProductCategories = data.categories || data.items || []; } catch {}
+}
+
+function renderProductCategoryCheckboxes(selected) {
+    const container = document.getElementById('productCategoriesList');
+    const cats = allProductCategories.length ? allProductCategories : [];
+    const selectedNames = selected.map(s => (typeof s === 'string' ? s : s.name || '').toLowerCase());
+    container.innerHTML = cats.map(c => `
+        <label class="flex items-center gap-2 text-sm cursor-pointer hover:text-white transition p-1 rounded">
+            <input type="checkbox" value="${esc(c.name)}" class="product-cat-checkbox accent-pink-500" ${selectedNames.includes(c.name.toLowerCase()) ? 'checked' : ''}>
+            <span class="text-gray-300">${esc(c.name)}</span>
+            <span class="text-gray-600 text-xs ml-auto">(${c.count || 0})</span>
+        </label>
+    `).join('');
+}
+
+function getSelectedProductCategories() {
+    return [...document.querySelectorAll('.product-cat-checkbox:checked')].map(cb => cb.value);
+}
+
+window.addNewProductCategory = () => {
+    const input = document.getElementById('newProductCategory');
+    const name = input.value.trim();
+    if (!name) return;
+    allProductCategories.push({ name, count: 0 });
+    const selected = getSelectedProductCategories();
+    selected.push(name);
+    renderProductCategoryCheckboxes(selected);
+    input.value = '';
+};
+
+window.handleProductFeaturedUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    try {
+        toast('Uploading image...', 'info');
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await api('POST', '/media', fd);
+        currentProductFeaturedId = res.id;
+        document.getElementById('productFeaturedImgThumb').src = res.url || res.source_url || URL.createObjectURL(file);
+        document.getElementById('productFeaturedImgPreview').classList.remove('hidden');
+        toast('Image uploaded', 'success');
+    } catch (err) { toast('Upload failed: ' + err.message, 'error'); }
+};
+
+window.removeProductFeaturedImage = () => {
+    currentProductFeaturedId = null;
+    document.getElementById('productFeaturedImgPreview').classList.add('hidden');
+};
+
+
+// ═══════════════════════════════════════════
 // TOAST SYSTEM
 // ═══════════════════════════════════════════
 window.toast = (msg, type = 'info') => {
@@ -1477,6 +2004,17 @@ window.toast = (msg, type = 'info') => {
     el.className = `toast toast-${type}`;
     const iconMap = { success: 'check-circle', error: 'alert-circle', info: 'info' };
     el.innerHTML = `<i data-feather="${iconMap[type] || 'info'}" class="w-4 h-4 shrink-0"></i><span>${esc(msg)}</span>`;
+    container.appendChild(el);
+    feather.replace();
+    setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateX(100%)'; setTimeout(() => el.remove(), 300); }, 4000);
+};
+
+window.toastHtml = (htmlMsg, type = 'info') => {
+    const container = document.getElementById('toastContainer');
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    const iconMap = { success: 'check-circle', error: 'alert-circle', info: 'info' };
+    el.innerHTML = `<i data-feather="${iconMap[type] || 'info'}" class="w-4 h-4 shrink-0"></i><span>${htmlMsg}</span>`;
     container.appendChild(el);
     feather.replace();
     setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateX(100%)'; setTimeout(() => el.remove(), 300); }, 4000);
