@@ -1527,6 +1527,32 @@
                         </div>
                     </div>
                 </div>
+                <div id="viewProjectsModal" class="fixed inset-0 z-[100] flex items-center justify-center hidden bg-black/80 backdrop-blur-sm transition-opacity px-4">
+    <div class="glass-panel rounded-[2.5rem] p-8 max-w-2xl w-full mx-4 border border-blue-500/30 shadow-[0_0_50px_rgba(59,130,246,0.15)] flex flex-col max-h-[80vh] min-h-0">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h3 class="text-2xl font-bold text-white mb-1">Assigned Projects</h3>
+                <p class="text-blue-400 text-sm font-mono" id="viewProjectsModalUser">user@example.com</p>
+            </div>
+            <button onclick="closeViewProjectsModal()" class="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors"><i data-feather="x" class="w-5 h-5 text-gray-400"></i></button>
+        </div>
+        <div class="overflow-y-auto flex-1 min-h-0 bg-black/20 rounded-[1.5rem] border border-white/5 p-1">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr class="border-b border-white/10 text-[10px] uppercase tracking-widest text-gray-500">
+                        <th class="p-4 font-bold">Project Name</th>
+                        <th class="p-4 font-bold text-right">Status</th>
+                    </tr>
+                </thead>
+                <tbody id="viewProjectsTableBody" class="text-sm">
+                    </tbody>
+            </table>
+        </div>
+        <div class="mt-6 pt-6 border-t border-white/10 flex justify-end">
+            <button onclick="closeViewProjectsModal()" class="btn-hero-glass px-6 py-3">Close</button>
+        </div>
+    </div>
+</div>
 
                 <div id="accessModal"
                     class="fixed inset-0 z-[100] flex items-center justify-center hidden bg-black/80 backdrop-blur-sm transition-opacity">
@@ -4513,15 +4539,15 @@
                         staffCount++;
                         const isSuper = u.uid === SUPER_ADMIN_UID;
                         staffDiv.innerHTML += `
-                            <div class="flex justify-between items-center p-5 bg-white/5 rounded-2xl border border-white/5 text-sm transition-all hover:border-white/10 mb-3">
+                            <div class="flex justify-between items-center p-5 bg-white/5 rounded-2xl border border-white/5 text-sm transition-all hover:border-white/10 hover:bg-white/5 mb-3 cursor-pointer group" onclick="openViewProjectsModal('${u.email}')">
                                 <div class="flex items-center gap-4 min-w-0">
-                                    <div class="w-10 h-10 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0"><i data-feather="user" class="w-5 h-5 text-blue-400"></i></div>
+                                    <div class="w-10 h-10 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform"><i data-feather="user" class="w-5 h-5 text-blue-400"></i></div>
                                     <div class="flex flex-col min-w-0">
                                         <span class="text-base ${isSuper ? 'text-[#FF8A00] font-bold' : 'text-gray-200 font-medium'} truncate">${u.name || u.email} ${isSuper ? '<span class="ml-2 text-[9px] bg-[#FF8A00]/20 text-[#FF8A00] px-2 py-0.5 rounded-full border border-[#FF8A00]/30 tracking-widest">OWNER</span>' : ''}</span>
                                         ${u.name ? `<span class="text-[10px] text-gray-500 font-mono truncate mt-0.5">${u.email}</span>` : ''}
                                     </div>
                                 </div>
-                                <div class="flex items-center gap-2 shrink-0">
+                                <div class="flex items-center gap-2 shrink-0" onclick="event.stopPropagation()">
                                     <button onclick="openEditUserModal('${u.uid}', '${u.email}', '${u.name ? u.name.replace(/'/g, "\\'") : ''}')" class="text-pink-400 hover:text-pink-300 bg-pink-500/10 p-2.5 rounded-xl border border-pink-500/20 transition-colors tooltip" title="Edit Name"><i data-feather="edit-2" class="w-5 h-5"></i></button>
                                 ${!isSuper ? `
                                     <button onclick="openAccessModal('${u.email}')" class="text-blue-400 hover:text-blue-300 bg-blue-500/10 p-2.5 rounded-xl border border-blue-500/20 transition-colors tooltip" title="Manage Folders"><i data-feather="sliders" class="w-5 h-5"></i></button>
@@ -4599,6 +4625,54 @@
             );
         };
         window.currentManageEmail = null;
+        window.openViewProjectsModal = async (email) => {
+            const safeEmail = (email || '').toLowerCase();
+            document.getElementById('viewProjectsModalUser').innerText = safeEmail;
+            const tbody = document.getElementById('viewProjectsTableBody');
+            
+            // Show loading state
+            tbody.innerHTML = '<tr><td colspan="2" class="p-8 text-center text-gray-400 text-sm"><i data-feather="loader" class="animate-spin inline w-4 h-4 mr-2 text-blue-400"></i> Loading projects...</td></tr>';
+            document.getElementById('viewProjectsModal').classList.remove('hidden');
+            if (window.feather) feather.replace();
+
+            let assigned = [];
+            try {
+                const token = await auth.currentUser.getIdToken();
+                const permsRes = await fetch(API_ADMIN, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ action: "getProjects", email: safeEmail })
+                });
+                const permsData = await permsRes.json().catch(() => ({}));
+                if (permsRes.ok && permsData.success) assigned = permsData.projects || [];
+            } catch (e) {
+                console.error("Failed to load assigned projects:", e);
+                tbody.innerHTML = '<tr><td colspan="2" class="p-8 text-center text-red-400 text-sm">Error loading projects.</td></tr>';
+                return;
+            }
+
+            // Render Table
+            if (assigned.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2" class="p-8 text-center text-gray-500 text-sm italic">No projects currently assigned to this employee.</td></tr>';
+            } else {
+                tbody.innerHTML = assigned.map(project => `
+                    <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                        <td class="p-4 flex items-center gap-3">
+                            <i data-feather="folder" class="w-4 h-4 text-blue-400 shrink-0"></i>
+                            <span class="font-bold text-gray-200 text-sm font-mono truncate">/${project}</span>
+                        </td>
+                        <td class="p-4 text-right">
+                            <span class="text-[10px] bg-green-500/20 text-green-400 px-2 py-1 rounded-full border border-green-500/30 uppercase tracking-widest font-bold">Active</span>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+            if (window.feather) feather.replace();
+        };
+
+        window.closeViewProjectsModal = () => {
+            document.getElementById('viewProjectsModal').classList.add('hidden');
+        };
 
         window.openAccessModal = async (email) => {
             window.currentManageEmail = (email || '').toLowerCase();
