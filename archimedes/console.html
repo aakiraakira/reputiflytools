@@ -918,8 +918,19 @@ async function api(method, endpoint, body) {
     } else if (body instanceof FormData) {
         opts.body = body;
     }
-    const res = await fetch(conn.api_base + endpoint, opts);
-    const json = await res.json();
+    let res;
+    try {
+        res = await fetch(conn.api_base + endpoint, opts);
+    } catch (netErr) {
+        throw new Error('Network error — check that the site is reachable and CORS is allowed. (' + netErr.message + ')');
+    }
+    const text = await res.text();
+    let json;
+    try {
+        json = JSON.parse(text);
+    } catch {
+        throw new Error(`Server returned non-JSON (HTTP ${res.status}). ${text.substring(0, 120)}`);
+    }
     if (!res.ok) throw new Error(json.message || json.data?.message || `HTTP ${res.status}`);
     return json;
 }
@@ -973,14 +984,28 @@ document.getElementById('btnConnect').addEventListener('click', async () => {
 
     showSetupStatus('Testing connection...', 'info');
     try {
-        const res = await fetch(apiBase + '/profile', { headers: { 'Authorization': 'Bearer ' + apiKey } });
-        const profile = await res.json();
-        if (!res.ok) throw new Error(profile.message || 'Connection failed');
+        let res;
+        try {
+            res = await fetch(apiBase + '/profile', { headers: { 'Authorization': 'Bearer ' + apiKey } });
+        } catch (netErr) {
+            showSetupStatus('Network error — cannot reach the site. Check the URL and try again. (' + netErr.message + ')', 'error');
+            return;
+        }
+        let profile;
+        try {
+            profile = await res.json();
+        } catch {
+            showSetupStatus('Server returned invalid response (not JSON). HTTP ' + res.status + '. The site may be down or the API URL may be wrong.', 'error');
+            return;
+        }
+        if (!res.ok) throw new Error(profile.message || profile.data?.message || 'Connection failed (HTTP ' + res.status + ')');
 
         const caps = profile.capabilities || {};
         const isAdmin = !!(caps.agent_access_manage || caps.deployment_read);
         const hasProducts = !!(caps.products_manage);
-        const connData = { api_base: apiBase, api_key: apiKey, site_name: profile.site_name || '', site_url: profile.site_url || apiBase, is_admin: isAdmin, has_products: hasProducts };
+        // Profile returns site_url but not site_name — derive name from URL hostname
+        const siteName = profile.site_name || (() => { try { return new URL(profile.site_url || apiBase).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+        const connData = { api_base: apiBase, api_key: apiKey, site_name: siteName, site_url: profile.site_url || apiBase, is_admin: isAdmin, has_products: hasProducts };
         await saveConnection(currentUser.uid, connData);
         window._conn = { uid: currentUser.uid, ...connData, connected_at: new Date().toISOString() };
         showScreen('screenDashboard');
@@ -992,7 +1017,7 @@ document.getElementById('btnConnect').addEventListener('click', async () => {
             loadProductCategories();
             loadProducts();
         }
-        toast('Connected to ' + (profile.site_name || 'your site'), 'success');
+        toast('Connected to ' + (siteName || 'your site'), 'success');
     } catch (err) {
         showSetupStatus('Connection failed: ' + err.message, 'error');
     }
