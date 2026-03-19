@@ -532,7 +532,7 @@
                     </div>
 
                     <!-- Simple Mode Toolbar -->
-                    <div id="simpleToolbar" class="flex gap-1 mb-2 overflow-x-auto pb-1" style="-webkit-overflow-scrolling:touch;scrollbar-width:none;">
+                    <div id="simpleToolbar" class="flex gap-1 mb-2 overflow-x-auto pb-1" style="-webkit-overflow-scrolling:touch;scrollbar-width:none;flex-wrap:nowrap;">
                         <button class="btn-hero-glass btn-xs shrink-0" onclick="insertTag('b')" title="Bold"><b>B</b></button>
                         <button class="btn-hero-glass btn-xs shrink-0" onclick="insertTag('i')" title="Italic"><i>I</i></button>
                         <button class="btn-hero-glass btn-xs shrink-0" onclick="insertTag('u')" title="Underline"><u>U</u></button>
@@ -561,16 +561,19 @@
                 <div class="glass-panel p-5">
                     <!-- Featured Image (always visible) -->
                     <div class="sidebar-section">
-                        <label class="sidebar-label mb-3">Featured Image</label>
+                        <label class="sidebar-label" style="margin-bottom:12px;">Featured Image</label>
                         <div id="featuredImgPreview" class="hidden mb-3">
                             <img id="featuredImgThumb" class="w-full rounded-xl border border-white/10 mb-2" alt="Featured">
                             <button class="btn-hero-glass btn-xs w-full justify-center text-red-400" onclick="removeFeaturedImage()">
                                 <i data-feather="trash-2" class="w-3 h-3"></i> Remove
                             </button>
                         </div>
-                        <div id="featuredImgPlaceholder" class="w-full rounded-xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center py-6 mb-3 cursor-pointer hover:border-white/20 transition" onclick="document.getElementById('featuredImgInput').click()">
-                            <i data-feather="image" class="w-8 h-8 text-gray-600 mb-2"></i>
-                            <p class="text-xs text-gray-500">Click to upload</p>
+                        <div id="featuredImgPlaceholder" class="w-full rounded-xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center cursor-pointer hover:border-white/20 transition" style="aspect-ratio:16/9;background:rgba(255,255,255,0.02);margin-bottom:12px;" onclick="document.getElementById('featuredImgInput').click()">
+                            <div style="width:48px;height:48px;border-radius:12px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;margin-bottom:8px;">
+                                <i data-feather="image" class="w-6 h-6 text-gray-600"></i>
+                            </div>
+                            <p class="text-xs text-gray-500" style="margin-bottom:2px;">Click to set featured image</p>
+                            <p class="text-xs text-gray-600">JPG, PNG, WebP</p>
                         </div>
                         <button id="btnUploadFeatured" class="btn-hero-glass btn-xs w-full justify-center" onclick="document.getElementById('featuredImgInput').click()">
                             <i data-feather="image" class="w-3 h-3"></i> Upload Image
@@ -2269,10 +2272,17 @@ window.toastHtml = (htmlMsg, type = 'info') => {
 // SUCCESS MODAL (post publish)
 // ═══════════════════════════════════════════
 function showSuccessModal(title, message, permalink) {
-    document.getElementById('modalTitle').textContent = title;
-    document.getElementById('modalBody').innerHTML = '';
     modalCallback = null;
     modalBusy = false;
+
+    // Build full modal content with top-right X close button
+    const modalPanel = document.getElementById('modalBackdrop').querySelector('.glass-panel');
+    const oldTitle = document.getElementById('modalTitle');
+    const oldBody = document.getElementById('modalBody');
+    const oldActions = document.getElementById('modalActions');
+
+    // Add close X at top-right by wrapping title row
+    oldTitle.textContent = title;
 
     let bodyHtml = `<p style="color:#a1a1aa;font-size:14px;margin-bottom:20px;">${esc(message)}</p>`;
     if (permalink) {
@@ -2282,14 +2292,30 @@ function showSuccessModal(title, message, permalink) {
                 <a href="${esc(permalink)}" target="_blank" rel="noopener" style="color:#4ade80;font-size:14px;word-break:break-all;text-decoration:underline;text-underline-offset:3px;">${esc(permalink)}</a>
             </div>`;
     }
-    document.getElementById('modalBody').innerHTML = bodyHtml;
+    oldBody.innerHTML = bodyHtml;
 
-    let actionsHtml = '<button class="btn-hero-glass btn-sm" onclick="closeModal()"><i data-feather="x" class="w-4 h-4"></i> Close</button>';
+    // Add top-right X close button before title
+    let closeX = document.getElementById('modalCloseX');
+    if (!closeX) {
+        closeX = document.createElement('button');
+        closeX.id = 'modalCloseX';
+        closeX.className = 'btn-hero-glass btn-xs';
+        closeX.style.cssText = 'position:absolute;top:16px;right:16px;z-index:10;';
+        closeX.innerHTML = '<i data-feather="x" class="w-4 h-4"></i>';
+        closeX.onclick = () => closeModal();
+        modalPanel.style.position = 'relative';
+        modalPanel.appendChild(closeX);
+    }
+    closeX.classList.remove('hidden');
+
+    let actionsHtml = '';
     if (permalink) {
         actionsHtml += `<button class="btn-hero-glass btn-sm" onclick="navigator.clipboard.writeText('${esc(permalink)}');toast('Link copied!','success')"><i data-feather="copy" class="w-4 h-4"></i> Copy Link</button>`;
         actionsHtml += `<a href="${esc(permalink)}" target="_blank" rel="noopener" class="btn-liquid-glow btn-sm" style="text-decoration:none"><i data-feather="external-link" class="w-4 h-4"></i> View Post</a>`;
+    } else {
+        actionsHtml = '<button class="btn-hero-glass btn-sm" onclick="closeModal()"><i data-feather="x" class="w-4 h-4"></i> Close</button>';
     }
-    document.getElementById('modalActions').innerHTML = actionsHtml;
+    oldActions.innerHTML = actionsHtml;
     document.getElementById('modalBackdrop').classList.remove('hidden');
     feather.replace();
 }
@@ -2320,6 +2346,9 @@ function showConfirmModal(title, body, onConfirm) {
     document.getElementById('modalBody').textContent = body;
     modalCallback = onConfirm;
     modalBusy = false;
+    // Hide the top-right X (only for success modals)
+    const closeX = document.getElementById('modalCloseX');
+    if (closeX) closeX.classList.add('hidden');
     document.getElementById('modalActions').innerHTML = `
         <button class="btn-hero-glass btn-sm" onclick="closeModal()">Cancel</button>
         <button id="modalConfirmBtn" class="btn-liquid-glow btn-sm" onclick="confirmModal()">Confirm</button>
