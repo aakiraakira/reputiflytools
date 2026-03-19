@@ -184,6 +184,8 @@
         .sidebar-section:last-child { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
         .sidebar-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255,255,255,0.4); margin-bottom: 8px; }
 
+        #simpleToolbar::-webkit-scrollbar { display: none; }
+
         @media (max-width: 768px) {
             input, textarea, select { font-size: 16px !important; }
             .glass-panel { border-radius: 16px; }
@@ -530,17 +532,17 @@
                     </div>
 
                     <!-- Simple Mode Toolbar -->
-                    <div id="simpleToolbar" class="flex gap-1 mb-2 flex-wrap">
-                        <button class="btn-hero-glass btn-xs" onclick="insertTag('b')" title="Bold"><b>B</b></button>
-                        <button class="btn-hero-glass btn-xs" onclick="insertTag('i')" title="Italic"><i>I</i></button>
-                        <button class="btn-hero-glass btn-xs" onclick="insertTag('u')" title="Underline"><u>U</u></button>
-                        <button class="btn-hero-glass btn-xs" onclick="insertTag('h2')" title="Heading 2">H2</button>
-                        <button class="btn-hero-glass btn-xs" onclick="insertTag('h3')" title="Heading 3">H3</button>
-                        <button class="btn-hero-glass btn-xs" onclick="insertTag('p')" title="Paragraph">P</button>
-                        <button class="btn-hero-glass btn-xs" onclick="insertTag('blockquote')" title="Quote">&#10077;</button>
-                        <button class="btn-hero-glass btn-xs" onclick="insertLink()" title="Link"><i data-feather="link" class="w-3 h-3"></i></button>
-                        <button class="btn-hero-glass btn-xs" onclick="insertTag('ul')" title="List">&#8226; List</button>
-                        <button class="btn-hero-glass btn-xs" onclick="insertImg()" title="Image"><i data-feather="image" class="w-3 h-3"></i></button>
+                    <div id="simpleToolbar" class="flex gap-1 mb-2 overflow-x-auto pb-1" style="-webkit-overflow-scrolling:touch;scrollbar-width:none;">
+                        <button class="btn-hero-glass btn-xs shrink-0" onclick="insertTag('b')" title="Bold"><b>B</b></button>
+                        <button class="btn-hero-glass btn-xs shrink-0" onclick="insertTag('i')" title="Italic"><i>I</i></button>
+                        <button class="btn-hero-glass btn-xs shrink-0" onclick="insertTag('u')" title="Underline"><u>U</u></button>
+                        <button class="btn-hero-glass btn-xs shrink-0" onclick="insertTag('h2')" title="Heading 2">H2</button>
+                        <button class="btn-hero-glass btn-xs shrink-0" onclick="insertTag('h3')" title="Heading 3">H3</button>
+                        <button class="btn-hero-glass btn-xs shrink-0" onclick="insertTag('p')" title="Paragraph">P</button>
+                        <button class="btn-hero-glass btn-xs shrink-0" onclick="insertTag('blockquote')" title="Quote">&#10077;</button>
+                        <button class="btn-hero-glass btn-xs shrink-0" onclick="insertLink()" title="Link"><i data-feather="link" class="w-3 h-3"></i></button>
+                        <button class="btn-hero-glass btn-xs shrink-0" onclick="insertTag('ul')" title="List">&#8226; List</button>
+                        <button class="btn-hero-glass btn-xs shrink-0" onclick="insertImg()" title="Image"><i data-feather="image" class="w-3 h-3"></i></button>
                     </div>
 
                     <textarea id="editorContent" class="input-dark" rows="16" placeholder="Write your post content here..."></textarea>
@@ -559,12 +561,16 @@
                 <div class="glass-panel p-5">
                     <!-- Featured Image (always visible) -->
                     <div class="sidebar-section">
-                        <label class="sidebar-label">Featured Image</label>
-                        <div id="featuredImgPreview" class="hidden mb-2">
+                        <label class="sidebar-label mb-3">Featured Image</label>
+                        <div id="featuredImgPreview" class="hidden mb-3">
                             <img id="featuredImgThumb" class="w-full rounded-xl border border-white/10 mb-2" alt="Featured">
                             <button class="btn-hero-glass btn-xs w-full justify-center text-red-400" onclick="removeFeaturedImage()">
                                 <i data-feather="trash-2" class="w-3 h-3"></i> Remove
                             </button>
+                        </div>
+                        <div id="featuredImgPlaceholder" class="w-full rounded-xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center py-6 mb-3 cursor-pointer hover:border-white/20 transition" onclick="document.getElementById('featuredImgInput').click()">
+                            <i data-feather="image" class="w-8 h-8 text-gray-600 mb-2"></i>
+                            <p class="text-xs text-gray-500">Click to upload</p>
                         </div>
                         <button id="btnUploadFeatured" class="btn-hero-glass btn-xs w-full justify-center" onclick="document.getElementById('featuredImgInput').click()">
                             <i data-feather="image" class="w-3 h-3"></i> Upload Image
@@ -769,7 +775,7 @@
 <!-- ═══════════════════════════════════════════ -->
 <!-- MODAL TEMPLATE (reused)                    -->
 <!-- ═══════════════════════════════════════════ -->
-<div id="modalBackdrop" class="modal-backdrop hidden" onclick="closeModal(event)">
+<div id="modalBackdrop" class="modal-backdrop hidden" onclick="closeModal(event)" style="z-index:9500">
     <div class="glass-panel p-6 md:p-8 w-full max-w-md" onclick="event.stopPropagation()">
         <h3 id="modalTitle" class="text-lg font-bold mb-2"></h3>
         <p id="modalBody" class="text-sm text-gray-400 mb-6"></p>
@@ -957,8 +963,19 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     }
 });
 
-window.doLogout = async () => { await signOut(auth); };
-document.getElementById('btnSetupLogout').addEventListener('click', () => signOut(auth));
+window.doLogout = async () => {
+    // Clear IndexedDB connection so stale keys don't persist across logins
+    if (currentUser) {
+        try { await deleteConnection(currentUser.uid); } catch {}
+    }
+    window._conn = null;
+    await signOut(auth);
+};
+document.getElementById('btnSetupLogout').addEventListener('click', () => {
+    if (currentUser) { deleteConnection(currentUser.uid).catch(() => {}); }
+    window._conn = null;
+    signOut(auth);
+});
 
 
 // ═══════════════════════════════════════════
@@ -1004,6 +1021,7 @@ async function deleteConnection(uid) {
 // ═══════════════════════════════════════════
 // API CLIENT
 // ═══════════════════════════════════════════
+let _disconnecting403 = false;
 async function api(method, endpoint, body) {
     const conn = window._conn;
     if (!conn) throw new Error('Not connected');
@@ -1017,9 +1035,14 @@ async function api(method, endpoint, body) {
     } else if (body instanceof FormData) {
         opts.body = body;
     }
+    // Cache-bust GET requests to prevent stale server-side cached responses
+    let fetchUrl = conn.api_base + endpoint;
+    if (method === 'GET') {
+        fetchUrl += (fetchUrl.includes('?') ? '&' : '?') + '_=' + Date.now();
+    }
     let res;
     try {
-        res = await fetch(conn.api_base + endpoint, opts);
+        res = await fetch(fetchUrl, opts);
     } catch (netErr) {
         throw new Error('Network error — check that the site is reachable and CORS is allowed. (' + netErr.message + ')');
     }
@@ -1031,13 +1054,25 @@ async function api(method, endpoint, body) {
         throw new Error(`Server returned non-JSON (HTTP ${res.status}). ${text.substring(0, 120)}`);
     }
     if (!res.ok) {
-        // If 403 (forbidden) — API key is stale/revoked, clear connection and go to setup
+        // Handle 403 responses — distinguish auth failures from license/permission issues
         if (res.status === 403 && currentUser) {
-            await deleteConnection(currentUser.uid);
-            window._conn = null;
-            showScreen('screenSetup');
-            showSetupStatus('Your API key was rejected by the site. Please reconnect with a valid key.', 'error');
-            throw new Error('API key rejected (403). Connection cleared.');
+            const errCode = json.code || '';
+            // License locked/denied — NOT an auth failure, keep connection alive
+            if (errCode === 'rspd_agent_license_locked' || errCode === 'rspd_license_locked') {
+                throw new Error('Site license is not active: ' + (json.message || 'License locked. Contact your administrator.'));
+            }
+            // Actual auth failure — stale/revoked API key, clear connection
+            if (!_disconnecting403) {
+                _disconnecting403 = true;
+                const oldSite = window._conn?.site_name || '';
+                await deleteConnection(currentUser.uid);
+                window._conn = null;
+                document.getElementById('headerSiteName').textContent = '';
+                showScreen('screenSetup');
+                showSetupStatus('Your API key was rejected by ' + (oldSite || 'the site') + '. Please upload a fresh JSON key to reconnect.', 'error');
+                setTimeout(() => { _disconnecting403 = false; }, 2000);
+                throw new Error('API key rejected (403). Connection cleared.');
+            }
         }
         throw new Error(json.message || json.data?.message || `HTTP ${res.status}`);
     }
@@ -1224,8 +1259,12 @@ async function loadPosts() {
         if (search) url += `&search=${encodeURIComponent(search)}`;
 
         const data = await api('GET', url);
-        postsTotal = data.total || 0;
-        const posts = data.posts || [];
+        let posts = data.posts || [];
+        // "All" filter: exclude trashed posts (like WordPress) — use "Trash" filter to see them
+        if (postsFilter === 'any') {
+            posts = posts.filter(p => p.status !== 'trash');
+        }
+        postsTotal = postsFilter === 'any' ? posts.length : (data.total || 0);
 
         if (posts.length === 0) {
             container.innerHTML = '<div class="p-8 text-center text-gray-500 text-sm"><i data-feather="inbox" class="w-8 h-8 mx-auto mb-2 opacity-40"></i><p>No posts found</p></div>';
@@ -1323,7 +1362,10 @@ window.quickTrash = (id) => {
         try {
             await api('POST', `/posts/${id}/trash`);
             toast('Moved to trash', 'success');
-        } catch (err) { toast(err.message, 'error'); }
+        } catch (err) {
+            // Still refresh even on error (post may already be trashed)
+            toast(err.message, 'error');
+        }
         await loadPosts();
     });
 };
@@ -1381,6 +1423,8 @@ window.openEditor = async (postId) => {
     document.getElementById('editorDate').value = '';
     document.getElementById('scheduleDateWrap').classList.add('hidden');
     document.getElementById('featuredImgPreview').classList.add('hidden');
+    document.getElementById('featuredImgPlaceholder').classList.remove('hidden');
+    document.getElementById('btnUploadFeatured').classList.remove('hidden');
     document.getElementById('metaFields').innerHTML = '';
     document.getElementById('editorDangerZone').classList.toggle('hidden', !postId);
     document.getElementById('btnPublish').innerHTML = '<i data-feather="send" class="w-4 h-4"></i><span class="hidden sm:inline">' + (postId ? ' Update' : ' Publish') + '</span>';
@@ -1407,6 +1451,8 @@ window.openEditor = async (postId) => {
                 if (post.featured_image.url) {
                     document.getElementById('featuredImgThumb').src = post.featured_image.url;
                     document.getElementById('featuredImgPreview').classList.remove('hidden');
+                    document.getElementById('featuredImgPlaceholder').classList.add('hidden');
+                    document.getElementById('btnUploadFeatured').classList.add('hidden');
                 }
             }
 
@@ -1538,11 +1584,18 @@ window.handleFeaturedUpload = async (event) => {
         currentFeaturedId = res.id;
         document.getElementById('featuredImgThumb').src = res.url || res.source_url || URL.createObjectURL(file);
         document.getElementById('featuredImgPreview').classList.remove('hidden');
+        document.getElementById('featuredImgPlaceholder').classList.add('hidden');
+        document.getElementById('btnUploadFeatured').classList.add('hidden');
         toast('Image uploaded', 'success');
     } catch (err) { toast('Upload failed: ' + err.message, 'error'); }
 };
 
-window.removeFeaturedImage = () => { currentFeaturedId = null; document.getElementById('featuredImgPreview').classList.add('hidden'); };
+window.removeFeaturedImage = () => {
+    currentFeaturedId = null;
+    document.getElementById('featuredImgPreview').classList.add('hidden');
+    document.getElementById('featuredImgPlaceholder').classList.remove('hidden');
+    document.getElementById('btnUploadFeatured').classList.remove('hidden');
+};
 
 // Meta fields
 window.addMetaField = (key, value) => {
@@ -1573,6 +1626,20 @@ window.savePost = async (statusOverride, silent) => {
     const title = document.getElementById('editorTitle').value.trim();
     if (!title && !silent) { toast('Title is required', 'error'); return; }
     if (!title && silent) return; // Don't auto-save empty posts
+
+    // Show loading state on buttons
+    const publishBtn = document.getElementById('btnPublish');
+    const draftBtn = document.getElementById('btnSaveDraft');
+    if (!silent) {
+        publishBtn.disabled = true;
+        draftBtn.disabled = true;
+        if (statusOverride === 'publish') {
+            publishBtn.innerHTML = '<i data-feather="loader" class="w-4 h-4 animate-spin"></i><span class="hidden sm:inline"> Publishing...</span>';
+        } else {
+            draftBtn.innerHTML = '<i data-feather="loader" class="w-4 h-4 animate-spin"></i><span class="hidden sm:inline"> Saving...</span>';
+        }
+        feather.replace();
+    }
 
     const body = {
         title,
@@ -1623,9 +1690,19 @@ window.savePost = async (statusOverride, silent) => {
             }
             document.getElementById('btnPublish').innerHTML = '<i data-feather="send" class="w-4 h-4"></i><span class="hidden sm:inline"> Update</span>';
             feather.replace();
+            // Refresh the posts list so the frontend is up to date
+            loadPosts();
         }
     } catch (err) {
         if (!silent) toast('Save failed: ' + err.message, 'error');
+    } finally {
+        // Restore button state
+        if (!silent) {
+            publishBtn.disabled = false;
+            draftBtn.disabled = false;
+            draftBtn.innerHTML = '<i data-feather="save" class="w-4 h-4"></i><span class="hidden sm:inline"> Save Draft</span>';
+            feather.replace();
+        }
     }
 };
 
@@ -1824,8 +1901,11 @@ async function loadProducts() {
         if (search) url += `&search=${encodeURIComponent(search)}`;
 
         const data = await api('GET', url);
-        productsTotal = data.total || 0;
-        const products = data.products || data.items || [];
+        let products = data.products || data.items || [];
+        if (productsFilter === 'any') {
+            products = products.filter(p => p.status !== 'trash');
+        }
+        productsTotal = productsFilter === 'any' ? products.length : (data.total || 0);
 
         if (products.length === 0) {
             container.innerHTML = '<div class="p-8 text-center text-gray-500 text-sm"><i data-feather="shopping-bag" class="w-8 h-8 mx-auto mb-2 opacity-40"></i><p>No products found</p></div>';
@@ -2087,6 +2167,8 @@ window.saveProduct = async (statusOverride, silent) => {
             }
             document.getElementById('btnPublishProduct').innerHTML = '<i data-feather="send" class="w-4 h-4"></i><span class="hidden sm:inline"> Update</span>';
             feather.replace();
+            // Refresh the products list so the frontend is up to date
+            loadProducts();
         }
     } catch (err) {
         if (!silent) toast('Save failed: ' + err.message, 'error');
@@ -2202,12 +2284,10 @@ function showSuccessModal(title, message, permalink) {
     }
     document.getElementById('modalBody').innerHTML = bodyHtml;
 
-    let actionsHtml = '';
+    let actionsHtml = '<button class="btn-hero-glass btn-sm" onclick="closeModal()"><i data-feather="x" class="w-4 h-4"></i> Close</button>';
     if (permalink) {
         actionsHtml += `<button class="btn-hero-glass btn-sm" onclick="navigator.clipboard.writeText('${esc(permalink)}');toast('Link copied!','success')"><i data-feather="copy" class="w-4 h-4"></i> Copy Link</button>`;
         actionsHtml += `<a href="${esc(permalink)}" target="_blank" rel="noopener" class="btn-liquid-glow btn-sm" style="text-decoration:none"><i data-feather="external-link" class="w-4 h-4"></i> View Post</a>`;
-    } else {
-        actionsHtml += `<button class="btn-liquid-glow btn-sm" onclick="closeModal()">OK</button>`;
     }
     document.getElementById('modalActions').innerHTML = actionsHtml;
     document.getElementById('modalBackdrop').classList.remove('hidden');
