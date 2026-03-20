@@ -1313,8 +1313,36 @@ let cachedFieldDefs = {};
 
 async function loadPostTypes(retries = 1) {
     try {
-        const data = await api('GET', '/post-types');
-        availablePostTypes = data.post_types || [];
+        const [postTypesData, customPostTypesData] = await Promise.all([
+            api('GET', '/post-types'),
+            api('GET', '/custom-post-types').catch(() => ({ custom_post_types: [] }))
+        ]);
+
+        const allPostTypes = postTypesData.post_types || [];
+        const rspdCustomPostTypes = customPostTypesData.custom_post_types || [];
+        const allowedPostTypes = new Set(['post']);
+
+        rspdCustomPostTypes.forEach(cpt => {
+            const slug = cpt && (cpt.slug || cpt.name);
+            if (slug) allowedPostTypes.add(String(slug));
+        });
+
+        availablePostTypes = allPostTypes.filter(type => allowedPostTypes.has(type.name));
+
+        if (!availablePostTypes.length) {
+            availablePostTypes = allPostTypes.filter(type => type.name === 'post');
+        }
+
+        if (!availablePostTypes.length) {
+            availablePostTypes = allPostTypes;
+        }
+
+        if (!availablePostTypes.some(type => type.name === currentPostType)) {
+            currentPostType = availablePostTypes.some(type => type.name === 'post')
+                ? 'post'
+                : (availablePostTypes[0]?.name || 'post');
+        }
+
         const selector = document.getElementById('postTypeSelector');
         if (availablePostTypes.length > 1) {
             selector.innerHTML = availablePostTypes.map(t =>
@@ -1361,6 +1389,57 @@ async function loadFieldDefinitions(postType) {
     }
 }
 
+let pendingMediaUploads = 0;
+
+function normalizeMediaResponse(response) {
+    return response && response.media ? response.media : response;
+}
+
+function beginMediaUpload() {
+    pendingMediaUploads += 1;
+}
+
+function endMediaUpload() {
+    pendingMediaUploads = Math.max(0, pendingMediaUploads - 1);
+}
+
+function hasPendingMediaUploads() {
+    return pendingMediaUploads > 0;
+}
+
+function getPendingMediaUploadMessage() {
+    if (pendingMediaUploads <= 1) {
+        return 'Please wait for the current image upload to finish before saving.';
+    }
+    return `Please wait for ${pendingMediaUploads} image uploads to finish before saving.`;
+}
+
+async function hydrateAcfImagePreviews(container) {
+    const imageFields = [...container.querySelectorAll('[data-acf-type="image"]')];
+
+    for (const field of imageFields) {
+        const attachmentId = field.getAttribute('data-attachment-id');
+        const preview = field.querySelector('.acf-img-preview');
+        const button = field.querySelector('button');
+
+        if (!attachmentId || !preview || !preview.classList.contains('hidden')) continue;
+
+        try {
+            const media = normalizeMediaResponse(await api('GET', `/media/${attachmentId}`));
+            if (!media || !media.url) continue;
+            preview.innerHTML = `<img src="${esc(media.url)}" class="w-full rounded-lg border border-white/10" style="max-height:120px;object-fit:cover;">`;
+            preview.classList.remove('hidden');
+            if (button) {
+                button.innerHTML = '<i data-feather="image" class="w-3 h-3"></i> Change Image';
+            }
+        } catch {
+            // Keep the field editable even if the media item no longer resolves.
+        }
+    }
+
+    feather.replace();
+}
+
 function renderAcfFields(fieldData, existingValues) {
     const container = document.getElementById('acfFieldsContainer');
     const wrap = document.getElementById('acfFieldsWrap');
@@ -1373,16 +1452,24 @@ function renderAcfFields(fieldData, existingValues) {
 
     const groups = fieldData.field_groups;
     let hasFields = false;
+    const seenFieldKeys = new Set();
 
     groups.forEach(group => {
         if (!group.fields || group.fields.length === 0) return;
+        const uniqueFields = group.fields.filter(field => {
+            const fieldName = field && field.name ? String(field.name) : '';
+            if (!fieldName || seenFieldKeys.has(fieldName)) return false;
+            seenFieldKeys.add(fieldName);
+            return true;
+        });
+        if (uniqueFields.length === 0) return;
         hasFields = true;
 
         const groupDiv = document.createElement('div');
         groupDiv.className = 'sidebar-section';
         groupDiv.innerHTML = `<div class="acf-group-title">${esc(group.title)}</div>`;
 
-        group.fields.forEach(field => {
+        uniqueFields.forEach(field => {
             const val = existingValues ? (existingValues[field.name] ?? field.default_value ?? '') : (field.default_value ?? '');
             const fieldDiv = document.createElement('div');
             fieldDiv.className = 'acf-field-wrap';
@@ -1450,7 +1537,7 @@ function renderAcfFields(fieldData, existingValues) {
                     break;
 
                 case 'image':
-                    const imgUrl = (val && typeof val === 'object') ? (val.url || '') : '';
+                    const imgUrl = (val && typeof val === 'object') ? (val.url || val.source_url || '') : '';
                     const imgId = (val && typeof val === 'object') ? (val.id || val.ID || '') : (val || '');
                     inputHtml = `<div data-acf-key="${esc(field.name)}" data-acf-type="image" data-attachment-id="${imgId}">
                         <div class="acf-img-preview ${imgUrl ? '' : 'hidden'}" style="margin-bottom:8px;">
@@ -1505,6 +1592,7 @@ function renderAcfFields(fieldData, existingValues) {
     container.querySelectorAll('[data-acf-type="gallery"]').forEach(el => {
         loadGalleryPreviews(el);
     });
+    hydrateAcfImagePreviews(container);
 
     // Wire up image field file inputs
     container.querySelectorAll('[data-acf-type="image"] .acf-img-input').forEach(input => {
@@ -1512,20 +1600,25 @@ function renderAcfFields(fieldData, existingValues) {
             const file = e.target.files[0];
             if (!file) return;
             const parent = input.closest('[data-acf-type="image"]');
+            beginMediaUpload();
             try {
                 toast('Uploading...', 'info');
                 const fd = new FormData();
                 fd.append('file', file);
-                const res = await api('POST', '/media', fd);
-                const media = res.media || res;
+                const media = normalizeMediaResponse(await api('POST', '/media', fd));
                 parent.setAttribute('data-attachment-id', media.id);
                 const preview = parent.querySelector('.acf-img-preview');
-                preview.innerHTML = `<img src="${media.url}" class="w-full rounded-lg border border-white/10" style="max-height:120px;object-fit:cover;">`;
+                preview.innerHTML = `<img src="${esc(media.url)}" class="w-full rounded-lg border border-white/10" style="max-height:120px;object-fit:cover;">`;
                 preview.classList.remove('hidden');
                 parent.querySelector('button').innerHTML = '<i data-feather="image" class="w-3 h-3"></i> Change Image';
                 feather.replace();
                 toast('Uploaded', 'success');
-            } catch (err) { toast('Upload failed: ' + err.message, 'error'); }
+            } catch (err) {
+                toast('Upload failed: ' + err.message, 'error');
+            } finally {
+                input.value = '';
+                endMediaUpload();
+            }
         });
     });
 
@@ -1536,20 +1629,24 @@ function renderAcfFields(fieldData, existingValues) {
             if (!files.length) return;
             const parent = input.closest('[data-acf-type="gallery"]');
             let currentIds = (parent.getAttribute('data-ids') || '').split(',').filter(Boolean);
-            for (const file of files) {
-                try {
-                    toast(`Uploading ${file.name}...`, 'info');
-                    const fd = new FormData();
-                    fd.append('file', file);
-                    const res = await api('POST', '/media', fd);
-                    const media = res.media || res;
-                    currentIds.push(String(media.id));
-                } catch (err) { toast(`Failed: ${file.name}`, 'error'); }
+            beginMediaUpload();
+            try {
+                for (const file of files) {
+                    try {
+                        toast(`Uploading ${file.name}...`, 'info');
+                        const fd = new FormData();
+                        fd.append('file', file);
+                        const media = normalizeMediaResponse(await api('POST', '/media', fd));
+                        currentIds.push(String(media.id));
+                    } catch (err) { toast(`Failed: ${file.name}`, 'error'); }
+                }
+                parent.setAttribute('data-ids', currentIds.join(','));
+                await loadGalleryPreviews(parent);
+                input.value = '';
+                toast('Gallery updated', 'success');
+            } finally {
+                endMediaUpload();
             }
-            parent.setAttribute('data-ids', currentIds.join(','));
-            loadGalleryPreviews(parent);
-            input.value = '';
-            toast('Gallery updated', 'success');
         });
     });
 
@@ -1596,7 +1693,7 @@ window.removeGalleryImage = (btn) => {
 
 function collectAcfValues() {
     const values = {};
-    document.querySelectorAll('[data-acf-key]').forEach(el => {
+    document.querySelectorAll('#acfFieldsContainer [data-acf-key]').forEach(el => {
         const key = el.getAttribute('data-acf-key');
         const type = el.getAttribute('data-acf-type');
 
@@ -2011,18 +2108,24 @@ function updateWordCount() {
 window.handleFeaturedUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
+    beginMediaUpload();
     try {
         toast('Uploading image...', 'info');
         const fd = new FormData();
         fd.append('file', file);
-        const res = await api('POST', '/media', fd);
-        currentFeaturedId = res.id;
-        document.getElementById('featuredImgThumb').src = res.url || res.source_url || URL.createObjectURL(file);
+        const media = normalizeMediaResponse(await api('POST', '/media', fd));
+        currentFeaturedId = media.id || null;
+        document.getElementById('featuredImgThumb').src = media.url || media.source_url || URL.createObjectURL(file);
         document.getElementById('featuredImgPreview').classList.remove('hidden');
         document.getElementById('featuredImgPlaceholder').classList.add('hidden');
         document.getElementById('btnUploadFeatured').classList.add('hidden');
         toast('Image uploaded', 'success');
-    } catch (err) { toast('Upload failed: ' + err.message, 'error'); }
+    } catch (err) {
+        toast('Upload failed: ' + err.message, 'error');
+    } finally {
+        event.target.value = '';
+        endMediaUpload();
+    }
 };
 
 window.removeFeaturedImage = () => {
@@ -2061,6 +2164,10 @@ window.savePost = async (statusOverride, silent) => {
     const title = document.getElementById('editorTitle').value.trim();
     if (!title && !silent) { toast('Title is required', 'error'); return; }
     if (!title && silent) return; // Don't auto-save empty posts
+    if (hasPendingMediaUploads()) {
+        if (!silent) toast(getPendingMediaUploadMessage(), 'error');
+        return;
+    }
 
     // Show loading state on buttons
     const publishBtn = document.getElementById('btnPublish');
@@ -2557,6 +2664,10 @@ window.saveProduct = async (statusOverride, silent) => {
     const title = document.getElementById('productTitle').value.trim();
     if (!title && !silent) { toast('Product name is required', 'error'); return; }
     if (!title && silent) return;
+    if (hasPendingMediaUploads()) {
+        if (!silent) toast(getPendingMediaUploadMessage(), 'error');
+        return;
+    }
 
     const manageStock = document.getElementById('productManageStockToggle').classList.contains('active');
 
@@ -2663,16 +2774,22 @@ window.addNewProductCategory = () => {
 window.handleProductFeaturedUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
+    beginMediaUpload();
     try {
         toast('Uploading image...', 'info');
         const fd = new FormData();
         fd.append('file', file);
-        const res = await api('POST', '/media', fd);
-        currentProductFeaturedId = res.id;
-        document.getElementById('productFeaturedImgThumb').src = res.url || res.source_url || URL.createObjectURL(file);
+        const media = normalizeMediaResponse(await api('POST', '/media', fd));
+        currentProductFeaturedId = media.id || null;
+        document.getElementById('productFeaturedImgThumb').src = media.url || media.source_url || URL.createObjectURL(file);
         document.getElementById('productFeaturedImgPreview').classList.remove('hidden');
         toast('Image uploaded', 'success');
-    } catch (err) { toast('Upload failed: ' + err.message, 'error'); }
+    } catch (err) {
+        toast('Upload failed: ' + err.message, 'error');
+    } finally {
+        event.target.value = '';
+        endMediaUpload();
+    }
 };
 
 window.removeProductFeaturedImage = () => {
