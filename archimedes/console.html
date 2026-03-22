@@ -371,13 +371,13 @@
         </header>
 
         <!-- TAB NAV -->
-        <div class="flex gap-2 mb-6 overflow-x-auto pb-2">
-            <button class="tab-btn active" onclick="switchTab('posts', this)"><i data-feather="file-text" class="w-4 h-4 inline mr-1"></i>Posts</button>
-            <button class="tab-btn" onclick="switchTab('media', this)"><i data-feather="image" class="w-4 h-4 inline mr-1"></i>Media</button>
-            <button class="tab-btn" onclick="switchTab('bulk', this)"><i data-feather="layers" class="w-4 h-4 inline mr-1"></i>Bulk</button>
-            <button id="tabBtnProducts" class="tab-btn hidden" onclick="switchTab('products', this)"><i data-feather="shopping-bag" class="w-4 h-4 inline mr-1"></i>Products</button>
-            <button class="tab-btn" onclick="switchTab('settings', this)"><i data-feather="settings" class="w-4 h-4 inline mr-1"></i>Settings</button>
-            <button id="tabBtnLabs" class="tab-btn" onclick="switchTab('labs', this)"><i data-feather="zap" class="w-4 h-4 inline mr-1"></i>Labs</button>
+        <div class="flex gap-1 mb-6 overflow-x-auto pb-2" style="justify-content: stretch;">
+            <button class="tab-btn active flex-1 text-center justify-center" onclick="switchTab('posts', this)"><i data-feather="file-text" class="w-4 h-4 inline mr-1"></i>Posts</button>
+            <button class="tab-btn hidden" onclick="switchTab('media', this)"><i data-feather="image" class="w-4 h-4 inline mr-1"></i>Media</button>
+            <button class="tab-btn hidden" onclick="switchTab('bulk', this)"><i data-feather="layers" class="w-4 h-4 inline mr-1"></i>Bulk</button>
+            <button id="tabBtnProducts" class="tab-btn hidden flex-1 text-center justify-center" onclick="switchTab('products', this)"><i data-feather="shopping-bag" class="w-4 h-4 inline mr-1"></i>Products</button>
+            <button class="tab-btn flex-1 text-center justify-center" onclick="switchTab('settings', this)"><i data-feather="settings" class="w-4 h-4 inline mr-1"></i>Settings</button>
+            <button id="tabBtnLabs" class="tab-btn flex-1 text-center justify-center" onclick="switchTab('labs', this)"><i data-feather="zap" class="w-4 h-4 inline mr-1"></i>Labs</button>
         </div>
 
         <!-- TAB: POSTS -->
@@ -394,16 +394,15 @@
                     </select>
                 </div>
                 <!-- Row 2: Filter buttons + New Post -->
-                <div class="flex flex-wrap items-center gap-2">
-                    <div class="flex gap-2 overflow-x-auto">
-                        <button class="btn-hero-glass btn-xs filter-btn active" onclick="filterPosts('any', this)">All</button>
-                        <button class="btn-hero-glass btn-xs filter-btn" onclick="filterPosts('publish', this)">Published</button>
-                        <button class="btn-hero-glass btn-xs filter-btn" onclick="filterPosts('draft', this)">Drafts</button>
-                        <button class="btn-hero-glass btn-xs filter-btn" onclick="filterPosts('trash', this)">Trash</button>
+                <div class="flex items-center gap-2">
+                    <div class="flex gap-1.5 overflow-x-auto flex-1" style="-webkit-overflow-scrolling: touch; scrollbar-width: none;">
+                        <button class="btn-hero-glass btn-xs filter-btn active shrink-0" onclick="filterPosts('any', this)">All</button>
+                        <button class="btn-hero-glass btn-xs filter-btn shrink-0" onclick="filterPosts('publish', this)">Published</button>
+                        <button class="btn-hero-glass btn-xs filter-btn shrink-0" onclick="filterPosts('draft', this)">Drafts</button>
+                        <button class="btn-hero-glass btn-xs filter-btn shrink-0" onclick="filterPosts('trash', this)">Trash</button>
                     </div>
-                    <div class="flex-1"></div>
-                    <button id="btnNewPost" class="btn-liquid-glow btn-sm whitespace-nowrap" onclick="openEditor()">
-                        <i data-feather="plus" class="w-4 h-4"></i> New Post
+                    <button id="btnNewPost" class="btn-liquid-glow btn-xs whitespace-nowrap shrink-0" onclick="openEditor()">
+                        <i data-feather="plus" class="w-3.5 h-3.5"></i> New
                     </button>
                 </div>
             </div>
@@ -1381,6 +1380,12 @@ async function api(method, endpoint, body) {
             // License locked/denied — NOT an auth failure, keep connection alive
             if (errCode === 'rspd_agent_license_locked' || errCode === 'rspd_license_locked') {
                 throw new Error('Site license is not active: ' + (json.message || 'License locked. Contact your administrator.'));
+            }
+            // Only treat as auth failure if the error code is specifically about the agent key
+            const isAgentKeyError = errCode === 'rspd_agent_key_revoked' || errCode === 'rspd_agent_key_invalid' || errCode === 'rspd_forbidden';
+            if (!isAgentKeyError) {
+                // Google API pass-through or other non-auth 403 — don't disconnect
+                throw new Error(json.error || json.message || 'Permission denied');
             }
             // Actual auth failure — stale/revoked API key, clear connection
             if (!_disconnecting403) {
@@ -3373,7 +3378,9 @@ let labsSeoLoaded = false;
 async function loadLabsSeo() {
     if (labsSeoLoaded) return;
     try {
-        const data = await api('GET', '/seo/search-performance');
+        const end = new Date().toISOString().slice(0, 10);
+        const start = new Date(Date.now() - 28 * 86400000).toISOString().slice(0, 10);
+        const data = await api('GET', `/seo/search-performance?start_date=${start}&end_date=${end}`);
         if (data && data.rows && data.rows.length > 0) {
             let totalClicks = 0, totalImpressions = 0, totalPosition = 0;
             data.rows.forEach(r => { totalClicks += r.clicks || 0; totalImpressions += r.impressions || 0; totalPosition += r.position || 0; });
@@ -3516,13 +3523,32 @@ window.runLabsAudit = async () => {
     results.innerHTML = '<p class="text-sm text-center py-4 animate-pulse text-purple-400">Running site audit... this may take a moment</p>';
     try {
         const data = await api('GET', '/seo/audit');
-        if (data && data.audit) {
-            const a = data.audit;
-            document.getElementById('labsHealthImages').textContent = (a.image_issues?.missing_alt?.length || 0) + (a.image_issues?.oversized?.length || 0);
-            document.getElementById('labsHealthLinks').textContent = a.broken_links?.length || 0;
-            document.getElementById('labsHealthMeta').textContent = (a.seo_issues?.missing_title?.length || 0) + (a.seo_issues?.missing_description?.length || 0);
+        // Support both nested (data.audit) and flat response formats
+        const a = data.audit || data;
+        if (a && (a.issues || a.pages_with_issues !== undefined || a.image_issues || a.broken_links)) {
+            // Flatten page-level issues into category counts
+            let missingAltCount = 0, missingH1Count = 0, missingDescCount = 0, thinContentCount = 0;
+            const missingAltPages = [], missingH1Pages = [], missingDescPages = [];
+            if (a.issues && Array.isArray(a.issues)) {
+                // Flat format: {issues: [{url, checks: [{type, severity, detail}]}]}
+                a.issues.forEach(page => {
+                    (page.checks || []).forEach(c => {
+                        if (c.type === 'missing_alt') { missingAltCount++; missingAltPages.push(page.url); }
+                        if (c.type === 'missing_h1') { missingH1Count++; missingH1Pages.push(page.url); }
+                        if (c.type === 'missing_description') { missingDescCount++; missingDescPages.push(page.url); }
+                        if (c.type === 'thin_content') { thinContentCount++; }
+                    });
+                });
+            }
+            // Use flat counts or fall back to nested format
+            const imgIssues = missingAltCount || (a.image_issues?.missing_alt?.length || 0) + (a.image_issues?.oversized?.length || 0);
+            const linkIssues = a.broken_links?.length || 0;
+            const metaIssues = (missingH1Count + missingDescCount) || (a.seo_issues?.missing_title?.length || 0) + (a.seo_issues?.missing_description?.length || 0);
+            document.getElementById('labsHealthImages').textContent = imgIssues;
+            document.getElementById('labsHealthLinks').textContent = linkIssues;
+            document.getElementById('labsHealthMeta').textContent = metaIssues;
             // Overall badge
-            const totalIssues = (a.broken_links?.length || 0) + (a.image_issues?.missing_alt?.length || 0) + (a.seo_issues?.missing_title?.length || 0);
+            const totalIssues = imgIssues + linkIssues + metaIssues;
             const badge = document.getElementById('labsHealthBadge');
             const overall = document.getElementById('labsHealthOverall');
             if (totalIssues === 0) { badge.className = 'w-12 h-12 rounded-full bg-green-500/20 mx-auto mb-2 flex items-center justify-center'; overall.textContent = 'Healthy'; overall.className = 'text-sm font-bold text-green-400'; }
@@ -3530,10 +3556,14 @@ window.runLabsAudit = async () => {
             else { badge.className = 'w-12 h-12 rounded-full bg-red-500/20 mx-auto mb-2 flex items-center justify-center'; overall.textContent = 'Needs Work'; overall.className = 'text-sm font-bold text-red-400'; }
             // Detailed results
             let html = '';
-            if (a.broken_links?.length) { html += '<p class="text-xs font-bold text-red-400 mb-1">🔗 Broken Links (' + a.broken_links.length + ')</p>'; a.broken_links.slice(0, 5).forEach(l => { html += `<div class="bg-white/5 p-2 rounded-lg mb-1 text-xs"><span class="text-gray-400">${esc(l.source || l.page || '')}</span> → <span class="text-red-400">${esc(l.url || l.link || '')}</span></div>`; }); }
-            if (a.image_issues?.missing_alt?.length) { html += '<p class="text-xs font-bold text-orange-400 mb-1 mt-3">🖼️ Images Missing Alt Text (' + a.image_issues.missing_alt.length + ')</p>'; a.image_issues.missing_alt.slice(0, 5).forEach(i => { html += `<div class="bg-white/5 p-2 rounded-lg mb-1 text-xs text-gray-400 truncate">${esc(typeof i === 'string' ? i : i.url || i.src || '')}</div>`; }); }
-            if (a.seo_issues?.missing_title?.length) { html += '<p class="text-xs font-bold text-blue-400 mb-1 mt-3">📝 Missing Meta Titles (' + a.seo_issues.missing_title.length + ')</p>'; a.seo_issues.missing_title.slice(0, 5).forEach(p => { html += `<div class="bg-white/5 p-2 rounded-lg mb-1 text-xs text-gray-400 truncate">${esc(typeof p === 'string' ? p : p.url || p.title || '')}</div>`; }); }
-            if (!html) html = '<p class="text-sm text-green-400 text-center py-4">✅ No issues found — your site looks great!</p>';
+            if (a.broken_links?.length) { html += '<p class="text-xs font-bold text-red-400 mb-1">Broken Links (' + a.broken_links.length + ')</p>'; a.broken_links.slice(0, 5).forEach(l => { html += `<div class="bg-white/5 p-2 rounded-lg mb-1 text-xs"><span class="text-gray-400">${esc(l.source || l.page || '')}</span> -> <span class="text-red-400">${esc(l.url || l.link || '')}</span></div>`; }); }
+            if (missingAltPages.length) { html += '<p class="text-xs font-bold text-orange-400 mb-1 mt-3">Pages with Missing Alt Text (' + missingAltPages.length + ')</p>'; missingAltPages.slice(0, 5).forEach(u => { html += `<div class="bg-white/5 p-2 rounded-lg mb-1 text-xs text-gray-400 truncate">${esc(u)}</div>`; }); }
+            else if (a.image_issues?.missing_alt?.length) { html += '<p class="text-xs font-bold text-orange-400 mb-1 mt-3">Images Missing Alt Text (' + a.image_issues.missing_alt.length + ')</p>'; a.image_issues.missing_alt.slice(0, 5).forEach(i => { html += `<div class="bg-white/5 p-2 rounded-lg mb-1 text-xs text-gray-400 truncate">${esc(typeof i === 'string' ? i : i.url || i.src || '')}</div>`; }); }
+            if (missingH1Pages.length) { html += '<p class="text-xs font-bold text-blue-400 mb-1 mt-3">Pages Missing H1 Tag (' + missingH1Pages.length + ')</p>'; missingH1Pages.slice(0, 5).forEach(u => { html += `<div class="bg-white/5 p-2 rounded-lg mb-1 text-xs text-gray-400 truncate">${esc(u)}</div>`; }); }
+            else if (a.seo_issues?.missing_title?.length) { html += '<p class="text-xs font-bold text-blue-400 mb-1 mt-3">Missing Meta Titles (' + a.seo_issues.missing_title.length + ')</p>'; a.seo_issues.missing_title.slice(0, 5).forEach(p => { html += `<div class="bg-white/5 p-2 rounded-lg mb-1 text-xs text-gray-400 truncate">${esc(typeof p === 'string' ? p : p.url || p.title || '')}</div>`; }); }
+            if (missingDescPages.length) { html += '<p class="text-xs font-bold text-yellow-400 mb-1 mt-3">Pages Missing Meta Description (' + missingDescPages.length + ')</p>'; missingDescPages.slice(0, 5).forEach(u => { html += `<div class="bg-white/5 p-2 rounded-lg mb-1 text-xs text-gray-400 truncate">${esc(u)}</div>`; }); }
+            if (a.total_pages) { html += `<p class="text-xs text-gray-500 mt-3">Scanned ${a.total_pages} pages — ${a.pages_with_issues || 0} with issues</p>`; }
+            if (!html) html = '<p class="text-sm text-green-400 text-center py-4">No issues found — your site looks great!</p>';
             results.innerHTML = html;
             toast('Site audit complete', 'success');
         }
