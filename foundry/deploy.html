@@ -3524,27 +3524,19 @@
             if (window.isSuperAdmin) {
                 items.push(repoActionItemHtml({
                     kind: 'button',
-                    label: 'Agent: Read Command',
-                    desc: 'Copy the API command for an AI agent to <b class="text-white">read all files</b> from this version.',
-                    icon: 'cpu',
-                    tone: 'primary',
-                    onClick: `closeRepoActionsModal(); copyAgentCommand('${client}', '${ver}', 'read')`
-                }));
-                items.push(repoActionItemHtml({
-                    kind: 'button',
-                    label: 'Agent: Override Deploy',
-                    desc: 'Copy the API command for an AI agent to <b class="text-white">deploy (override)</b> this version.',
-                    icon: 'cpu',
-                    tone: 'primary',
-                    onClick: `closeRepoActionsModal(); copyAgentCommand('${client}', '${ver}', 'override')`
-                }));
-                items.push(repoActionItemHtml({
-                    kind: 'button',
                     label: 'Agent: New Revision',
-                    desc: 'Copy the API command for an AI agent to <b class="text-white">deploy as a new revision</b>.',
+                    desc: 'AI agent pulls all files, you describe changes, it <b class="text-white">deploys as a new revision</b>.',
                     icon: 'cpu',
                     tone: 'primary',
                     onClick: `closeRepoActionsModal(); copyAgentCommand('${client}', '${ver}', 'new')`
+                }));
+                items.push(repoActionItemHtml({
+                    kind: 'button',
+                    label: 'Agent: Override',
+                    desc: 'AI agent pulls all files, you describe changes, it <b class="text-white">overrides this version in-place</b>.',
+                    icon: 'cpu',
+                    tone: 'primary',
+                    onClick: `closeRepoActionsModal(); copyAgentCommand('${client}', '${ver}', 'override')`
                 }));
             }
 
@@ -3660,45 +3652,20 @@
                 }
             }
 
-            let command = '';
+            const deployLabel = mode === 'new' ? 'DEPLOY AS A NEW REVISION' : 'DEPLOY AS OVERRIDE (same version)';
+            const command = `AGENT TASK — ${deployLabel}
+Project: ${client} | Version: ${ver}
 
-            if (mode === 'read') {
-                command = `To read all files from /${client}/${ver === 'base' ? '' : ver + '/'}:
-
+STEP 1: Pull all files from this version.
 POST ${API_AGENT_BRIDGE}
 Headers: { "Content-Type": "application/json", "x-agent-key": "${apiKey}" }
-Body:
-{
-  "action": "read",
-  "folderName": "${client}",
-  "version": "${ver}"
-}
+Body: { "action": "read", "folderName": "${client}", "version": "${ver}" }
 
-This returns { files: [{ path, content, isBinary }] } — text files are decoded, binary files are base64.`;
-            } else if (mode === 'override') {
-                command = `To deploy (override) files to /${client}/${ver === 'base' ? '' : ver + '/'}:
+This returns { files: [{ path, content, isBinary }] }. Read and understand ALL files.
 
-POST ${API_AGENT_BRIDGE}
-Headers: { "Content-Type": "application/json", "x-agent-key": "${apiKey}" }
-Body:
-{
-  "action": "deploy",
-  "folderName": "${client}",
-  "version": "${ver}",
-  "mode": "override",
-  "commitMessage": "Your commit message here",
-  "files": [
-    { "path": "index.html", "content": "<html>...</html>", "isBinary": false },
-    { "path": "style.css", "content": "body { ... }", "isBinary": false }
-  ]
-}
+STEP 2: I will tell you what changes to make.
 
-Text files: set "isBinary": false, "content" is the raw text.
-Binary files (images): set "isBinary": true, "content" is base64-encoded.
-This will override existing files in ${ver === 'base' ? client : client + '/' + ver}.`;
-            } else if (mode === 'new') {
-                command = `To deploy as a NEW revision under /${client}/:
-
+STEP 3: Deploy using this endpoint.
 POST ${API_AGENT_BRIDGE}
 Headers: { "Content-Type": "application/json", "x-agent-key": "${apiKey}" }
 Body:
@@ -3706,18 +3673,19 @@ Body:
   "action": "deploy",
   "folderName": "${client}",
   "version": "${ver}",
-  "mode": "new",
-  "commitMessage": "Your commit message here",
+  "mode": "${mode}",
+  "commitMessage": "Describe what changed",
   "files": [
-    { "path": "index.html", "content": "<html>...</html>", "isBinary": false },
-    { "path": "style.css", "content": "body { ... }", "isBinary": false }
+    { "path": "index.html", "content": "full file content here", "isBinary": false },
+    { "path": "style.css", "content": "full file content here", "isBinary": false }
   ]
 }
 
-This auto-creates the next version number (e.g. v4 if v3 exists).
-Text files: set "isBinary": false, "content" is the raw text.
-Binary files (images): set "isBinary": true, "content" is base64-encoded.`;
-            }
+Rules:
+- Text files (html, css, js, json, svg, txt): "isBinary": false, "content" is raw text.
+- Binary files (images): "isBinary": true, "content" is base64.
+- ${mode === 'new' ? 'Mode "new" auto-creates the next version number (e.g. v4 if v3 exists).' : 'Mode "override" replaces files in-place in ' + (ver === 'base' ? client : client + '/' + ver) + '.'}
+- Send ALL files in the deploy, not just changed ones.`;
 
             try {
                 await navigator.clipboard.writeText(command);
