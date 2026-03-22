@@ -755,12 +755,6 @@
                     class="w-4 h-4 group-hover:text-green-400 group-hover:scale-110 transition-transform"></i>
                 <span>Access Control</span>
             </button>
-            <button id="nav-agent-keys" onclick="openAgentKeyManager()"
-                class="hidden sidebar-tab w-full flex items-center gap-3.5 px-5 py-3.5 rounded-xl text-sm font-semibold group">
-                <i data-feather="cpu"
-                    class="w-4 h-4 group-hover:text-purple-400 group-hover:scale-110 transition-transform"></i>
-                <span>Agent API Keys</span>
-            </button>
         </nav>
 
         <div class="p-6">
@@ -1904,7 +1898,6 @@
             document.getElementById('userBadge').innerText = user.displayName || user.email.split('@')[0];
             if (user.uid === SUPER_ADMIN_UID) {
                 document.getElementById('nav-admin').classList.remove('hidden');
-                document.getElementById('nav-agent-keys').classList.remove('hidden');
                 const vsCodeLink = document.getElementById('vsCodeHelpLink');
                 if (vsCodeLink) {
                     vsCodeLink.classList.remove('hidden');
@@ -3626,34 +3619,34 @@
         // ==========================================
         let cachedAgentKey = localStorage.getItem('agentApiKey') || null;
 
-        window.copyAgentCommand = async (client, ver, mode) => {
-            let apiKey = cachedAgentKey;
+        // --- Agent Command Modal Helpers ---
+        function showAgentModal(id) {
+            const m = document.getElementById(id);
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+            feather.replace();
+            requestAnimationFrame(() => {
+                m.classList.remove('opacity-0');
+                m.querySelector('.agent-modal-panel').classList.remove('scale-95');
+            });
+        }
+        function hideAgentModal(id) {
+            const m = document.getElementById(id);
+            m.classList.add('opacity-0');
+            m.querySelector('.agent-modal-panel').classList.add('scale-95');
+            setTimeout(() => { m.classList.add('hidden'); m.classList.remove('flex'); }, 200);
+        }
+        function agentToast(msg) {
+            const t = document.createElement('div');
+            t.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 bg-green-500/90 text-white px-6 py-3 rounded-full font-bold text-sm z-[9999] shadow-xl';
+            t.textContent = msg;
+            document.body.appendChild(t);
+            setTimeout(() => t.remove(), 2500);
+        }
 
-            // If no cached key, prompt to generate one
-            if (!apiKey) {
-                const confirmed = confirm('No Agent API key found. Generate one now?\n\nThis key allows AI agents to read/deploy files via API.');
-                if (!confirmed) return;
-
-                try {
-                    const token = await auth.currentUser.getIdToken();
-                    const resp = await fetch(API_AGENT_KEY, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({})
-                    });
-                    const data = await resp.json();
-                    if (!data.success) throw new Error(data.error || 'Failed to generate key');
-                    apiKey = data.apiKey;
-                    cachedAgentKey = apiKey;
-                    localStorage.setItem('agentApiKey', apiKey);
-                } catch (e) {
-                    alert('Failed to generate API key: ' + e.message);
-                    return;
-                }
-            }
-
+        function buildAgentCommand(client, ver, mode, apiKey) {
             const deployLabel = mode === 'new' ? 'DEPLOY AS A NEW REVISION' : 'DEPLOY AS OVERRIDE (same version)';
-            const command = `AGENT TASK — ${deployLabel}
+            return `AGENT TASK — ${deployLabel}
 Project: ${client} | Version: ${ver}
 
 STEP 1: Pull all files from this version.
@@ -3685,66 +3678,120 @@ Rules:
 - Text files (html, css, js, json, svg, txt): "isBinary": false, "content" is raw text.
 - Binary files (images): "isBinary": true, "content" is base64.
 - ${mode === 'new' ? 'Mode "new" auto-creates the next version number (e.g. v4 if v3 exists).' : 'Mode "override" replaces files in-place in ' + (ver === 'base' ? client : client + '/' + ver) + '.'}
-- Send ALL files in the deploy, not just changed ones.`;
+- Send ALL files in the deploy, not just changed ones.
 
-            try {
-                await navigator.clipboard.writeText(command);
-                // Show a quick toast
-                const toast = document.createElement('div');
-                toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 bg-green-500/90 text-white px-6 py-3 rounded-full font-bold text-sm z-[9999] shadow-xl';
-                toast.textContent = `✓ Agent ${mode} command copied to clipboard`;
-                document.body.appendChild(toast);
-                setTimeout(() => toast.remove(), 2500);
-            } catch (e) {
-                // Fallback: show in a prompt
-                prompt('Copy this command:', command);
+STEP 4: Changelog — Before deploying, update or create a CHANGELOG.md file.
+Add an entry at the TOP of the file in this format:
+## [version] — [YYYY-MM-DD]
+- [Concise bullet point of each change made]
+- Files changed: [list of filenames]
+- Agent: [Your name/model]
+
+Include CHANGELOG.md in the deployed files array alongside everything else.`;
+        }
+
+        window.copyAgentCommand = async (client, ver, mode) => {
+            let apiKey = cachedAgentKey;
+
+            // If no cached key, show generate key modal
+            if (!apiKey) {
+                // Store pending params so confirm button can continue
+                window._pendingAgentCmd = { client, ver, mode };
+                showAgentModal('agentKeyConfirmModal');
+                return;
             }
+
+            // Build and show command modal
+            const command = buildAgentCommand(client, ver, mode, apiKey);
+            const el = document.getElementById('agentCommandText');
+            el.textContent = command;
+            window._currentAgentCommand = command;
+            window._currentAgentFilename = `agent-${mode}-${client}-${ver}.md`;
+            document.getElementById('agentCmdModalTitle').textContent = mode === 'new' ? 'New Revision Command' : 'Override Command';
+            document.getElementById('agentCmdModalProject').textContent = `${client} / ${ver}`;
+            showAgentModal('agentCommandModal');
         };
 
-        // Manage Agent Keys (UI callable)
-        window.openAgentKeyManager = async () => {
+        // Called from the confirm-generate-key modal
+        window.confirmGenerateAgentKey = async () => {
+            // Show loading state on the generate button
+            const genBtn = document.getElementById('agentGenKeyBtn');
+            const originalText = genBtn.innerHTML;
+            genBtn.disabled = true;
+            genBtn.innerHTML = '<span class="inline-block animate-spin mr-2">⟳</span> Generating...';
+
             try {
                 const token = await auth.currentUser.getIdToken();
                 const resp = await fetch(API_AGENT_KEY, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ action: 'list' })
+                    body: JSON.stringify({})
                 });
                 const data = await resp.json();
-                if (!data.success) throw new Error(data.error);
+                if (!data.success) throw new Error(data.error || 'Failed to generate key');
+                cachedAgentKey = data.apiKey;
+                localStorage.setItem('agentApiKey', data.apiKey);
 
-                let msg = 'Agent API Keys:\n\n';
-                if (data.keys.length === 0) {
-                    msg += '(No keys generated yet)';
-                } else {
-                    data.keys.forEach((k, i) => {
-                        msg += `${i + 1}. ${k.key.substring(0, 12)}... | ${k.disabled ? 'DISABLED' : 'Active'} | Last used: ${k.lastUsedAt || 'Never'}\n`;
-                    });
-                }
-                msg += '\n\nYour cached key: ' + (cachedAgentKey ? cachedAgentKey.substring(0, 16) + '...' : 'None');
-                msg += '\n\nUse the Agent command buttons in the repo actions menu to auto-generate and copy commands.';
-                alert(msg);
+                // Brief success state before transitioning
+                genBtn.innerHTML = '✓ Key Generated';
+                genBtn.classList.remove('bg-purple-500', 'hover:bg-purple-600');
+                genBtn.classList.add('bg-green-500');
+
+                setTimeout(() => {
+                    hideAgentModal('agentKeyConfirmModal');
+                    // Reset button state
+                    genBtn.innerHTML = originalText;
+                    genBtn.disabled = false;
+                    genBtn.classList.remove('bg-green-500');
+                    genBtn.classList.add('bg-purple-500', 'hover:bg-purple-600');
+
+                    // Now continue with the original command
+                    if (window._pendingAgentCmd) {
+                        const { client, ver, mode } = window._pendingAgentCmd;
+                        window._pendingAgentCmd = null;
+                        window.copyAgentCommand(client, ver, mode);
+                    }
+                }, 800);
             } catch (e) {
-                alert('Error: ' + e.message);
+                genBtn.innerHTML = originalText;
+                genBtn.disabled = false;
+                agentToast('✗ Failed: ' + e.message);
             }
         };
 
-        window.revokeAgentKey = async () => {
-            if (!cachedAgentKey) { alert('No key to revoke.'); return; }
-            if (!confirm('Revoke current agent API key? Any agents using it will stop working.')) return;
-
+        window.copyAgentCmdToClipboard = async () => {
             try {
-                const token = await auth.currentUser.getIdToken();
-                await fetch(API_AGENT_KEY, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ action: 'revoke', key: cachedAgentKey })
-                });
-                cachedAgentKey = null;
-                localStorage.removeItem('agentApiKey');
-                alert('Key revoked successfully.');
+                await navigator.clipboard.writeText(window._currentAgentCommand);
+                agentToast('✓ Command copied to clipboard');
             } catch (e) {
-                alert('Error: ' + e.message);
+                agentToast('✗ Copy failed');
+            }
+        };
+
+        window.downloadAgentCmd = () => {
+            const blob = new Blob([window._currentAgentCommand], { type: 'text/markdown' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = window._currentAgentFilename || 'agent-command.md';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+            agentToast('✓ Downloaded as .md');
+        };
+
+        window.copyAgentCurl = async () => {
+            // Build a curl that downloads the .md content from a data URI approach
+            // Actually more useful: a curl that the agent can run to fetch the command file
+            // Best approach: encode the command as a downloadable raw gist-style snippet
+            const cmd = window._currentAgentCommand;
+            const b64 = btoa(unescape(encodeURIComponent(cmd)));
+            const curlCmd = `curl -s "data:text/markdown;base64,${b64}" -o ${window._currentAgentFilename || 'agent-command.md'}`;
+            try {
+                await navigator.clipboard.writeText(curlCmd);
+                agentToast('✓ curl command copied');
+            } catch (e) {
+                agentToast('✗ Copy failed');
             }
         };
 
@@ -5416,6 +5463,73 @@ Rules:
                     class="flex-1 btn-hero-glass py-3.5 text-sm font-bold justify-center rounded-xl">Cancel</button>
                 <button id="editorToggleConfirmBtn"
                     class="flex-1 btn-liquid-glow py-3.5 text-sm font-bold justify-center rounded-xl shadow-[0_10px_30px_-10px_rgba(34,197,94,0.5)]">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AGENT: Confirm Generate Key Modal -->
+    <div id="agentKeyConfirmModal" class="fixed inset-0 z-[170] hidden items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-opacity opacity-0" onclick="if(event.target===this)hideAgentModal('agentKeyConfirmModal')">
+        <div class="agent-modal-panel glass-panel w-full max-w-md rounded-[2rem] border border-purple-500/30 shadow-[0_0_60px_rgba(139,92,246,0.2)] overflow-hidden transform transition-transform duration-300 scale-95">
+            <div class="p-6 border-b border-white/10 flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-purple-400"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                    </div>
+                    <div>
+                        <h2 class="text-lg font-bold text-white">Generate Agent API Key</h2>
+                        <p class="text-xs text-gray-400 mt-0.5">Required for AI agent access</p>
+                    </div>
+                </div>
+                <button onclick="hideAgentModal('agentKeyConfirmModal')" class="text-gray-500 hover:text-white bg-white/5 hover:bg-white/10 w-9 h-9 rounded-xl transition-colors flex items-center justify-center cursor-pointer relative z-10" style="line-height:1">
+                    <span class="text-xl font-light pointer-events-none">✕</span>
+                </button>
+            </div>
+            <div class="p-6">
+                <div class="bg-purple-500/5 border border-purple-500/10 rounded-xl p-4 mb-6">
+                    <p class="text-sm text-gray-300 leading-relaxed">No API key found. This will generate a persistent key that allows AI agents to <strong class="text-purple-300">read files</strong> and <strong class="text-purple-300">deploy changes</strong> on your behalf.</p>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="hideAgentModal('agentKeyConfirmModal')" class="flex-1 px-5 py-3 rounded-xl text-sm font-semibold text-gray-400 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer">Cancel</button>
+                    <button id="agentGenKeyBtn" onclick="confirmGenerateAgentKey()" class="flex-1 px-5 py-3 rounded-xl text-sm font-semibold text-white bg-purple-500 hover:bg-purple-600 transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-wait">
+                        ⚡ Generate Key
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AGENT: Command Output Modal (Copy + Download + Curl) -->
+    <div id="agentCommandModal" class="fixed inset-0 z-[170] hidden items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-opacity opacity-0" onclick="if(event.target===this)hideAgentModal('agentCommandModal')">
+        <div class="agent-modal-panel glass-panel w-full max-w-2xl rounded-[2rem] border border-purple-500/30 shadow-[0_0_60px_rgba(139,92,246,0.2)] flex flex-col max-h-[85vh] overflow-hidden transform transition-transform duration-300 scale-95">
+            <div class="p-6 border-b border-white/10 flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-purple-400"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+                    </div>
+                    <div>
+                        <h2 class="text-lg font-bold text-white" id="agentCmdModalTitle">Agent Command</h2>
+                        <p class="text-xs text-gray-400 mt-0.5">Project: <span id="agentCmdModalProject" class="font-mono text-purple-300"></span></p>
+                    </div>
+                </div>
+                <button onclick="hideAgentModal('agentCommandModal')" class="text-gray-500 hover:text-white bg-white/5 hover:bg-white/10 w-9 h-9 rounded-xl transition-colors flex items-center justify-center cursor-pointer relative z-10" style="line-height:1">
+                    <span class="text-xl font-light pointer-events-none">✕</span>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto hide-scrollbar flex-1">
+                <pre id="agentCommandText" class="text-xs text-gray-300 font-mono bg-black/40 border border-white/5 rounded-xl p-4 whitespace-pre-wrap leading-relaxed max-h-[50vh] overflow-y-auto hide-scrollbar"></pre>
+            </div>
+            <div class="p-5 border-t border-white/10 bg-black/40 flex flex-col gap-3">
+                <div class="flex gap-3">
+                    <button onclick="copyAgentCmdToClipboard()" class="flex-1 px-5 py-3.5 rounded-xl text-sm font-semibold text-white bg-purple-500 hover:bg-purple-600 transition-colors flex items-center justify-center gap-2 cursor-pointer">
+                        📋 Copy Command
+                    </button>
+                    <button onclick="downloadAgentCmd()" class="flex-1 px-5 py-3.5 rounded-xl text-sm font-semibold text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 transition-colors flex items-center justify-center gap-2 cursor-pointer">
+                        ⬇ Download .md
+                    </button>
+                </div>
+                <button onclick="copyAgentCurl()" class="w-full px-5 py-3 rounded-xl text-xs font-mono font-semibold text-gray-400 bg-white/5 hover:bg-white/10 border border-white/5 transition-colors flex items-center justify-center gap-2 cursor-pointer">
+                    <span class="text-purple-400">$</span> Copy curl command
+                </button>
             </div>
         </div>
     </div>
