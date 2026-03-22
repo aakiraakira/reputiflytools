@@ -755,6 +755,12 @@
                     class="w-4 h-4 group-hover:text-green-400 group-hover:scale-110 transition-transform"></i>
                 <span>Access Control</span>
             </button>
+            <button id="nav-agent-keys" onclick="openAgentKeyManager()"
+                class="hidden sidebar-tab w-full flex items-center gap-3.5 px-5 py-3.5 rounded-xl text-sm font-semibold group">
+                <i data-feather="cpu"
+                    class="w-4 h-4 group-hover:text-purple-400 group-hover:scale-110 transition-transform"></i>
+                <span>Agent API Keys</span>
+            </button>
         </nav>
 
         <div class="p-6">
@@ -1869,6 +1875,8 @@
         const API_ADMIN = "https://manageteam-5resuz4f5a-as.a.run.app";
         const API_WP_EXPORT = "https://asia-southeast1-reputifly-automation.cloudfunctions.net/exportBranchFiles";
         const API_WP_EXPERIMENTAL = "https://asia-southeast1-reputifly-automation.cloudfunctions.net/experimentalWpDeploy";
+        const API_AGENT_BRIDGE = "https://asia-southeast1-reputifly-automation.cloudfunctions.net/agentBridge";
+        const API_AGENT_KEY = "https://asia-southeast1-reputifly-automation.cloudfunctions.net/generateAgentKey";
 
         const SUPER_ADMIN_UID = "wyeWdXkzCNf4ghrLxmoyvVbURAv2";
 
@@ -1896,6 +1904,7 @@
             document.getElementById('userBadge').innerText = user.displayName || user.email.split('@')[0];
             if (user.uid === SUPER_ADMIN_UID) {
                 document.getElementById('nav-admin').classList.remove('hidden');
+                document.getElementById('nav-agent-keys').classList.remove('hidden');
                 const vsCodeLink = document.getElementById('vsCodeHelpLink');
                 if (vsCodeLink) {
                     vsCodeLink.classList.remove('hidden');
@@ -3511,6 +3520,34 @@
                 onClick: `closeRepoActionsModal(); executeExperimentalWpExport('${client}', '${ver}')`
             }));
 
+            // --- AI Agent Commands (Super Admin only) ---
+            if (window.isSuperAdmin) {
+                items.push(repoActionItemHtml({
+                    kind: 'button',
+                    label: 'Agent: Read Command',
+                    desc: 'Copy the API command for an AI agent to <b class="text-white">read all files</b> from this version.',
+                    icon: 'cpu',
+                    tone: 'primary',
+                    onClick: `closeRepoActionsModal(); copyAgentCommand('${client}', '${ver}', 'read')`
+                }));
+                items.push(repoActionItemHtml({
+                    kind: 'button',
+                    label: 'Agent: Override Deploy',
+                    desc: 'Copy the API command for an AI agent to <b class="text-white">deploy (override)</b> this version.',
+                    icon: 'cpu',
+                    tone: 'primary',
+                    onClick: `closeRepoActionsModal(); copyAgentCommand('${client}', '${ver}', 'override')`
+                }));
+                items.push(repoActionItemHtml({
+                    kind: 'button',
+                    label: 'Agent: New Revision',
+                    desc: 'Copy the API command for an AI agent to <b class="text-white">deploy as a new revision</b>.',
+                    icon: 'cpu',
+                    tone: 'primary',
+                    onClick: `closeRepoActionsModal(); copyAgentCommand('${client}', '${ver}', 'new')`
+                }));
+            }
+
             if (isBase) {
                 items.push(repoActionItemHtml({
                     kind: 'button',
@@ -3591,6 +3628,157 @@
         repoActionsModal?.addEventListener('click', (e) => {
             if (e.target === repoActionsModal) closeRepoActionsModal();
         });
+
+        // ==========================================
+        // AI AGENT COMMAND COPY + KEY MANAGEMENT
+        // ==========================================
+        let cachedAgentKey = localStorage.getItem('agentApiKey') || null;
+
+        window.copyAgentCommand = async (client, ver, mode) => {
+            let apiKey = cachedAgentKey;
+
+            // If no cached key, prompt to generate one
+            if (!apiKey) {
+                const confirmed = confirm('No Agent API key found. Generate one now?\n\nThis key allows AI agents to read/deploy files via API.');
+                if (!confirmed) return;
+
+                try {
+                    const token = await auth.currentUser.getIdToken();
+                    const resp = await fetch(API_AGENT_KEY, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({})
+                    });
+                    const data = await resp.json();
+                    if (!data.success) throw new Error(data.error || 'Failed to generate key');
+                    apiKey = data.apiKey;
+                    cachedAgentKey = apiKey;
+                    localStorage.setItem('agentApiKey', apiKey);
+                } catch (e) {
+                    alert('Failed to generate API key: ' + e.message);
+                    return;
+                }
+            }
+
+            let command = '';
+
+            if (mode === 'read') {
+                command = `To read all files from /${client}/${ver === 'base' ? '' : ver + '/'}:
+
+POST ${API_AGENT_BRIDGE}
+Headers: { "Content-Type": "application/json", "x-agent-key": "${apiKey}" }
+Body:
+{
+  "action": "read",
+  "folderName": "${client}",
+  "version": "${ver}"
+}
+
+This returns { files: [{ path, content, isBinary }] } — text files are decoded, binary files are base64.`;
+            } else if (mode === 'override') {
+                command = `To deploy (override) files to /${client}/${ver === 'base' ? '' : ver + '/'}:
+
+POST ${API_AGENT_BRIDGE}
+Headers: { "Content-Type": "application/json", "x-agent-key": "${apiKey}" }
+Body:
+{
+  "action": "deploy",
+  "folderName": "${client}",
+  "version": "${ver}",
+  "mode": "override",
+  "commitMessage": "Your commit message here",
+  "files": [
+    { "path": "index.html", "content": "<html>...</html>", "isBinary": false },
+    { "path": "style.css", "content": "body { ... }", "isBinary": false }
+  ]
+}
+
+Text files: set "isBinary": false, "content" is the raw text.
+Binary files (images): set "isBinary": true, "content" is base64-encoded.
+This will override existing files in ${ver === 'base' ? client : client + '/' + ver}.`;
+            } else if (mode === 'new') {
+                command = `To deploy as a NEW revision under /${client}/:
+
+POST ${API_AGENT_BRIDGE}
+Headers: { "Content-Type": "application/json", "x-agent-key": "${apiKey}" }
+Body:
+{
+  "action": "deploy",
+  "folderName": "${client}",
+  "version": "${ver}",
+  "mode": "new",
+  "commitMessage": "Your commit message here",
+  "files": [
+    { "path": "index.html", "content": "<html>...</html>", "isBinary": false },
+    { "path": "style.css", "content": "body { ... }", "isBinary": false }
+  ]
+}
+
+This auto-creates the next version number (e.g. v4 if v3 exists).
+Text files: set "isBinary": false, "content" is the raw text.
+Binary files (images): set "isBinary": true, "content" is base64-encoded.`;
+            }
+
+            try {
+                await navigator.clipboard.writeText(command);
+                // Show a quick toast
+                const toast = document.createElement('div');
+                toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 bg-green-500/90 text-white px-6 py-3 rounded-full font-bold text-sm z-[9999] shadow-xl';
+                toast.textContent = `✓ Agent ${mode} command copied to clipboard`;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 2500);
+            } catch (e) {
+                // Fallback: show in a prompt
+                prompt('Copy this command:', command);
+            }
+        };
+
+        // Manage Agent Keys (UI callable)
+        window.openAgentKeyManager = async () => {
+            try {
+                const token = await auth.currentUser.getIdToken();
+                const resp = await fetch(API_AGENT_KEY, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ action: 'list' })
+                });
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error);
+
+                let msg = 'Agent API Keys:\n\n';
+                if (data.keys.length === 0) {
+                    msg += '(No keys generated yet)';
+                } else {
+                    data.keys.forEach((k, i) => {
+                        msg += `${i + 1}. ${k.key.substring(0, 12)}... | ${k.disabled ? 'DISABLED' : 'Active'} | Last used: ${k.lastUsedAt || 'Never'}\n`;
+                    });
+                }
+                msg += '\n\nYour cached key: ' + (cachedAgentKey ? cachedAgentKey.substring(0, 16) + '...' : 'None');
+                msg += '\n\nUse the Agent command buttons in the repo actions menu to auto-generate and copy commands.';
+                alert(msg);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        };
+
+        window.revokeAgentKey = async () => {
+            if (!cachedAgentKey) { alert('No key to revoke.'); return; }
+            if (!confirm('Revoke current agent API key? Any agents using it will stop working.')) return;
+
+            try {
+                const token = await auth.currentUser.getIdToken();
+                await fetch(API_AGENT_KEY, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ action: 'revoke', key: cachedAgentKey })
+                });
+                cachedAgentKey = null;
+                localStorage.removeItem('agentApiKey');
+                alert('Key revoked successfully.');
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        };
 
         const triggerBlobDownload = (blob, filename) => {
             const a = document.createElement('a');
