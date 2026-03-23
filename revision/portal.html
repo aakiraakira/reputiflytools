@@ -144,12 +144,62 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            position: relative;
         }
 
         .tab-btn.active {
             background: rgba(230, 57, 127, 0.1);
             color: #E6397F;
             border: 1px solid rgba(230, 57, 127, 0.3);
+        }
+
+        .tab-btn .tab-error-dot {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 8px;
+            height: 8px;
+            background: #EF4444;
+            border-radius: 50%;
+            animation: pulse-dot 1.5s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.3); }
+        }
+
+        @keyframes flash-error {
+            0% { background: transparent; }
+            25% { background: rgba(239, 68, 68, 0.15); }
+            100% { background: transparent; }
+        }
+
+        .section-flash-error {
+            animation: flash-error 1.2s ease-out;
+            border-radius: 12px;
+        }
+
+        .char-counter {
+            font-size: 11px;
+            margin-top: 4px;
+            transition: color 0.2s;
+        }
+
+        .toast-notification {
+            position: fixed;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-20px);
+            opacity: 0;
+            z-index: 999999;
+            pointer-events: none;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .toast-notification.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
         }
 
         /* Feedback Zone */
@@ -956,6 +1006,7 @@
                 const secDesc = typeof secObj === 'object' && secObj.d ? secObj.d : null;
 
                 const secEl = document.createElement('div');
+                secEl.id = `section-${key}`;
                 secEl.className = "bg-white/[0.02] border border-white/10 rounded-2xl p-6 shadow-xl";
 
                 const tooltipHtml = secDesc ? `
@@ -1029,6 +1080,19 @@
             saveLocalState();
         }
 
+        function updateCharCounter(key, idx, val) {
+            const counter = document.getElementById(`char-counter-${key}-${idx}`);
+            if (!counter) return;
+            const len = (val || '').trim().length;
+            if (len >= 10) {
+                counter.className = 'char-counter text-emerald-500';
+                counter.innerHTML = '<span class="text-emerald-500">&#10003;</span> Good to go';
+            } else {
+                counter.className = 'char-counter text-gray-500';
+                counter.innerHTML = `<span>${len}/10</span> min. characters`;
+            }
+        }
+
         function updateCardType(key, type, idx, val) {
             appState.data[key][type][idx].itemType = val;
             document.getElementById(`cards-${key}-${type}`).innerHTML = renderCards(key, type);
@@ -1084,7 +1148,11 @@
                                 </div>
                             </div>
                         </div>
-                        <textarea id="comment-${key}-${i}" class="w-full input-dark rounded-xl p-3 text-sm resize-none flex-1 min-h-[60px] shadow-inner transition-colors duration-300" placeholder="${placeholderText}" oninput="updateCardComment('${key}', '${type}', ${i}, this.value)" ${isUnselected ? 'disabled' : ''}>${item.comment}</textarea>
+                        ${isUnselected ? `<div class="relative flex-1">
+                            <textarea id="comment-${key}-${i}" class="w-full input-dark rounded-xl p-3 text-sm resize-none min-h-[60px] shadow-inner opacity-50 cursor-not-allowed" placeholder="${placeholderText}" disabled>${item.comment}</textarea>
+                            <div class="absolute inset-0 cursor-pointer rounded-xl" onclick="onDisabledTextareaClick('${key}', ${i})"></div>
+                        </div>` : `<textarea id="comment-${key}-${i}" class="w-full input-dark rounded-xl p-3 text-sm resize-none flex-1 min-h-[60px] shadow-inner transition-colors duration-300" placeholder="${placeholderText}" oninput="updateCardComment('${key}', '${type}', ${i}, this.value); updateCharCounter('${key}', ${i}, this.value)">${item.comment}</textarea>
+                        <div id="char-counter-${key}-${i}" class="char-counter ${(item.comment || '').trim().length >= 10 ? 'text-emerald-500' : 'text-gray-500'}">${(item.comment || '').trim().length >= 10 ? '<span class="text-emerald-500">&#10003;</span> Good to go' : '<span>' + (item.comment || '').trim().length + '/10</span> min. characters'}</div>`}
                     </div>
                 </div>
             `}).join('');
@@ -1396,26 +1464,36 @@
 
         // --- PHASE 3: COMPILER & API HANDOFF ---
         async function submitRevisions() {
-            // New Validation Loop
+            // --- VALIDATION ---
             let isValid = true;
+            let firstErrorPage = null;
             let firstInvalidInput = null;
+            const pagesWithErrors = new Set();
 
-            // Clear previous errors
+            // Clear previous error states
             document.querySelectorAll('.border-red-500').forEach(el => {
                 el.classList.remove('border-red-500');
                 el.classList.add('border-white/10');
             });
+            document.querySelectorAll('.tab-error-dot').forEach(el => el.remove());
+            document.querySelectorAll('.section-error-badge').forEach(el => el.remove());
 
             appState.pages.forEach((page, pIdx) => {
-                page.s.forEach((secName, sIdx) => {
+                page.s.forEach((secObj, sIdx) => {
                     const key = `${pIdx}-${sIdx}`;
                     const d = appState.data[key];
+                    let sectionHasError = false;
+
                     d.feedbackItems.forEach((item, i) => {
                         const isCommentInvalid = !item.comment || item.comment.trim().length < 10;
                         const isTypeInvalid = !item.itemType || item.itemType === "";
 
                         if (isCommentInvalid || isTypeInvalid) {
                             isValid = false;
+                            sectionHasError = true;
+                            pagesWithErrors.add(pIdx);
+
+                            if (firstErrorPage === null) firstErrorPage = pIdx;
 
                             const textarea = document.getElementById(`comment-${key}-${i}`);
                             const selectEl = document.getElementById(`select-${key}-${i}`);
@@ -1430,23 +1508,73 @@
                             }
 
                             if (!firstInvalidInput) {
-                                firstInvalidInput = textarea || selectEl;
-                                const tabBtns = document.querySelectorAll('.tab-btn');
-                                if (tabBtns[pIdx]) tabBtns[pIdx].click();
-                                setTimeout(() => {
-                                    firstInvalidInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                }, 100);
+                                firstInvalidInput = { el: textarea || selectEl, pIdx, sIdx };
                             }
                         }
                     });
+
+                    // Add error badge to section header if this section has errors
+                    if (sectionHasError) {
+                        const sectionEl = document.getElementById(`section-${key}`);
+                        if (sectionEl) {
+                            const header = sectionEl.querySelector('h3');
+                            if (header && !header.querySelector('.section-error-badge')) {
+                                const badge = document.createElement('span');
+                                badge.className = 'section-error-badge ml-2 bg-red-500/20 text-red-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-red-500/30 uppercase tracking-wider';
+                                badge.textContent = 'Needs attention';
+                                header.appendChild(badge);
+                            }
+                        }
+                    }
                 });
             });
 
+            // Add error dots to page tabs with issues
+            pagesWithErrors.forEach(pIdx => {
+                const tabBtns = document.querySelectorAll('.tab-btn');
+                if (tabBtns[pIdx] && !tabBtns[pIdx].querySelector('.tab-error-dot')) {
+                    const dot = document.createElement('span');
+                    dot.className = 'tab-error-dot';
+                    tabBtns[pIdx].appendChild(dot);
+                }
+            });
+
             if (!isValid) {
+                // Navigate to the first error
+                if (firstInvalidInput) {
+                    const tabBtns = document.querySelectorAll('.tab-btn');
+                    if (tabBtns[firstInvalidInput.pIdx]) tabBtns[firstInvalidInput.pIdx].click();
+
+                    setTimeout(() => {
+                        // Re-query after tab switch re-renders sections
+                        const key = `${firstInvalidInput.pIdx}-${firstInvalidInput.sIdx}`;
+                        const sectionEl = document.getElementById(`section-${key}`);
+                        if (sectionEl) {
+                            sectionEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            sectionEl.classList.add('section-flash-error');
+                            setTimeout(() => sectionEl.classList.remove('section-flash-error'), 1500);
+                        }
+
+                        // Re-apply red borders after tab switch re-render
+                        appState.pages[firstInvalidInput.pIdx].s.forEach((sec, sIdx) => {
+                            const k = `${firstInvalidInput.pIdx}-${sIdx}`;
+                            const d = appState.data[k];
+                            d.feedbackItems.forEach((item, i) => {
+                                if (!item.comment || item.comment.trim().length < 10) {
+                                    const ta = document.getElementById(`comment-${k}-${i}`);
+                                    if (ta) { ta.classList.remove('border-white/10'); ta.classList.add('border-red-500'); }
+                                }
+                                if (!item.itemType || item.itemType === "") {
+                                    const sel = document.getElementById(`select-${k}-${i}`);
+                                    if (sel) { sel.classList.remove('border-white/10'); sel.classList.add('border-red-500'); }
+                                }
+                            });
+                        });
+                    }, 150);
+                }
+
                 setTimeout(() => {
                     let errorMsg = "Please ensure all fields are filled out for your uploads.";
-
-                    // Find exactly what is missing to give specific feedback
                     const firstInvalidData = appState.pages.flatMap((page, pIdx) =>
                         page.s.flatMap((sec, sIdx) => appState.data[`${pIdx}-${sIdx}`].feedbackItems)
                     ).find(item => !item.comment || item.comment.trim() === "" || !item.itemType || item.itemType === "");
@@ -1456,19 +1584,24 @@
                         const noComment = !firstInvalidData.comment || firstInvalidData.comment.trim().length < 10;
 
                         if (noType && noComment) {
-                            errorMsg = "Please select an <b>Upload Type</b> AND add a <b>Specific Comment</b> for your images.";
+                            errorMsg = "Please select an <b>Upload Type</b> AND add a <b>Specific Comment</b> (at least 10 characters) for your images.";
                         } else if (noType) {
                             errorMsg = "You forgot to select an <b>Upload Type</b> for one or more images.";
                         } else if (noComment) {
-    errorMsg = "Your comment is too short. Please provide a detailed instruction (at least 10 characters) explaining exactly what needs to be changed or where the asset goes.";
-}
+                            errorMsg = "Your comment is too short. Please provide a detailed instruction <b>(at least 10 characters)</b> explaining exactly what needs to be changed or where the asset goes.";
+                        }
+                    }
+
+                    if (pagesWithErrors.size > 0) {
+                        const pageNames = [...pagesWithErrors].map(idx => appState.pages[idx].n);
+                        errorMsg += `<br><br><span class="text-xs text-gray-500">Issues found on: <b class="text-red-400">${pageNames.join(', ')}</b></span>`;
                     }
 
                     document.getElementById('validationMessage').innerHTML = errorMsg;
                     document.getElementById('validationModal').classList.remove('hidden');
                     document.getElementById('validationModal').classList.add('flex');
                     feather.replace();
-                }, 150);
+                }, 200);
                 return;
             }
 
@@ -1696,6 +1829,38 @@
                 document.getElementById('validationModal').classList.remove('hidden');
                 document.getElementById('validationModal').classList.add('flex');
             }
+        }
+        // --- TOAST NOTIFICATION ---
+        let toastTimeout = null;
+        function showToast(msg, type = 'warn') {
+            let toast = document.getElementById('toastNotification');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toastNotification';
+                toast.className = 'toast-notification';
+                document.body.appendChild(toast);
+            }
+            const colors = {
+                warn: 'bg-amber-500/90 border-amber-400/50',
+                error: 'bg-red-500/90 border-red-400/50',
+                success: 'bg-emerald-500/90 border-emerald-400/50'
+            };
+            toast.innerHTML = `<div class="${colors[type] || colors.warn} backdrop-blur-xl text-white text-sm font-semibold px-5 py-3 rounded-xl border shadow-2xl flex items-center gap-2"><i data-feather="alert-circle" class="w-4 h-4 shrink-0"></i> ${msg}</div>`;
+            feather.replace();
+            toast.classList.add('show');
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function onDisabledTextareaClick(key, i) {
+            const select = document.getElementById(`select-${key}-${i}`);
+            if (select) {
+                select.classList.remove('border-white/10');
+                select.classList.add('border-amber-500');
+                select.focus();
+                setTimeout(() => { select.classList.remove('border-amber-500'); select.classList.add('border-white/10'); }, 2000);
+            }
+            showToast('Please select an Upload Type first before adding a comment.', 'warn');
         }
     </script>
 </body>
