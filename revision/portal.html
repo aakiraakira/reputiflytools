@@ -1261,26 +1261,52 @@
                 for (let pIdx = 0; pIdx < appState.pages.length; pIdx++) {
                     const page = appState.pages[pIdx];
                     let pageHasChanges = false;
-                    let pageMd = `# REVISION DIRECTIVE FOR CURSOR AI\n**Project:** ${appState.project}\n**Page:** ${page.n}\n\n`;
 
-pageMd += `> **CRITICAL AI DIRECTIVE:** You are strictly forbidden from writing or modifying any code until you have physically opened and visually analyzed the \`.webp\` files associated with each task.\n`;
-pageMd += `> * For **"Fix"** tasks: The client has drawn mandatory red annotations on the image. The text comment is only half the instruction; the visual red annotation is the ground truth.\n`;
-pageMd += `> * For **"Asset"** tasks: Visually inspect the provided image to understand its dimensions, transparency, and content so you can implement it correctly based on the client's text comment.\n\n---\n\n`;
+                    // --- PRE-COUNT total tasks for this page ---
+                    let totalPageTasks = 0;
+                    const modifiedSections = [];
+                    page.s.forEach((secObj, sIdx) => {
+                        const d = appState.data[`${pIdx}-${sIdx}`];
+                        if (d && d.feedbackItems) {
+                            totalPageTasks += d.feedbackItems.length;
+                        }
+                        if (d && (d.globalText.trim() !== "" || d.feedbackItems.length > 0)) {
+                            modifiedSections.push(typeof secObj === 'string' ? secObj : secObj.n);
+                        }
+                    });
 
-if (page.url) {
-    pageMd += `**Live Page URL:** ${page.url}\n*(AI: Crawl this link for live DOM/CSS context before writing code)*\n\n`;
-}
+                    // --- BUILD MARKDOWN: Header + Agent Rules ---
+                    let pageMd = `# REVISION PACK — ${appState.project}\n\n`;
+                    pageMd += `## METADATA\n`;
+                    pageMd += `- **Page:** ${page.n}\n`;
+                    pageMd += `- **Total Tasks This Page:** ${totalPageTasks}\n`;
+                    if (page.url) {
+                        pageMd += `- **Live URL:** ${page.url}\n`;
+                    }
+                    pageMd += `\n`;
 
-                    // --- INJECT PAGE-WIDE DIRECTIVES FIRST ---
+                    pageMd += `## AGENT RULES — OBEY WITHOUT EXCEPTION\n`;
+                    pageMd += `1. Before making ANY changes, read the COMPLETE target file to understand its existing code structure, naming conventions, class patterns, and indentation style.\n`;
+                    pageMd += `2. Visually inspect every \`.webp\` file referenced below BEFORE writing any code for that task. Describe what you see in the image (annotations, layout, elements highlighted) before making changes.\n`;
+                    pageMd += `3. For **FIX** tasks: The client has drawn red annotations on the image. The red annotation is the **PRIMARY** instruction — the text comment is supplementary context. If they conflict, follow the visual annotation.\n`;
+                    pageMd += `4. For **ASSET** tasks: Visually inspect the provided image to understand its dimensions, transparency, and content before implementing based on the client's text comment.\n`;
+                    pageMd += `5. Only modify elements within the specified section boundary for each task. Use the section name and any surrounding context to locate the correct section.\n`;
+                    pageMd += `6. Do NOT restructure, reformat, beautify, or "clean up" code outside of task scope.\n`;
+                    pageMd += `7. Preserve all existing class names, IDs, data attributes, and script tags unless the task explicitly says otherwise.\n`;
+                    pageMd += `8. Match the existing CSS approach in the file. If the file uses Tailwind utility classes, use Tailwind. If it uses Bootstrap, use Bootstrap. If it uses custom CSS, use custom CSS. Do NOT mix approaches.\n`;
+                    pageMd += `9. After completing ALL ${totalPageTasks} tasks, output the VERIFICATION BLOCK (template at the bottom of this file).\n`;
+                    pageMd += `10. There are exactly **${totalPageTasks} tasks** on this page. Do not stop until all ${totalPageTasks} are complete.\n\n`;
+                    pageMd += `---\n\n`;
+
+                    // --- INJECT PAGE-WIDE DIRECTIVES ---
                     const pageGlobalDir = appState.data[`${pIdx}-page-directive`];
                     if (pageGlobalDir && pageGlobalDir.trim() !== "") {
                         pageMd += `## ⚠️ PAGE-WIDE DIRECTIVES\n`;
-                        pageMd += `<global_rules>\n`;
-                        pageMd += `Apply the following instructions to the existing page structure.\n`;
-                        pageMd += `CONSTRAINT: Execute these changes surgically. Do NOT remove, rewrite, or truncate previously established sections of the code unless explicitly told to do so. Keep the existing content intact.\n\n`;
-                        pageMd += `CLIENT DIRECTIVE:\n${pageGlobalDir.trim()}\n`;
-                        pageMd += `</global_rules>\n\n---\n\n`;
-                        
+                        pageMd += `Apply the following instructions across the existing page structure of **${page.n}**.\n`;
+                        pageMd += `**CONSTRAINT:** Execute these changes surgically. Do NOT remove, rewrite, or truncate previously established sections of the code unless explicitly told to do so. Keep all existing content intact.\n\n`;
+                        pageMd += `**CLIENT DIRECTIVE:**\n${pageGlobalDir.trim()}\n\n`;
+                        pageMd += `---\n\n`;
+
                         pageHasChanges = true;
                         hasChanges = true;
                     }
@@ -1292,33 +1318,69 @@ if (page.url) {
                     let refCount = 1;
                     let assetCount = 1;
 
+                    // --- BUILD MARKDOWN: Section blocks with tasks ---
                     page.s.forEach((secObj, sIdx) => {
                         const secName = typeof secObj === 'string' ? secObj : secObj.n;
+                        const secPurpose = (typeof secObj === 'object' && secObj.d) ? secObj.d : null;
                         const d = appState.data[`${pIdx}-${sIdx}`];
                         if (d.globalText.trim() !== "" || d.feedbackItems.length > 0) {
                             pageHasChanges = true;
                             hasChanges = true;
+
                             pageMd += `## SECTION: ${secName}\n`;
+                            if (secPurpose) {
+                                pageMd += `**Purpose:** ${secPurpose}\n`;
+                            }
+                            pageMd += `\n`;
 
                             if (d.globalText.trim() !== "") {
-                                pageMd += `**General Notes:** ${d.globalText.trim()}\n\n`;
+                                pageMd += `**General Client Notes (interpret in context of this section and any uploaded images):**\n"${d.globalText.trim()}"\n\n`;
                             }
 
                             if (d.feedbackItems.length > 0) {
                                 d.feedbackItems.forEach((item) => {
                                     const isFix = item.itemType === 'fix';
                                     const tag = isFix ? `REF-${refCount++}` : `ASSET-${assetCount++}`;
-                                    const taskTitle = isFix ? `Visual Fix (Reference Image: \`${tag}.webp\`)` : `New Asset (Asset Image: \`${tag}.webp\`)`;
+                                    const taskType = isFix ? 'FIX' : 'ASSET';
 
-                                    pageMd += `### TASK ${globalTaskCount++}: ${taskTitle}\n`;
-                                    pageMd += `**Client Comment:** "${item.comment || ''}"\n`;
-                                    pageMd += `**WP CDN Link:** ${item.url}\n\n`;
+                                    pageMd += `### TASK ${globalTaskCount} of ${totalPageTasks} — ${taskType} (Section: ${secName})\n`;
+                                    pageMd += `- **Reference Image:** \`${tag}.webp\` — VISUALLY INSPECT THIS FILE. Describe what you see before coding.\n`;
+                                    pageMd += `- **Client Comment:** "${item.comment || '(No comment provided)'}"\n`;
+                                    if (isFix) {
+                                        pageMd += `- **Interpretation:** The red annotations on the image are the PRIMARY instruction. The text comment provides supplementary context. If they conflict, follow the visual.\n`;
+                                    }
+                                    pageMd += `- **WP CDN Link:** ${item.url}\n`;
+                                    pageMd += `- **Boundary:** Only modify elements within the "${secName}" section. Do not alter elements outside this section.\n\n`;
 
+                                    globalTaskCount++;
                                     imgFolder.file(`${tag}.webp`, item.b64, { base64: true });
                                 });
                             }
                         }
                     });
+
+                    // --- APPEND VERIFICATION BLOCK ---
+                    if (pageHasChanges) {
+                        pageMd += `---\n\n`;
+                        pageMd += `## REQUIRED VERIFICATION BLOCK\n`;
+                        pageMd += `After completing all tasks, output the following checklist. Fill in each line:\n\n`;
+                        pageMd += `\`\`\`\nVERIFICATION:\n`;
+                        let vIdx = 1;
+                        page.s.forEach((secObj, sIdx) => {
+                            const vSecName = typeof secObj === 'string' ? secObj : secObj.n;
+                            const vd = appState.data[`${pIdx}-${sIdx}`];
+                            if (vd && vd.feedbackItems && vd.feedbackItems.length > 0) {
+                                vd.feedbackItems.forEach(() => {
+                                    pageMd += `- [ ] Task ${vIdx} of ${totalPageTasks} (${vSecName}): {describe what you changed}\n`;
+                                    vIdx++;
+                                });
+                            }
+                        });
+                        pageMd += `\n- No code outside specified sections was modified: YES / NO\n`;
+                        pageMd += `- All .webp reference images were visually inspected: YES / NO\n`;
+                        pageMd += `- Tasks I could NOT complete and why: {list or "None"}\n`;
+                        pageMd += `\`\`\`\n`;
+                    }
 
                     if (pageHasChanges) {
                         pageZip.file("instructions.md", pageMd);
