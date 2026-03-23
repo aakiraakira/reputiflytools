@@ -17,7 +17,8 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
         import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-storage.js";
-        import { getFirestore, collection, addDoc, doc, getDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, doc, getDoc, query, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDqpzqEVtrEtQvvmcMie_Et7xiNh8QU_Ao",
@@ -28,7 +29,17 @@
             appId: "1:455384979132:web:9079ec81182115b16622b9"
         };
 
+        const authConfig = {
+            apiKey: "AIzaSyB4_6wJOcQddUFz8BemeG9HQgbuZtoHp20",
+            authDomain: "reputifly-automation.firebaseapp.com",
+            projectId: "reputifly-automation",
+            storageBucket: "reputifly-automation.firebasestorage.app",
+            messagingSenderId: "1095726999398",
+            appId: "1:1095726999398:web:4e26ec90770da0244c0aa7"
+        };
+
         const app = initializeApp(firebaseConfig);
+        const authApp = initializeApp(authConfig, "authApp");
         window.storage = getStorage(app);
         window.storageRef = ref;
         window.uploadBytes = uploadBytes;
@@ -38,6 +49,13 @@
         window.addDoc = addDoc;
         window.doc = doc;
         window.getDoc = getDoc;
+        window.query = query;
+        window.orderBy = orderBy;
+        window.getDocs = getDocs;
+        window.auth = getAuth(authApp);
+        window.signInWithEmailAndPassword = signInWithEmailAndPassword;
+        window.onAuthStateChanged = onAuthStateChanged;
+        window.signOut = signOut;
         window.dispatchEvent(new Event('firebaseReady'));
     </script>
 
@@ -194,30 +212,90 @@
         class="fixed bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-[#10B981]/10 rounded-full blur-[150px] pointer-events-none z-0">
     </div>
 
+    <!-- Auth Overlay -->
+    <div id="authOverlay" class="fixed inset-0 bg-[#050507] z-[99999] flex flex-col items-center justify-center hidden transition-opacity duration-300">
+        <!-- Loading spinner -->
+        <div id="authLoadingState" class="flex flex-col items-center hidden">
+            <div class="w-10 h-10 border-[3px] border-pink-500/30 border-t-pink-500 rounded-full animate-spin mb-4"></div>
+            <h2 class="text-xl font-bold text-white" style="font-family:'Space Grotesk',sans-serif;">Verifying Access...</h2>
+        </div>
+        <!-- Login form -->
+        <div id="authLoginState" class="hidden w-full max-w-sm glass-panel rounded-2xl p-8 relative overflow-hidden text-center border border-white/10">
+            <div class="w-16 h-16 rounded-full bg-pink-500/10 flex items-center justify-center mx-auto mb-6 border border-pink-500/20">
+                <i data-feather="lock" class="w-6 h-6 text-pink-500"></i>
+            </div>
+            <h2 class="text-2xl font-bold text-white mb-2" style="font-family:'Space Grotesk',sans-serif;">Revision Portal</h2>
+            <p class="text-gray-400 text-sm mb-6">Staff login required.</p>
+            <form id="authLoginForm" class="space-y-4 text-left">
+                <div>
+                    <input type="email" id="authEmail" required placeholder="Email Address" class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none transition-all focus:border-pink-500">
+                </div>
+                <div>
+                    <input type="password" id="authPassword" required placeholder="Password" class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none transition-all focus:border-pink-500">
+                </div>
+                <button type="submit" class="w-full py-3 mt-2 rounded-xl font-bold text-white transition-all" style="background:#E6397F; box-shadow: 0 10px 20px -5px rgba(230,57,127,0.4);">Login</button>
+                <p id="authErrorMsg" class="text-red-400 text-xs text-center hidden mt-2"></p>
+            </form>
+        </div>
+        <!-- Access denied -->
+        <div id="authDeniedState" class="w-full max-w-md hidden">
+            <div class="glass-panel rounded-3xl p-10 text-center border border-white/10">
+                <div class="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-5">
+                    <i data-feather="shield-off" class="w-8 h-8 text-red-400"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-white mb-2 tracking-tight">Access Denied</h2>
+                <p class="text-gray-400 text-sm mb-6">Your account does not have staff privileges for the Revision Portal.</p>
+                <button onclick="window.signOut(window.auth).then(() => window.location.reload())" class="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold py-3.5 rounded-xl transition-all">Sign Out & Try Again</button>
+            </div>
+        </div>
+    </div>
+
     <div id="adminView"
-        class="w-full max-w-2xl mx-auto my-auto glass-panel rounded-[2rem] p-8 hidden z-10 relative shadow-[0_0_80px_rgba(0,0,0,0.8)]">
+        class="w-full max-w-5xl mx-auto my-auto glass-panel rounded-[2rem] px-10 py-8 hidden z-10 relative shadow-[0_0_80px_rgba(0,0,0,0.8)]">
         <div class="text-center mb-8">
             <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png"
                 class="h-12 mx-auto mb-4" alt="Reputifly">
             <h1 class="text-3xl font-bold mb-2">Automated Revision Portal</h1>
-            <p class="text-gray-400 text-sm">Upload a scope.json file to generate a stateless Client Revision Portal
-                link.</p>
+            <p class="text-gray-400 text-sm">Select a project to generate a Client Revision Portal link.</p>
         </div>
 
-        <input type="file" id="scopeUpload" accept=".json" class="hidden">
-        <button onclick="document.getElementById('scopeUpload').click()"
-            class="w-full bg-black/40 border border-dashed border-white/20 hover:border-[#E6397F]/50 hover:bg-[#E6397F]/5 hover:shadow-[0_0_30px_rgba(230,57,127,0.1)] p-12 rounded-3xl flex flex-col items-center justify-center gap-4 transition-all duration-300 mb-6 cursor-pointer group">
-            <div
-                class="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-hover:scale-110 group-hover:bg-[#E6397F]/20 group-hover:border-[#E6397F]/50 transition-all duration-300">
-                <i data-feather="upload-cloud"
-                    class="w-8 h-8 text-[#E6397F] group-hover:text-white transition-colors"></i>
+        <!-- Manual Upload Section (always visible by default) -->
+        <div id="manualUploadSection">
+            <input type="file" id="scopeUpload" accept=".json" class="hidden">
+            <button onclick="document.getElementById('scopeUpload').click()"
+                class="w-full bg-black/40 border border-dashed border-white/20 hover:border-[#E6397F]/50 hover:bg-[#E6397F]/5 hover:shadow-[0_0_30px_rgba(230,57,127,0.1)] p-10 rounded-3xl flex flex-col items-center justify-center gap-4 transition-all duration-300 mb-6 cursor-pointer group">
+                <div
+                    class="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-hover:scale-110 group-hover:bg-[#E6397F]/20 group-hover:border-[#E6397F]/50 transition-all duration-300">
+                    <i data-feather="upload-cloud"
+                        class="w-7 h-7 text-[#E6397F] group-hover:text-white transition-colors"></i>
+                </div>
+                <div class="space-y-1 text-center">
+                    <span class="font-bold text-lg text-white group-hover:text-[#E6397F] transition-colors block">Upload scope.json</span>
+                    <p class="text-xs text-gray-500 font-medium">Click to browse or drag & drop</p>
+                </div>
+            </button>
+        </div>
+
+        <!-- Divider -->
+        <div id="projectDivider" class="flex items-center gap-3 mb-6">
+            <div class="flex-1 h-px bg-white/10"></div>
+            <span class="text-xs text-gray-500 font-semibold uppercase tracking-widest">or import from project</span>
+            <div class="flex-1 h-px bg-white/10"></div>
+        </div>
+
+        <!-- Project Import Section -->
+        <div id="projectImportSection" class="mb-6">
+            <div class="relative mb-3">
+                <i data-feather="search" class="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+                <input type="text" id="projectSearchInput" placeholder="Search projects..." oninput="filterProjects(this.value)" class="w-full bg-black/30 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-gray-500 outline-none transition-all focus:border-pink-500/50">
             </div>
-            <div class="space-y-1 text-center">
-                <span class="font-bold text-lg text-white group-hover:text-[#E6397F] transition-colors block">Select
-                    scope.json</span>
-                <p class="text-xs text-gray-500 font-medium">Click to browse or drag & drop</p>
+            <div id="projectListContainer" class="space-y-2">
+                <div class="text-center py-4">
+                    <div class="w-6 h-6 border-2 border-pink-500/30 border-t-pink-500 rounded-full animate-spin mx-auto mb-2"></div>
+                    <p class="text-gray-500 text-xs">Loading projects...</p>
+                </div>
             </div>
-        </button>
+        </div>
 
         <div id="urlMappingContainer" class="hidden mb-6">
             <h3 class="text-white font-bold mb-3 text-sm flex items-center gap-2"><i data-feather="link"
@@ -551,13 +629,13 @@
                         alert("Scope not found or link has expired.");
                         document.getElementById('clientView').classList.add('hidden');
                         document.getElementById('clientView').classList.remove('flex');
-                        document.getElementById('adminView').classList.remove('hidden');
+                        initPortalAuth();
                     }
                 }).catch(err => {
                     alert("Error loading scope: " + err.message);
                     document.getElementById('clientView').classList.add('hidden');
                     document.getElementById('clientView').classList.remove('flex');
-                    document.getElementById('adminView').classList.remove('hidden');
+                    initPortalAuth();
                 });
             };
 
@@ -576,13 +654,175 @@
                     alert("The revision link is broken or corrupted.");
                     document.getElementById('clientView').classList.add('hidden');
                     document.getElementById('clientView').classList.remove('flex');
-                    document.getElementById('adminView').classList.remove('hidden');
+                    initPortalAuth();
                 }
             };
             initEncoded();
         } else {
-            document.getElementById('adminView').classList.remove('hidden');
+            if (window.onAuthStateChanged) initPortalAuth();
+            else window.addEventListener('firebaseReady', () => initPortalAuth());
         }
+
+        // --- AUTH + PROJECT IMPORT LOGIC ---
+        function initPortalAuth() {
+            const overlay = document.getElementById('authOverlay');
+            const loadingState = document.getElementById('authLoadingState');
+            const loginState = document.getElementById('authLoginState');
+            const deniedState = document.getElementById('authDeniedState');
+
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+
+            window.onAuthStateChanged(window.auth, async (user) => {
+                if (user) {
+                    loadingState.classList.remove('hidden');
+                    loginState.classList.add('hidden');
+                    deniedState.classList.add('hidden');
+                    try {
+                        const token = await user.getIdToken();
+                        const res = await fetch("https://listsamples-5resuz4f5a-as.a.run.app", {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (!res.ok) throw new Error("Verification failed.");
+                        const data = await res.json();
+                        if (data.userRole === 'superadmin' || data.userRole === 'staff') {
+                            overlay.style.opacity = '0';
+                            overlay.style.transition = 'opacity 0.3s';
+                            setTimeout(() => overlay.remove(), 300);
+                            document.getElementById('adminView').classList.remove('hidden');
+                            loadProjectList();
+                            feather.replace();
+                        } else {
+                            loadingState.classList.add('hidden');
+                            deniedState.classList.remove('hidden');
+                            feather.replace();
+                        }
+                    } catch (err) {
+                        console.error("Auth Error:", err);
+                        loadingState.classList.add('hidden');
+                        deniedState.classList.remove('hidden');
+                        feather.replace();
+                    }
+                } else {
+                    loadingState.classList.add('hidden');
+                    loginState.classList.remove('hidden');
+                    deniedState.classList.add('hidden');
+                    feather.replace();
+                }
+            });
+
+            document.getElementById('authLoginForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const email = document.getElementById('authEmail').value;
+                const password = document.getElementById('authPassword').value;
+                const errMsg = document.getElementById('authErrorMsg');
+                errMsg.classList.add('hidden');
+                try {
+                    await window.signInWithEmailAndPassword(window.auth, email, password);
+                } catch (err) {
+                    errMsg.textContent = "Invalid credentials. Please try again.";
+                    errMsg.classList.remove('hidden');
+                }
+            });
+        }
+
+        async function loadProjectList() {
+            const container = document.getElementById('projectListContainer');
+            try {
+                const q = window.query(window.collection(window.db, "projects"), window.orderBy("createdAt", "desc"));
+                const snapshot = await window.getDocs(q);
+
+                const seen = new Set();
+                const projects = [];
+                snapshot.forEach(d => {
+                    const data = d.data();
+                    if (!seen.has(data.projectName)) {
+                        seen.add(data.projectName);
+                        projects.push({ id: d.id, ...data });
+                    }
+                });
+
+                if (projects.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500 text-sm text-center py-6">No projects found.</p>';
+                    return;
+                }
+
+                container.innerHTML = projects.map(p => {
+                    const safeName = p.projectName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    return `<button onclick="importProject('${safeName}')" class="w-full text-left bg-white/5 hover:bg-white/10 border border-white/10 hover:border-pink-500/30 rounded-xl p-3 transition-all group">
+                        <div class="font-bold text-sm text-white group-hover:text-pink-400 transition-colors">${p.projectName}</div>
+                        ${p.domain ? `<div class="text-xs text-gray-500 mt-0.5">${p.domain}</div>` : ''}
+                    </button>`;
+                }).join('');
+                feather.replace();
+            } catch (err) {
+                console.error("Failed to load projects:", err);
+                container.innerHTML = '<p class="text-red-400 text-sm text-center py-6">Failed to load projects.</p>';
+            }
+        }
+
+        function filterProjects(query) {
+            const buttons = document.querySelectorAll('#projectListContainer button');
+            const q = query.toLowerCase().trim();
+            buttons.forEach(btn => {
+                const name = btn.querySelector('.font-bold')?.textContent?.toLowerCase() || '';
+                const domain = btn.querySelector('.text-gray-500')?.textContent?.toLowerCase() || '';
+                btn.style.display = (name.includes(q) || domain.includes(q)) ? '' : 'none';
+            });
+        }
+
+        async function importProject(projectName) {
+            const container = document.getElementById('projectListContainer');
+            const originalHtml = container.innerHTML;
+            container.innerHTML = `<div class="text-center py-6"><div class="w-6 h-6 border-2 border-pink-500/30 border-t-pink-500 rounded-full animate-spin mx-auto mb-2"></div><p class="text-gray-500 text-xs">Loading ${projectName}...</p></div>`;
+
+            try {
+                const docSnap = await window.getDoc(window.doc(window.db, "project_metadata", projectName));
+                if (!docSnap.exists()) throw new Error("Project metadata not found.");
+
+                const meta = docSnap.data();
+                const scope = meta.scope;
+                if (!scope || !scope.pages) throw new Error("No scope data found for this project.");
+
+                const leanData = {
+                    p: projectName,
+                    pgs: scope.pages.filter(p => !p.exclude).map(page => ({
+                        n: page.name,
+                        s: page.sections.map(sec => {
+                            if (typeof sec === 'string') return sec;
+                            if (sec.description || sec.purpose) {
+                                return { n: sec.name, d: sec.description || sec.purpose };
+                            }
+                            return sec.name;
+                        })
+                    }))
+                };
+
+                window.tempLeanData = leanData;
+
+                document.getElementById('manualUploadSection').classList.add('hidden');
+                document.getElementById('projectDivider').classList.add('hidden');
+                document.getElementById('projectImportSection').classList.add('hidden');
+                document.getElementById('urlMappingContainer').classList.remove('hidden');
+
+                const listContainer = document.getElementById('urlInputsList');
+                listContainer.innerHTML = leanData.pgs.map((page, idx) => `
+                    <div class="mb-3 bg-black/40 p-3 rounded-xl border border-white/5">
+                        <label class="text-xs font-bold text-white mb-2 block flex items-center gap-2"><i data-feather="file" class="w-3 h-3 text-gray-400"></i> ${page.n}</label>
+                        <input type="text" id="page-url-${idx}" class="input-dark w-full rounded-lg p-2.5 text-xs font-mono" placeholder="https:// (Optional)">
+                    </div>
+                `).join('');
+                feather.replace();
+            } catch (err) {
+                console.error("Import failed:", err);
+                container.innerHTML = originalHtml;
+                alert("Failed to import project: " + err.message);
+            }
+        }
+
+        // Toggle functions kept for backward compat
+        function showManualUpload() {}
+        function showProjectImport() {}
 
         // --- PHASE 1: ADMIN LOGIC ---
         document.getElementById('scopeUpload').addEventListener('change', function (e) {
@@ -609,7 +849,9 @@
 
                     window.tempLeanData = leanData;
 
-                    document.getElementById('scopeUpload').nextElementSibling.classList.add('hidden');
+                    document.getElementById('manualUploadSection').classList.add('hidden');
+                    document.getElementById('projectDivider').classList.add('hidden');
+                    document.getElementById('projectImportSection').classList.add('hidden');
                     document.getElementById('urlMappingContainer').classList.remove('hidden');
 
                     const listContainer = document.getElementById('urlInputsList');
