@@ -785,6 +785,10 @@
                         <h1 class="text-4xl sm:text-5xl font-bold mb-4 tracking-tight">Deploy Sample</h1>
                         <p class="text-gray-400 text-sm sm:text-base max-w-lg leading-relaxed">Push a brand new AI
                             sample directly to the root global edge network.</p>
+                        <button type="button" onclick="copyAgentDeploySampleCommand()"
+                            class="mt-3 flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-500/10 border border-purple-500/30 hover:border-purple-500 hover:bg-purple-500/20 text-purple-300 hover:text-white text-xs font-bold transition-all cursor-pointer">
+                            <i data-feather="cpu" class="w-3.5 h-3.5"></i> Agent: Deploy Sample
+                        </button>
                     </div>
                     <div
                         class="bg-black/40 p-1 rounded-2xl border border-white/10 grid grid-cols-2 gap-1 text-[11px] sm:text-sm font-bold backdrop-blur-xl w-full sm:w-auto">
@@ -3620,6 +3624,14 @@
         let cachedAgentKey = localStorage.getItem('agentApiKey') || null;
 
         // --- Agent Command Modal Helpers ---
+        // Attach close handlers via addEventListener (immune to feather.replace interference)
+        document.addEventListener('DOMContentLoaded', () => {
+            const cmdClose = document.getElementById('agentCmdCloseBtn');
+            if (cmdClose) cmdClose.addEventListener('click', (e) => { e.stopPropagation(); hideAgentModal('agentCommandModal'); });
+            const keyClose = document.getElementById('agentKeyCloseBtn');
+            if (keyClose) keyClose.addEventListener('click', (e) => { e.stopPropagation(); hideAgentModal('agentKeyConfirmModal'); });
+        });
+
         function showAgentModal(id) {
             const m = document.getElementById(id);
             m.classList.remove('hidden');
@@ -3750,7 +3762,12 @@ Include CHANGELOG.md in the deployed files array alongside everything else.`;
                     genBtn.classList.add('bg-purple-500', 'hover:bg-purple-600');
 
                     // Now continue with the original command
-                    if (window._pendingAgentCmd) {
+                    if (window._pendingAgentCmdCallback) {
+                        const cb = window._pendingAgentCmdCallback;
+                        window._pendingAgentCmdCallback = null;
+                        window._pendingAgentCmd = null;
+                        cb();
+                    } else if (window._pendingAgentCmd) {
                         const { client, ver, mode } = window._pendingAgentCmd;
                         window._pendingAgentCmd = null;
                         window.copyAgentCommand(client, ver, mode);
@@ -3797,6 +3814,64 @@ Include CHANGELOG.md in the deployed files array alongside everything else.`;
             } catch (e) {
                 agentToast('✗ Copy failed');
             }
+        };
+
+        window.copyAgentDeploySampleCommand = async () => {
+            let apiKey = cachedAgentKey;
+            if (!apiKey) {
+                window._pendingAgentCmd = { client: '__NEW_SAMPLE__', ver: 'base', mode: 'new' };
+                window._pendingAgentCmdCallback = () => copyAgentDeploySampleCommand();
+                showAgentModal('agentKeyConfirmModal');
+                return;
+            }
+
+            const command = `AGENT TASK — DEPLOY A NEW SAMPLE FROM SCRATCH
+You are creating a brand new client website sample.
+
+STEP 1: I will tell you the client name, industry, and requirements.
+
+STEP 2: Build the complete website files locally in a workspace folder.
+Follow professional web design standards. Include: index.html, about.html, services.html, contact.html at minimum.
+Ensure consistent header/footer across all pages.
+
+STEP 3: Deploy using this endpoint.
+POST ${API_AGENT_BRIDGE}
+Headers: { "Content-Type": "application/json", "x-agent-key": "${apiKey}" }
+Body:
+{
+  "action": "deploy",
+  "folderName": "[CLIENT-NAME-kebab-case]",
+  "version": "base",
+  "mode": "override",
+  "commitMessage": "Initial sample build for [client name]",
+  "files": [
+    { "path": "index.html", "content": "full file content here", "isBinary": false },
+    { "path": "about.html", "content": "full file content here", "isBinary": false }
+  ]
+}
+
+Rules:
+- folderName must be kebab-case (e.g. "acme-plumbing", "straits-diving-engineering").
+- Text files (html, css, js, json, svg, txt): "isBinary": false, "content" is raw text.
+- Binary files (images): "isBinary": true, "content" is base64.
+- Send ALL files in the deploy.
+- Include a sitemap.json describing the site structure and brand colours.
+
+STEP 4: Changelog — Create a CHANGELOG.md file with the initial entry:
+## base — [YYYY-MM-DD]
+- Initial sample build
+- Pages: [list all pages]
+- Agent: [Your name/model]
+
+Include CHANGELOG.md and sitemap.json in the deployed files array.`;
+
+            const el = document.getElementById('agentCommandText');
+            el.textContent = command;
+            window._currentAgentCommand = command;
+            window._currentAgentFilename = 'agent-deploy-new-sample.md';
+            document.getElementById('agentCmdModalTitle').textContent = 'Deploy New Sample';
+            document.getElementById('agentCmdModalProject').textContent = 'New client project';
+            showAgentModal('agentCommandModal');
         };
 
         const triggerBlobDownload = (blob, filename) => {
@@ -5484,9 +5559,9 @@ Include CHANGELOG.md in the deployed files array alongside everything else.`;
                         <p class="text-xs text-gray-400 mt-0.5">Required for AI agent access</p>
                     </div>
                 </div>
-                <button onclick="hideAgentModal('agentKeyConfirmModal')" class="text-gray-500 hover:text-white bg-white/5 hover:bg-white/10 w-9 h-9 rounded-xl transition-colors flex items-center justify-center cursor-pointer relative z-10" style="line-height:1">
-                    <span class="text-xl font-light pointer-events-none">✕</span>
-                </button>
+                <div id="agentKeyCloseBtn" class="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 transition-colors flex items-center justify-center cursor-pointer relative z-50 flex-shrink-0" role="button" tabindex="0">
+                    <span style="font-size:20px;color:#9ca3af;pointer-events:none;user-select:none;">✕</span>
+                </div>
             </div>
             <div class="p-6">
                 <div class="bg-purple-500/5 border border-purple-500/10 rounded-xl p-4 mb-6">
@@ -5505,7 +5580,7 @@ Include CHANGELOG.md in the deployed files array alongside everything else.`;
     <!-- AGENT: Command Output Modal (Copy + Download + Curl) -->
     <div id="agentCommandModal" class="fixed inset-0 z-[170] hidden items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-opacity opacity-0" onclick="if(event.target===this)hideAgentModal('agentCommandModal')">
         <div class="agent-modal-panel glass-panel w-full max-w-2xl rounded-[2rem] border border-purple-500/30 shadow-[0_0_60px_rgba(139,92,246,0.2)] flex flex-col max-h-[85vh] overflow-hidden transform transition-transform duration-300 scale-95">
-            <div class="p-6 border-b border-white/10 flex justify-between items-center">
+            <div class="p-6 border-b border-white/10 flex justify-between items-center flex-shrink-0">
                 <div class="flex items-center gap-3">
                     <div class="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-purple-400"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
@@ -5515,14 +5590,14 @@ Include CHANGELOG.md in the deployed files array alongside everything else.`;
                         <p class="text-xs text-gray-400 mt-0.5">Project: <span id="agentCmdModalProject" class="font-mono text-purple-300"></span></p>
                     </div>
                 </div>
-                <button onclick="hideAgentModal('agentCommandModal')" class="text-gray-500 hover:text-white bg-white/5 hover:bg-white/10 w-9 h-9 rounded-xl transition-colors flex items-center justify-center cursor-pointer relative z-10" style="line-height:1">
-                    <span class="text-xl font-light pointer-events-none">✕</span>
-                </button>
+                <div id="agentCmdCloseBtn" class="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 transition-colors flex items-center justify-center cursor-pointer relative z-50 flex-shrink-0" style="line-height:1" role="button" tabindex="0">
+                    <span style="font-size:20px;color:#9ca3af;pointer-events:none;user-select:none;">✕</span>
+                </div>
             </div>
             <div class="p-6 overflow-y-auto hide-scrollbar flex-1">
                 <pre id="agentCommandText" class="text-xs text-gray-300 font-mono bg-black/40 border border-white/5 rounded-xl p-4 whitespace-pre-wrap leading-relaxed max-h-[50vh] overflow-y-auto hide-scrollbar"></pre>
             </div>
-            <div class="p-5 border-t border-white/10 bg-black/40 flex flex-col gap-3">
+            <div class="p-5 border-t border-white/10 bg-black/40 flex flex-col gap-3 flex-shrink-0">
                 <div class="flex gap-3">
                     <button onclick="copyAgentCmdToClipboard()" class="flex-1 px-5 py-3.5 rounded-xl text-sm font-semibold text-white bg-purple-500 hover:bg-purple-600 transition-colors flex items-center justify-center gap-2 cursor-pointer">
                         📋 Copy Command
