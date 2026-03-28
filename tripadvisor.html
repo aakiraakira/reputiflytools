@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TripAdvisor Review Portal</title>
+    <link rel="icon" type="image/png" href="https://reputifly.com/wp-content/uploads/2026/01/IMG_2123.jpg">    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+    function initializeGoogleMaps() {
+        if (window.reviewApp) {
+            window.reviewApp.mapsApiLoaded();
+        } else {
+            setTimeout(initializeGoogleMaps, 100);
+        }
+    }
+    </script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBXdjRQZJd9ySH5mxql4tlXCEVpDH9GGbI&libraries=places&callback=initializeGoogleMaps"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #111827; color: #d1d5db; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .view-button { cursor: pointer; }
+        .review-item { transition: all 0.3s ease-in-out; }
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0; transform: translateY(20px); }
+            10%, 90% { opacity: 1; transform: translateY(0); }
+        }
+        .notification-toast { animation: fadeInOut 4s ease-in-out forwards; }
+        button:disabled, input:disabled, textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+        .pac-container { background-color: #1f2937; border: 1px solid #4b5563; border-radius: 0.5rem; color: #d1d5db; z-index: 10000 !important; font-family: 'Inter', sans-serif; }
+        .pac-item { padding: 0.75rem; cursor: pointer; border-top: 1px solid #374151; }
+        .pac-item:first-child { border-top: none; }
+        .pac-item:hover { background-color: #374151; }
+        .pac-item-query { font-weight: 500; color: #f9fafb; }
+        .hidden { display: none; }
+        .sticky-tabs { position: sticky; top: 0; z-index: 10; background-color: #111827; padding-top: 0.5rem; padding-bottom: 0.5rem; }
+        #map { height: 350px; border-radius: 0.75rem; background-color: #374151; }
+        .pac-target-input { padding: 0.75rem; width: 100%; }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #34D399; 
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="text-gray-200">
+
+    <div id="app" class="container mx-auto max-w-7xl p-4 sm:p-6 lg:p-8">
+
+        <div id="initial-view">
+            <header class="text-center mb-12">
+                <h1 class="text-4xl sm:text-5xl font-bold text-white">TripAdvisor Management Portal</h1>
+                <p class="text-gray-400 mt-2">Welcome back, Julian. Please select your workspace.</p>
+            </header>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+                <div id="owner-portal-btn" class="view-button text-center p-8 bg-gray-800 rounded-xl border border-gray-700 hover:border-teal-500 hover:bg-gray-700 transition-all duration-300 transform hover:-translate-y-1">
+                    <h2 class="text-3xl font-bold text-teal-400">Owner Portal</h2>
+                    <p class="mt-2 text-gray-400">Pull context and generate TripAdvisor reviews via AI.</p>
+                </div>
+                <div id="admin-portal-btn" class="view-button text-center p-8 bg-gray-800 rounded-xl border border-gray-700 hover:border-indigo-500 hover:bg-gray-700 transition-all duration-300 transform hover:-translate-y-1">
+                    <h2 class="text-3xl font-bold text-indigo-400">Admin Dashboard</h2>
+                    <p class="mt-2 text-gray-400">Manage batches and copy tasks for Telegram.</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="owner-view" class="hidden"></div>
+        <div id="admin-view" class="hidden"></div>
+    </div>
+    
+    <div id="login-modal-container"></div>
+    <div id="generic-modal-container"></div>
+    <div id="notification" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-white py-3 px-5 rounded-lg shadow-xl z-[10001]"></div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const app = {
+                // --- STATE ---
+                state: {
+                    currentView: 'initial',
+                    isOwnerLoggedIn: false, isAdminLoggedIn: false,
+                    mapsInitialized: false,
+                    data: { companies: [] },
+                    activeCompanyId: localStorage.getItem('activeCompanyTab') || null,
+                    ownerState: {
+                        activeTab: 'submitter',
+                        geminiApiKey: localStorage.getItem('geminiApiKey') || '',
+                        isAiGenerating: false,
+                        selectedPlace: {
+                            name: '',
+                            tripAdvisorLink: '',
+                            startingCount: 0,
+                            reviews: [],
+                            placeId: ''
+                        },
+                        reviews: [], // Array of objects: {title, text, date, companion}
+                        bulkText: '',
+                        promptGenerator: { input: '', output: '' },
+                        sheetRow: { dailyReviews: '', reviewsOrdered: '', output: '' }
+                    }
+                },
+                // --- DOM ELEMENTS ---
+                elements: {
+                    app: document.getElementById('app'),
+                    initialView: document.getElementById('initial-view'),
+                    ownerView: document.getElementById('owner-view'),
+                    adminView: document.getElementById('admin-view'),
+                    loginModalContainer: document.getElementById('login-modal-container'),
+                    genericModalContainer: document.getElementById('generic-modal-container'),
+                    notification: document.getElementById('notification'),
+                },
+                // --- INITIALIZATION ---
+                init() {
+                    window.reviewApp = this; 
+                    this.loadData();
+                    this.attachInitialListeners();
+                    
+                    this.state.isOwnerLoggedIn = sessionStorage.getItem('isOwnerLoggedIn') === 'true';
+                    this.state.isAdminLoggedIn = sessionStorage.getItem('isAdminLoggedIn') === 'true';
+
+                    const restoredView = localStorage.getItem('currentView');
+                    if (restoredView && restoredView !== 'initial' && restoredView !== 'client') {
+                         this.switchView(restoredView, true);
+                    } else {
+                        this.render();
+                    }
+                },
+                
+                mapsApiLoaded() {
+                    this.state.mapsInitialized = true;
+                    this.initializeMapsForCurrentView();
+                },
+
+                initializeMapsForCurrentView() {
+                    if (!this.state.mapsInitialized) return;
+                    const view = this.state.currentView;
+                    if (view === 'owner') this.initializeOwnerViewMaps();
+                },
+
+                // --- GOOGLE MAPS & PLACES INTEGRATION ---
+                initializeOwnerViewMaps() {
+                    if (this.state.ownerState.activeTab === 'submitter') {
+                        this.initAutocomplete('owner-link-input', this.handleOwnerPlaceSelection.bind(this));
+                    }
+                },
+
+                initAutocomplete(inputId, callback) {
+                    if (!this.state.mapsInitialized) return;
+                    const input = document.getElementById(inputId);
+                    if (!input || input.dataset.acAttached) return;
+
+                    const autocompleteOptions = {
+                        fields: ["place_id", "name", "reviews", "user_ratings_total"],
+                        types: ["establishment"]
+                    };
+                    const autocomplete = new google.maps.places.Autocomplete(input, autocompleteOptions);
+                    input.dataset.acAttached = 'true';
+
+                    autocomplete.addListener('place_changed', () => {
+                        const place = autocomplete.getPlace();
+                        callback(place);
+                    });
+                },
+
+                handleOwnerPlaceSelection(place) {
+                    if (!place || !place.place_id) {
+                        this.showNotification("Could not retrieve company details.", "error");
+                        return;
+                    }
+
+                    const { ownerState } = this.state;
+                    ownerState.selectedPlace.name = place.name || '';
+                    ownerState.selectedPlace.placeId = place.place_id;
+                    ownerState.selectedPlace.startingCount = place.user_ratings_total || 0;
+                    
+                    if (place.reviews && place.reviews.length > 0) {
+                        const positiveReviews = place.reviews.filter(r => r.rating >= 4).map(r => r.text);
+                        ownerState.promptGenerator.input = positiveReviews.join('\n\n');
+                    } else {
+                        ownerState.promptGenerator.input = 'No recent positive reviews found on Google. Paste your own context points here.';
+                    }
+                    
+                    this.showNotification(`Context pulled for: ${place.name}`, "success");
+                    this.render();
+                },
+
+                // --- DATA PERSISTENCE ---
+                loadData() {
+                    const savedData = localStorage.getItem('tripAdvisorDashboardData');
+                    if (savedData) { 
+                        try {
+                            this.state.data = JSON.parse(savedData); 
+                            if (!this.state.data.companies) this.state.data.companies = []; 
+                        } catch(e) {
+                            this.state.data = { companies: [] };
+                        }
+                    }
+                    const activeTab = localStorage.getItem('activeCompanyTab');
+                    if (activeTab && this.state.data.companies.find(c => c.id === activeTab)) { 
+                        this.state.activeCompanyId = activeTab; 
+                    } else if (this.state.data.companies.length > 0) { 
+                        this.state.activeCompanyId = this.state.data.companies[0].id; 
+                    }
+                },
+                saveData() {
+                    localStorage.setItem('tripAdvisorDashboardData', JSON.stringify(this.state.data));
+                },
+
+                // --- VIEW MANAGEMENT ---
+                switchView(view, isRestoring = false) {
+                    const isLoggedIn = (view === 'owner' && this.state.isOwnerLoggedIn) ||
+                                     (view === 'admin' && this.state.isAdminLoggedIn);
+
+                    if (!isLoggedIn && view !== 'initial') {
+                        if (!isRestoring) {
+                            this.showLoginModal(view);
+                        } else {
+                            this.state.currentView = 'initial';
+                            localStorage.setItem('currentView', 'initial');
+                            this.render();
+                        }
+                        return;
+                    }
+
+                    this.state.currentView = view;
+                    localStorage.setItem('currentView', view);
+                    
+                    if (view === 'initial') { 
+                        this.state.isOwnerLoggedIn = false;
+                        this.state.isAdminLoggedIn = false;
+                        sessionStorage.removeItem('isOwnerLoggedIn');
+                        sessionStorage.removeItem('isAdminLoggedIn');
+                    }
+
+                    if (view === 'owner' && !this.state.ownerState.geminiApiKey) {
+                        this.showApiKeyModal();
+                    }
+                    
+                    this.render();
+                    setTimeout(() => this.initializeMapsForCurrentView(), 0);
+                },
+                
+                // --- RENDERING ---
+                render() {
+                    const { initialView, ownerView, adminView } = this.elements;
+                    initialView.classList.toggle('hidden', this.state.currentView !== 'initial');
+                    ownerView.classList.toggle('hidden', this.state.currentView !== 'owner');
+                    adminView.classList.toggle('hidden', this.state.currentView !== 'admin');
+
+                    if (this.state.currentView === 'owner') this.renderOwnerView();
+                    if (this.state.currentView === 'admin') this.renderAdminView();
+
+                    setTimeout(() => this.initializeMapsForCurrentView(), 0);
+                },
+                
+                renderOwnerView() {
+                    const { activeTab } = this.state.ownerState;
+                    this.elements.ownerView.innerHTML = `
+                        <div class="flex justify-between items-center mb-6">
+                            <button class="back-to-initial-btn text-gray-400 hover:text-white">← Logout & Return</button>
+                            <h1 class="text-3xl sm:text-4xl font-bold text-white text-center">Owner Portal</h1>
+                            <button id="settings-btn" class="text-gray-400 hover:text-white">⚙️ Settings</button>
+                        </div>
+                        <div class="border-b border-gray-600 mb-6">
+                            <nav class="-mb-px flex gap-4 overflow-x-auto" aria-label="Tabs">
+                                <button data-tab="submitter" class="owner-tab-btn ${activeTab === 'submitter' ? 'border-teal-500 text-teal-400' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Review Builder</button>
+                                <button data-tab="promptGenerator" class="owner-tab-btn ${activeTab === 'promptGenerator' ? 'border-teal-500 text-teal-400' : 'border-transparent text-gray-400 hover:text-gray-200'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">AI Configuration</button>
+                            </nav>
+                        </div>
+                        <div id="owner-submitter-view" class="${activeTab !== 'submitter' ? 'hidden' : ''}">${this.renderOwnerSubmitterView()}</div>
+                        <div id="owner-prompt-generator-view" class="${activeTab !== 'promptGenerator' ? 'hidden' : ''}">${this.renderOwnerPromptGeneratorView()}</div>
+                    `;
+                },
+                
+                renderOwnerSubmitterView() {
+                    const { selectedPlace, reviews } = this.state.ownerState;
+                    const isPlaceSelected = !!selectedPlace.placeId || selectedPlace.name;
+                    const areReviewsProcessed = reviews.length > 0;
+                    return `
+                        <div id="owner-link-section" class="p-6 bg-gray-800 border border-gray-700 rounded-xl space-y-4">
+                             <h2 class="text-xl font-semibold text-white">Step 1: Get Context from Google</h2>
+                             <p class="text-sm text-gray-400">Search the business on Google to extract existing positive reviews as context for the AI.</p>
+                             <input type="text" id="owner-link-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg" placeholder="Search Google Places..." value="${selectedPlace.name || ''}">
+                             
+                             <div class="pt-4 border-t border-gray-700 mt-4">
+                                <h2 class="text-xl font-semibold text-white mb-4">Step 2: TripAdvisor Target Details</h2>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-1">Target Business Name</label>
+                                        <input type="text" id="ta-business-name" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg" placeholder="Business Name" value="${selectedPlace.name || ''}">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-1">TripAdvisor URL</label>
+                                        <input type="text" id="ta-url-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg" placeholder="https://www.tripadvisor.com/..." value="${selectedPlace.tripAdvisorLink || ''}">
+                                    </div>
+                                </div>
+                             </div>
+                        </div>
+
+                        <div id="owner-reviews-section" class="mt-8 ${!areReviewsProcessed ? 'hidden' : ''}">
+                            <div class="mb-6 flex justify-between items-center">
+                                <h2 class="text-xl font-semibold text-white">Step 3: Review AI Output (${reviews.length})</h2>
+                                <button id="reset-owner-reviews-btn" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg">Clear Results</button>
+                            </div>
+                            <div id="owner-reviews-container">${this.renderReviewCards()}</div>
+                            <div class="mt-8 pt-6 border-t border-gray-700"> 
+                                <button id="download-owner-file-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg">Download JSON for Admin</button> 
+                            </div>
+                        </div>`;
+                },
+                
+                renderOwnerPromptGeneratorView() {
+                    const { input, output } = this.state.ownerState.promptGenerator;
+                    const { geminiApiKey, isAiGenerating } = this.state.ownerState;
+
+                    return `
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            <div class="p-6 bg-gray-800 border border-gray-700 rounded-xl flex flex-col">
+                                <h2 class="text-xl font-semibold text-white mb-4">1. Review Context</h2>
+                                <p class="text-sm text-gray-400 mb-3">Auto-filled from Google search. Edit to guide the AI.</p>
+                                <textarea id="prompt-generator-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg flex-1 resize-y min-h-[300px]">${input}</textarea>
+                            </div>
+                            <div class="p-6 bg-gray-800 border border-gray-700 rounded-xl flex flex-col">
+                                <h2 class="text-xl font-semibold text-white mb-4">2. Generate Master Prompt</h2>
+                                <button id="generate-prompt-btn" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg">Build TripAdvisor Instructions</button>
+                                <div class="relative mt-4 flex-1 min-h-[300px]">
+                                    <pre id="prompt-generator-output" class="absolute inset-0 w-full h-full p-3 bg-gray-900 border border-gray-600 rounded-lg whitespace-pre-wrap overflow-y-auto text-sm">${output || 'Master prompt will appear here...'}</pre>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-8 p-6 bg-gray-800 border border-gray-700 rounded-xl">
+                             <h2 class="text-xl font-semibold text-white mb-4">3. Craft Reviews (Gemini 3.1 Flash Lite Preview)</h2>
+                             <button id="craft-ai-reviews-btn" class="w-full flex items-center justify-center bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-4 rounded-lg text-lg" ${!output || !geminiApiKey || isAiGenerating ? 'disabled' : ''}>
+                                    ${isAiGenerating ? '<div class="spinner"></div><span class="ml-3">Generating JSON Payload...</span>' : 'Generate 50 TripAdvisor Reviews'}
+                             </button>
+                             ${!geminiApiKey ? '<p class="text-yellow-400 text-sm mt-3">Missing Gemini API Key. Please add it in Settings.</p>' : ''}
+                        </div>`;
+                },
+
+                renderReviewCards() {
+                    const { reviews } = this.state.ownerState;
+                    if (reviews.length === 0) return '';
+
+                    return reviews.map((review, index) => `
+                        <div class="review-item bg-gray-800 p-6 rounded-xl mb-6 border border-gray-700">
+                            <div class="flex justify-between items-start mb-4">
+                                <span class="text-2xl font-bold text-teal-400">#${index + 1}</span>
+                                <button data-index="${index}" class="remove-review-btn text-gray-500 hover:text-red-500 font-bold text-2xl">×</button>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label class="text-xs text-gray-400 font-bold uppercase">Date of Visit</label>
+                                    <input type="text" value="${review.date}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg text-white" readonly>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 font-bold uppercase">Companion Type</label>
+                                    <input type="text" value="${review.companion}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg text-white" readonly>
+                                </div>
+                            </div>
+                            <div class="mb-4">
+                                <label class="text-xs text-gray-400 font-bold uppercase">Title (Min 25 chars)</label>
+                                <input type="text" value="${review.title.replace(/"/g, '&quot;')}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg text-white font-semibold" readonly>
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-400 font-bold uppercase">Review Body (Min 25 chars)</label>
+                                <textarea class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg h-32 resize-y text-white" readonly>${review.text}</textarea>
+                            </div>
+                        </div>
+                    `).join('');
+                },
+
+                renderAdminView() {
+                    this.elements.adminView.innerHTML = `
+                        <div class="flex justify-between items-center mb-8">
+                            <h1 class="text-3xl sm:text-4xl font-bold text-white">Admin Dashboard</h1>
+                            <button class="back-to-initial-btn text-gray-400 hover:text-white">← Logout & Return</button>
+                        </div>
+                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 self-start">
+                             <h2 class="text-xl font-semibold text-white mb-4">Manage Companies</h2>
+                             <div class="flex flex-col sm:flex-row gap-4">
+                                 <input type="text" id="new-company-name" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg" placeholder="Company Name...">
+                                 <input type="text" id="new-company-link" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg" placeholder="TripAdvisor URL (Optional)">
+                                 <button id="add-company-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg whitespace-nowrap">Add Entity</button>
+                             </div>
+                        </div>
+                        <main id="admin-main-content" class="mt-8">
+                            ${this.renderAdminMainContent()}
+                        </main>
+                    `;
+                },
+                renderAdminMainContent() {
+                    const companies = this.state.data.companies;
+                    if (companies.length === 0) return `<div class="text-center py-16 px-6 bg-gray-800 rounded-lg"><h3 class="text-xl font-semibold text-white">No Companies Added</h3><p class="text-gray-400 mt-2">Create an entity to start assigning tasks.</p></div>`;
+                    const company = companies.find(c => c.id === this.state.activeCompanyId);
+                    return `
+                        <div class="sticky-tabs border-b border-gray-600 mb-6">
+                            <nav class="-mb-px flex gap-4 overflow-x-auto" aria-label="Tabs">
+                                ${companies.map(c => `
+                                    <button data-id="${c.id}" class="company-tab-btn group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${this.state.activeCompanyId === c.id ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}">
+                                        ${c.name}
+                                    </button>
+                                `).join('')}
+                            </nav>
+                        </div>
+                        ${company ? this.renderAdminCompanyDetails(company) : ''}
+                    `;
+                },
+                renderAdminCompanyDetails(company) {
+                    const totalReviews = company.reviews?.length || 0;
+                    const doneReviews = company.reviews?.filter(r => r.status === 'done').length || 0;
+                    const progress = totalReviews > 0 ? (doneReviews / totalReviews) * 100 : 0;
+                    const undoneReviews = company.reviews?.filter(r => r.status !== 'done') || [];
+                    return `
+                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 mb-8">
+                            <div class="flex flex-wrap justify-between items-start gap-4 mb-4">
+                                <div class="flex-1 min-w-[250px]">
+                                  <h2 class="text-2xl font-bold text-white">${company.name}</h2>
+                                  ${company.tripAdvisorLink ? `<a href="${company.tripAdvisorLink}" target="_blank" class="text-sm text-indigo-400 hover:underline break-all block mt-2">${company.tripAdvisorLink}</a>` : '<p class="text-sm text-yellow-400 mt-2">No TripAdvisor link configured.</p>'}
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <button data-id="${company.id}" class="copy-latest-undone-btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg" ${undoneReviews.length === 0 ? 'disabled' : ''}>Copy Next</button>
+                                    <label class="file-input-button bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-center cursor-pointer">
+                                        Load JSON File <input type="file" data-id="${company.id}" class="upload-admin-file hidden" accept=".json">
+                                    </label>
+                                    <button data-id="${company.id}" class="remove-company-btn bg-red-800 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg col-span-2">Delete Company</button>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between mb-1">
+                                    <span class="text-base font-medium text-indigo-400">Completion</span>
+                                    <span class="text-sm font-medium text-indigo-400">${doneReviews} / ${totalReviews} (${Math.round(progress)}%)</span>
+                                </div>
+                                <div class="w-full bg-gray-700 rounded-full h-2.5"> <div class="bg-indigo-600 h-2.5 rounded-full" style="width: ${progress}%"></div> </div>
+                            </div>
+                        </div>
+                        <div id="admin-reviews-container">
+                            ${company.reviews && company.reviews.length > 0 ? company.reviews.map((review, index) => this.getAdminReviewHtml(company, review, index)).join('') : `<div class="text-center py-16 px-6 bg-gray-800 rounded-lg"><p class="text-gray-400">No reviews loaded. Upload a JSON payload generated by the Owner portal.</p></div>`}
+                        </div>
+                    `;
+                },
+                getAdminReviewHtml(company, review, index) {
+                    const isDone = review.status === 'done';
+                    return `
+                        <div class="review-item relative bg-gray-800 p-6 rounded-xl mb-6 shadow-lg border ${isDone ? 'border-green-500 opacity-60' : 'border-gray-700'}">
+                            ${isDone ? '<span class="absolute top-3 right-3 bg-green-600 text-white text-xs font-bold px-2 py-1 rounded-full">SENT</span>' : ''}
+                            <div class="flex justify-between items-start mb-4"> <span class="text-2xl font-bold text-indigo-400">Task #${index + 1}</span> </div>
+                            
+                            <div class="grid grid-cols-2 gap-4 mb-4 bg-gray-900 p-4 rounded-lg">
+                                <div><span class="text-gray-500 text-xs font-bold uppercase block">Date</span> <span class="text-gray-200">${review.date}</span></div>
+                                <div><span class="text-gray-500 text-xs font-bold uppercase block">Companion</span> <span class="text-gray-200">${review.companion}</span></div>
+                                <div class="col-span-2"><span class="text-gray-500 text-xs font-bold uppercase block">Title</span> <span class="text-gray-200 font-semibold">${review.title}</span></div>
+                                <div class="col-span-2"><span class="text-gray-500 text-xs font-bold uppercase block">Review Content</span> <span class="text-gray-300 italic">"${review.text}"</span></div>
+                            </div>
+
+                             <div class="mt-4 pt-4 border-t border-gray-700 flex gap-3">
+                                 ${isDone ? `<button data-index="${index}" class="undo-review-btn flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-4 rounded-lg">Undo Status</button>` : `<button data-index="${index}" class="copy-btn flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg> Copy Template for Telegram</button>`}
+                            </div>
+                        </div>`;
+                },
+
+                // --- EVENT LISTENERS & HANDLERS ---
+                attachInitialListeners() {
+                    document.getElementById('owner-portal-btn').addEventListener('click', () => this.switchView('owner'));
+                    document.getElementById('admin-portal-btn').addEventListener('click', () => this.switchView('admin'));
+                    this.elements.app.addEventListener('click', e => { if (e.target.closest('.back-to-initial-btn')) { this.switchView('initial'); } this.handleGenericClick(e); });
+                    this.elements.app.addEventListener('input', e => this.handleGenericInput(e));
+                    this.elements.app.addEventListener('change', e => this.handleGenericChange(e));
+                },
+                
+                handleOwnerTabClick(tab) {
+                    this.state.ownerState.activeTab = tab;
+                    this.render();
+                },
+
+                handleGenericClick(e) {
+                    const target = e.target;
+                    
+                    if (target.closest('.owner-tab-btn')) { this.handleOwnerTabClick(target.closest('.owner-tab-btn').dataset.tab); return; }
+                    if (target.closest('#settings-btn')) { this.showApiKeyModal(); return; }
+
+                    if (this.state.currentView === 'owner') {
+                        if (target.id === 'reset-owner-reviews-btn') { this.state.ownerState.reviews = []; this.render(); }
+                        if (target.id === 'generate-prompt-btn') this.generateOwnerPrompt();
+                        if (target.id === 'craft-ai-reviews-btn') this.craftAiReviews();
+                        
+                        if (target.closest('.remove-review-btn')) {
+                            this.state.ownerState.reviews.splice(target.closest('.remove-review-btn').dataset.index, 1);
+                            this.render();
+                        }
+
+                        if (target.id === 'download-owner-file-btn') {
+                            const name = document.getElementById('ta-business-name')?.value || 'TripAdvisor';
+                            const link = document.getElementById('ta-url-input')?.value || '';
+                            const data = { 
+                                name: name,
+                                tripAdvisorLink: link, 
+                                reviews: this.state.ownerState.reviews 
+                            };
+                            const dataBlob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                            const url = URL.createObjectURL(dataBlob);
+                            const a = document.createElement('a');
+                            a.href = url; a.download = `${name.replace(/\s+/g, '_')}_TA_Payload.json`;
+                            document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                            this.showNotification('Payload JSON downloaded successfully!');
+                        }
+                    }
+                    
+                    if (this.state.currentView === 'admin') this.handleAdminClick(e);
+                },
+
+                handleAdminClick(e) {
+                    const target = e.target;
+                    
+                    if(target.id === 'add-company-btn') {
+                        const nameInput = document.getElementById('new-company-name');
+                        const linkInput = document.getElementById('new-company-link');
+                        if (nameInput.value.trim()) {
+                            const newCompany = { id: `comp_${Date.now()}`, name: nameInput.value.trim(), tripAdvisorLink: linkInput.value.trim(), reviews: [] };
+                            this.state.data.companies.push(newCompany);
+                            this.state.activeCompanyId = newCompany.id;
+                            this.saveData(); 
+                            this.render(); 
+                            nameInput.value = ''; linkInput.value = '';
+                        }
+                    }
+                    if(target.closest('.company-tab-btn')) { 
+                        this.state.activeCompanyId = target.closest('.company-tab-btn').dataset.id; 
+                        localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
+                        this.render(); 
+                    }
+                    if(target.closest('.remove-company-btn')) {
+                        const id = target.closest('.remove-company-btn').dataset.id;
+                        this.showConfirmModal('Delete Company?', 'This cannot be undone.', () => {
+                            this.state.data.companies = this.state.data.companies.filter(c => c.id !== id);
+                            if (this.state.activeCompanyId === id) {
+                                this.state.activeCompanyId = this.state.data.companies[0]?.id || null;
+                                localStorage.setItem('activeCompanyTab', this.state.activeCompanyId);
+                            }
+                            this.saveData(); this.render();
+                        });
+                    }
+                    
+                    const company = this.state.data.companies.find(c => c.id === this.state.activeCompanyId);
+                    if(!company) return;
+
+                    const reviewIndex = e.target.closest('[data-review-index]')?.dataset.reviewIndex ?? e.target.closest('[data-index]')?.dataset.index;
+                    
+                    if (target.closest('.copy-latest-undone-btn')) {
+                        const latestUndone = company.reviews.map((r, i) => ({...r, originalIndex: i})).find(r => r.status !== 'done');
+                        if (latestUndone) {
+                            this.copyTelegramFormat(company, latestUndone);
+                            company.reviews[latestUndone.originalIndex].status = 'done';
+                            this.saveData(); this.render();
+                        } else { this.showNotification('No pending tasks to copy.'); }
+                        return;
+                    }
+
+                    if (!reviewIndex) return;
+                    const review = company.reviews[reviewIndex];
+
+                    if (target.closest('.copy-btn')) {
+                        this.copyTelegramFormat(company, review);
+                        review.status = 'done';
+                        this.saveData(); this.render();
+                    }
+                    if (target.closest('.undo-review-btn')) {
+                        review.status = 'undone';
+                        this.saveData(); this.render();
+                    }
+                },
+
+                copyTelegramFormat(company, review) {
+                    const tgText = `📝 **New TripAdvisor Review Task**\n🔗 Link: ${company.tripAdvisorLink || 'N/A'}\n\n📅 **When did you go?**: ${review.date}\n👥 **Who did you go with?**: ${review.companion}\n\n🏷️ **Title** (Copy exact, min 25 chars):\n\`${review.title}\`\n\n💬 **Review** (Copy exact, min 25 chars):\n\`${review.text}\``;
+                    this.copyToClipboard(tgText, 'Telegram format copied!');
+                },
+
+                handleGenericInput(e) {
+                    const target = e.target;
+                    if (target.id === 'prompt-generator-input') this.state.ownerState.promptGenerator.input = target.value;
+                },
+
+                async handleGenericChange(e) {
+                    const target = e.target;
+                    if (this.state.currentView === 'admin' && target.classList.contains('upload-admin-file')) {
+                        const file = target.files[0];
+                        const companyId = target.dataset.id;
+                        if (file && companyId) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                                try {
+                                    const uploaded = JSON.parse(event.target.result);
+                                    if (Array.isArray(uploaded.reviews)) {
+                                        const company = this.state.data.companies.find(c => c.id === companyId);
+                                        if(company) {
+                                            if (uploaded.tripAdvisorLink && !company.tripAdvisorLink) company.tripAdvisorLink = uploaded.tripAdvisorLink;
+                                            if (uploaded.name && company.name === 'New Company') company.name = uploaded.name;
+                                            
+                                            const existingReviewTexts = new Set((company.reviews || []).map(r => r.text));
+                                            const newReviews = uploaded.reviews
+                                                .filter(r => r.text && !existingReviewTexts.has(r.text))
+                                                .map(r => ({...r, status: 'undone'}));
+
+                                            company.reviews = [...(company.reviews || []), ...newReviews];
+                                            this.saveData(); 
+                                            this.render();
+                                            this.showNotification(`Successfully loaded ${newReviews.length} tasks.`);
+                                        }
+                                    } else { this.showNotification('Invalid JSON structure. Needs a "reviews" array.', 'error'); }
+                                } catch (err) { 
+                                    this.showNotification('Error parsing JSON.', 'error'); 
+                                } finally { target.value = ''; }
+                            };
+                            reader.readAsText(file);
+                        }
+                    }
+                },
+
+                generateOwnerPrompt() {
+                    const { promptGenerator } = this.state.ownerState;
+                    const bName = document.getElementById('ta-business-name')?.value.trim() || '';
+                    
+                    const promptText = `You are an expert copywriter specializing in creating authentic user-generated content for TripAdvisor.
+
+TASK:
+Based on the Google review CONTEXT below, craft 50 highly realistic, positive TripAdvisor reviews. 
+
+CONTEXT / KEYWORDS:
+${promptGenerator.input.trim()}
+${bName ? `\nBUSINESS NAME: ${bName}` : ''}
+
+CRITICAL REQUIREMENTS:
+1. "title": Write a catchy title for the review. **IT MUST BE MINIMUM 25 CHARACTERS LONG.**
+2. "text": Write the review body. Invent plausible, specific details to make them credible. **IT MUST BE MINIMUM 25 CHARACTERS LONG.** Vary tone, emotion, and sentence structure across the 50 reviews.
+3. "date": Generate a recent visit date in the format "Month Year" (e.g., "January 2026", "December 2025"). Spread these dates across the last 6 months.
+4. "companion": Select ONE of the exact following options based on the vibe of the review: "Business", "Couples", "Family", "Friends", "Solo".
+
+OUTPUT FORMAT (JSON STRICT):
+You MUST return ONLY a valid JSON array of 50 objects. DO NOT wrap the output in markdown backticks (no \`\`\`json). The format must exactly match this schema:
+
+[
+  {
+    "title": "A wonderful experience that exceeded expectations",
+    "text": "The service was absolutely phenomenal from start to finish. I highly recommend taking the time to visit this place.",
+    "date": "March 2026",
+    "companion": "Family"
+  }
+]`;
+                    promptGenerator.output = promptText;
+                    this.render();
+                    this.showNotification("Prompt configured for JSON output.");
+                },
+
+                async craftAiReviews() {
+                    const { geminiApiKey, promptGenerator } = this.state.ownerState;
+                    if (!geminiApiKey) { this.showNotification("Gemini API key is not set.", 'error'); return; }
+                    if (!promptGenerator.output) { this.showNotification("Generate prompt instructions first.", 'error'); return; }
+
+                    this.state.ownerState.isAiGenerating = true;
+                    this.render();
+
+                    // STRICTLY enforcing Gemini 3.1 Flash Lite Preview as instructed
+                    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${geminiApiKey}`;
+
+                    try {
+                        const response = await fetch(API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                contents: [{ parts: [{ text: promptGenerator.output }] }],
+                                generationConfig: { responseMimeType: "application/json" } 
+                            })
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+                        }
+
+                        const data = await response.json();
+                        const rawText = data.candidates[0]?.content?.parts[0]?.text || '[]';
+                        
+                        try {
+                            const parsedArray = JSON.parse(rawText.trim());
+                            if (Array.isArray(parsedArray) && parsedArray.length > 0) {
+                                this.state.ownerState.reviews = parsedArray.map(r => ({
+                                    title: r.title || 'Great Experience',
+                                    text: r.text || 'Good place.',
+                                    date: r.date || 'January 2026',
+                                    companion: r.companion || 'Friends'
+                                }));
+                                this.state.ownerState.activeTab = 'submitter';
+                                this.showNotification("50 TripAdvisor tasks successfully generated!", "success");
+                            } else {
+                                throw new Error("Parsed JSON was not a valid array.");
+                            }
+                        } catch (parseError) {
+                            console.error("Failed JSON Output from API:", rawText);
+                            this.showNotification("AI did not return valid JSON. Try generating again.", "error");
+                        }
+                        
+                    } catch (error) {
+                        this.showNotification(`API Error: ${error.message}`, 'error');
+                    } finally {
+                        this.state.ownerState.isAiGenerating = false;
+                        this.render();
+                    }
+                },
+
+                // --- UTILITIES & MODALS ---
+                showLoginModal(type) {
+                    const titles = { owner: 'Owner Login', admin: 'Admin Login' };
+                    const credentials = { owner: {u: 'owner', p: 'owner'}, admin: {u: 'admin', p: 'admin'} };
+                    const colors = { owner: 'teal', admin: 'indigo' };
+                    const title = titles[type]; const correctUser = credentials[type].u; const correctPass = credentials[type].p; const color = colors[type];
+                    this.elements.loginModalContainer.innerHTML = `
+                        <div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000]">
+                            <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm border border-gray-700">
+                                <h2 class="text-2xl font-bold text-white mb-6">${title}</h2>
+                                <form id="login-form">
+                                    <div class="mb-4"><label for="username" class="block text-gray-300 mb-2">Username</label><input type="text" id="username" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-${color}-500"></div>
+                                    <div class="mb-6"><label for="password" class="block text-gray-300 mb-2">Password</label><input type="password" id="password" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-${color}-500"></div>
+                                    <p id="login-error" class="text-red-400 text-sm mb-4 hidden">Invalid credentials.</p>
+                                    <div class="flex items-center justify-between">
+                                        <button type="button" class="cancel-login-btn text-gray-400 hover:text-white">Cancel</button>
+                                        <button type="submit" class="text-white font-bold py-2 px-6 rounded-lg bg-${color}-600 hover:bg-${color}-700">Login</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>`;
+                    const form = this.elements.loginModalContainer.querySelector('#login-form');
+                    form.querySelector('#username').focus();
+                    form.onsubmit = (e) => {
+                        e.preventDefault();
+                        const user = form.querySelector('#username').value;
+                        const pass = form.querySelector('#password').value;
+                        if (user === correctUser && pass === correctPass) {
+                            if (type === 'owner') { this.state.isOwnerLoggedIn = true; sessionStorage.setItem('isOwnerLoggedIn', 'true'); }
+                            if (type === 'admin') { this.state.isAdminLoggedIn = true; sessionStorage.setItem('isAdminLoggedIn', 'true'); }
+                            this.elements.loginModalContainer.innerHTML = '';
+                            this.switchView(type);
+                        } else { form.querySelector('#login-error').classList.remove('hidden'); }
+                    };
+                    this.elements.loginModalContainer.querySelector('.cancel-login-btn').onclick = () => { this.elements.loginModalContainer.innerHTML = ''; };
+                },
+                showApiKeyModal() {
+                    const currentKey = this.state.ownerState.geminiApiKey;
+                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><form id="api-key-form" class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">Gemini API Key</h2><p class="text-gray-400 mb-4">Key saved locally in browser. Required for generation.</p><input type="password" id="modal-api-key-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg mb-6" placeholder="Enter API key..." value="${currentKey}"><div class="flex justify-end gap-4"><button type="button" id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button type="submit" class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-6 rounded-lg">Save Key</button></div></form></div>`;
+                    const input = document.getElementById('modal-api-key-input');
+                    input.focus();
+                    document.getElementById('modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
+                    document.getElementById('api-key-form').onsubmit = (e) => {
+                        e.preventDefault();
+                        const newKey = input.value.trim();
+                        if (newKey) {
+                            this.state.ownerState.geminiApiKey = newKey;
+                            localStorage.setItem('geminiApiKey', newKey);
+                            this.showNotification('API Key saved successfully!');
+                            this.elements.genericModalContainer.innerHTML = '';
+                            this.render();
+                        } else {
+                            this.showNotification('API Key cannot be empty.', 'error');
+                        }
+                    };
+                },
+                showConfirmModal(title, message, onConfirm) {
+                     this.elements.genericModalContainer.innerHTML = `<div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[10000] p-4"><div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700"><h2 class="text-2xl font-bold text-white mb-4">${title}</h2><p class="text-gray-300 mb-6">${message}</p><div class="flex justify-end gap-4"><button id="modal-cancel" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg">Cancel</button><button id="modal-confirm" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg">Confirm</button></div></div></div>`;
+                    document.getElementById('modal-cancel').onclick = () => this.elements.genericModalContainer.innerHTML = '';
+                    document.getElementById('modal-confirm').onclick = () => { onConfirm(); this.elements.genericModalContainer.innerHTML = ''; };
+                },
+                copyToClipboard(text, message = "Copied to clipboard!") {
+                    if (!navigator.clipboard) { 
+                        const textArea = document.createElement("textarea");
+                        textArea.value = text;
+                        document.body.appendChild(textArea);
+                        textArea.focus();
+                        textArea.select();
+                        try { document.execCommand('copy'); this.showNotification(message); } 
+                        catch (err) { this.showNotification("Failed to copy.", 'error'); }
+                        document.body.removeChild(textArea);
+                        return;
+                    }
+                    navigator.clipboard.writeText(text).then(() => { this.showNotification(message); }, () => { this.showNotification("Failed to copy.", 'error'); });
+                },
+                showNotification(message, type = 'success') {
+                    const el = this.elements.notification;
+                    el.textContent = message;
+                    el.className = `notification-toast fixed bottom-5 right-5 text-white py-3 px-5 rounded-lg shadow-xl z-[10001] ${type === 'info' ? 'bg-blue-600' : type === 'success' ? 'bg-green-600' : 'bg-red-600'}`;
+                    el.classList.remove('hidden');
+                    el.style.animation = 'none';
+                    el.offsetHeight; 
+                    el.style.animation = null; 
+                    setTimeout(() => el.classList.add('hidden'), 3900);
+                }
+            };
+            
+            app.init();
+        });
+    </script>
+</body>
+</html>
