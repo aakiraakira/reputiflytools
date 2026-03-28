@@ -303,7 +303,7 @@
                                         <input type="text" id="ta-business-name" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg" placeholder="Business Name" value="${selectedPlace.name || ''}">
                                     </div>
                                     <div>
-                                        <label class="block text-sm font-medium text-gray-300 mb-1">TripAdvisor URL</label>
+                                        <label class="block text-sm font-medium text-gray-300 mb-1">TripAdvisor URL <span class="text-red-400">*Required</span></label>
                                         <input type="text" id="ta-url-input" class="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg" placeholder="https://www.tripadvisor.com/..." value="${selectedPlace.tripAdvisorLink || ''}">
                                     </div>
                                 </div>
@@ -502,8 +502,14 @@
                         }
 
                         if (target.id === 'download-owner-file-btn') {
-                            const name = document.getElementById('ta-business-name')?.value || 'TripAdvisor';
-                            const link = document.getElementById('ta-url-input')?.value || '';
+                            // Extract values directly from the bound state memory
+                            const name = this.state.ownerState.selectedPlace.name || 'TripAdvisor_Entity';
+                            const link = this.state.ownerState.selectedPlace.tripAdvisorLink || '';
+                            
+                            if (!link) {
+                                this.showNotification('Warning: TripAdvisor URL is missing!', 'error');
+                            }
+
                             const data = { 
                                 name: name,
                                 tripAdvisorLink: link, 
@@ -589,7 +595,10 @@
 
                 handleGenericInput(e) {
                     const target = e.target;
+                    // Properly bound state values so they map to the JSON export exactly
                     if (target.id === 'prompt-generator-input') this.state.ownerState.promptGenerator.input = target.value;
+                    if (target.id === 'ta-business-name') this.state.ownerState.selectedPlace.name = target.value;
+                    if (target.id === 'ta-url-input') this.state.ownerState.selectedPlace.tripAdvisorLink = target.value;
                 },
 
                 async handleGenericChange(e) {
@@ -605,8 +614,10 @@
                                     if (Array.isArray(uploaded.reviews)) {
                                         const company = this.state.data.companies.find(c => c.id === companyId);
                                         if(company) {
-                                            if (uploaded.tripAdvisorLink && !company.tripAdvisorLink) company.tripAdvisorLink = uploaded.tripAdvisorLink;
-                                            if (uploaded.name && company.name === 'New Company') company.name = uploaded.name;
+                                            
+                                            // Forcefully overwrites Admin settings to reflect whatever the Owner explicitly put into the JSON
+                                            if (uploaded.tripAdvisorLink) company.tripAdvisorLink = uploaded.tripAdvisorLink;
+                                            if (uploaded.name) company.name = uploaded.name;
                                             
                                             const existingReviewTexts = new Set((company.reviews || []).map(r => r.text));
                                             const newReviews = uploaded.reviews
@@ -616,7 +627,7 @@
                                             company.reviews = [...(company.reviews || []), ...newReviews];
                                             this.saveData(); 
                                             this.render();
-                                            this.showNotification(`Successfully loaded ${newReviews.length} tasks.`);
+                                            this.showNotification(`Successfully loaded ${newReviews.length} tasks and updated company info.`);
                                         }
                                     } else { this.showNotification('Invalid JSON structure. Needs a "reviews" array.', 'error'); }
                                 } catch (err) { 
@@ -629,8 +640,8 @@
                 },
 
                 generateOwnerPrompt() {
-                    const { promptGenerator } = this.state.ownerState;
-                    const bName = document.getElementById('ta-business-name')?.value.trim() || '';
+                    const { promptGenerator, selectedPlace } = this.state.ownerState;
+                    const bName = selectedPlace.name.trim() || '';
                     
                     const promptText = `You are an expert copywriter specializing in creating authentic user-generated content for TripAdvisor.
 
