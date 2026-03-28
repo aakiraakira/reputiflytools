@@ -106,7 +106,7 @@
                             reviews: [],
                             placeId: ''
                         },
-                        reviews: [], // Array of objects: {title, text, date, companion}
+                        reviews: [], // Array of objects: {link, title, text, date, companion}
                         bulkText: '',
                         promptGenerator: { input: '', output: '' },
                         sheetRow: { dailyReviews: '', reviewsOrdered: '', output: '' }
@@ -360,6 +360,10 @@
                                 <span class="text-2xl font-bold text-teal-400">#${index + 1}</span>
                                 <button data-index="${index}" class="remove-review-btn text-gray-500 hover:text-red-500 font-bold text-2xl">×</button>
                             </div>
+                            <div class="mb-4">
+                                <label class="text-xs text-gray-400 font-bold uppercase">Task Link</label>
+                                <input type="text" value="${review.link || ''}" class="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg text-teal-400 text-sm font-medium" readonly>
+                            </div>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                                 <div>
                                     <label class="text-xs text-gray-400 font-bold uppercase">Date of Visit</label>
@@ -459,6 +463,7 @@
                             <div class="flex justify-between items-start mb-4"> <span class="text-2xl font-bold text-indigo-400">Task #${index + 1}</span> </div>
                             
                             <div class="grid grid-cols-2 gap-4 mb-4 bg-gray-900 p-4 rounded-lg">
+                                <div class="col-span-2"><span class="text-gray-500 text-xs font-bold uppercase block">Link</span> <a href="${review.link || company.tripAdvisorLink}" target="_blank" class="text-indigo-400 text-sm hover:underline break-all">${review.link || company.tripAdvisorLink || 'N/A'}</a></div>
                                 <div><span class="text-gray-500 text-xs font-bold uppercase block">Date</span> <span class="text-gray-200">${review.date}</span></div>
                                 <div><span class="text-gray-500 text-xs font-bold uppercase block">Companion</span> <span class="text-gray-200">${review.companion}</span></div>
                                 <div class="col-span-2"><span class="text-gray-500 text-xs font-bold uppercase block">Title</span> <span class="text-gray-200 font-semibold">${review.title}</span></div>
@@ -502,9 +507,8 @@
                         }
 
                         if (target.id === 'download-owner-file-btn') {
-                            // Extract values directly from the bound state memory
-                            const name = this.state.ownerState.selectedPlace.name || 'TripAdvisor_Entity';
-                            const link = this.state.ownerState.selectedPlace.tripAdvisorLink || '';
+                            const name = this.state.ownerState.selectedPlace.name || document.getElementById('ta-business-name')?.value || 'TripAdvisor_Entity';
+                            const link = this.state.ownerState.selectedPlace.tripAdvisorLink || document.getElementById('ta-url-input')?.value || '';
                             
                             if (!link) {
                                 this.showNotification('Warning: TripAdvisor URL is missing!', 'error');
@@ -589,13 +593,13 @@
                 },
 
                 copyTelegramFormat(company, review) {
-                    const tgText = `📝 **New TripAdvisor Review Task**\n🔗 Link: ${company.tripAdvisorLink || 'N/A'}\n\n📅 **When did you go?**: ${review.date}\n👥 **Who did you go with?**: ${review.companion}\n\n🏷️ **Title** (Copy exact, min 25 chars):\n\`${review.title}\`\n\n💬 **Review** (Copy exact, min 25 chars):\n\`${review.text}\``;
+                    const linkToUse = review.link || company.tripAdvisorLink || 'N/A';
+                    const tgText = `📝 **New TripAdvisor Review Task**\n🔗 Link: ${linkToUse}\n\n📅 **When did you go?**: ${review.date}\n👥 **Who did you go with?**: ${review.companion}\n\n🏷️ **Title** (Copy exact, min 25 chars):\n\`${review.title}\`\n\n💬 **Review** (Copy exact, min 25 chars):\n\`${review.text}\``;
                     this.copyToClipboard(tgText, 'Telegram format copied!');
                 },
 
                 handleGenericInput(e) {
                     const target = e.target;
-                    // Properly bound state values so they map to the JSON export exactly
                     if (target.id === 'prompt-generator-input') this.state.ownerState.promptGenerator.input = target.value;
                     if (target.id === 'ta-business-name') this.state.ownerState.selectedPlace.name = target.value;
                     if (target.id === 'ta-url-input') this.state.ownerState.selectedPlace.tripAdvisorLink = target.value;
@@ -615,7 +619,6 @@
                                         const company = this.state.data.companies.find(c => c.id === companyId);
                                         if(company) {
                                             
-                                            // Forcefully overwrites Admin settings to reflect whatever the Owner explicitly put into the JSON
                                             if (uploaded.tripAdvisorLink) company.tripAdvisorLink = uploaded.tripAdvisorLink;
                                             if (uploaded.name) company.name = uploaded.name;
                                             
@@ -641,7 +644,9 @@
 
                 generateOwnerPrompt() {
                     const { promptGenerator, selectedPlace } = this.state.ownerState;
-                    const bName = selectedPlace.name.trim() || '';
+                    // Grab straight from DOM to ensure we capture exactly what the user typed in
+                    const bName = document.getElementById('ta-business-name')?.value.trim() || selectedPlace.name.trim() || '';
+                    const taLink = document.getElementById('ta-url-input')?.value.trim() || selectedPlace.tripAdvisorLink || '';
                     
                     const promptText = `You are an expert copywriter specializing in creating authentic user-generated content for TripAdvisor.
 
@@ -651,18 +656,21 @@ Based on the Google review CONTEXT below, craft 50 highly realistic, positive Tr
 CONTEXT / KEYWORDS:
 ${promptGenerator.input.trim()}
 ${bName ? `\nBUSINESS NAME: ${bName}` : ''}
+${taLink ? `\nTRIPADVISOR LINK: ${taLink}` : ''}
 
 CRITICAL REQUIREMENTS:
-1. "title": Write a catchy title for the review. **IT MUST BE MINIMUM 25 CHARACTERS LONG.**
-2. "text": Write the review body. Invent plausible, specific details to make them credible. **IT MUST BE MINIMUM 25 CHARACTERS LONG.** Vary tone, emotion, and sentence structure across the 50 reviews.
-3. "date": Generate a recent visit date in the format "Month Year" (e.g., "January 2026", "December 2025"). Spread these dates across the last 6 months.
-4. "companion": Select ONE of the exact following options based on the vibe of the review: "Business", "Couples", "Family", "Friends", "Solo".
+1. "link": MUST be exactly "${taLink}". Include this exact link in every single review object.
+2. "title": Write a catchy title for the review. **IT MUST BE MINIMUM 25 CHARACTERS LONG.**
+3. "text": Write the review body. Invent plausible, specific details to make them credible. **IT MUST BE MINIMUM 25 CHARACTERS LONG.** Vary tone, emotion, and sentence structure across the 50 reviews.
+4. "date": Generate a recent visit date in the format "Month Year" (e.g., "January 2026", "December 2025"). Spread these dates across the last 6 months.
+5. "companion": Select ONE of the exact following options based on the vibe of the review: "Business", "Couples", "Family", "Friends", "Solo".
 
 OUTPUT FORMAT (JSON STRICT):
 You MUST return ONLY a valid JSON array of 50 objects. DO NOT wrap the output in markdown backticks (no \`\`\`json). The format must exactly match this schema:
 
 [
   {
+    "link": "${taLink || 'https://www.tripadvisor.com/...'}",
     "title": "A wonderful experience that exceeded expectations",
     "text": "The service was absolutely phenomenal from start to finish. I highly recommend taking the time to visit this place.",
     "date": "March 2026",
@@ -682,7 +690,6 @@ You MUST return ONLY a valid JSON array of 50 objects. DO NOT wrap the output in
                     this.state.ownerState.isAiGenerating = true;
                     this.render();
 
-                    // STRICTLY enforcing Gemini 3.1 Flash Lite Preview as instructed
                     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${geminiApiKey}`;
 
                     try {
@@ -706,7 +713,9 @@ You MUST return ONLY a valid JSON array of 50 objects. DO NOT wrap the output in
                         try {
                             const parsedArray = JSON.parse(rawText.trim());
                             if (Array.isArray(parsedArray) && parsedArray.length > 0) {
+                                // Map the link directly to each review object from the AI output (or fallback to the input field)
                                 this.state.ownerState.reviews = parsedArray.map(r => ({
+                                    link: r.link || document.getElementById('ta-url-input')?.value.trim() || '',
                                     title: r.title || 'Great Experience',
                                     text: r.text || 'Good place.',
                                     date: r.date || 'January 2026',
