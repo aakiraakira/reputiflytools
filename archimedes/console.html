@@ -4863,8 +4863,25 @@ window.openServiceDetail = (i) => {
     document.getElementById('bookingsMainView').style.display = 'none';
     document.getElementById('bookingsDetailView').style.display = '';
 
-    // Load availability for this service
-    const avail = formConfig.availability?.[name] || formConfig.availability?.['_default'] || {};
+    // Load availability for this service.
+    // Handle both per-service keyed and flat structures.
+    // If flat, migrate to per-service in memory so add/remove blocked dates work correctly.
+    var rawAvail = formConfig.availability || {};
+    var isFlat = rawAvail.working_hours || rawAvail.blocked_dates;
+    if (isFlat) {
+        var flatData = {
+            working_hours: rawAvail.working_hours || {},
+            blocked_dates: rawAvail.blocked_dates || [],
+            always_available: rawAvail.always_available || false
+        };
+        var newAvail = {};
+        (formConfig.services || []).forEach(function(svc) {
+            var svcName = typeof svc === "string" ? svc : svc.name;
+            newAvail[svcName] = JSON.parse(JSON.stringify(flatData));
+        });
+        formConfig.availability = newAvail;
+    }
+    var avail = formConfig.availability[name] || formConfig.availability['_default'] || {};
     const alwaysAvail = avail.always_available || false;
     const toggle = document.getElementById('bookingAlwaysAvailable');
     if (toggle) {
@@ -4900,8 +4917,13 @@ function renderWeeklyGrid(avail) {
     const grid = document.getElementById('bookingWeeklyGrid');
     const wh = avail.working_hours || {};
     grid.innerHTML = DAYS.map(day => {
-        const hours = wh[day.key];
+        // Support both abbreviations (mon) and full names (monday) as keys.
+        var hours = wh[day.key] || wh[day.label.toLowerCase()] || null;
         const isActive = !!hours;
+        // Normalize {open, close} object to [open, close] array.
+        if (hours && typeof hours === 'object' && hours.open && hours.close) {
+            hours = [hours.open, hours.close];
+        }
         const startTime = hours ? hours[0] : '09:00';
         const endTime = hours ? hours[1] : '18:00';
         return `
@@ -4985,6 +5007,23 @@ window.saveServiceAvailability = async () => {
     const s = formConfig.services[currentServiceIdx];
     const name = typeof s === 'string' ? s : s.name;
     if (!formConfig.availability) formConfig.availability = {};
+
+    // Migrate flat availability (agent-saved) to per-service format on first console save.
+    if (formConfig.availability.working_hours || formConfig.availability.blocked_dates) {
+        var flatData = {
+            working_hours: formConfig.availability.working_hours || {},
+            blocked_dates: formConfig.availability.blocked_dates || [],
+            always_available: formConfig.availability.always_available || false
+        };
+        // Move flat data under each service name.
+        var newAvail = {};
+        (formConfig.services || []).forEach(function(svc) {
+            var svcName = typeof svc === "string" ? svc : svc.name;
+            newAvail[svcName] = JSON.parse(JSON.stringify(flatData));
+        });
+        formConfig.availability = newAvail;
+    }
+
     if (!formConfig.availability[name]) formConfig.availability[name] = { working_hours: {}, blocked_dates: [] };
 
     // Check always available toggle
