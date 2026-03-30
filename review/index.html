@@ -168,20 +168,7 @@
             /* Employee task cards - bigger touch targets */
             .start-upload-btn { min-height: 48px !important; }
         }
-        .bottom-nav {
-            display: none;
-            position: fixed; bottom: 0; left: 0; right: 0;
-            background: white; border-top: 1px solid var(--border);
-            z-index: 100; padding: 8px 0 env(safe-area-inset-bottom);
-            justify-content: space-around; align-items: center;
-        }
-        .bottom-nav button {
-            display: flex; flex-direction: column; align-items: center; gap: 2px;
-            background: none; border: none; padding: 8px 16px; font-size: 11px;
-            color: var(--text-secondary); cursor: pointer; font-family: inherit;
-        }
-        .bottom-nav button.active { color: var(--text); font-weight: 600; }
-        .bottom-nav button svg { width: 22px; height: 22px; }
+        /* (bottom-nav removed - using top scrollable tabs for all users) */
 
         /* Number input: hide spinner arrows */
         .tracker-num::-webkit-inner-spin-button, .tracker-num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
@@ -343,6 +330,15 @@
                 },
                 // Employees (admin manages)
                 employees: [],
+                // Employee upload state
+                _expandedOrderId: null,
+                _todayUploads: {},
+                _uploadOrderId: null,
+                _allOrdersLoaded: false,
+                _allOrders: [],
+                // Tracker state
+                trackerFilter: '',
+                trackerSort: { field: 'companyName', dir: 'asc' },
             },
             el: {
                 app: document.getElementById('app'),
@@ -508,25 +504,7 @@
                     </div>
                     <main id="view-container" style="max-width:1200px;margin:0 auto;padding:24px 16px 120px">
                     </main>
-                    ${!isAdmin ? `
-                    <div class="bottom-nav" id="bottom-nav">
-                        <button data-tab="assignments" class="${this.state.activeTab === 'assignments' ? 'active' : ''}">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                            Tasks
-                        </button>
-                        <button data-tab="upload" class="${this.state.activeTab === 'upload' ? 'active' : ''}">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                            Upload
-                        </button>
-                        <button data-tab="tracker" class="${this.state.activeTab === 'tracker' ? 'active' : ''}">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h18M3 14h18M3 18h18M3 6h18"/></svg>
-                            Sheet
-                        </button>
-                        <button data-tab="ai" class="${this.state.activeTab === 'ai' ? 'active' : ''}">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-                            AI
-                        </button>
-                    </div>` : ''}`;
+                    `;
 
                 // Attach shell listeners
                 document.getElementById('logout-btn').onclick = () => auth.signOut();
@@ -539,14 +517,6 @@
                         this.updateView();
                     }
                 };
-                // Bottom nav for employees
-                const bottomNav = document.getElementById('bottom-nav');
-                if (bottomNav) {
-                    bottomNav.onclick = e => {
-                        const btn = e.target.closest('[data-tab]');
-                        if (btn) { this.state.activeTab = btn.dataset.tab; this.renderShell(); this.updateView(); }
-                    };
-                }
                 this.attachShellDelegation();
                 this.updateView();
             },
@@ -1849,66 +1819,6 @@
                 });
             },
 
-            // ═══════════════════════════════════════════════════════
-            // TAB: LINKS (Admin - all tracking links at a glance)
-            // ═══════════════════════════════════════════════════════
-            renderLinks() {
-                const { orders } = this.state;
-                return `
-                    <h2 style="font-size:20px;font-weight:700;margin-bottom:16px">All Links</h2>
-                    ${orders.length === 0
-                        ? `<div class="card" style="padding:40px;text-align:center"><p style="color:var(--text-secondary)">No orders yet.</p></div>`
-                        : `<div class="card" style="padding:0;overflow-x:auto">
-                            <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:700px">
-                                <thead>
-                                    <tr style="background:var(--bg-secondary);border-bottom:2px solid var(--border)">
-                                        <th style="padding:12px 16px;text-align:left;font-weight:600">Company</th>
-                                        <th style="padding:12px 8px;text-align:center;font-weight:600">TNC</th>
-                                        <th style="padding:12px 8px;text-align:center;font-weight:600">Progress</th>
-                                        <th style="padding:12px 8px;text-align:center;font-weight:600">TNC Link</th>
-                                        <th style="padding:12px 8px;text-align:center;font-weight:600">Tracking Link</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${orders.map(o => {
-                                        const pct = o.quantity > 0 ? Math.round((o.completedCount/o.quantity)*100) : 0;
-                                        const token = o.clientTrackingToken || o.id;
-                                        return `
-                                        <tr style="border-bottom:1px solid var(--border)">
-                                            <td style="padding:10px 16px;font-weight:500">${o.companyName}</td>
-                                            <td style="padding:10px 8px;text-align:center">
-                                                <span class="badge ${o.tncSigned ? 'badge-success' : 'badge-warning'}" style="cursor:pointer" onclick="dashApp.toggleTnc('${o.id}',${!o.tncSigned})">${o.tncSigned ? 'Signed' : 'Pending'}</span>
-                                            </td>
-                                            <td style="padding:10px 8px;text-align:center">${pct}%</td>
-                                            <td style="padding:10px 8px;text-align:center">
-                                                <button class="btn btn-secondary btn-sm copy-tnc-link" data-id="${o.id}" style="width:auto;padding:4px 10px;font-size:11px">Copy</button>
-                                            </td>
-                                            <td style="padding:10px 8px;text-align:center">
-                                                <button class="btn btn-secondary btn-sm copy-track-link" data-id="${o.id}" style="width:auto;padding:4px 10px;font-size:11px">Copy</button>
-                                            </td>
-                                        </tr>`;
-                                    }).join('')}
-                                </tbody>
-                            </table>
-                        </div>`
-                    }`;
-            },
-
-            async toggleTnc(orderId, newValue) {
-                try {
-                    await db.collection('orders').doc(orderId).update({
-                        tncSigned: newValue,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    const order = this.state.orders.find(o => o.id === orderId);
-                    if (order) order.tncSigned = newValue;
-                    this.toast(newValue ? 'Marked as TNC signed' : 'Marked as TNC pending', 'success');
-                    this.updateView();
-                } catch(e) {
-                    this.toast('Failed to update TNC status', 'error');
-                }
-            },
-
             // ── Add Company Modal (Manual - no Google Places) ──
             showAddCompanyModal() {
                 this.el.modal.innerHTML = `
@@ -2209,195 +2119,6 @@
                 // Confirm today's progress
                 document.getElementById('confirm-today-btn')?.addEventListener('click', () => {
                     this.showDailyReportModal();
-                });
-            },
-
-            // ═══════════════════════════════════════════════════════
-            // TAB: UPLOAD PROOFS (Employee - Batch Upload Per Company)
-            // ═══════════════════════════════════════════════════════
-            renderUploadProofs() {
-                const orderId = this.state._uploadOrderId;
-                const order = this.state.orders.find(o => o.id === orderId);
-                const uploads = this.state._todayUploads || {};
-                const companyUploads = uploads[orderId] || { screenshots: [], reviewCount: 0 };
-
-                if (!order) {
-                    // Show company picker
-                    const { orders } = this.state;
-                    return `
-                        <h2 style="font-size:20px;font-weight:700;margin-bottom:16px">Upload Proofs</h2>
-                        <p style="color:var(--text-secondary);margin-bottom:16px">Select a company to upload proof screenshots:</p>
-                        <div style="display:flex;flex-direction:column;gap:8px">
-                            ${orders.length === 0 ? `<div class="card" style="padding:30px;text-align:center"><p style="color:var(--text-secondary)">No companies assigned yet.</p></div>` :
-                            orders.map(o => {
-                                const left = (o.quantity||0) - (o.completedCount||0);
-                                const todayUploads = (this.state._todayUploads?.[o.id]?.screenshots?.length) || 0;
-                                const todayCount = (this.state._todayUploads?.[o.id]?.reviewCount) || 0;
-                                return `
-                                <div class="card start-upload-btn" data-id="${o.id}" data-name="${o.companyName}" style="padding:16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background 0.15s" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
-                                    <div>
-                                        <p style="font-weight:600;font-size:15px">${o.companyName}</p>
-                                        <p style="font-size:12px;color:var(--text-secondary)">${o.completedCount||0}/${o.quantity} done (${left} left)</p>
-                                    </div>
-                                    <div style="text-align:right">
-                                        ${todayUploads > 0 ? `<span style="font-size:12px;color:var(--success);font-weight:600">${todayCount} reviews, ${todayUploads} screenshots today</span>` : `<span style="font-size:22px;color:var(--text-secondary)">→</span>`}
-                                    </div>
-                                </div>`;
-                            }).join('')}
-                        </div>
-                        ${Object.keys(this.state._todayUploads || {}).length > 0 ? `
-                            <button id="confirm-today-btn" class="btn btn-primary" style="margin-top:24px;min-height:52px;font-size:16px">Confirm Today's Progress</button>
-                        ` : ''}`;
-                }
-
-                return `
-                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-                        <button id="back-to-tasks" class="btn btn-secondary btn-sm" style="width:auto;padding:8px 12px">Back</button>
-                        <h2 style="font-size:18px;font-weight:700">${order.companyName}</h2>
-                    </div>
-
-                    <div class="card" style="padding:20px;margin-bottom:16px">
-                        <p style="font-size:14px;font-weight:500;margin-bottom:12px">Step 1: Upload proof screenshots</p>
-                        <label style="display:flex;align-items:center;justify-content:center;border:2px dashed var(--border);border-radius:var(--radius);padding:24px;cursor:pointer;background:var(--bg-secondary);min-height:80px;transition:border-color 0.2s" onmouseover="this.style.borderColor='var(--text)'" onmouseout="this.style.borderColor='var(--border)'">
-                            <div style="text-align:center">
-                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 8px"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                                <p style="font-weight:500">Tap to select screenshots</p>
-                                <p style="font-size:12px;color:var(--text-secondary)">You can select multiple at once</p>
-                            </div>
-                            <input type="file" id="proof-files" accept="image/*" multiple style="display:none">
-                        </label>
-
-                        ${companyUploads.screenshots.length > 0 ? `
-                        <div style="margin-top:16px">
-                            <p style="font-size:13px;font-weight:500;margin-bottom:8px">${companyUploads.screenshots.length} screenshot(s) ready</p>
-                            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px">
-                                ${companyUploads.screenshots.map((s, i) => `
-                                    <div style="position:relative">
-                                        <img src="${s.preview}" style="width:100%;height:80px;object-fit:cover;border-radius:8px">
-                                        <button class="remove-screenshot" data-idx="${i}" style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:var(--error);color:white;border:none;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">x</button>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>` : ''}
-                    </div>
-
-                    <div class="card" style="padding:20px;margin-bottom:16px">
-                        <p style="font-size:14px;font-weight:500;margin-bottom:12px">Step 2: How many reviews did you complete?</p>
-                        <input type="number" id="review-count-input" class="input" inputmode="numeric" value="${companyUploads.reviewCount || ''}" placeholder="e.g. 5" min="0" style="font-size:18px;text-align:center;font-weight:700;padding:16px">
-                        <p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Be honest - the screenshots are your proof.</p>
-                    </div>
-
-                    <button id="save-company-progress" class="btn btn-primary" style="min-height:52px;font-size:16px" ${companyUploads.screenshots.length === 0 ? 'disabled' : ''}>
-                        Save Progress for ${order.companyName}
-                    </button>`;
-            },
-
-            attachUploadListeners() {
-                // Back button
-                document.getElementById('back-to-tasks')?.addEventListener('click', () => {
-                    this.state.activeTab = 'assignments';
-                    this.renderShell();
-                    this.updateView();
-                });
-
-                // Start upload from My Tasks
-                document.querySelectorAll('.start-upload-btn').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        this.state._uploadOrderId = btn.dataset.id;
-                        this.state.activeTab = 'upload';
-                        this.renderShell();
-                        this.updateView();
-                    });
-                });
-
-                // Confirm today
-                document.getElementById('confirm-today-btn')?.addEventListener('click', () => {
-                    this.showDailyReportModal();
-                });
-
-                // File input
-                const fileInput = document.getElementById('proof-files');
-                if (!fileInput) return;
-
-                fileInput.addEventListener('change', async e => {
-                    const files = Array.from(e.target.files);
-                    if (files.length === 0) return;
-
-                    const orderId = this.state._uploadOrderId;
-                    if (!this.state._todayUploads) this.state._todayUploads = {};
-                    if (!this.state._todayUploads[orderId]) this.state._todayUploads[orderId] = { screenshots: [], reviewCount: 0, urls: [] };
-
-                    this.toast(`Compressing ${files.length} image(s)...`, 'info');
-
-                    for (const file of files) {
-                        try {
-                            const blob = await compressImage(file, 800, 0.5);
-                            const preview = URL.createObjectURL(blob);
-
-                            // Convert to base64 for upload
-                            const reader = new FileReader();
-                            const base64 = await new Promise((resolve, reject) => {
-                                reader.onload = () => resolve(reader.result.split(',')[1]);
-                                reader.onerror = reject;
-                                reader.readAsDataURL(blob);
-                            });
-
-                            // Upload to server immediately
-                            const token = await auth.currentUser.getIdToken();
-                            const resp = await fetch(`${API_BASE}/upload-proof`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                body: JSON.stringify({ orderId, imageBase64: base64 })
-                            });
-                            const data = await resp.json();
-                            if (!resp.ok) throw new Error(data.error || 'Upload failed');
-
-                            this.state._todayUploads[orderId].screenshots.push({ preview, url: data.imageUrl });
-                        } catch(err) {
-                            this.toast(`Failed: ${err.message}`, 'error');
-                        }
-                    }
-                    this.toast(`${files.length} screenshot(s) uploaded!`, 'success');
-                    this.updateView();
-                });
-
-                // Remove screenshot
-                document.querySelectorAll('.remove-screenshot').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        const idx = parseInt(btn.dataset.idx);
-                        const orderId = this.state._uploadOrderId;
-                        this.state._todayUploads[orderId].screenshots.splice(idx, 1);
-                        this.updateView();
-                    });
-                });
-
-                // Review count input
-                document.getElementById('review-count-input')?.addEventListener('input', e => {
-                    const orderId = this.state._uploadOrderId;
-                    if (!this.state._todayUploads) this.state._todayUploads = {};
-                    if (!this.state._todayUploads[orderId]) this.state._todayUploads[orderId] = { screenshots: [], reviewCount: 0 };
-                    this.state._todayUploads[orderId].reviewCount = parseInt(e.target.value) || 0;
-                });
-
-                // Save company progress
-                document.getElementById('save-company-progress')?.addEventListener('click', () => {
-                    const orderId = this.state._uploadOrderId;
-                    const uploads = this.state._todayUploads?.[orderId];
-                    if (!uploads || uploads.screenshots.length === 0) {
-                        this.toast('Upload at least one screenshot first.', 'error');
-                        return;
-                    }
-                    const count = parseInt(document.getElementById('review-count-input')?.value) || 0;
-                    if (count <= 0) {
-                        this.toast('Enter how many reviews you completed.', 'error');
-                        return;
-                    }
-                    uploads.reviewCount = count;
-                    this.toast(`Saved: ${count} reviews for this company.`, 'success');
-                    // Go back to tasks
-                    this.state.activeTab = 'assignments';
-                    this.renderShell();
-                    this.updateView();
                 });
             },
 
