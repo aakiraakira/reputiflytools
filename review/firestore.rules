@@ -1,0 +1,97 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper Functions ──
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    function isEmployee() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'employee';
+    }
+    function isClient(clientId) {
+      return isAuthenticated() && request.auth.uid == clientId;
+    }
+    function isAssignedEmployee(orderId) {
+      return isAuthenticated() && request.auth.uid in get(/databases/$(database)/documents/orders/$(orderId)).data.assignedEmployees;
+    }
+
+    // ── Users Collection ──
+    // Admin: full access (read any, list all, write). Users: read own profile.
+    match /users/{userId} {
+      allow get: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ── Clients Collection ──
+    // Admin: full CRUD. Client: read own record.
+    match /clients/{clientId} {
+      allow read: if isAdmin() || isClient(clientId);
+      allow write: if isAdmin();
+
+      // Client's orders subcollection (read-only for client)
+      match /orders/{orderId} {
+        allow read: if isAdmin() || isClient(clientId);
+        allow write: if isAdmin();
+      }
+    }
+
+    // ── Orders Collection (top-level for queries) ──
+    // Public: read individual orders (for TNC + tracking pages via direct doc ID).
+    // Admin: full CRUD. Assigned employees: read + update proofs.
+    match /orders/{orderId} {
+      allow get: if true; // Public read by document ID (TNC + tracking pages)
+      allow list: if isAuthenticated(); // Listing requires auth (admin/employee)
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (
+        // Public TNC signing (only tncSigned, tncSignatureId, updatedAt)
+        !isAuthenticated() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tncSigned', 'tncSignatureId', 'updatedAt'])
+      ) || (
+        // Employees can update counts, daily target, and comments
+        isAuthenticated() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completedCount', 'dailyTarget', 'comments', 'updatedAt'])
+      );
+      allow delete: if isAdmin();
+
+      // Reviews subcollection under each order
+      match /reviews/{reviewId} {
+        allow read: if isAuthenticated();
+        allow write: if isAdmin();
+      }
+
+      // Proofs subcollection (employee screenshot uploads)
+      match /proofs/{proofId} {
+        allow read: if true; // Public read for tracking page proof gallery
+        allow create: if isAuthenticated();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // ── TNC Signatures Collection ──
+    match /signatures/{signatureId} {
+      allow read: if isAdmin();
+      allow create: if true; // Public form submission
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Daily Reports Collection ──
+    match /dailyReports/{reportId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated(); // Employee creates daily report
+      allow update: if isAdmin(); // Admin approves/edits
+      allow delete: if isAdmin();
+    }
+
+    // ── System Config (admin only) ──
+    match /config/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+  }
+}
