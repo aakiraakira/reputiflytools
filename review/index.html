@@ -774,15 +774,28 @@
             },
 
             showNewOrderModal() {
+                this._quickOrderMode = false;
                 this.el.modal.innerHTML = `
                     <div class="modal-overlay" id="order-modal">
                         <div class="modal-content" style="max-width:520px">
-                            <h2 style="font-size:20px;font-weight:700;margin-bottom:20px">New Order</h2>
+                            <h2 style="font-size:20px;font-weight:700;margin-bottom:16px">New Order</h2>
+                            <!-- Mode toggle -->
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:20px;background:var(--bg-secondary);border-radius:var(--radius);border:1px solid var(--border);padding:3px">
+                                <button type="button" id="mode-full" style="padding:8px;text-align:center;font-weight:600;font-size:13px;border:none;border-radius:9px;cursor:pointer;background:var(--accent);color:#fff;transition:all 0.2s">With Google Page</button>
+                                <button type="button" id="mode-quick" style="padding:8px;text-align:center;font-weight:600;font-size:13px;border:none;border-radius:9px;cursor:pointer;background:transparent;color:var(--text-secondary);transition:all 0.2s">TNC Only (No Page)</button>
+                            </div>
                             <form id="new-order-form" style="display:flex;flex-direction:column;gap:16px">
-                                <div>
+                                <!-- Full mode: Google search -->
+                                <div id="order-search-section">
                                     <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">Search Business</label>
                                     <input type="text" id="order-search-input" class="input" placeholder="Search Google for a business...">
                                     <p id="order-place-info" style="font-size:12px;color:var(--success);margin-top:4px;display:none"></p>
+                                </div>
+                                <!-- Quick mode: Manual name -->
+                                <div id="order-quick-section" style="display:none">
+                                    <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">Client / Company Name</label>
+                                    <input type="text" id="order-quick-name" class="input" placeholder="e.g. John's Cafe">
+                                    <p style="font-size:11px;color:var(--text-secondary);margin-top:4px">You can add their Google page later via the Tracker.</p>
                                 </div>
                                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                                     <div>
@@ -809,6 +822,27 @@
                 document.getElementById('cancel-order').onclick = () => this.el.modal.innerHTML = '';
                 document.getElementById('order-modal').onclick = e => { if (e.target.id === 'order-modal') this.el.modal.innerHTML = ''; };
 
+                // Mode toggle
+                const setMode = (quick) => {
+                    this._quickOrderMode = quick;
+                    document.getElementById('order-search-section').style.display = quick ? 'none' : '';
+                    document.getElementById('order-quick-section').style.display = quick ? '' : 'none';
+                    document.getElementById('mode-full').style.background = quick ? 'transparent' : 'var(--accent)';
+                    document.getElementById('mode-full').style.color = quick ? 'var(--text-secondary)' : '#fff';
+                    document.getElementById('mode-quick').style.background = quick ? 'var(--accent)' : 'transparent';
+                    document.getElementById('mode-quick').style.color = quick ? '#fff' : 'var(--text-secondary)';
+                    // In quick mode, enable submit immediately (no Places search needed)
+                    const btn = document.getElementById('submit-order');
+                    if (quick) btn.disabled = false;
+                    else btn.disabled = !this._orderPlace;
+                };
+                document.getElementById('mode-full').onclick = () => setMode(false);
+                document.getElementById('mode-quick').onclick = () => setMode(true);
+                // Enable submit when typing quick name
+                document.getElementById('order-quick-name')?.addEventListener('input', e => {
+                    if (this._quickOrderMode) document.getElementById('submit-order').disabled = !e.target.value.trim();
+                });
+
                 // Init Google Places in modal
                 setTimeout(() => {
                     if (this.state.mapsReady) {
@@ -823,6 +857,7 @@
             },
 
             _orderPlace: null,
+            _quickOrderMode: false,
             handleOrderPlaceSelect(place) {
                 if (!place?.place_id) return;
                 this._orderPlace = {
@@ -840,19 +875,36 @@
             },
 
             async createOrder() {
-                if (!this._orderPlace) { this.toast('Search and select a business first.', 'error'); return; }
                 const qty = parseInt(document.getElementById('order-qty')?.value) || 0;
                 const daily = parseInt(document.getElementById('order-daily')?.value) || 5;
                 const comments = document.getElementById('order-comments')?.value || '';
                 if (qty <= 0) { this.toast('Enter a valid quantity.', 'error'); return; }
 
+                let name, placeId, reviewLink, startingCount;
+
+                if (this._quickOrderMode) {
+                    // Quick mode: TNC only, no page
+                    name = document.getElementById('order-quick-name')?.value?.trim();
+                    if (!name) { this.toast('Enter a company/client name.', 'error'); return; }
+                    placeId = 'pending';
+                    reviewLink = '';
+                    startingCount = 0;
+                } else {
+                    // Full mode: Google Places
+                    if (!this._orderPlace) { this.toast('Search and select a business first.', 'error'); return; }
+                    name = this._orderPlace.name;
+                    placeId = this._orderPlace.placeId;
+                    reviewLink = this._orderPlace.reviewLink;
+                    startingCount = this._orderPlace.startingCount;
+                }
+
                 try {
                     const token = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
                     await db.collection('orders').add({
-                        companyName: this._orderPlace.name,
-                        placeId: this._orderPlace.placeId,
-                        reviewLink: this._orderPlace.reviewLink,
-                        startingCount: this._orderPlace.startingCount,
+                        companyName: name,
+                        placeId,
+                        reviewLink,
+                        startingCount,
                         quantity: qty,
                         dailyTarget: daily,
                         completedCount: 0,
@@ -868,7 +920,7 @@
 
                     this._orderPlace = null;
                     this.el.modal.innerHTML = '';
-                    this.toast('Order created!', 'success');
+                    this.toast('Order created! Copy TNC link to send to client.', 'success');
                     this.loadOrders();
                 } catch(err) {
                     this.toast('Failed to create order: ' + err.message, 'error');
