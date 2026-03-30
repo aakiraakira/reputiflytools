@@ -1041,13 +1041,14 @@
                         const c = this.state.companies.find(x => x.id === cid);
                         if (c) this.downloadJSON(c, `data_${c.name.replace(/\s+/g, '_')}.json`);
                     } else if (tab.classList.contains('delete-company')) {
-                        if (confirm(`Delete "${this.state.companies.find(x=>x.id===cid)?.name}"? This cannot be undone.`)) {
+                        const companyName = this.state.companies.find(x=>x.id===cid)?.name;
+                        this.showConfirm(`Delete "${companyName}"? This cannot be undone.`, async () => {
                             await IDB.delete(cid);
                             this.state.companies = await IDB.getAll();
                             this.state.activeCompanyId = this.state.companies[0]?.id || null;
                             this.updateView();
                             this.toast('Company deleted.');
-                        }
+                        });
                     }
 
                     // Review actions
@@ -1395,10 +1396,10 @@
                     });
                 });
                 document.querySelectorAll('.revoke-employee').forEach(btn => {
-                    btn.addEventListener('click', async () => {
+                    btn.addEventListener('click', () => {
                         const uid = btn.dataset.id;
                         const name = btn.dataset.name;
-                        if (!confirm(`Revoke access for "${name}"? They will no longer be able to log in.`)) return;
+                        this.showConfirm(`Revoke access for "${name}"? They will no longer be able to log in.`, async () => {
                         try {
                             const token = await auth.currentUser.getIdToken();
                             const resp = await fetch(`${API_BASE}/revoke-employee`, {
@@ -1414,6 +1415,7 @@
                         } catch(err) {
                             this.toast(err.message, 'error');
                         }
+                        });
                     });
                 });
             },
@@ -1569,18 +1571,20 @@
 
                 // Delete order buttons
                 document.querySelectorAll('.delete-order-btn').forEach(btn => {
-                    btn.onclick = async () => {
+                    btn.onclick = () => {
                         const name = btn.dataset.name;
-                        if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
-                        try {
-                            const token = await auth.currentUser.getIdToken();
-                            const resp = await fetch(`${API_BASE}/orders/${btn.dataset.id}`, {
-                                method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
-                            });
-                            if (!resp.ok) throw new Error('Delete failed');
-                            this.toast(`Deleted ${name}`, 'success');
-                            this.loadOrders();
-                        } catch(err) { this.toast(err.message, 'error'); }
+                        const id = btn.dataset.id;
+                        this.showConfirm(`Delete "${name}"? This will remove the order and all associated data permanently.`, async () => {
+                            try {
+                                const token = await auth.currentUser.getIdToken();
+                                const resp = await fetch(`${API_BASE}/orders/${id}`, {
+                                    method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+                                });
+                                if (!resp.ok) throw new Error('Delete failed');
+                                this.toast(`Deleted ${name}`, 'success');
+                                this.loadOrders();
+                            } catch(err) { this.toast(err.message, 'error'); }
+                        });
                     };
                 });
 
@@ -2373,6 +2377,26 @@ ${extraInstructions}1. Output ONLY reviews separated by double newlines. No numb
                 this.el.toast.appendChild(toast);
                 setTimeout(() => toast.classList.add('show'), 10);
                 setTimeout(() => { toast.classList.remove('show'); toast.addEventListener('transitionend', () => toast.remove()); }, 3000);
+            },
+
+            showConfirm(message, onConfirm) {
+                this.el.modal.innerHTML = `
+                    <div class="modal-overlay" id="confirm-modal">
+                        <div class="modal-content" style="max-width:400px;text-align:center">
+                            <div style="width:48px;height:48px;background:#FEE2E2;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="2"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+                            </div>
+                            <h3 style="font-size:18px;font-weight:700;margin-bottom:8px">Are you sure?</h3>
+                            <p style="color:var(--text-secondary);font-size:14px;margin-bottom:24px;line-height:1.5">${message}</p>
+                            <div style="display:flex;gap:12px">
+                                <button id="confirm-cancel" class="btn btn-secondary" style="flex:1">Cancel</button>
+                                <button id="confirm-ok" class="btn btn-danger" style="flex:1">Delete</button>
+                            </div>
+                        </div>
+                    </div>`;
+                document.getElementById('confirm-cancel').onclick = () => this.el.modal.innerHTML = '';
+                document.getElementById('confirm-modal').onclick = e => { if (e.target.id === 'confirm-modal') this.el.modal.innerHTML = ''; };
+                document.getElementById('confirm-ok').onclick = () => { this.el.modal.innerHTML = ''; onConfirm(); };
             },
 
             sleep(ms) { return new Promise(r => setTimeout(r, ms)); },
