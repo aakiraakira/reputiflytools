@@ -2341,13 +2341,16 @@
 
                 this.el.modal.innerHTML = `
                     <div class="modal-overlay" id="proof-modal">
-                        <div class="modal-content" style="max-width:700px;max-height:80vh;overflow-y:auto">
+                        <div class="modal-content" style="max-width:750px;max-height:85vh;overflow-y:auto">
                             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                                 <h2 style="font-size:20px;font-weight:700">${order.companyName} - Proofs</h2>
-                                <button id="close-proofs" class="btn btn-secondary btn-sm" style="width:auto">Close</button>
+                                <div style="display:flex;gap:8px">
+                                    <span id="proof-total" style="font-size:13px;color:var(--text-secondary);align-self:center"></span>
+                                    <button id="close-proofs" class="btn btn-secondary btn-sm" style="width:auto">Close</button>
+                                </div>
                             </div>
-                            <div id="proof-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px">
-                                <p style="color:var(--text-secondary);grid-column:1/-1;text-align:center">Loading proofs...</p>
+                            <div id="proof-container">
+                                <p style="color:var(--text-secondary);text-align:center;padding:40px">Loading proofs...</p>
                             </div>
                         </div>
                     </div>`;
@@ -2357,17 +2360,75 @@
 
                 try {
                     const snap = await db.collection('orders').doc(orderId).collection('proofs').orderBy('uploadedAt', 'desc').get();
-                    const grid = document.getElementById('proof-grid');
+                    const container = document.getElementById('proof-container');
+                    const totalEl = document.getElementById('proof-total');
                     if (snap.empty) {
-                        grid.innerHTML = '<p style="color:var(--text-secondary);grid-column:1/-1;text-align:center">No proofs uploaded yet.</p>';
-                    } else {
-                        grid.innerHTML = snap.docs.map(d => {
-                            const p = d.data();
-                            return `<img src="${p.imageUrl}" style="width:100%;height:120px;object-fit:cover;border-radius:8px;cursor:pointer" onclick="window.open('${p.imageUrl}','_blank')">`;
-                        }).join('');
+                        container.innerHTML = '<p style="color:var(--text-secondary);text-align:center;padding:40px">No proofs uploaded yet.</p>';
+                        totalEl.textContent = '0 screenshots';
+                        return;
                     }
+
+                    totalEl.textContent = `${snap.docs.length} screenshots`;
+
+                    // Group by date
+                    const grouped = {};
+                    snap.docs.forEach(d => {
+                        const p = d.data();
+                        const ts = p.uploadedAt?.toDate ? p.uploadedAt.toDate() : new Date(p.uploadedAt);
+                        const dateKey = ts.toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+                        if (!grouped[dateKey]) grouped[dateKey] = [];
+                        grouped[dateKey].push({ id: d.id, ...p, _ts: ts });
+                    });
+
+                    container.innerHTML = Object.entries(grouped).map(([date, proofs]) => `
+                        <div style="margin-bottom:20px">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                                <p style="font-size:13px;font-weight:600;color:var(--text-secondary)">${date}</p>
+                                <span style="font-size:12px;color:var(--text-secondary)">${proofs.length} screenshot${proofs.length !== 1 ? 's' : ''}</span>
+                            </div>
+                            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px">
+                                ${proofs.map(p => `
+                                    <div style="position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
+                                        <img src="${p.imageUrl}" style="width:100%;height:110px;object-fit:cover;cursor:pointer;display:block" onclick="window.open('${p.imageUrl}','_blank')">
+                                        <button class="delete-proof-btn" data-order-id="${orderId}" data-proof-id="${p.id}" data-storage-path="${p.storagePath || ''}" style="position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,0.6);color:white;border:none;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;backdrop-filter:blur(4px)" title="Delete screenshot">x</button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `).join('');
+
+                    // Delete handlers
+                    container.querySelectorAll('.delete-proof-btn').forEach(btn => {
+                        btn.addEventListener('click', async e => {
+                            e.stopPropagation();
+                            const proofId = btn.dataset.proofId;
+                            const storagePath = btn.dataset.storagePath;
+                            const oId = btn.dataset.orderId;
+                            if (!confirm('Delete this screenshot? This cannot be undone.')) return;
+                            try {
+                                // Delete Firestore doc
+                                await db.collection('orders').doc(oId).collection('proofs').doc(proofId).delete();
+                                // Delete from Storage via admin API
+                                if (storagePath) {
+                                    const token = await auth.currentUser.getIdToken();
+                                    await fetch(`${API_BASE}/delete-proof`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                        body: JSON.stringify({ orderId: oId, proofId, storagePath })
+                                    }).catch(() => {}); // Best-effort storage delete
+                                }
+                                btn.closest('[style*="position:relative"]').remove();
+                                this.toast('Screenshot deleted.', 'success');
+                                // Update count
+                                const remaining = container.querySelectorAll('.delete-proof-btn').length;
+                                totalEl.textContent = `${remaining} screenshots`;
+                            } catch(err) {
+                                this.toast('Delete failed: ' + err.message, 'error');
+                            }
+                        });
+                    });
                 } catch(e) {
-                    document.getElementById('proof-grid').innerHTML = '<p style="color:var(--error)">Failed to load proofs.</p>';
+                    document.getElementById('proof-container').innerHTML = '<p style="color:var(--error)">Failed to load proofs.</p>';
                 }
             },
 
