@@ -978,6 +978,7 @@
                             </div>
                             <div style="display:flex;gap:8px;flex-wrap:wrap">
                                 <button class="btn btn-success btn-sm copy-latest-undone" data-cid="${c.id}" style="width:auto" ${undone.length === 0 ? 'disabled' : ''}>Copy Latest</button>
+                                <button class="btn btn-primary btn-sm generate-for-company" data-cid="${c.id}" style="width:auto">Generate</button>
                                 <button class="btn btn-secondary btn-sm download-company" data-cid="${c.id}" style="width:auto">Download</button>
                                 <button class="btn btn-danger btn-sm delete-company" data-cid="${c.id}" style="width:auto">Delete</button>
                             </div>
@@ -1049,6 +1050,8 @@
                             this.updateView();
                             this.toast('Company deleted.');
                         });
+                    } else if (tab.classList.contains('generate-for-company')) {
+                        this.generateForCompany(cid);
                     }
 
                     // Review actions
@@ -1142,9 +1145,10 @@
                     return `
                         <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px">
                             <h2 style="font-size:20px;font-weight:700">Generated Reviews (${ai.reviews.length})</h2>
-                            <div style="display:flex;gap:8px">
+                            <div style="display:flex;gap:8px;flex-wrap:wrap">
                                 <button id="ai-reset" class="btn btn-secondary btn-sm" style="width:auto">Start Over</button>
-                                <button id="ai-download" class="btn btn-primary btn-sm" style="width:auto">Download JSON</button>
+                                <button id="ai-download" class="btn btn-secondary btn-sm" style="width:auto">Download JSON</button>
+                                <button id="ai-add-to-reviews" class="btn btn-primary btn-sm" style="width:auto">Add to Reviews</button>
                             </div>
                         </div>
                         <div id="ai-sheet-section" class="card" style="padding:20px;margin-bottom:16px">
@@ -1217,7 +1221,78 @@
                     ai.contextReviews = '';
                 }
                 this.toast(`Selected: ${place.name}`, 'success');
-                this.runAIGeneration();
+                this.runAIGeneration().catch(() => {}); // Error already toasted inside
+            },
+
+            async addAIReviewsToIDB() {
+                const { ai } = this.state;
+                if (ai.reviews.length === 0) { this.toast('No reviews to add.', 'error'); return; }
+                const name = ai.manualName?.trim() || this.inferShortName(ai.selectedPlace.name) || 'AI Generated';
+                const link = ai.selectedPlace.reviewLink || '';
+
+                // Check if company already exists in IDB
+                const existing = this.state.companies.find(c => c.name.toLowerCase() === name.toLowerCase());
+                if (existing) {
+                    // Append new reviews (skip duplicates)
+                    const existingTexts = new Set(existing.reviews.map(r => r.text));
+                    const newReviews = ai.reviews.filter(r => !existingTexts.has(r.text)).map(r => ({ text: r.text, status: 'undone', requiresImage: false, imageDataUrls: [] }));
+                    existing.reviews = [...existing.reviews, ...newReviews];
+                    if (link && !existing.reviewLink) existing.reviewLink = link;
+                    await IDB.put(existing);
+                    this.toast(`${newReviews.length} reviews added to "${existing.name}" (${newReviews.length === 0 ? 'all duplicates skipped' : 'duplicates skipped'})`, 'success');
+                } else {
+                    // Create new company
+                    const c = {
+                        id: `comp_${Date.now()}`,
+                        name,
+                        reviewLink: link,
+                        reviews: ai.reviews.map(r => ({ text: r.text, status: 'undone', requiresImage: false, imageDataUrls: [] }))
+                    };
+                    await IDB.put(c);
+                    this.toast(`${c.reviews.length} reviews saved to "${name}" in Review Manager!`, 'success');
+                }
+                this.state.companies = await IDB.getAll();
+                this.state.activeCompanyId = this.state.companies.find(c => c.name.toLowerCase() === name.toLowerCase())?.id || this.state.activeCompanyId;
+            },
+
+            async generateForCompany(companyId) {
+                const company = this.state.companies.find(c => c.id === companyId);
+                if (!company) return;
+
+                // Switch to AI tab with company pre-filled, quality mode
+                this.state.ai.manualName = company.name;
+                this.state.ai.selectedPlace = {
+                    name: company.name,
+                    placeId: '',
+                    reviewLink: company.reviewLink || '',
+                    startingCount: 0,
+                    details: {}
+                };
+                this.state.ai.model = 'flash'; // quality mode
+                this.state.ai.notes = '';
+                this.state.ai.contextReviews = '';
+                this.state.activeTab = 'ai';
+                this.renderShell();
+                this.updateView();
+
+                // Auto-run generation with quality, fallback to quick
+                await this.runAIGenerationWithFallback();
+            },
+
+            async runAIGenerationWithFallback() {
+                const { ai } = this.state;
+                ai.model = 'flash'; // quality first
+                try {
+                    await this.runAIGeneration();
+                    if (ai.reviews.length === 0) throw new Error('No reviews generated');
+                } catch(err) {
+                    // Fallback to quick mode
+                    this.toast('Quality mode failed, trying Quick mode...', 'info');
+                    ai.model = 'flash-lite';
+                    ai.generating = false;
+                    ai.reviews = [];
+                    await this.runAIGeneration();
+                }
             },
 
             async runAIGeneration() {
@@ -1291,6 +1366,9 @@
                 } catch(err) {
                     log(`Error: ${err.message}`, ai.progress);
                     this.toast(`Generation failed: ${err.message}`, 'error');
+                    ai.generating = false;
+                    this.updateView();
+                    throw err; // Re-throw for fallback wrapper
                 }
 
                 ai.generating = false;
@@ -1318,6 +1396,9 @@
                         const { ai } = this.state;
                         const name = (ai.manualName || ai.selectedPlace.name || 'reviews').replace(/\s+/g, '_');
                         this.downloadJSON({ link: ai.selectedPlace.reviewLink, reviews: ai.reviews.map(r => ({ text: r.text, requiresImage: false })) }, `${name}.json`);
+                    }
+                    if (e.target.id === 'ai-add-to-reviews') {
+                        this.addAIReviewsToIDB();
                     }
                     if (e.target.id === 'ai-gen-sheet') {
                         const { ai } = this.state;
