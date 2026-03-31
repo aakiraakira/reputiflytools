@@ -1874,7 +1874,10 @@
                         <div class="card" style="padding:40px;text-align:center"><p style="color:var(--text-secondary)">No reports yet. Employees submit daily progress here.</p></div>
                     ` : ''}
                     ${approved.length > 0 ? `
-                        <h3 style="font-size:15px;font-weight:600;color:var(--success);margin:24px 0 12px">Recently Approved</h3>
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px">
+                            <h3 style="font-size:15px;font-weight:600;color:var(--success)">Recently Approved (${approved.length})</h3>
+                            <button id="clear-approved-btn" class="order-action-btn" style="color:var(--error);font-size:13px">Clear All Approved</button>
+                        </div>
                         ${approved.slice(0, 10).map(r => this.renderReportCard(r, false)).join('')}
                     ` : ''}`;
             },
@@ -1961,6 +1964,25 @@
                             btn.textContent = 'Approve';
                         }
                     });
+                });
+
+                // Clear all approved reports
+                document.getElementById('clear-approved-btn')?.addEventListener('click', async () => {
+                    const approved = (this.state._reports || []).filter(r => r.status === 'approved');
+                    if (approved.length === 0) return;
+                    if (!confirm(`Delete ${approved.length} approved report(s)? This only clears the log — order counts are already saved.`)) return;
+                    try {
+                        const batch = db.batch();
+                        for (const r of approved) {
+                            batch.delete(db.collection('dailyReports').doc(r.id));
+                        }
+                        await batch.commit();
+                        this.toast(`${approved.length} approved reports cleared.`, 'success');
+                        this.state._reports = null;
+                        this.updateView();
+                    } catch(err) {
+                        this.toast('Failed to clear: ' + err.message, 'error');
+                    }
                 });
             },
 
