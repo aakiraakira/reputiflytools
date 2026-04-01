@@ -259,7 +259,7 @@
                 tx.onerror = () => reject(tx.error);
             });
         },
-        // Import from old localStorage format (reviews.html compatibility)
+        // Import from old localStorage format (reviews.html compatibility) — runs ONCE then clears
         async importFromLocalStorage() {
             const saved = localStorage.getItem('reviewDashboardData');
             if (!saved) return;
@@ -268,6 +268,8 @@
                 if (data.companies && data.companies.length > 0) {
                     for (const c of data.companies) await this.put(c);
                 }
+                // Clear after successful migration so deleted companies don't come back
+                localStorage.removeItem('reviewDashboardData');
             } catch(e) { console.warn('Failed to import from localStorage:', e); }
         }
     };
@@ -371,9 +373,13 @@
                     return;
                 }
 
-                // Set default tab based on role
-                if (this.state.userRole === 'employee') this.state.activeTab = 'assignments';
-                else this.state.activeTab = 'orders';
+                // Restore last tab or set default
+                const savedTab = localStorage.getItem('activeTab');
+                if (this.state.userRole === 'employee') {
+                    this.state.activeTab = savedTab && ['assignments','reviews','tracker','ai','guide'].includes(savedTab) ? savedTab : 'assignments';
+                } else {
+                    this.state.activeTab = savedTab && ['orders','tracker','reviews','ai','reports','employees','guide'].includes(savedTab) ? savedTab : 'orders';
+                }
 
                 this.renderShell();
                 this.loadData();
@@ -515,6 +521,7 @@
                     const tab = e.target.closest('[data-tab]');
                     if (tab) {
                         this.state.activeTab = tab.dataset.tab;
+                        localStorage.setItem('activeTab', tab.dataset.tab);
                         this.renderShell();
                         this.updateView();
                     }
