@@ -937,13 +937,13 @@
                     <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px">
                         <h2 style="font-size:20px;font-weight:700">Review Manager</h2>
                         <label class="btn btn-secondary btn-sm" style="width:auto;cursor:pointer">
-                            Upload JSON <input type="file" id="upload-json" accept=".json" style="display:none">
+                            Upload JSON <input type="file" id="rm-upload-json" accept=".json" style="display:none">
                         </label>
                     </div>
                     <div class="card" style="padding:16px;margin-bottom:16px">
                         <div style="display:flex;gap:8px">
-                            <input type="text" id="new-company-name" class="input" placeholder="New company name..." style="flex:1">
-                            <button id="add-company-btn" class="btn btn-primary btn-sm" style="width:auto;flex-shrink:0">+ Add</button>
+                            <input type="text" id="rm-new-company-name" class="input" placeholder="New company name..." style="flex:1">
+                            <button id="rm-add-company-btn" class="btn btn-primary btn-sm" style="width:auto;flex-shrink:0">+ Add</button>
                         </div>
                     </div>
                     ${companies.length === 0
@@ -1011,7 +1011,11 @@
                 const container = document.getElementById('view-container');
                 if (!container) return;
 
-                // Guard: prevent stacking listeners on the same container
+                // These listeners target elements that get recreated on each render,
+                // so they must re-attach every time (NOT inside the stacking guard)
+                this._attachReviewElementListeners();
+
+                // Guard: prevent stacking DELEGATION listeners on the container
                 if (container._reviewClickAttached) return;
                 container._reviewClickAttached = true;
 
@@ -1072,15 +1076,17 @@
                     }
                 });
 
-                // Upload JSON
-                document.getElementById('upload-json')?.addEventListener('change', async e => {
+            },
+
+            _attachReviewElementListeners() {
+                // Upload JSON (re-attaches each render since element is recreated)
+                document.getElementById('rm-upload-json')?.addEventListener('change', async e => {
                     const file = e.target.files[0];
                     if (!file) return;
                     try {
                         const text = await file.text();
                         const data = JSON.parse(text);
                         if (data.link && Array.isArray(data.reviews)) {
-                            // Single company file format (from automation.html)
                             const name = file.name.replace(/\.json$/, '').replace(/_/g, ' ');
                             const newCompany = {
                                 id: `comp_${Date.now()}`,
@@ -1093,7 +1099,6 @@
                             this.state.activeCompanyId = newCompany.id;
                             this.toast(`${newCompany.reviews.length} reviews imported for ${name}`);
                         } else if (data.id && data.name) {
-                            // Full company object (download format)
                             await IDB.put(data);
                             this.state.companies = await IDB.getAll();
                             this.state.activeCompanyId = data.id;
@@ -1106,9 +1111,9 @@
                     e.target.value = '';
                 });
 
-                // Add company (inline input, matching reviews.html)
-                document.getElementById('add-company-btn')?.addEventListener('click', () => {
-                    const nameInput = document.getElementById('new-company-name');
+                // Add company (re-attaches each render)
+                document.getElementById('rm-add-company-btn')?.addEventListener('click', () => {
+                    const nameInput = document.getElementById('rm-new-company-name');
                     const name = nameInput?.value?.trim();
                     if (!name) { this.toast('Enter a company name.', 'error'); nameInput?.focus(); return; }
                     const c = { id: `comp_${Date.now()}`, name, reviewLink: '', reviews: [] };
