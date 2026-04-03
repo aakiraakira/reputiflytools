@@ -1997,8 +1997,16 @@
                 const pending = reports.filter(r => r.status === 'pending_approval');
                 const approved = reports.filter(r => r.status === 'approved');
 
+                const costPerReview = parseFloat(localStorage.getItem('costPerReview') || '1');
+
                 return `
-                    <h2 style="font-size:20px;font-weight:700;margin-bottom:16px">Employee Reports</h2>
+                    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px">
+                        <h2 style="font-size:20px;font-weight:700">Employee Reports</h2>
+                        <div class="card" style="padding:10px 16px;display:flex;align-items:center;gap:8px;margin:0">
+                            <span style="font-size:13px;font-weight:500;color:var(--text-secondary);white-space:nowrap">Cost/review: $</span>
+                            <input type="number" id="cost-per-review" class="input" value="${costPerReview}" step="0.1" min="0" style="width:70px;padding:6px 8px;font-size:14px;font-weight:700;text-align:center">
+                        </div>
+                    </div>
                     ${pending.length > 0 ? `
                         <h3 style="font-size:15px;font-weight:600;color:var(--warning);margin-bottom:12px">Pending Approval (${pending.length})</h3>
                         ${pending.map(r => this.renderReportCard(r, true)).join('')}
@@ -2017,6 +2025,8 @@
 
             renderReportCard(report, showActions) {
                 const dateStr = report.date || 'Unknown date';
+                const costPerReview = parseFloat(localStorage.getItem('costPerReview') || '1');
+                const totalPay = ((report.totalReviews || 0) * costPerReview).toFixed(2);
                 return `
                     <div class="card" style="padding:20px;margin-bottom:12px;${report.status === 'approved' ? 'opacity:0.7' : ''}">
                         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
@@ -2025,6 +2035,7 @@
                                 <p style="font-size:12px;color:var(--text-secondary)">${dateStr} - ${report.totalReviews || 0} reviews, ${report.totalScreenshots || 0} screenshots</p>
                             </div>
                             <div style="display:flex;align-items:center;gap:8px">
+                                <span style="font-weight:700;font-size:15px;color:var(--success)">$${totalPay}</span>
                                 <span class="badge ${report.status === 'approved' ? 'badge-success' : 'badge-warning'}">${report.status === 'approved' ? 'Approved' : 'Pending'}</span>
                                 <button class="delete-report-btn order-action-btn" data-report="${report.id}" style="color:var(--error);font-size:16px;padding:2px 6px" title="Delete this report">x</button>
                             </div>
@@ -2065,6 +2076,14 @@
             },
 
             attachReportListeners() {
+                // Cost per review input — save on change and recalculate
+                document.getElementById('cost-per-review')?.addEventListener('change', e => {
+                    const val = parseFloat(e.target.value) || 0;
+                    localStorage.setItem('costPerReview', String(val));
+                    this.toast(`Cost set to $${val}/review`, 'success');
+                    this.updateView(); // Re-render cards with new cost
+                });
+
                 // Approve button
                 document.querySelectorAll('.approve-report').forEach(btn => {
                     btn.addEventListener('click', async () => {
@@ -2480,14 +2499,17 @@
                 }
 
                 const today = new Date().toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+                const uid = this.state.user?.uid;
                 const reportLines = entries.map(([orderId, data]) => {
                     const order = this.state.orders.find(o => o.id === orderId);
-                    return { orderId, companyName: order?.companyName || 'Unknown', reviewsClaimed: data.reviewCount, screenshotsCount: data.screenshots.length, screenshotUrls: data.screenshots.map(s => s.url) };
+                    const assigned = order?.dailyAssignment?.[uid]?.count || 0;
+                    const trackUrl = `${SITE_BASE}/track.html?order=${orderId}`;
+                    return { orderId, companyName: order?.companyName || 'Unknown', reviewsClaimed: data.reviewCount, screenshotsCount: data.screenshots.length, screenshotUrls: data.screenshots.map(s => s.url), assigned, trackUrl };
                 });
                 const totalReviews = reportLines.reduce((s, e) => s + e.reviewsClaimed, 0);
                 const totalScreenshots = reportLines.reduce((s, e) => s + e.screenshotsCount, 0);
 
-                const reportText = `Today's Report - ${today}\n${'─'.repeat(30)}\n${reportLines.map(e => `${e.companyName}: ${e.reviewsClaimed} reviews (${e.screenshotsCount} screenshots)`).join('\n')}\n${'─'.repeat(30)}\nTotal: ${totalReviews} reviews (${totalScreenshots} screenshots)`;
+                const reportText = `Today's Report - ${today}\n${'─'.repeat(30)}\n${reportLines.map(e => `${e.companyName}: ${e.reviewsClaimed}${e.assigned ? '/' + e.assigned : ''} reviews (${e.screenshotsCount} screenshots)\n${e.trackUrl}`).join('\n\n')}\n${'─'.repeat(30)}\nTotal: ${totalReviews} reviews (${totalScreenshots} screenshots)`;
 
                 this.el.modal.innerHTML = `
                     <div class="modal-overlay" id="report-modal">
