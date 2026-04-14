@@ -1968,8 +1968,9 @@
                     }
                 };
 
-                // Source of truth: assignedEmployees array. If employee is in the array, company IS
-                // currently assigned to them. Simple.
+                // Source of truth: dailyAssignment[empUid].date === today
+                // Ticked = company is in employee's TODAY list
+                // Unticked companies that were previously assigned get cleaned up on save
                 const refreshCheckboxes = async () => {
                     const empUid = document.getElementById('qa-employee').value;
                     if (!empUid) {
@@ -1983,7 +1984,7 @@
                         return;
                     }
 
-                    // CRITICAL: Re-fetch fresh data from SERVER (bypass cache)
+                    // Force fresh server fetch (bypass Firestore cache)
                     const freshSnap = await db.collection('orders').where('status', '==', 'active').get({ source: 'server' });
                     const freshOrders = {};
                     freshSnap.docs.forEach(d => { freshOrders[d.id] = d.data(); });
@@ -1996,43 +1997,34 @@
                         }
                     });
 
-                    console.log('[ManageAssignments] Employee UID:', empUid);
-                    console.log('[ManageAssignments] Currently assigned orders:');
+                    console.log('[ManageAssignments] Employee UID:', empUid, '| Today:', today);
 
                     let currentCount = 0;
                     document.querySelectorAll('.qa-check').forEach(cb => {
                         const orderId = cb.dataset.id;
                         const order = activeOrders.find(o => o.id === orderId);
-                        const assignedArr = order?.assignedEmployees || [];
-                        const isAssigned = assignedArr.includes(empUid);
+                        const assignment = order?.dailyAssignment?.[empUid];
+                        // TICK ONLY if assigned TODAY (using dailyAssignment.date === today)
+                        const isAssignedToday = assignment?.date === today;
                         const statusEl = document.querySelector(`.qa-status[data-id="${orderId}"]`);
                         const countInput = document.querySelector(`.qa-count[data-id="${orderId}"]`);
 
-                        if (isAssigned) {
-                            console.log(`  ✓ ${order.companyName} (id: ${orderId})`, 'assignedEmployees:', assignedArr);
+                        if (isAssignedToday) {
+                            console.log(`  ✓ ${order.companyName} — today, count: ${assignment.count}`);
                             cb.checked = true;
                             currentCount++;
-                            // Use dailyAssignment count if exists, else dailyTarget
-                            const assignment = order?.dailyAssignment?.[empUid];
-                            if (countInput) {
-                                countInput.value = assignment?.count || order.dailyTarget || 5;
-                            }
+                            if (countInput) countInput.value = assignment.count;
                             if (statusEl) {
                                 statusEl.style.display = '';
-                                if (assignment?.date === today) {
-                                    statusEl.textContent = '✓ today';
-                                    statusEl.style.color = '#10B981';
-                                } else {
-                                    statusEl.textContent = '✓ assigned';
-                                    statusEl.style.color = '#10B981';
-                                }
+                                statusEl.textContent = '✓ today';
+                                statusEl.style.color = '#10B981';
                             }
                         } else {
                             cb.checked = false;
                             if (statusEl) statusEl.style.display = 'none';
                         }
                     });
-                    console.log(`[ManageAssignments] Total currently assigned: ${currentCount}`);
+                    console.log(`[ManageAssignments] Total ticked today: ${currentCount}`);
                     document.getElementById('qa-helper').style.display = '';
                     document.getElementById('qa-current-count').textContent = currentCount;
                     updateTotal();
