@@ -1865,7 +1865,9 @@
                 };
             },
 
-            showQuickAssignModal() {
+            async showQuickAssignModal() {
+                // Force fresh fetch to avoid stale data
+                await this.loadOrders();
                 const today = new Date().toISOString().split('T')[0];
                 const activeOrders = this.state.orders
                     .filter(o => o.status !== 'completed' && ((o.quantity||0) - (o.completedCount||0)) > 0)
@@ -2010,25 +2012,27 @@
                             });
                         }
 
-                        // Clear unchecked companies that were previously assigned today
+                        // Clear unchecked companies: remove from assignedEmployees AND clear dailyAssignment
+                        // (catches legacy assignments, today's, and previous days)
                         const toClear = [];
                         document.querySelectorAll('.qa-check:not(:checked)').forEach(cb => {
                             const orderId = cb.dataset.id;
                             const order = activeOrders.find(o => o.id === orderId);
-                            if (order?.dailyAssignment?.[employeeUid]?.date === today) {
-                                toClear.push(orderId);
-                            }
+                            const wasAssigned = order?.dailyAssignment?.[employeeUid] ||
+                                                (order?.assignedEmployees || []).includes(employeeUid);
+                            if (wasAssigned) toClear.push(orderId);
                         });
                         for (const orderId of toClear) {
                             await db.collection('orders').doc(orderId).update({
                                 [`dailyAssignment.${employeeUid}`]: firebase.firestore.FieldValue.delete(),
+                                assignedEmployees: firebase.firestore.FieldValue.arrayRemove(employeeUid),
                                 updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
                             });
                         }
 
                         this.toast(`${toAssign.length} assigned, ${toClear.length} removed.`, 'success');
                         this.el.modal.innerHTML = '';
-                        this.loadOrders();
+                        await this.loadOrders();
                     } catch(err) {
                         this.toast(err.message, 'error');
                         btn.disabled = false;
