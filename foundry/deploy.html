@@ -5188,6 +5188,46 @@ Include CHANGELOG.md and sitemap.json in the deployed files array.`;
                     throw new Error(data.error || `HTTP ${res.status}`);
                 }
 
+                // NEW: automatically assign the new staff member to ALL existing
+                // projects right after creation. Without this, the new user has
+                // zero entries in any projects.*.assignedEmployees array, which
+                // means manageTeam's isStaff rule classifies them as non-staff
+                // and deploy.html's Admin tab renders them in the Client list
+                // instead of the Staff list. This auto-assignment also grants
+                // them VPS dashboard admin access (admin.reputifly.cloud), which
+                // reads isStaff from the same projects.*.assignedEmployees source
+                // of truth via the getUserRoleByUid Cloud Function.
+                //
+                // Rationale: a user created via the "Create Staff" form is by
+                // definition meant to be staff — they should have the same
+                // administrator privilege as existing staff (same destination
+                // logic). Assigning to every project matches that intent.
+                //
+                // Failure handling: if setProjects fails for any reason (network,
+                // auth, server error), we log a warning and continue. The Firebase
+                // Auth user has already been created at this point, so the admin
+                // can manually assign them via the Manage Folders button later.
+                try {
+                    const allProjects = Object.keys(window.repoData || {})
+                        .filter(c => c.toLowerCase() !== 'index.html');
+                    if (allProjects.length > 0) {
+                        const projRes = await fetch(API_ADMIN, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentIdToken}` },
+                            body: JSON.stringify({
+                                action: "setProjects",
+                                email: newEmail,
+                                projects: allProjects
+                            })
+                        });
+                        if (!projRes.ok) {
+                            console.warn(`[createUser] auto-setProjects returned HTTP ${projRes.status} for ${newEmail}`);
+                        }
+                    }
+                } catch (projErr) {
+                    console.warn('[createUser] auto-setProjects failed (user was still created):', projErr);
+                }
+
                 // Admin Telegram Notification
                 fetch('https://asia-southeast1-b2b-software.cloudfunctions.net/reputifly', {
                     method: 'POST',
