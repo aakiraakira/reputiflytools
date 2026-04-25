@@ -1470,6 +1470,61 @@ async function checkCloudProfile(user) {
 }
 
 let _authHandling = false;
+
+/**
+ * Auto-connect a Firestore cloud profile end-to-end:
+ *   - Fetch /profile from the api_base to verify reachability + capabilities
+ *   - Persist connection to IndexedDB (overwriting any stale cache)
+ *   - Show dashboard
+ *
+ * Returns true on success, false on any failure (caller may show fallback UI).
+ */
+async function _autoConnectFromCloud(user, cloud, statusMsg) {
+    showScreen('screenSetup');
+    showSetupStatus(statusMsg || 'Connecting to your site...', 'info');
+    try {
+        let res;
+        try {
+            res = await fetch(cloud.api_base + '/profile', { headers: { 'Authorization': 'Bearer ' + cloud.api_key } });
+        } catch (netErr) {
+            showSetupStatus('Could not reach the site. Contact your administrator. (' + netErr.message + ')', 'error');
+            return false;
+        }
+        let profile;
+        try { profile = await res.json(); } catch {
+            showSetupStatus('Site returned invalid response. Contact your administrator.', 'error');
+            return false;
+        }
+        if (!res.ok) {
+            showSetupStatus(profile.message || ('Connection failed (HTTP ' + res.status + ')'), 'error');
+            return false;
+        }
+
+        const caps = profile.capabilities || {};
+        const isAdmin = !!(caps.agent_access_manage || caps.deployment_read);
+        const hasProducts = !!(caps.products_manage);
+        const siteName = cloud.label || cloud.site_name || profile.site_name || (() => { try { return new URL(cloud.api_base).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+        // v1.59.10 — record the cloud profile fingerprint so future logins can detect drift cheaply.
+        const cloudFingerprint = (cloud.api_base || '') + '|' + (cloud.api_key || '');
+        const connData = { api_base: cloud.api_base, api_key: cloud.api_key, site_name: siteName, site_url: profile.site_url || cloud.api_base, is_admin: isAdmin, has_products: hasProducts, cloud_fingerprint: cloudFingerprint, cloud_updated_at: cloud.updated_at || cloud.updatedAt || null };
+        await saveConnection(user.uid, connData);
+        window._conn = { uid: user.uid, ...connData, connected_at: new Date().toISOString() };
+        showScreen('screenDashboard');
+        populateSettings(window._conn);
+        applyRoleVisibility(isAdmin, hasProducts);
+        loadPosts();
+        loadCategories();
+        loadPostTypes();
+        if (currentLabsTab === 'seo' && !labsSeoLoaded) loadLabsSeo();
+        if (hasProducts) { loadProductCategories(); loadProducts(); }
+        toast('Connected to ' + (siteName || 'your site'), 'success');
+        return true;
+    } catch (err) {
+        showSetupStatus('Auto-connect failed: ' + err.message, 'error');
+        return false;
+    }
+}
+
 onAuthStateChanged(auth, async (user) => {
     if (_authHandling) return; // Prevent re-entrant calls
     _authHandling = true;
@@ -1477,8 +1532,55 @@ onAuthStateChanged(auth, async (user) => {
     if (user) {
         currentUser = user;
 
-        // 1. Check local IndexedDB first (returning user who already connected)
-        const conn = await getConnection(user.uid);
+        // v1.59.10 — fetch IndexedDB cache AND Firestore profile in PARALLEL so we
+        // can reconcile staleness on every login. Previously we returned early on the
+        // IndexedDB hit and never re-checked Firestore — meaning if an admin updated
+        // the client's cloud profile (e.g. moved to a new site URL or reissued the
+        // agent key), returning users kept the OLD connection forever and saw
+        // "Network error / Failed to fetch" against a now-defunct host.
+        const [conn, cloud] = await Promise.all([
+            getConnection(user.uid).catch(() => null),
+            checkCloudProfile(user).catch(() => null),
+        ]);
+
+        // 1. Firestore says revoked → kick out + clear local cache so a re-login won't auto-restore.
+        if (cloud && cloud.revoked) {
+            try { await deleteConnection(user.uid); } catch {}
+            window._conn = null;
+            showScreen('screenSetup');
+            showSetupStatus('Your access has been revoked. Contact your administrator.', 'error');
+            return;
+        }
+
+        // 2. Firestore has a profile — compare against IndexedDB cache. If they differ,
+        //    Firestore wins (admin source of truth). Detects: api_base change, api_key
+        //    rotation, or a newer updated_at timestamp.
+        if (cloud && cloud.api_base && cloud.api_key) {
+            const cloudFingerprint = (cloud.api_base || '') + '|' + (cloud.api_key || '');
+            const cachedFingerprint = conn ? ((conn.api_base || '') + '|' + (conn.api_key || '')) : '';
+            const cloudUpdatedAt = cloud.updated_at || cloud.updatedAt || null;
+            const cachedUpdatedAt = conn ? (conn.cloud_updated_at || null) : null;
+            const fingerprintDrift = cachedFingerprint && cloudFingerprint !== cachedFingerprint;
+            const timestampDrift = cloudUpdatedAt && cachedUpdatedAt && cloudUpdatedAt !== cachedUpdatedAt;
+            const noLocalCache = !conn;
+
+            if (noLocalCache || fingerprintDrift || timestampDrift) {
+                // Clear stale cache before re-establishing so a partial failure doesn't
+                // leave us with mismatched fields.
+                if (fingerprintDrift || timestampDrift) {
+                    try { await deleteConnection(user.uid); } catch {}
+                    window._conn = null;
+                }
+                const ok = await _autoConnectFromCloud(user, cloud, fingerprintDrift ? 'Cloud profile updated — refreshing your connection...' : 'Connecting to your site...');
+                if (ok) return;
+                // Auto-connect failed: if we still had a valid local cache that matches
+                // the cloud profile we'd just continue with it; otherwise stay on setup screen.
+                if (!conn) return;
+                // fall through and use the local cache as last resort
+            }
+        }
+
+        // 3. No drift OR no Firestore profile — use the local IndexedDB cache.
         if (conn) {
             window._conn = conn;
             showScreen('screenDashboard');
@@ -1492,56 +1594,7 @@ onAuthStateChanged(auth, async (user) => {
             return;
         }
 
-        // 2. Check Firestore for admin-preconfigured profile
-        const cloud = await checkCloudProfile(user);
-        if (cloud && cloud.revoked) {
-            showScreen('screenSetup');
-            showSetupStatus('Your access has been revoked. Contact your administrator.', 'error');
-            return;
-        }
-        if (cloud) {
-            // Auto-connect using cloud profile
-            showScreen('screenSetup');
-            showSetupStatus('Connecting to your site...', 'info');
-            try {
-                let res;
-                try {
-                    res = await fetch(cloud.api_base + '/profile', { headers: { 'Authorization': 'Bearer ' + cloud.api_key } });
-                } catch (netErr) {
-                    showSetupStatus('Could not reach the site. Contact your administrator. (' + netErr.message + ')', 'error');
-                    return;
-                }
-                let profile;
-                try { profile = await res.json(); } catch {
-                    showSetupStatus('Site returned invalid response. Contact your administrator.', 'error');
-                    return;
-                }
-                if (!res.ok) throw new Error(profile.message || 'Connection failed');
-
-                const caps = profile.capabilities || {};
-                const isAdmin = !!(caps.agent_access_manage || caps.deployment_read);
-                const hasProducts = !!(caps.products_manage);
-                const siteName = cloud.label || cloud.site_name || profile.site_name || (() => { try { return new URL(cloud.api_base).hostname.replace(/^www\./, ''); } catch { return ''; } })();
-                const connData = { api_base: cloud.api_base, api_key: cloud.api_key, site_name: siteName, site_url: profile.site_url || cloud.api_base, is_admin: isAdmin, has_products: hasProducts };
-                await saveConnection(user.uid, connData);
-                window._conn = { uid: user.uid, ...connData, connected_at: new Date().toISOString() };
-                showScreen('screenDashboard');
-                populateSettings(window._conn);
-                applyRoleVisibility(isAdmin, hasProducts);
-                loadPosts();
-                loadCategories();
-                loadPostTypes();
-                // Retry SEO dashboard if tab was already active before connection
-                if (currentLabsTab === 'seo' && !labsSeoLoaded) loadLabsSeo();
-                if (hasProducts) { loadProductCategories(); loadProducts(); }
-                toast('Connected to ' + (siteName || 'your site'), 'success');
-            } catch (err) {
-                showSetupStatus('Auto-connect failed: ' + err.message, 'error');
-            }
-            return;
-        }
-
-        // 3. No local or cloud profile — show manual upload screen
+        // 4. No local AND no cloud profile — show manual upload screen.
         showScreen('screenSetup');
     } else {
         currentUser = null;
@@ -1633,6 +1686,40 @@ async function deleteConnection(uid) {
 // API CLIENT
 // ═══════════════════════════════════════════
 let _disconnecting403 = false;
+let _selfHealingFromCloud = false;
+
+/**
+ * v1.59.10 — when a fetch against the cached api_base fails with a network error
+ * (commonly ERR_NAME_NOT_RESOLVED if the admin migrated the client to a new domain),
+ * try to recover by re-pulling the Firestore cloud profile. If the profile now points
+ * at a different api_base, replace the cache and reload the dashboard.
+ *
+ * Returns true when a successful self-heal happened (caller should NOT propagate
+ * the original network error — the page is now reloading or has been refreshed).
+ */
+async function _trySelfHealFromCloud(originalError) {
+    if (_selfHealingFromCloud || !currentUser) return false;
+    _selfHealingFromCloud = true;
+    try {
+        const cloud = await checkCloudProfile(currentUser).catch(() => null);
+        if (!cloud || !cloud.api_base || !cloud.api_key) return false;
+        const cachedFingerprint = (window._conn?.api_base || '') + '|' + (window._conn?.api_key || '');
+        const cloudFingerprint  = (cloud.api_base || '') + '|' + (cloud.api_key || '');
+        if (cloudFingerprint === cachedFingerprint) {
+            // Cloud agrees with cache — the network error is real, not a stale-cache problem.
+            return false;
+        }
+        // Cloud disagrees → the cache is stale. Clear and reconnect.
+        try { await deleteConnection(currentUser.uid); } catch {}
+        window._conn = null;
+        toast('Detected updated cloud profile — reconnecting...', 'info');
+        const ok = await _autoConnectFromCloud(currentUser, cloud, 'Cloud profile changed — reconnecting your dashboard...');
+        return ok;
+    } finally {
+        _selfHealingFromCloud = false;
+    }
+}
+
 async function api(method, endpoint, body) {
     const conn = window._conn;
     if (!conn) throw new Error('Not connected');
@@ -1655,6 +1742,15 @@ async function api(method, endpoint, body) {
     try {
         res = await fetch(fetchUrl, opts);
     } catch (netErr) {
+        // v1.59.10 — self-heal path: try Firestore for an updated profile before giving up.
+        // Only triggers once per attempt + only when the cached api_base differs from cloud.
+        const healed = await _trySelfHealFromCloud(netErr).catch(() => false);
+        if (healed) {
+            // The dashboard has been re-rendered with the fresh connection; the original
+            // call failed but the user is now connected to the right site. Surface a clear
+            // message rather than a confusing CORS error.
+            throw new Error('Reconnected to updated site. Please retry your last action.');
+        }
         throw new Error('Network error — check that the site is reachable and CORS is allowed. (' + netErr.message + ')');
     }
     const text = await res.text();
@@ -5073,7 +5169,7 @@ async function loadFormSubmissions() {
             <div class="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10">
                 <div>
                     <p class="text-sm font-bold text-white">${esc(s.name || 'Unknown')}</p>
-                    <p class="text-xs text-gray-400">${esc(s.service || '—')}${s.date ? ' &middot; ' + esc(s.date) : ''}${s.location ? ' &middot; ' + esc(s.location) : ''}</p>
+                    <p class="text-xs text-gray-400">${esc(s.service || '—')}${s.date ? ' &middot; ' + esc(s.date) : ''}${s.time ? ' @ ' + esc(s.time) : ''}${s.location ? ' &middot; ' + esc(s.location) : ''}</p>
                     <p class="text-xs text-gray-500">${esc(s.email || '')}${s.phone ? ' &middot; ' + esc(s.phone) : ''}</p>
                     ${s.notes ? `<p class="text-xs text-gray-600 mt-1 italic">"${esc(s.notes)}"</p>` : ''}
                 </div>
