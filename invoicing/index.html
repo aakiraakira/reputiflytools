@@ -1832,11 +1832,18 @@ const ALLOWED_EMAIL = 'realjuliantung@gmail.com';
 const DEV_MODE = new URLSearchParams(location.search).get('dev') === '1';
 
 let app, auth, db;
+// Promise that resolves once persistence is configured. We always await this
+// before any auth call so the user's session is reliably stored to IndexedDB
+// (browserLocalPersistence) — surviving tab close, browser restart, even OS
+// reboot — and they stay signed in until they explicitly hit "Sign out".
+let persistenceReady = Promise.resolve();
 if (!DEV_MODE) {
   app = initializeApp(FIREBASE_CONFIG);
   auth = getAuth(app);
   db = getFirestore(app);
-  setPersistence(auth, browserLocalPersistence).catch(() => {});
+  persistenceReady = setPersistence(auth, browserLocalPersistence).catch((e) => {
+    console.warn('[auth] persistence setup failed, falling back to default:', e);
+  });
 }
 
 // REGION: state ─────────────────────────────────────────────────────
@@ -2002,8 +2009,46 @@ async function requireRecentAuth() {
 // REGION: auth-gate ─────────────────────────────────────────────────
 const authScreen = document.getElementById('auth-screen');
 const appShell   = document.getElementById('app');
+let authResolved = false;   // true once onAuthStateChanged has fired at least once
+
+// Initial paint: hide both auth screen and app shell behind a tiny loading
+// state so persisted-login users don't see a flash of the sign-in form before
+// onAuthStateChanged fires with their cached session.
+if (!DEV_MODE) {
+  authScreen.style.display = 'none';
+  appShell.hidden = true;
+  showAuthLoading();
+}
+
+function showAuthLoading() {
+  let host = document.getElementById('auth-loading');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'auth-loading';
+    host.style.cssText = `
+      position: fixed; inset: 0; background: #E8E8E8;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 999;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    `;
+    host.innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; gap:14px;">
+        <img src="assets/reputifly-logo-light.png" alt="" style="height:32px; opacity:0.85;">
+        <div style="font-size:11px; font-weight:700; letter-spacing:0.18em; text-transform:uppercase; color:#9E9E9E;">Loading…</div>
+      </div>
+    `;
+    document.body.appendChild(host);
+  } else {
+    host.style.display = 'flex';
+  }
+}
+function hideAuthLoading() {
+  const host = document.getElementById('auth-loading');
+  if (host) host.style.display = 'none';
+}
 
 function showAuthScreen(errorMsg) {
+  hideAuthLoading();
   authScreen.style.display = 'flex';
   appShell.hidden = true;
   if (errorMsg) {
@@ -2013,6 +2058,7 @@ function showAuthScreen(errorMsg) {
   }
 }
 function showApp() {
+  hideAuthLoading();
   authScreen.style.display = 'none';
   appShell.hidden = false;
 }
@@ -2026,10 +2072,13 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
   btn.disabled = true; btn.textContent = 'Signing in…';
   try {
     if (DEV_MODE) {
-      // dev bypass
       bootstrapDev();
       return;
     }
+    // Wait for persistence to be configured BEFORE signing in. This guarantees
+    // the auth token is written to IndexedDB so the user stays signed in
+    // across tab close, browser restart, even OS reboot.
+    await persistenceReady;
     await signInWithEmailAndPassword(auth, email, password);
   } catch (e) {
     err.textContent = e.message?.replace('Firebase: ', '') || 'Sign in failed';
@@ -2044,6 +2093,7 @@ document.getElementById('auth-reset').addEventListener('click', async () => {
   if (!email) { showToast('Enter your email first', 'warn'); return; }
   if (DEV_MODE) { showToast('Reset is disabled in dev mode', 'info'); return; }
   try {
+    await persistenceReady;
     await sendPasswordResetEmail(auth, email);
     showToast('Reset email sent if account exists');
   } catch (e) { showToast(e.message?.replace('Firebase: ', '') || 'Reset failed', 'error'); }
@@ -2054,24 +2104,40 @@ document.getElementById('signout-btn').addEventListener('click', async () => {
   try { await signOut(auth); } catch {}
 });
 
-// Auth state listener (real mode)
+// Auth state listener (real mode). Fires:
+//   • on page load with the persisted user (if any) — auto-login path
+//   • after explicit signIn / signOut
 if (!DEV_MODE) {
-  onAuthStateChanged(auth, async (user) => {
-    if (!user) {
-      detachListeners();
-      showAuthScreen();
-      return;
-    }
-    if (user.uid !== ALLOWED_UID) {
-      await signOut(auth);
-      showAuthScreen('This account is not authorised for Reputifly Accounting.');
-      return;
-    }
-    state.user = user;
-    document.getElementById('user-email').textContent = user.email || '—';
-    showApp();
-    await bootstrapData(user.uid);
+  // Make sure persistence is set before we register the listener so the very
+  // first event reflects the correct stored session.
+  persistenceReady.then(() => {
+    onAuthStateChanged(auth, async (user) => {
+      authResolved = true;
+      if (!user) {
+        detachListeners();
+        showAuthScreen();
+        return;
+      }
+      if (user.uid !== ALLOWED_UID) {
+        await signOut(auth);
+        showAuthScreen('This account is not authorised for Reputifly Accounting.');
+        return;
+      }
+      state.user = user;
+      document.getElementById('user-email').textContent = user.email || '—';
+      showApp();
+      await bootstrapData(user.uid);
+    });
   });
+
+  // Safety net: if onAuthStateChanged hasn't fired within 5s (offline or SDK
+  // hung), fall back to showing the login screen so the user isn't stuck.
+  setTimeout(() => {
+    if (!authResolved) {
+      console.warn('[auth] state did not resolve within 5s — showing login');
+      showAuthScreen();
+    }
+  }, 5000);
 }
 
 function detachListeners() {
