@@ -1971,6 +1971,38 @@ function showToast(msg, kind = 'success') {
   }, 3500);
 }
 
+// Shared "Copy share link" handler — used by row menus, drawer footer, and
+// the editor sticky bar. If the doc has no token yet (legacy or freshly
+// migrated), one is lazy-minted and back-filled onto the source doc + the
+// public mirror. Token-based URL only — never reveals the invoice number.
+async function handleCopyShareLink(d, kind /* 'quotations' | 'invoices' | 'quotation' | 'invoice' */) {
+  if (!d) return;
+  if (DEV_MODE) {
+    showToast('Share links require live Firestore (not dev mode)', 'warn');
+    return;
+  }
+  try {
+    let token = d.shareToken;
+    let displayNumber = d.displayNumber;
+    if (!token) {
+      // Lazy-mint for legacy docs that predate the share feature.
+      token = generateShareToken();
+      const isQuotation = (kind === 'quotations' || kind === 'quotation');
+      const sourcePath = isQuotation
+        ? `users/${state.user.uid}/quotations/${d.id}`
+        : `users/${state.user.uid}/invoices/${d.id}`;
+      await updateDoc(doc(db, sourcePath), { shareToken: token, updatedAt: serverTimestamp() });
+      await upsertShareDoc(token, buildSharePayload({ ...d, shareToken: token }, isQuotation ? 'quotation' : 'invoice'));
+    }
+    const url = buildShareUrl(displayNumber, token);
+    await navigator.clipboard.writeText(url);
+    showToast('Share link copied — paste it to your client');
+  } catch (e) {
+    console.error('[share] copy failed', e);
+    showToast(e.message || 'Could not copy share link', 'error');
+  }
+}
+
 // REGION: modal helper ──────────────────────────────────────────────
 function openModal({ title, body, okLabel = 'Confirm', cancelLabel = 'Cancel', danger = false, requireText, onOk }) {
   const scrim = document.getElementById('modal-scrim');
@@ -2425,6 +2457,8 @@ async function convertQuotationToInvoice(quotationId, paymentDate) {
     const next = (state.counters.invoice?.value || 0) + 1;
     const displayNumber = formatNumber(next, 'INV-', 4);
     const newId = 'i' + Math.random().toString(36).slice(2, 9);
+    // Transfer the share token so old QINV- links keep working.
+    const shareToken = quote.shareToken || generateShareToken();
     state.invoices.set(newId, {
       id: newId, version: 1, number: next, displayNumber,
       issueDate: paymentDate,
@@ -2434,15 +2468,16 @@ async function convertQuotationToInvoice(quotationId, paymentDate) {
       terms: quote.terms || null,
       sourceQuotationId: quotationId,
       sourceQuotationNumber: quote.displayNumber,
+      shareToken,
       status: 'paid',
       createdAt: { seconds: Math.floor(Date.now() / 1000) }
     });
     state.counters.invoice = { ...state.counters.invoice, value: next };
-    state.quotations.set(quotationId, { ...quote, status: 'converted', convertedToInvoiceId: newId });
+    state.quotations.set(quotationId, { ...quote, status: 'converted', convertedToInvoiceId: newId, shareToken });
     render();
     return { invoiceId: newId, displayNumber };
   }
-  return await runTransaction(db, async (txn) => {
+  const result = await runTransaction(db, async (txn) => {
     const counterRef = doc(db, `users/${uid}/counters/invoice`);
     const counterSnap = await txn.get(counterRef);
     if (!counterSnap.exists()) throw new Error('Counter not initialised');
@@ -2456,10 +2491,15 @@ async function convertQuotationToInvoice(quotationId, paymentDate) {
     const next = cur.value + 1;
     const displayNumber = formatNumber(next, cur.prefix || 'INV-', cur.padding || 4);
 
+    // Transfer the share token. If the source quotation predates the
+    // share-link feature, mint a new token and back-fill it onto the
+    // quotation as well.
+    const shareToken = quote.shareToken || generateShareToken();
+
     const invoiceRef = doc(collection(db, `users/${uid}/invoices`));
     const auditRef = doc(collection(invoiceRef, 'audit'));
 
-    txn.set(invoiceRef, {
+    const invoiceData = {
       version: 1, number: next, displayNumber,
       issueDate: paymentDate,
       client: { ...quote.client },
@@ -2468,23 +2508,35 @@ async function convertQuotationToInvoice(quotationId, paymentDate) {
       terms: quote.terms || null,
       sourceQuotationId: quotationId,
       sourceQuotationNumber: quote.displayNumber,
+      shareToken,
       status: 'paid',
       createdAt: serverTimestamp()
-    });
+    };
+    txn.set(invoiceRef, invoiceData);
     txn.update(counterRef, {
       value: next, lastIssuedAt: serverTimestamp(),
       lastInvoiceId: invoiceRef.id, updatedAt: serverTimestamp()
     });
     txn.update(quoteRef, {
       status: 'converted', convertedToInvoiceId: invoiceRef.id,
+      shareToken,
       convertedAt: serverTimestamp(), updatedAt: serverTimestamp()
     });
     txn.set(auditRef, {
       ts: serverTimestamp(), actor: uid, event: 'created',
       after: { number: next, status: 'paid' }
     });
-    return { invoiceId: invoiceRef.id, displayNumber };
+    return { invoiceId: invoiceRef.id, displayNumber, shareToken, invoiceData };
   });
+
+  // Re-point the public mirror at the new invoice. Old QINV- links
+  // continue to resolve here and now show the INV- invoice.
+  upsertShareDoc(result.shareToken, buildSharePayload({
+    ...result.invoiceData,
+    displayNumber: result.displayNumber
+  }, 'invoice'));
+
+  return { invoiceId: result.invoiceId, displayNumber: result.displayNumber };
 }
 
 async function setCounterValue(name, value) {
@@ -2520,11 +2572,119 @@ async function nextQuotationNumber() {
   });
 }
 
+// REGION: share-links ───────────────────────────────────────────────
+// Every saved quotation / invoice carries an unguessable 8-char token. A
+// public mirror at `shares/{token}` lets clients view + download without
+// auth. The token is permanent: when QINV-005 → INV-0042 conversion
+// happens, the same token re-points at the new invoice, so any link
+// already shared with a client keeps working.
+function generateShareToken() {
+  // Token-only URL ⇒ this string IS the access secret. Use crypto-grade
+  // randomness (not Math.random). 16 base36 chars ≈ 82 bits of entropy
+  // ≈ 4.7×10^24 possibilities. Brute-force enumeration is computationally
+  // infeasible even ignoring Firestore's rate limiting. The displayNumber
+  // is *not* embedded in the URL — clients can't increment it to find
+  // other invoices because there's nothing to increment.
+  // We oversample (32 bytes) and reject mod-bias to keep entropy clean.
+  const bytes = new Uint8Array(32);
+  (typeof crypto !== 'undefined' ? crypto : window.crypto).getRandomValues(bytes);
+  let out = '';
+  for (let i = 0; i < bytes.length && out.length < 16; i++) {
+    // 252 = 36 * 7 — accept bytes < 252 to avoid modulo bias.
+    if (bytes[i] < 252) out += (bytes[i] % 36).toString(36);
+  }
+  // In the astronomically unlikely event we still have fewer than 16
+  // chars, keep going with Math.random as a fallback.
+  while (out.length < 16) out += Math.floor(Math.random() * 36).toString(36);
+  return out.slice(0, 16);
+}
+
+function buildShareUrl(_displayNumber, token) {
+  // URL contains ONLY the unguessable token — no invoice number, no
+  // sequential identifier, nothing enumerable. The invoice number is
+  // displayed prominently inside the rendered page, so the link still
+  // looks formal once opened.
+  const origin = location.origin;
+  const dirPath = location.pathname.replace(/[^/]*$/, '');
+  return `${origin}${dirPath}view.html?i=${token}`;
+}
+
+function buildSharePayload(d, type) {
+  const settings = state.settings || DEFAULT_SETTINGS;
+  const company = settings.company || {};
+  return {
+    type,                                // 'quotation' | 'invoice'
+    status: d.status || (type === 'invoice' ? 'paid' : 'draft'),
+    displayNumber: d.displayNumber || '',
+    issueDate: d.issueDate || '',
+    client: {
+      name:    (d.client && d.client.name)    || '',
+      attn:    (d.client && d.client.attn)    || '',
+      address: (d.client && d.client.address) || '',
+      postal:  (d.client && d.client.postal)  || '',
+      email:   (d.client && d.client.email)   || ''
+    },
+    items: (d.items || []).map(i => ({
+      description: i.description || '',
+      subtitle:    i.subtitle    || '',
+      qty:         Number(i.qty)    || 0,
+      rate:        Number(i.rate)   || 0,
+      amount:      Number(i.amount) || 0
+    })),
+    subtotal: Number(d.subtotal) || 0,
+    total:    Number(d.total)    || 0,
+    terms: d.terms ? {
+      title:    d.terms.title    || '',
+      subtitle: d.terms.subtitle || '',
+      sections: (d.terms.sections || []).map(s => ({
+        heading: s.heading || '',
+        body:    s.body    || ''
+      }))
+    } : null,
+    optional: d.optional ? { ...d.optional } : null,
+    company: {
+      name:    company.name    || '',
+      uen:     company.uen     || '',
+      address: company.address || '',
+      email:   company.email   || ''
+    },
+    ownerUid: ALLOWED_UID,
+    updatedAt: serverTimestamp()
+  };
+}
+
+async function upsertShareDoc(token, payload) {
+  if (DEV_MODE || !token) return;
+  try {
+    await setDoc(doc(db, 'shares', token), payload, { merge: true });
+  } catch (e) {
+    // Non-fatal — the source-of-truth doc is saved, only the public mirror
+    // failed. Surface to console so we can spot rule problems.
+    console.warn('[share] upsert failed for', token, e);
+  }
+}
+
+async function deleteShareDoc(token) {
+  if (DEV_MODE || !token) return;
+  try {
+    await deleteDoc(doc(db, 'shares', token));
+  } catch (e) {
+    console.warn('[share] delete failed for', token, e);
+  }
+}
+
 // REGION: quotations-store ──────────────────────────────────────────
 async function saveQuotation(data, existingId) {
   const uid = state.user.uid;
+  // Carry-forward the existing token (edits) or mint a new one (creates).
+  const existing = existingId ? state.quotations.get(existingId) : null;
+  const shareToken = (data.shareToken)
+    || (existing && existing.shareToken)
+    || generateShareToken();
+
   const payload = {
     ...data,
+    shareToken,
     searchBlob: buildSearchBlob(data),
     updatedAt: DEV_MODE ? { seconds: Math.floor(Date.now()/1000) } : serverTimestamp()
   };
@@ -2549,19 +2709,28 @@ async function saveQuotation(data, existingId) {
     }
   }
 
+  let docId;
+  let docForShare;
   if (existingId) {
     await updateDoc(doc(db, `users/${uid}/quotations/${existingId}`), payload);
-    return existingId;
+    docId = existingId;
+    docForShare = { ...(existing || {}), ...payload, id: existingId };
   } else {
     const { number, displayNumber } = await nextQuotationNumber();
-    const ref = await addDoc(collection(db, `users/${uid}/quotations`), {
+    const newDoc = {
       version: 1, number, displayNumber,
       status: data.status || 'draft',
       ...payload,
       createdAt: serverTimestamp()
-    });
-    return ref.id;
+    };
+    const ref = await addDoc(collection(db, `users/${uid}/quotations`), newDoc);
+    docId = ref.id;
+    docForShare = { ...newDoc, id: docId, displayNumber };
   }
+
+  // Mirror to public share collection (fire-and-forget, never blocks save).
+  upsertShareDoc(shareToken, buildSharePayload(docForShare, 'quotation'));
+  return docId;
 }
 
 async function deleteQuotation(id) {
@@ -2569,6 +2738,7 @@ async function deleteQuotation(id) {
   // Snapshot the deleted draft's number BEFORE removal so we can renumber.
   const target = state.quotations.get(id);
   const numToDelete = target?.number;
+  const shareToken = target?.shareToken;
 
   if (DEV_MODE) {
     state.quotations.delete(id);
@@ -2577,6 +2747,8 @@ async function deleteQuotation(id) {
     return;
   }
   await deleteDoc(doc(db, `users/${state.user.uid}/quotations/${id}`));
+  // Drop the public mirror so the share link returns "not found".
+  if (shareToken) deleteShareDoc(shareToken);
   if (numToDelete) await maybeReclaimDraftNumber(numToDelete);
 }
 
@@ -2603,20 +2775,24 @@ async function updateQuotation(id, patch) {
     state.quotations.set(id, next); render(); return;
   }
   const payload = { ...patch, updatedAt: serverTimestamp() };
+  const cur = state.quotations.get(id) || {};
   if (patch.client || patch.items || patch.total) {
-    const cur = state.quotations.get(id);
     payload.searchBlob = buildSearchBlob({ ...cur, ...patch });
   }
   await updateDoc(doc(db, `users/${state.user.uid}/quotations/${id}`), payload);
+  // Refresh the public mirror with the latest data (token unchanged).
+  if (cur.shareToken) {
+    upsertShareDoc(cur.shareToken, buildSharePayload({ ...cur, ...patch }, 'quotation'));
+  }
 }
 
 // REGION: invoices-store ────────────────────────────────────────────
 async function updateInvoiceClient(id, patch) {
   // Only client + items editable
+  const cur = state.invoices.get(id) || {};
   const payload = { ...patch };
-  payload.searchBlob = buildSearchBlob({ ...(state.invoices.get(id) || {}), ...patch });
+  payload.searchBlob = buildSearchBlob({ ...cur, ...patch });
   if (DEV_MODE) {
-    const cur = state.invoices.get(id) || {};
     state.invoices.set(id, { ...cur, ...payload }); render(); return;
   }
   payload.updatedAt = serverTimestamp();
@@ -2625,12 +2801,16 @@ async function updateInvoiceClient(id, patch) {
   await addDoc(collection(db, `users/${state.user.uid}/invoices/${id}/revisions`), {
     ts: serverTimestamp(), actor: state.user.uid, after: payload
   });
+  // Refresh the public share mirror with the latest invoice content.
+  if (cur.shareToken) {
+    upsertShareDoc(cur.shareToken, buildSharePayload({ ...cur, ...patch }, 'invoice'));
+  }
 }
 
 async function voidInvoice(id, reason) {
   await requireRecentAuth();
+  const cur = state.invoices.get(id) || {};
   if (DEV_MODE) {
-    const cur = state.invoices.get(id) || {};
     state.invoices.set(id, { ...cur, status: 'void', voidReason: reason }); render(); return;
   }
   await updateDoc(doc(db, `users/${state.user.uid}/invoices/${id}`), {
@@ -2639,6 +2819,12 @@ async function voidInvoice(id, reason) {
   await addDoc(collection(db, `users/${state.user.uid}/invoices/${id}/audit`), {
     ts: serverTimestamp(), actor: state.user.uid, event: 'voided', reason
   });
+  // Reflect the voided state on the public share viewer (it shows a
+  // translucent "VOIDED" overlay rather than disappearing — clients should
+  // know an invoice they were sent has been retracted).
+  if (cur.shareToken) {
+    upsertShareDoc(cur.shareToken, buildSharePayload({ ...cur, status: 'void' }, 'invoice'));
+  }
 }
 
 // REGION: settings-store ────────────────────────────────────────────
@@ -2841,6 +3027,7 @@ function renderCreationTab() {
     <div class="summary">Invoice <strong data-summary-num>${escapeHtml(displayNumber)}</strong> · <strong data-summary-total>${escapeHtml(fmtMoney(d.total))}</strong></div>
     <div class="actions">
       <button class="btn ghost" id="reset-draft">Reset</button>
+      <button class="btn" id="save-and-share">Save &amp; copy share link</button>
       <button class="btn primary" id="save-and-pdf">Save &amp; download PDF</button>
     </div>
   `;
@@ -2849,6 +3036,7 @@ function renderCreationTab() {
   document.getElementById('reset-draft').addEventListener('click', () => {
     if (confirm('Reset the form?')) { initDraft(); render(); }
   });
+  document.getElementById('save-and-share').addEventListener('click', () => handleSave(false, true));
   document.getElementById('save-and-pdf').addEventListener('click', () => handleSave(true));
 }
 
@@ -3038,6 +3226,7 @@ function renderCreationTabMobile(d, s, displayNumber /*, _isInvoiceMode */) {
     <div class="summary">Invoice <strong data-summary-num>${escapeHtml(displayNumber)}</strong> · <strong data-summary-total>${escapeHtml(fmtMoney(d.total))}</strong></div>
     <div class="actions">
       <button class="btn ghost" id="reset-draft">Reset</button>
+      <button class="btn" id="save-and-share">Share</button>
       <button class="btn primary" id="save-and-pdf">PDF</button>
     </div>
   `;
@@ -3046,6 +3235,7 @@ function renderCreationTabMobile(d, s, displayNumber /*, _isInvoiceMode */) {
   document.getElementById('reset-draft').addEventListener('click', () => {
     if (confirm('Reset the form?')) { initDraft(); render(); }
   });
+  document.getElementById('save-and-share').addEventListener('click', () => handleSave(false, true));
   document.getElementById('save-and-pdf').addEventListener('click', () => handleSave(true));
 }
 
@@ -3391,7 +3581,7 @@ function buildFooterBlock(d, s) {
   return foot;
 }
 
-async function handleSave(downloadAfter) {
+async function handleSave(downloadAfter, shareAfter = false) {
   const d = state.draft;
   if (!d.client.name) { showToast('Client name is required', 'warn'); return; }
   recomputeTotals(d);
@@ -3416,8 +3606,10 @@ async function handleSave(downloadAfter) {
 
   const saveBtn = document.getElementById('save-draft');
   const pdfBtn = document.getElementById('save-and-pdf');
+  const shareBtn = document.getElementById('save-and-share');
   if (saveBtn) saveBtn.disabled = true;
   if (pdfBtn) pdfBtn.disabled = true;
+  if (shareBtn) shareBtn.disabled = true;
 
   try {
     const id = await saveQuotation(baseDoc);
@@ -3427,6 +3619,16 @@ async function handleSave(downloadAfter) {
     if (downloadAfter && saved) {
       await downloadPdf(saved, d.includeTerms ? 'invoice-with-terms' : 'invoice');
     }
+    if (shareAfter && saved && saved.shareToken) {
+      try {
+        const url = buildShareUrl(saved.displayNumber, saved.shareToken);
+        await navigator.clipboard.writeText(url);
+        showToast('Share link copied — paste it to your client');
+      } catch (clipErr) {
+        console.warn('[share] clipboard write failed', clipErr);
+        showToast('Saved, but clipboard blocked — open from Drafts to copy', 'warn');
+      }
+    }
     initDraft();
     render();
   } catch (e) {
@@ -3435,6 +3637,7 @@ async function handleSave(downloadAfter) {
   } finally {
     if (saveBtn) saveBtn.disabled = false;
     if (pdfBtn) pdfBtn.disabled = false;
+    if (shareBtn) shareBtn.disabled = false;
   }
 }
 
@@ -3583,6 +3786,7 @@ function openRowMenu(anchor, kind, d) {
   const items = [];
   items.push({ label: 'Open', fn: () => openDrawer(kind === 'quotations' ? 'quotation' : 'invoice', d.id) });
   items.push({ label: 'Download PDF', fn: () => downloadPdf(d, d.terms ? 'invoice-with-terms' : 'invoice') });
+  items.push({ label: 'Copy share link', fn: () => handleCopyShareLink(d, kind) });
   if (kind === 'quotations') {
     if (d.status !== 'converted') {
       items.push({ label: 'Mark as paid…', fn: () => promptConvert(d) });
@@ -3895,6 +4099,8 @@ function renderDrawer() {
   }
 
   const right = document.createElement('div'); right.className = 'actions';
+  const shareBtn = document.createElement('button'); shareBtn.className = 'btn'; shareBtn.textContent = 'Copy share link';
+  shareBtn.addEventListener('click', () => handleCopyShareLink(d, kind));
   const pdfBtn = document.createElement('button'); pdfBtn.className = 'btn'; pdfBtn.textContent = 'Download PDF';
   pdfBtn.addEventListener('click', () => downloadPdf(d, d.terms ? 'invoice-with-terms' : 'invoice'));
   const saveBtn = document.createElement('button'); saveBtn.className = 'btn primary'; saveBtn.textContent = 'Save changes';
@@ -3934,6 +4140,7 @@ function renderDrawer() {
       saveBtn.disabled = false;
     }
   });
+  right.appendChild(shareBtn);
   right.appendChild(pdfBtn);
   right.appendChild(saveBtn);
 
@@ -4688,9 +4895,13 @@ window.__reputifly = {
   setDraftMode: (mode) => { state.draft.mode = mode; render(); },
   forceRender: () => render(),
   isDev: DEV_MODE,
-  // Test-only direct paths so headless audits can drive deletion without
+  // Test-only direct paths so headless audits can drive flows without
   // navigating modals.
-  _test_delete: async (id) => { await deleteQuotation(id); }
+  _test_delete:  async (id) => { await deleteQuotation(id); },
+  _test_convert: async (id, paymentDate) => convertQuotationToInvoice(id, paymentDate || new Date().toISOString().slice(0,10)),
+  _test_void:    async (id, reason) => voidInvoice(id, reason || 'test'),
+  _test_buildShareUrl: (displayNumber, token) => buildShareUrl(displayNumber, token),
+  _test_genToken: () => generateShareToken()
 };
 
 </script>
