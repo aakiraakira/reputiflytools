@@ -221,18 +221,347 @@ body { padding: 56px 24px 96px; display: flex; flex-direction: column; align-ite
   body { padding: 0; gap: 0; }
   .page { box-shadow: none; border-radius: 0; width: 210mm; min-height: 297mm; padding: 14mm 14mm; }
   .viewer-bar, .viewer-foot { display: none !important; }
+  .es-scrim, .es-sheet, .es-toasts { display: none !important; }
   .voided-watermark span { color: rgba(220,38,38,0.35); border-color: rgba(220,38,38,0.35); }
 }
 @page { size: A4; margin: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   EMAIL-INVOICE SHEET (mobile = bottom-sheet, desktop = centred modal)
+   Same DOM, switched layouts via media query. Slide-up on mobile so
+   the recipient stays in their thumb's reach; centred on desktop so
+   it doesn't feel weirdly anchored to the bottom of a tall window.
+   ═══════════════════════════════════════════════════════════════════ */
+.es-scrim {
+  position: fixed; inset: 0;
+  background: rgba(10,10,10,0.5);
+  z-index: 250;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+}
+.es-scrim.is-open { opacity: 1; pointer-events: auto; }
+
+.es-sheet {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  z-index: 260;
+  padding: 14px 22px 28px;
+  transform: translateY(100%);
+  transition: transform 240ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 -16px 40px -12px rgba(0,0,0,0.18);
+  display: flex; flex-direction: column; gap: 14px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  /* Hide scrollbar — sheet should never look like it has a vertical
+     scroll affordance unless the content really overflows on small
+     screens; even then keep the chrome quiet. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.es-sheet::-webkit-scrollbar { display: none; }
+.es-sheet[hidden] { display: none; }
+.es-sheet.is-open { transform: translateY(0); }
+
+.es-sheet__handle {
+  align-self: center;
+  width: 40px; height: 4px;
+  background: var(--hairline-strong);
+  border-radius: var(--pill);
+  margin: 2px 0 4px;
+}
+
+.es-sheet__head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px;
+}
+.es-sheet__title {
+  font-size: 19px; font-weight: 700; letter-spacing: -0.015em;
+  color: var(--ink); line-height: 1.2;
+}
+.es-sheet__sub {
+  margin-top: 4px;
+  font-size: 13px; color: var(--ink-muted); font-weight: 500;
+}
+.es-sheet__close {
+  flex-shrink: 0;
+  width: 36px; height: 36px;
+  border: 0; background: var(--surface-soft);
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--ink); cursor: pointer;
+  transition: background 120ms ease;
+}
+.es-sheet__close:hover { background: var(--hairline); }
+
+.es-banner {
+  background: rgba(220,38,38,0.08);
+  border: 1px solid rgba(220,38,38,0.25);
+  color: var(--danger);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+  font-size: 13px; font-weight: 500; line-height: 1.45;
+}
+
+.es-form { display: flex; flex-direction: column; gap: 12px; margin: 4px 0 0; }
+
+.es-label {
+  display: block;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-muted);
+  margin-bottom: 8px;
+}
+.es-input {
+  width: 100%;
+  font: inherit;
+  font-size: 16px; /* >=16 prevents iOS zoom-on-focus */
+  color: var(--ink);
+  background: var(--surface);
+  border: 1.5px solid var(--hairline-strong);
+  border-radius: var(--r-md);
+  padding: 13px 14px;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+  box-sizing: border-box;
+}
+.es-input::placeholder { color: var(--ink-faint); }
+.es-input:focus {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(10,10,10,0.06);
+}
+.es-input--error,
+.es-input--error:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(220,38,38,0.10);
+}
+.es-error-msg {
+  display: block;
+  margin-top: 6px;
+  font-size: 12.5px; color: var(--danger); font-weight: 500;
+}
+.es-error-msg[hidden] { display: none; }
+.es-error-msg--block {
+  margin-top: 0;
+  padding: 10px 12px;
+  background: rgba(220,38,38,0.06);
+  border-radius: var(--r-sm);
+  text-align: center;
+}
+
+.es-link {
+  display: inline-block;
+  background: transparent; border: 0;
+  color: var(--ink); font: inherit;
+  font-size: 13.5px; font-weight: 600;
+  padding: 4px 0; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.es-link:hover { opacity: 0.7; }
+
+.es-divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 4px 0;
+  font-size: 12px; color: var(--ink-faint); font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+.es-divider::before, .es-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--hairline);
+}
+
+/* Full-width + ghost variants of the existing .viewer-btn — same pill,
+   same letter spacing, just different chrome. Keeps the visual language
+   consistent between the at-rest action bar and the popup CTAs. */
+.viewer-btn--full { width: 100%; justify-content: center; }
+.viewer-btn--ghost {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1.5px solid var(--hairline-strong);
+  box-shadow: none;
+}
+.viewer-btn--ghost:hover { background: var(--surface-soft); }
+.viewer-btn[disabled],
+.viewer-btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.es-spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: es-spin 0.7s linear infinite;
+  margin-right: 8px;
+  vertical-align: -2px;
+}
+@keyframes es-spin { to { transform: rotate(360deg); } }
+
+.es-foot-note {
+  font-size: 11.5px; color: var(--ink-faint);
+  text-align: center; line-height: 1.45;
+  margin-top: 4px;
+}
+
+/* Auto-download overlay — shown when the viewer loads with ?dl=1.
+   Full-screen scrim + centred card so the recipient knows what's
+   happening (file is generated client-side, takes a few seconds) and
+   gets a clear path back to the regular viewer if they want to scroll
+   the invoice or retry. */
+.dl-overlay {
+  position: fixed; inset: 0;
+  background: rgba(232,232,232,0.92);
+  z-index: 600;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+}
+.dl-overlay.is-open { opacity: 1; pointer-events: auto; }
+.dl-overlay__card {
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  padding: 38px 32px 30px;
+  width: 100%; max-width: 420px;
+  text-align: center;
+  box-shadow: 0 30px 80px -28px rgba(0,0,0,0.22), 0 0 0 1px rgba(0,0,0,0.04);
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.dl-overlay__spinner {
+  width: 44px; height: 44px;
+  border: 3px solid var(--hairline-strong);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: es-spin 0.8s linear infinite;
+}
+.dl-overlay__icon {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background: rgba(16,185,129,0.12);
+  color: var(--paid);
+  display: flex; align-items: center; justify-content: center;
+}
+.dl-overlay__icon.error { background: rgba(220,38,38,0.10); color: var(--danger); }
+.dl-overlay__title {
+  font-size: 19px; font-weight: 700; letter-spacing: -0.015em;
+  color: var(--ink); margin: 6px 0 2px;
+}
+.dl-overlay__msg {
+  font-size: 14px; color: var(--ink-muted); line-height: 1.55;
+  max-width: 320px;
+}
+.dl-overlay__actions {
+  display: flex; gap: 10px; justify-content: center; margin-top: 8px; flex-wrap: wrap;
+}
+@media (max-width: 794px) {
+  .dl-overlay__card { padding: 50px 36px 38px; max-width: 540px; gap: 18px; border-radius: var(--r-xl); }
+  .dl-overlay__spinner { width: 64px; height: 64px; border-width: 5px; }
+  .dl-overlay__icon { width: 80px; height: 80px; }
+  .dl-overlay__icon svg { width: 44px; height: 44px; }
+  .dl-overlay__title { font-size: 28px; }
+  .dl-overlay__msg { font-size: 19px; max-width: none; }
+  .dl-overlay__actions { gap: 14px; margin-top: 14px; }
+}
+
+/* Toasts — bottom-centre, stack upwards, ink pill with a coloured dot.
+   Ported from index.html:1298-1329 with the `es-` prefix to avoid
+   colliding with anything else later. */
+.es-toasts {
+  position: fixed;
+  left: 50%; bottom: 24px;
+  transform: translateX(-50%);
+  display: flex; flex-direction: column-reverse; gap: 8px;
+  z-index: 1000;
+  pointer-events: none;
+  max-width: calc(100vw - 32px);
+}
+.es-toast {
+  background: var(--ink);
+  color: white;
+  border-radius: var(--r-md);
+  padding: 11px 18px;
+  font-size: 13.5px; font-weight: 500;
+  max-width: 420px;
+  display: flex; align-items: center; gap: 10px;
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.4);
+  animation: es-toast-in 200ms ease;
+  pointer-events: auto;
+}
+.es-toast::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--paid); flex-shrink: 0;
+}
+.es-toast.error::before { background: var(--danger); }
+.es-toast.warn::before  { background: var(--due); }
+.es-toast.info::before  { background: #3B82F6; }
+.es-toast.leaving { animation: es-toast-out 220ms ease forwards; }
+@keyframes es-toast-in  { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes es-toast-out { to   { transform: translateY(20px); opacity: 0; } }
+
+/* Desktop: same DOM, different layout — centred modal instead of a
+   bottom-anchored sheet. Switching via media query (not JS) means the
+   open/close controller is identical for both presentations. */
+@media (min-width: 721px) {
+  .es-sheet {
+    left: 50%; right: auto; top: 50%; bottom: auto;
+    width: 460px; max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 64px);
+    border-radius: var(--r-xl);
+    transform: translate(-50%, -45%) scale(0.96);
+    transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+    opacity: 0;
+    box-shadow: 0 24px 56px -16px rgba(0,0,0,0.3),
+                0 0 0 1px rgba(0,0,0,0.04);
+    padding: 22px 26px 26px;
+  }
+  .es-sheet.is-open {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  .es-sheet__handle { display: none; }
+  .es-toasts { bottom: 32px; }
+}
+
+/* Mobile bump — meta viewport=794 scales everything down ~0.5× on a
+   real phone screen, so we counter-scale the popup chrome to read at
+   normal size. Mirrors the existing .viewer-btn mobile bump. */
+@media (max-width: 794px) {
+  .es-sheet { padding: 18px 28px 36px; gap: 18px; max-height: calc(100vh - 16px); }
+  .es-sheet__handle { width: 60px; height: 6px; margin: 4px 0 8px; }
+  .es-sheet__title { font-size: 28px; }
+  .es-sheet__sub { font-size: 18px; margin-top: 6px; }
+  .es-sheet__close { width: 52px; height: 52px; }
+  .es-sheet__close svg { width: 30px; height: 30px; }
+  .es-banner { font-size: 18px; padding: 16px 20px; border-radius: var(--r-md); }
+  .es-label { font-size: 16px; margin-bottom: 12px; }
+  .es-input { font-size: 22px; padding: 20px 22px; border-width: 2px; border-radius: var(--r-md); }
+  .es-error-msg { font-size: 17px; margin-top: 10px; }
+  .es-error-msg--block { padding: 16px 18px; }
+  .es-link { font-size: 19px; padding: 8px 0; }
+  .es-divider { font-size: 17px; gap: 16px; margin: 10px 0; }
+  .viewer-btn--ghost { border-width: 2px; }
+  .es-spinner { width: 22px; height: 22px; border-width: 3px; margin-right: 12px; vertical-align: -4px; }
+  .es-foot-note { font-size: 17px; }
+  .es-toasts { bottom: 36px; }
+  .es-toast { font-size: 22px; padding: 18px 28px; max-width: calc(100vw - 32px); }
+  .es-toast::before { width: 10px; height: 10px; }
+}
 </style>
 </head>
 <body>
 
-<!-- Top-right action bar (hidden in print) -->
+<!-- Top-right action bar (hidden in print). Click opens the email/download
+     popup — the actual PDF download is one of two CTAs inside it. -->
 <div class="viewer-bar" id="viewer-bar" style="display:none;">
   <button class="viewer-btn" id="download-pdf">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-    Download PDF
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+    Send me via email
   </button>
 </div>
 
@@ -404,6 +733,66 @@ body { padding: 56px 24px 96px; display: flex; flex-direction: column; align-ite
 <div class="viewer-foot">
   Issued via <a href="https://reputifly.com" target="_blank" rel="noopener">Reputifly</a>
 </div>
+
+<!-- Email-invoice popup. On mobile (≤720px) renders as a bottom sheet
+     that slides up; on desktop (≥721px) the same DOM is positioned as
+     a centred modal via CSS media query — no JS branching. -->
+<div class="es-scrim" id="es-scrim" hidden></div>
+<div class="es-sheet" id="es-sheet" role="dialog" aria-modal="true" aria-labelledby="es-title" aria-hidden="true" hidden>
+  <div class="es-sheet__handle" aria-hidden="true"></div>
+
+  <div class="es-sheet__head">
+    <div>
+      <div class="es-sheet__title" id="es-title">Send me this invoice</div>
+      <div class="es-sheet__sub" id="es-sub"></div>
+    </div>
+    <button class="es-sheet__close" id="es-close" type="button" aria-label="Close">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+
+  <!-- Voided-invoice notice (hidden by default; shown if d.status === 'void'
+       and the user opens the sheet anyway). -->
+  <div class="es-banner" id="es-banner" hidden>
+    This invoice has been voided. We won't send a payment QR by email — please use the Download option below instead.
+  </div>
+
+  <form class="es-form" id="es-form" novalidate>
+    <div>
+      <label class="es-label" for="es-email">Your email</label>
+      <input class="es-input" id="es-email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" required>
+      <div class="es-error-msg" id="es-email-err" hidden>Please enter a valid email</div>
+    </div>
+
+    <div id="es-acc-toggle-wrap">
+      <button class="es-link" id="es-acc-toggle" type="button">+ Also send to my accountant</button>
+    </div>
+    <div id="es-acc-wrap" hidden>
+      <label class="es-label" for="es-acc-email">Accountant email <span style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--ink-faint);">(optional)</span></label>
+      <input class="es-input" id="es-acc-email" type="email" inputmode="email" placeholder="accountant@firm.com">
+      <div class="es-error-msg" id="es-acc-err" hidden>Please enter a valid accountant email</div>
+      <button class="es-link" id="es-acc-remove" type="button" style="margin-top:6px;">– Remove accountant</button>
+    </div>
+
+    <div class="es-error-msg es-error-msg--block" id="es-form-err" hidden></div>
+
+    <button class="viewer-btn viewer-btn--full" id="es-send" type="submit">
+      <span id="es-send-label">Send invoice</span>
+    </button>
+  </form>
+
+  <div class="es-divider" aria-hidden="true">or</div>
+
+  <button class="viewer-btn viewer-btn--ghost viewer-btn--full" id="es-download" type="button">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    <span id="es-download-label">Download PDF instead</span>
+  </button>
+
+  <p class="es-foot-note">Includes the PayNow QR and a one-tap link to download the PDF. Check your spam folder if you don't see it within a minute.</p>
+</div>
+
+<!-- Toast host — bottom-centre, stacks upwards. -->
+<div class="es-toasts" id="es-toasts" aria-live="polite"></div>
 
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
@@ -608,111 +997,619 @@ async function loadH2CIntoFrame(iframe) {
   });
 }
 
+// Generate + save the invoice PDF. Extracted from setupDownloadButton's
+// click handler so it's reusable from the popup's "Download PDF instead"
+// button — same proven path, no duplication. The optional `btnEl` /
+// `loadingLabel` lets the caller drive their own loading affordance.
+async function triggerDownload(d, renderedRoot, opts = {}) {
+  const btnEl = opts.btnEl || null;
+  const labelEl = opts.labelEl || null;
+  const loadingLabel = opts.loadingLabel || 'Generating PDF…';
+  let originalLabel = null;
+  if (btnEl) {
+    originalLabel = labelEl ? labelEl.textContent : btnEl.innerHTML;
+    if (labelEl) labelEl.textContent = loadingLabel;
+    else btnEl.innerHTML = loadingLabel;
+    btnEl.disabled = true;
+  }
+  let iframe = null;
+  try {
+    let waited = 0;
+    while (typeof html2pdf === 'undefined' && waited < 5000) {
+      await new Promise(r => setTimeout(r, 100)); waited += 100;
+    }
+    if (typeof html2pdf === 'undefined') throw new Error('PDF library failed to load');
+
+    // Create an off-screen iframe at exact A4 width (794px). html2canvas
+    // is loaded INSIDE this iframe so it runs with the iframe's window
+    // context (innerWidth=794) instead of the parent's — that's the cure
+    // for the centred-offset bug that was cropping the left half.
+    iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed; left:-10000px; top:0; width:794px; height:1123px; border:0;';
+    document.body.appendChild(iframe);
+    const idoc = iframe.contentDocument || iframe.contentWindow.document;
+
+    const baseCss = document.querySelector('style').textContent;
+    const resetCss = `
+      html, body { background: #ffffff !important; width: 794px !important; }
+      body { padding: 0 !important; margin: 0 !important;
+             display: block !important; gap: 0 !important;
+             overflow: visible !important; }
+      .page { box-shadow: none !important; border-radius: 0 !important;
+              margin: 0 !important; width: 794px !important;
+              min-height: 1123px !important; }
+      .viewer-bar, .viewer-foot, .es-scrim, .es-sheet, .es-toasts { display: none !important; }
+      /* Disable tabular-nums so html2canvas doesn't pad narrow chars
+         like "1" and "-" with visible gaps (renders "QINV-001" as
+         "QINV- 001" otherwise). Proportional digits look identical
+         to on-screen. */
+      *, *::before, *::after { font-variant-numeric: normal !important; }
+    `;
+
+    const clone = renderedRoot.cloneNode(true);
+
+    idoc.open();
+    idoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+      <style>${baseCss}</style>
+      <style>${resetCss}</style>
+      </head><body></body></html>`);
+    idoc.close();
+    idoc.body.appendChild(clone);
+
+    await new Promise(r => {
+      if (idoc.readyState === 'complete') return r();
+      iframe.addEventListener('load', r, { once: true });
+      setTimeout(r, 800);
+    });
+    try { await idoc.fonts.ready; } catch {}
+    await new Promise(r => requestAnimationFrame(() => setTimeout(r, 100)));
+
+    await inlineImagesAsDataUrls(idoc.body);
+    const h2c = await loadH2CIntoFrame(iframe);
+
+    const pages = Array.from(idoc.querySelectorAll('.page'));
+    if (!pages.length) throw new Error('No .page elements rendered');
+
+    const canvases = [];
+    for (const pageEl of pages) {
+      const canvas = await h2c(pageEl, {
+        scale: 3,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        letterRendering: true,
+        scrollX: 0, scrollY: 0,
+        windowWidth: 794,
+        windowHeight: pageEl.scrollHeight
+      });
+      canvases.push(canvas);
+    }
+
+    const worker = html2pdf().set({
+      margin: 0,
+      filename: pdfFilename(d) + '.pdf',
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true }
+    }).from(document.createElement('div'));
+    await worker.toPdf();
+    const pdf = await worker.get('pdf');
+    pdf.deletePage(1);
+    canvases.forEach(canvas => {
+      pdf.addPage('a4', 'portrait');
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297, undefined, 'SLOW');
+    });
+    pdf.save(pdfFilename(d) + '.pdf');
+    return { ok: true };
+  } catch (e) {
+    console.error('[pdf] generation failed', e);
+    return { ok: false, error: e };
+  } finally {
+    if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    if (btnEl) {
+      if (labelEl) labelEl.textContent = originalLabel;
+      else btnEl.innerHTML = originalLabel;
+      btnEl.disabled = false;
+    }
+  }
+}
+
 function setupDownloadButton(d, renderedRoot) {
   const btn = document.getElementById('download-pdf');
   document.getElementById('viewer-bar').style.display = '';
-  btn.addEventListener('click', async () => {
-    const original = btn.innerHTML;
-    btn.innerHTML = 'Generating PDF…';
-    btn.disabled = true;
-    let iframe = null;
-    try {
-      let waited = 0;
-      while (typeof html2pdf === 'undefined' && waited < 5000) {
-        await new Promise(r => setTimeout(r, 100)); waited += 100;
-      }
-      if (typeof html2pdf === 'undefined') throw new Error('PDF library failed to load');
 
-      // Create an off-screen iframe at exact A4 width (794px). html2canvas
-      // is loaded INSIDE this iframe so it runs with the iframe's window
-      // context (innerWidth=794) instead of the parent's — that's the cure
-      // for the centred-offset bug that was cropping the left half.
-      iframe = document.createElement('iframe');
-      iframe.style.cssText = 'position:fixed; left:-10000px; top:0; width:794px; height:1123px; border:0;';
-      document.body.appendChild(iframe);
-      const idoc = iframe.contentDocument || iframe.contentWindow.document;
+  // Voided invoices: disable the at-rest button visually (still clickable
+  // — the popup will explain and offer the download path so an accountant
+  // can archive). Hiding it would look like a bug.
+  if (d.status === 'void') {
+    btn.setAttribute('aria-disabled', 'true');
+    btn.title = 'This invoice has been voided';
+  }
 
-      const baseCss = document.querySelector('style').textContent;
-      const resetCss = `
-        html, body { background: #ffffff !important; width: 794px !important; }
-        body { padding: 0 !important; margin: 0 !important;
-               display: block !important; gap: 0 !important;
-               overflow: visible !important; }
-        .page { box-shadow: none !important; border-radius: 0 !important;
-                margin: 0 !important; width: 794px !important;
-                min-height: 1123px !important; }
-        .viewer-bar, .viewer-foot { display: none !important; }
-        /* Disable tabular-nums so html2canvas doesn't pad narrow chars
-           like "1" and "-" with visible gaps (renders "QINV-001" as
-           "QINV- 001" otherwise). Proportional digits look identical
-           to on-screen. */
-        *, *::before, *::after { font-variant-numeric: normal !important; }
-      `;
+  btn.addEventListener('click', () => openEmailSheet(d, renderedRoot, btn));
+}
 
-      const clone = renderedRoot.cloneNode(true);
+// Auto-download flow triggered when the viewer loads with ?dl=1 (the
+// link in the email's "Download PDF" button). Builds a centred overlay
+// so the recipient knows what's happening, runs the existing
+// triggerDownload code path (no parallel implementation), and then
+// shows a success/error state with a path back to the regular viewer.
+async function runAutoDownload(d, renderedRoot) {
+  const overlay = document.createElement('div');
+  overlay.className = 'dl-overlay';
+  overlay.setAttribute('role', 'status');
+  overlay.setAttribute('aria-live', 'polite');
+  overlay.innerHTML = `
+    <div class="dl-overlay__card">
+      <div class="dl-overlay__spinner" aria-hidden="true"></div>
+      <h2 class="dl-overlay__title">Downloading your invoice…</h2>
+      <p class="dl-overlay__msg">Generating the PDF and saving to your device. This usually takes a few seconds.</p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('is-open'));
 
-      idoc.open();
-      idoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-        <style>${baseCss}</style>
-        <style>${resetCss}</style>
-        </head><body></body></html>`);
-      idoc.close();
-      idoc.body.appendChild(clone);
-
-      await new Promise(r => {
-        if (idoc.readyState === 'complete') return r();
-        iframe.addEventListener('load', r, { once: true });
-        setTimeout(r, 800);
-      });
-      try { await idoc.fonts.ready; } catch {}
-      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 100)));
-
-      await inlineImagesAsDataUrls(idoc.body);
-      const h2c = await loadH2CIntoFrame(iframe);
-
-      const pages = Array.from(idoc.querySelectorAll('.page'));
-      if (!pages.length) throw new Error('No .page elements rendered');
-
-      const canvases = [];
-      for (const pageEl of pages) {
-        const canvas = await h2c(pageEl, {
-          scale: 3,
-          useCORS: true,
-          backgroundColor: '#ffffff',
-          letterRendering: true,
-          scrollX: 0, scrollY: 0,
-          windowWidth: 794,
-          windowHeight: pageEl.scrollHeight
-        });
-        canvases.push(canvas);
-      }
-
-      const worker = html2pdf().set({
-        margin: 0,
-        filename: pdfFilename(d) + '.pdf',
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true }
-      }).from(document.createElement('div'));
-      await worker.toPdf();
-      const pdf = await worker.get('pdf');
-      pdf.deletePage(1);
-      canvases.forEach(canvas => {
-        pdf.addPage('a4', 'portrait');
-        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297, undefined, 'SLOW');
-      });
-      pdf.save(pdfFilename(d) + '.pdf');
-    } catch (e) {
-      console.error('[pdf] generation failed', e);
-      alert('Couldn\'t generate the PDF. Please try refreshing the page. (' + (e.message || e) + ')');
-    } finally {
-      if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      btn.innerHTML = original;
-      btn.disabled = false;
+  // Strip the dl param from the URL so a refresh doesn't auto-download
+  // again (and so the "View in browser" path doesn't loop).
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('dl')) {
+      url.searchParams.delete('dl');
+      history.replaceState(null, '', url.toString());
     }
+  } catch {}
+
+  const result = await triggerDownload(d, renderedRoot);
+  const card = overlay.querySelector('.dl-overlay__card');
+
+  if (result.ok) {
+    card.innerHTML = `
+      <div class="dl-overlay__icon" aria-hidden="true">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <h2 class="dl-overlay__title">Downloaded</h2>
+      <p class="dl-overlay__msg">Your invoice PDF was saved. You can also scroll the invoice in your browser, or download it again if needed.</p>
+      <div class="dl-overlay__actions">
+        <button class="viewer-btn" type="button" data-act="view">View invoice</button>
+        <button class="viewer-btn viewer-btn--ghost" type="button" data-act="again">Download again</button>
+      </div>
+    `;
+  } else {
+    card.innerHTML = `
+      <div class="dl-overlay__icon error" aria-hidden="true">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </div>
+      <h2 class="dl-overlay__title">Couldn't generate the PDF</h2>
+      <p class="dl-overlay__msg">Something went wrong saving the file. You can try again, or open the invoice in your browser to use the download button there.</p>
+      <div class="dl-overlay__actions">
+        <button class="viewer-btn" type="button" data-act="again">Try again</button>
+        <button class="viewer-btn viewer-btn--ghost" type="button" data-act="view">View invoice</button>
+      </div>
+    `;
+  }
+
+  card.querySelectorAll('button[data-act]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const act = e.currentTarget.getAttribute('data-act');
+      if (act === 'view') {
+        overlay.classList.remove('is-open');
+        setTimeout(() => overlay.remove(), 220);
+      } else if (act === 'again') {
+        overlay.remove();
+        runAutoDownload(d, renderedRoot);
+      }
+    });
   });
 }
+
+// ── Email-invoice popup ─────────────────────────────────────────────
+// API endpoint + billing-account constants. `_to` is the Reputifly
+// account that owns the send (for billing/rate limits, NOT the
+// recipient — recipients go in `_send_to`). Verified active via curl
+// against the live API; hello@reputifly.com returned "client account
+// inactive" so we use the runikojane account. Domain whitelist for
+// this account currently includes reputifly.org (production); add
+// 127.0.0.1 to the same account's whitelist before running locally.
+const REPUTIFLY_API  = 'https://asia-southeast1-b2b-software.cloudfunctions.net/reputifly';
+const REPUTIFLY_TO   = 'runikojane@gmail.com';
+const REPUTIFLY_LOGO = 'https://reputifly.org/invoicing/assets/reputifly-logo-light.png';
+// PayNow QR is hosted on the deployed site (GitHub Pages → reputifly.org)
+// rather than embedded as a base64 data URL because Gmail / Outlook
+// silently strip inline data: images above ~50KB, leaving recipients
+// with a broken QR. Public URL renders reliably in every mail client
+// AND keeps the email payload tiny. Same pattern as REPUTIFLY_LOGO.
+const REPUTIFLY_QR   = 'https://reputifly.org/invoicing/assets/paynow-qr.jpeg';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+function validateEmail(s) { return EMAIL_RE.test(String(s || '').trim()); }
+
+// URL helpers for the email CTAs. The download link gets `?dl=1` so the
+// viewer auto-triggers the PDF flow on load; the "view" link is the
+// bare share URL with any download flag stripped.
+function withDlParam(href) {
+  try { const u = new URL(href); u.searchParams.set('dl', '1'); return u.toString(); }
+  catch { return href + (href.includes('?') ? '&' : '?') + 'dl=1'; }
+}
+function stripDlParam(href) {
+  try { const u = new URL(href); u.searchParams.delete('dl'); return u.toString(); }
+  catch { return href; }
+}
+
+// Bottom toast — ported from index.html:2016-2028 with `.es-`-prefixed
+// classes so it can never collide with a future toast system.
+function showToast(msg, kind = 'success') {
+  const host = document.getElementById('es-toasts');
+  if (!host) return;
+  const el = document.createElement('div');
+  el.className = 'es-toast' + (kind && kind !== 'success' ? ' ' + kind : '');
+  el.textContent = msg;
+  host.appendChild(el);
+  while (host.children.length > 3) host.removeChild(host.firstChild);
+  setTimeout(() => {
+    el.classList.add('leaving');
+    setTimeout(() => el.remove(), 240);
+  }, 3500);
+}
+
+// Build the HTML fragment that goes into `_auto_reply_content`. Inline
+// styles only (no <style>, no <script>, no <html>/<body>) so it composes
+// cleanly inside whatever outer template the API wraps it with. Max-width
+// 560px so it survives nested wrapping. Outlook-safe table for the
+// payment summary; all colours hardcoded since the API may inject its
+// own brand colour into the wrapper. The QR is loaded from the public
+// REPUTIFLY_QR URL — Gmail reliably renders it that way, whereas inline
+// data: URLs above ~50KB get silently stripped.
+function buildEmailHtml(d, shareUrl) {
+  const company = d.company || {};
+  const client  = d.client  || {};
+  const total   = fmtMoney(d.total);
+  const greeting = client.name
+    ? `Hi ${escapeHtml(client.name)},`
+    : 'Hi there,';
+
+  return `
+<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#0B0A14;line-height:1.5;max-width:560px;margin:0 auto;padding:8px;">
+  <p style="font-size:16px;margin:0 0 16px;">${greeting}</p>
+  <p style="font-size:15px;margin:0 0 22px;color:#3a3a4a;">
+    Here is invoice <strong>${escapeHtml(d.displayNumber || '')}</strong> from ${escapeHtml(company.name || '')}.
+    Scan the PayNow QR below to pay, or tap the button at the bottom to view &amp; download the PDF.
+  </p>
+
+  <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border:1px solid #e5e5ec;border-radius:12px;background:#fafafd;margin:0 0 22px;border-collapse:separate;">
+    <tr>
+      <td style="padding:14px 18px 6px;color:#666;font-size:13px;">Amount due</td>
+      <td style="padding:14px 18px 6px;text-align:right;font-size:22px;font-weight:700;color:#0B0A14;">${total}</td>
+    </tr>
+    <tr>
+      <td style="padding:6px 18px 12px;color:#666;font-size:13px;">Pay to</td>
+      <td style="padding:6px 18px 12px;text-align:right;font-size:14px;">${escapeHtml(company.name || '')}</td>
+    </tr>
+    <tr>
+      <td colspan="2" style="padding:0 14px 14px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-top:1px solid #e5e5ec;">
+          <tr>
+            <td style="padding:14px 8px 4px;text-align:center;color:#888;font-size:10.5px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;">UEN</td>
+            <td style="padding:14px 8px 4px;text-align:center;color:#888;font-size:10.5px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;">Reference</td>
+          </tr>
+          <tr>
+            <td style="padding:0 8px 4px;text-align:center;font-size:15px;font-weight:700;font-family:Menlo,Consolas,monospace;color:#0B0A14;">${escapeHtml(company.uen || '')}</td>
+            <td style="padding:0 8px 4px;text-align:center;font-size:15px;font-weight:700;font-family:Menlo,Consolas,monospace;color:#0B0A14;">${escapeHtml(d.displayNumber || '')}</td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <div style="text-align:center;margin:0 0 22px;">
+    <img src="${REPUTIFLY_QR}" width="180" height="180" alt="PayNow QR for ${escapeHtml(d.displayNumber || 'invoice')}"
+         style="display:block;margin:0 auto;border:1px solid #e5e5ec;border-radius:12px;padding:8px;background:#fff;">
+    <p style="font-size:12px;color:#888;margin:10px 0 0;">Scan with any Singapore banking app</p>
+  </div>
+
+  <div style="text-align:center;margin:0 0 14px;">
+    <a href="${escapeHtml(withDlParam(shareUrl))}" style="display:inline-block;background:#0B0A14;color:#fff;text-decoration:none;padding:15px 32px;border-radius:999px;font-weight:600;font-size:15px;line-height:1;">
+      <span style="display:inline-block;font-size:17px;line-height:1;vertical-align:-2px;margin-right:8px;">&#11015;&#65039;</span>Download Invoice PDF
+    </a>
+  </div>
+  <div style="text-align:center;margin:0 0 26px;">
+    <a href="https://wa.me/6580111965" style="color:#666;text-decoration:underline;font-size:13px;">Contact Reputifly &rarr;</a>
+  </div>
+
+  <p style="font-size:12px;color:#888;margin:0 0 6px;">
+    Didn't request this? Safely ignore — the link above is unique to this invoice.
+  </p>
+  <p style="font-size:12px;color:#888;margin:0;">
+    Sent on behalf of ${escapeHtml(company.name || 'us')} via Reputifly.
+  </p>
+</div>`.trim();
+}
+
+// Fire one POST per recipient (the API only accepts a single _send_to).
+// Promise.all so partial failure surfaces cleanly to the caller.
+async function sendInvoiceEmail({ to, accountant, d, shareUrl }) {
+  const company    = d.company || {};
+  const senderName = company.name || 'Reputifly';
+  const subject    = `Invoice ${d.displayNumber || ''} from ${senderName} — ${fmtMoney(d.total)}`.trim();
+  const html       = buildEmailHtml(d, shareUrl);
+
+  const recipients = [to];
+  if (accountant && accountant.toLowerCase() !== to.toLowerCase()) {
+    recipients.push(accountant);
+  }
+
+  const sends = recipients.map(addr =>
+    fetch(REPUTIFLY_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        _to:           REPUTIFLY_TO,
+        _send_to:      addr,
+        _subject:      subject,
+        _sender_name:  senderName,
+        _brand_color:  '#0B0A14',
+        _brand_logo:   REPUTIFLY_LOGO,
+        _auto_reply_content: html,
+      }),
+    })
+    .then(async r => {
+      const status = r.status;
+      let body = null; try { body = await r.json(); } catch {}
+      if (!r.ok) {
+        const err = new Error(`http_${status}`);
+        err.status = status;
+        err.body = body;
+        throw err;
+      }
+      if (body && body.success === false) {
+        throw new Error(body.error || 'send_failed');
+      }
+      return { addr, ok: true };
+    })
+    .catch(err => ({ addr, ok: false, err }))
+  );
+
+  const results = await Promise.all(sends);
+  const sent   = results.filter(r => r.ok).map(r => r.addr);
+  const failed = results.filter(r => !r.ok).map(r => ({ addr: r.addr, err: r.err }));
+  return { ok: failed.length === 0, sent, failed };
+}
+
+// Open + close the popup. Listeners are added on open and removed on
+// close so we never accumulate stale handlers across sessions.
+let __esState = { isOpen: false, opener: null, escHandler: null, scrimHandler: null, closeHandler: null };
+
+function openEmailSheet(d, renderedRoot, opener) {
+  if (__esState.isOpen) return;
+  const scrim   = document.getElementById('es-scrim');
+  const sheet   = document.getElementById('es-sheet');
+  const sub     = document.getElementById('es-sub');
+  const banner  = document.getElementById('es-banner');
+  const form    = document.getElementById('es-form');
+  const emailIn = document.getElementById('es-email');
+  const emailEr = document.getElementById('es-email-err');
+  const accTog  = document.getElementById('es-acc-toggle');
+  const accTogW = document.getElementById('es-acc-toggle-wrap');
+  const accWrap = document.getElementById('es-acc-wrap');
+  const accIn   = document.getElementById('es-acc-email');
+  const accEr   = document.getElementById('es-acc-err');
+  const accRem  = document.getElementById('es-acc-remove');
+  const formEr  = document.getElementById('es-form-err');
+  const sendBtn = document.getElementById('es-send');
+  const sendLab = document.getElementById('es-send-label');
+  const dlBtn   = document.getElementById('es-download');
+  const dlLab   = document.getElementById('es-download-label');
+  const closeBtn = document.getElementById('es-close');
+
+  // Reset state from any prior open.
+  emailIn.value = (d.client && d.client.email) || '';
+  emailIn.classList.remove('es-input--error');
+  emailEr.hidden = true;
+  accIn.value = '';
+  accIn.classList.remove('es-input--error');
+  accEr.hidden = true;
+  accWrap.hidden = true;
+  accTogW.hidden = false;
+  formEr.hidden = true; formEr.textContent = '';
+  sendLab.textContent = 'Send invoice';
+  sendBtn.disabled = false;
+  dlLab.textContent = 'Download PDF instead';
+  dlBtn.disabled = false;
+
+  // Subtitle + voided handling.
+  const subTxt = (d.displayNumber ? `Invoice ${d.displayNumber}` : 'This invoice') + ` · ${fmtMoney(d.total)}`;
+  sub.textContent = subTxt;
+  if (d.status === 'void') {
+    banner.hidden = false;
+    form.style.display = 'none';
+  } else {
+    banner.hidden = true;
+    form.style.display = '';
+  }
+
+  // Show + animate in. We toggle `hidden` first, then add `is-open` on
+  // the next frame so the transition fires (the browser needs the
+  // element to be visible before it'll animate the transform).
+  sheet.hidden = false;
+  scrim.hidden = false;
+  sheet.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => {
+    scrim.classList.add('is-open');
+    sheet.classList.add('is-open');
+  });
+
+  // Focus the recipient input after the slide-in transition so iOS
+  // scrolls the keyboard up at a sane time.
+  setTimeout(() => { try { emailIn.focus(); emailIn.select(); } catch {} }, 220);
+
+  // Wire up listeners (all detach in closeEmailSheet).
+  __esState.escHandler = (e) => { if (e.key === 'Escape') closeEmailSheet(); };
+  __esState.scrimHandler = () => closeEmailSheet();
+  __esState.closeHandler = () => closeEmailSheet();
+  document.addEventListener('keydown', __esState.escHandler);
+  scrim.addEventListener('click', __esState.scrimHandler);
+  closeBtn.addEventListener('click', __esState.closeHandler);
+
+  // Accountant toggle: show on click of the "+" link, hide on remove.
+  const onAccToggle = () => {
+    accTogW.hidden = true;
+    accWrap.hidden = false;
+    setTimeout(() => { try { accIn.focus(); } catch {} }, 50);
+  };
+  const onAccRemove = () => {
+    accWrap.hidden = true;
+    accTogW.hidden = false;
+    accIn.value = '';
+    accIn.classList.remove('es-input--error');
+    accEr.hidden = true;
+  };
+  accTog.onclick = onAccToggle;
+  accRem.onclick = onAccRemove;
+
+  // Inline validation on blur for both inputs.
+  emailIn.oninput = () => {
+    if (emailIn.classList.contains('es-input--error') && validateEmail(emailIn.value)) {
+      emailIn.classList.remove('es-input--error'); emailEr.hidden = true;
+    }
+  };
+  accIn.oninput = () => {
+    if (accIn.classList.contains('es-input--error') && (!accIn.value || validateEmail(accIn.value))) {
+      accIn.classList.remove('es-input--error'); accEr.hidden = true;
+    }
+  };
+
+  // Submit handler (re-bound each open so it captures the latest d/root).
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    formEr.hidden = true;
+
+    const to  = emailIn.value.trim();
+    const acc = accWrap.hidden ? '' : accIn.value.trim();
+
+    let ok = true;
+    if (!validateEmail(to)) {
+      emailIn.classList.add('es-input--error');
+      emailEr.hidden = false;
+      try { emailIn.focus(); } catch {}
+      ok = false;
+    }
+    if (acc && !validateEmail(acc)) {
+      accIn.classList.add('es-input--error');
+      accEr.hidden = false;
+      if (ok) { try { accIn.focus(); } catch {} }
+      ok = false;
+    }
+    if (!ok) return;
+
+    sendBtn.disabled = true;
+    sendLab.innerHTML = '<span class="es-spinner" aria-hidden="true"></span>Sending…';
+    dlBtn.disabled = true;
+    emailIn.disabled = true; accIn.disabled = true;
+
+    try {
+      // Build the share URL fresh each send so any URL params (?dl=1)
+      // get stripped — the email's CTA controls its own param.
+      const shareUrl = stripDlParam(window.location.href);
+      const result = await sendInvoiceEmail({ to, accountant: acc, d, shareUrl });
+
+      // Re-enable inputs (in case we stay open for partial retry).
+      emailIn.disabled = false; accIn.disabled = false;
+
+      if (result.ok) {
+        const msg = result.sent.length === 2
+          ? 'Sent to you and your accountant'
+          : `Invoice sent to ${result.sent[0]}`;
+        closeEmailSheet();
+        setTimeout(() => showToast(msg, 'success'), 200);
+      } else if (result.sent.length === 0) {
+        // Total failure.
+        const sample = result.failed[0] && result.failed[0].err;
+        const status = sample && sample.status;
+        let copy;
+        if (status === 403) copy = "Email service is currently disabled. Try downloading the PDF instead.";
+        else if (status === 429) copy = "Too many requests — please wait a minute and try again.";
+        else copy = "Couldn't send — please try again.";
+        formEr.textContent = copy;
+        formEr.hidden = false;
+        sendBtn.disabled = false;
+        sendLab.textContent = 'Send invoice';
+        dlBtn.disabled = false;
+      } else {
+        // Partial success — succeeded for one, failed for the other.
+        const failedAddr = result.failed[0].addr;
+        formEr.textContent = `Couldn't send to ${failedAddr}. The other recipient was emailed successfully.`;
+        formEr.hidden = false;
+        sendBtn.disabled = false;
+        sendLab.textContent = `Retry ${failedAddr}`;
+        dlBtn.disabled = false;
+        // Pre-fill the failed addr into the recipient field so retry just resends to it.
+        emailIn.value = failedAddr;
+        if (!accWrap.hidden) accRem.click();
+      }
+    } catch (err) {
+      console.error('[email] send failed', err);
+      emailIn.disabled = false; accIn.disabled = false;
+      formEr.textContent = "Couldn't reach the email service. Check your connection and retry.";
+      formEr.hidden = false;
+      sendBtn.disabled = false;
+      sendLab.textContent = 'Send invoice';
+      dlBtn.disabled = false;
+    }
+  };
+
+  // Download CTA inside the sheet — runs the existing PDF flow against
+  // the same renderedRoot, with its own loading affordance.
+  dlBtn.onclick = async () => {
+    if (dlBtn.disabled) return;
+    sendBtn.disabled = true;
+    const result = await triggerDownload(d, renderedRoot, {
+      btnEl: dlBtn, labelEl: dlLab, loadingLabel: 'Generating PDF…',
+    });
+    sendBtn.disabled = false;
+    if (result.ok) {
+      closeEmailSheet();
+      setTimeout(() => showToast('PDF downloaded', 'success'), 200);
+    } else {
+      formEr.textContent = "Couldn't generate the PDF — please try refreshing the page.";
+      formEr.hidden = false;
+    }
+  };
+
+  __esState.isOpen = true;
+  __esState.opener = opener || null;
+}
+
+function closeEmailSheet() {
+  if (!__esState.isOpen) return;
+  const scrim = document.getElementById('es-scrim');
+  const sheet = document.getElementById('es-sheet');
+  scrim.classList.remove('is-open');
+  sheet.classList.remove('is-open');
+  sheet.setAttribute('aria-hidden', 'true');
+
+  // Detach listeners.
+  if (__esState.escHandler)   document.removeEventListener('keydown', __esState.escHandler);
+  if (__esState.scrimHandler) scrim.removeEventListener('click', __esState.scrimHandler);
+  if (__esState.closeHandler) document.getElementById('es-close').removeEventListener('click', __esState.closeHandler);
+
+  // After the slide-out / fade-out transition, fully hide so it doesn't
+  // intercept clicks or appear in the tab order.
+  setTimeout(() => {
+    sheet.hidden = true;
+    scrim.hidden = true;
+  }, 260);
+
+  // Restore focus to whatever opened the sheet.
+  try { if (__esState.opener) __esState.opener.focus(); } catch {}
+
+  __esState = { isOpen: false, opener: null, escHandler: null, scrimHandler: null, closeHandler: null };
+}
+
+// Test hook — exposed so headless tests can drive the popup directly
+// without simulating a click into a closed shadow tree.
+window.__test_openEmailSheet = openEmailSheet;
+window.__test_closeEmailSheet = closeEmailSheet;
+window.__test_buildEmailHtml = buildEmailHtml;
+window.__test_sendInvoiceEmail = sendInvoiceEmail;
 
 function applyVoidedOverlay(host) {
   const wm = document.createElement('div');
@@ -794,6 +1691,18 @@ function renderShareDoc(d) {
 
   hideStatus();
   setupDownloadButton(d, wrapper);
+
+  // Auto-download trigger — only fires when the viewer was opened from
+  // the email's "Download PDF" button (?dl=1). Voided invoices skip the
+  // auto-trigger; the recipient still sees the regular viewer + popup so
+  // they can read the void notice instead of getting a surprise download.
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.get('dl') === '1' && d.status !== 'void') {
+      // Wait one frame so the invoice paints first, then start the download.
+      requestAnimationFrame(() => runAutoDownload(d, wrapper));
+    }
+  } catch {}
 }
 
 // Test hook — exposed for headless verification harness only.
