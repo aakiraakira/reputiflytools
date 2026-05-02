@@ -11,6 +11,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<!-- html2pdf bundles html2canvas + jsPDF; loaded once and used by downloadPdf
+     to produce a real .pdf download (instead of the browser's print dialog). -->
+<script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js" defer></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════════
    DESIGN TOKENS  ·  identical ramp to the printed invoice templates
@@ -4235,6 +4238,39 @@ function pdfFilename(docData) {
   return client ? `${num}-${client}` : num;
 }
 
+// Pre-fetch every <img> in the rendered tree and inline it as a data URL
+// so html2canvas can paint logo + PayNow QR reliably. Without this, the
+// PDF sometimes ships with empty image rectangles when the asset URL is
+// relative or the image hasn't fully loaded by the time html2canvas
+// snapshots the DOM. Same-origin assets like assets/reputifly-logo-light.png
+// are CORS-clean and convert in milliseconds.
+async function inlineImagesAsDataUrls(rootEl) {
+  const imgs = Array.from(rootEl.querySelectorAll('img'));
+  await Promise.all(imgs.map(async (img) => {
+    const src = img.getAttribute('src');
+    if (!src || src.startsWith('data:')) return;
+    try {
+      const resp = await fetch(src);
+      if (!resp.ok) return;
+      const blob = await resp.blob();
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onloadend = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(blob);
+      });
+      img.setAttribute('src', dataUrl);
+      // Wait for the new src to fully decode before continuing.
+      await new Promise(r => {
+        if (img.complete && img.naturalWidth) r();
+        else { img.addEventListener('load', r, { once: true }); img.addEventListener('error', r, { once: true }); }
+      });
+    } catch (e) {
+      console.warn('[pdf] image inline failed for', src, e);
+    }
+  }));
+}
+
 async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' */) {
   try { await document.fonts.ready; } catch {}
   const tpl = document.querySelector(`#tpl-${variant}`);
@@ -4248,30 +4284,65 @@ async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' 
   const filename = pdfFilename(docData);
   const html = buildIframeHtml(root.innerHTML, docData, filename);
 
-  // Always render to the hidden iframe — useful for headless tests + parity check.
+  // Render the bound template into the hidden iframe (off-screen but
+  // measurable). html2pdf will rasterise the iframe body into A4 pages
+  // and trigger a real .pdf download — no print-dialog detour.
   const iframe = document.getElementById('print-iframe');
-  if (iframe) {
-    const idoc = iframe.contentDocument || iframe.contentWindow.document;
-    idoc.open();
-    idoc.write(html);
-    idoc.close();
-  }
+  if (!iframe) { showToast('Print iframe missing', 'error'); return; }
+  const idoc = iframe.contentDocument || iframe.contentWindow.document;
+  idoc.open(); idoc.write(html); idoc.close();
 
-  // Open in a new tab so the user gets a real print dialog and the document
-  // title becomes the suggested PDF filename. Works on mobile too — the user
-  // can use the browser's built-in "Save as PDF" / share-sheet flow.
-  const blob = new Blob([html], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  const w = window.open(url, '_blank');
-  if (!w) {
-    showToast('Pop-ups blocked — allow them to download', 'warn');
-    URL.revokeObjectURL(url);
+  // Wait for layout + fonts inside the iframe before snapshotting.
+  await new Promise(resolve => {
+    if (idoc.readyState === 'complete') return resolve();
+    iframe.addEventListener('load', resolve, { once: true });
+    setTimeout(resolve, 600);  // safety: never block forever
+  });
+  try { await idoc.fonts.ready; } catch {}
+
+  // Wait for html2pdf CDN if it hasn't finished loading yet (defer attr).
+  let waited = 0;
+  while (typeof html2pdf === 'undefined' && waited < 5000) {
+    await new Promise(r => setTimeout(r, 100)); waited += 100;
+  }
+  if (typeof html2pdf === 'undefined') {
+    showToast('PDF library failed to load — please refresh and try again', 'error');
     return;
   }
-  // Once the new tab loads, trigger its print dialog automatically.
-  // Then revoke the blob URL once the user closes it.
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-  showToast('PDF opened — use Save as PDF in the print dialog');
+
+  showToast('Generating PDF…');
+  try {
+    // Inline all images (logo, PayNow QR) as data URLs so html2canvas
+    // can render them without race conditions or CORS issues.
+    await inlineImagesAsDataUrls(idoc.body);
+
+    await html2pdf()
+      .from(idoc.body)
+      .set({
+        margin: 0,
+        filename: filename + '.pdf',
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: {
+          scale: 2,                  // crisp text on retina screens
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          windowWidth: 794,          // 210mm at 96dpi — forces desktop layout
+          letterRendering: true
+        },
+        jsPDF: {
+          unit: 'mm',
+          format: 'a4',
+          orientation: 'portrait',
+          compress: true
+        },
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['.payment', '.foot', '.terms-section'] }
+      })
+      .save();
+    showToast('PDF downloaded');
+  } catch (e) {
+    console.error('[pdf] generation failed', e);
+    showToast(e.message || 'PDF generation failed', 'error');
+  }
 }
 
 function bindPdfData(root, d, variant) {
@@ -4382,30 +4453,20 @@ function bindPdfData(root, d, variant) {
 
 function buildIframeHtml(innerHtml, d, filename) {
   // Inline the same CSS as the standalone templates so the iframe document
-  // is byte-identical-class to the standalone invoice templates.
+  // is byte-identical-class to the standalone invoice templates. NO auto-
+  // print snippet — every download now goes through html2pdf for a real
+  // .pdf save. This iframe HTML is used as a render surface for html2pdf
+  // and as a passive preview when opened in a tab (e.g. the "Preview
+  // page 2" button in Advanced settings); both must NOT trigger print.
   const css = INVOICE_CSS;
   const title = filename || (d.displayNumber || 'Invoice');
-  // The auto-print snippet runs once the page has loaded + fonts are ready,
-  // so the user immediately gets the browser's Save-as-PDF dialog when this
-  // HTML is opened in a fresh tab. The page's <title> becomes the default
-  // filename suggestion.
-  const autoPrint = `
-    <script>
-      (async function() {
-        try { await document.fonts && document.fonts.ready; } catch(e){}
-        // Wait one frame so layout is fully settled
-        requestAnimationFrame(() => setTimeout(() => {
-          try { window.focus(); window.print(); } catch(e){}
-        }, 350));
-      })();
-    <\/script>`;
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
     <title>${escapeHtml(title)}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <style>${css}</style></head><body>${innerHtml}${autoPrint}</body></html>`;
+    <style>${css}</style></head><body>${innerHtml}</body></html>`;
 }
 
 // CSS lifted verbatim from invoice-template-with-terms.html (superset of single-page).
