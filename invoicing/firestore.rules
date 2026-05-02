@@ -1,0 +1,82 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner() {
+      return request.auth != null
+        && request.auth.uid == 'fzvLrWhEVjbCBkptrIviP7FQp6q2'
+        && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner() && userId == request.auth.uid;
+
+      match /settings/{doc} {
+        allow read, write: if isOwner();
+      }
+
+      match /quotations/{qid} {
+        allow read, create, update, delete: if isOwner();
+
+        match /revisions/{rev} {
+          allow read, create: if isOwner();
+          allow update, delete: if false;
+        }
+      }
+
+      match /counters/{name} {
+        allow read: if isOwner();
+        allow create: if isOwner()
+          && request.resource.data.value is int
+          && request.resource.data.value >= 0;
+        // Invoice counter is strictly monotonic +1 (or unchanged) — preserves the
+        // immutable tax-invoice audit trail.
+        // Quotation counter may also decrement (when the most-recent draft is
+        // deleted, the QINV- number is reclaimed to avoid gaps).
+        allow update: if isOwner()
+          && request.resource.data.value is int
+          && (
+            (name == 'invoice'
+              && (request.resource.data.value == resource.data.value + 1
+                  || request.resource.data.value == resource.data.value))
+            || (name == 'quotation'
+              && request.resource.data.value >= 0)
+          );
+        allow delete: if false;
+      }
+
+      match /invoices/{iid} {
+        allow read: if isOwner();
+        allow create: if isOwner()
+          && request.resource.data.keys().hasAll(
+              ['version','number','displayNumber','issueDate','createdAt',
+               'client','items','total','status'])
+          && request.resource.data.number is int
+          && request.resource.data.number > 0
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.status in ['paid'];
+        allow update: if isOwner()
+          && request.resource.data.number == resource.data.number
+          && request.resource.data.displayNumber == resource.data.displayNumber
+          && request.resource.data.issueDate == resource.data.issueDate
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.status in ['paid','void']
+          && (resource.data.status != 'void' || request.resource.data.status == 'void');
+        allow delete: if false;
+
+        match /audit/{eventId} {
+          allow read: if isOwner();
+          allow create: if isOwner()
+            && request.resource.data.ts == request.time;
+          allow update, delete: if false;
+        }
+        match /revisions/{rev} {
+          allow read, create: if isOwner();
+          allow update, delete: if false;
+        }
+      }
+    }
+
+    match /{path=**} { allow read, write: if false; }
+  }
+}
