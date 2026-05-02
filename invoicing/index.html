@@ -1382,8 +1382,12 @@ input[type="date"]::-webkit-datetime-edit { text-align: left; }
    ═══════════════════════════════════════════════════════════════════ */
 #pdf-stage { display: none; }
 #print-iframe {
+  /* Sized to exactly one A4 width in CSS pixels (210mm at 96dpi).
+     A 0×0 iframe was causing the .page to layout off-canvas; mm
+     units were causing rendering artefacts. Plain px is the most
+     predictable for html2canvas. */
   position: fixed; left: -10000px; top: 0;
-  width: 0; height: 0; border: 0;
+  width: 794px; height: 1123px; border: 0;
   visibility: hidden;
 }
 
@@ -4271,36 +4275,28 @@ async function inlineImagesAsDataUrls(rootEl) {
   }));
 }
 
+// Inject html2canvas into an iframe's window so it runs in that
+// document's context (instead of the parent's). This is the cure for
+// the parent-window-innerWidth offset bug where html2canvas centres
+// the captured element using the parent's viewport width regardless
+// of the actual iframe size.
+async function loadH2CIntoFrame(iframe) {
+  if (iframe.contentWindow.html2canvas) return iframe.contentWindow.html2canvas;
+  return new Promise((resolve, reject) => {
+    const idoc = iframe.contentDocument;
+    const s = idoc.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+    s.onload = () => resolve(iframe.contentWindow.html2canvas);
+    s.onerror = () => reject(new Error('html2canvas failed to load in iframe'));
+    idoc.head.appendChild(s);
+  });
+}
+
 async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' */) {
   try { await document.fonts.ready; } catch {}
   const tpl = document.querySelector(`#tpl-${variant}`);
   if (!tpl) { showToast('PDF template missing', 'error'); return; }
-  const clone = tpl.content.cloneNode(true);
-  const root = document.createElement('div');
-  root.appendChild(clone);
 
-  bindPdfData(root, docData, variant);
-
-  const filename = pdfFilename(docData);
-  const html = buildIframeHtml(root.innerHTML, docData, filename);
-
-  // Render the bound template into the hidden iframe (off-screen but
-  // measurable). html2pdf will rasterise the iframe body into A4 pages
-  // and trigger a real .pdf download — no print-dialog detour.
-  const iframe = document.getElementById('print-iframe');
-  if (!iframe) { showToast('Print iframe missing', 'error'); return; }
-  const idoc = iframe.contentDocument || iframe.contentWindow.document;
-  idoc.open(); idoc.write(html); idoc.close();
-
-  // Wait for layout + fonts inside the iframe before snapshotting.
-  await new Promise(resolve => {
-    if (idoc.readyState === 'complete') return resolve();
-    iframe.addEventListener('load', resolve, { once: true });
-    setTimeout(resolve, 600);  // safety: never block forever
-  });
-  try { await idoc.fonts.ready; } catch {}
-
-  // Wait for html2pdf CDN if it hasn't finished loading yet (defer attr).
   let waited = 0;
   while (typeof html2pdf === 'undefined' && waited < 5000) {
     await new Promise(r => setTimeout(r, 100)); waited += 100;
@@ -4310,34 +4306,73 @@ async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' 
     return;
   }
 
+  const filename = pdfFilename(docData);
   showToast('Generating PDF…');
+
+  // Render the bound template in the print-iframe.
+  const clone = tpl.content.cloneNode(true);
+  const root = document.createElement('div');
+  root.appendChild(clone);
+  bindPdfData(root, docData, variant);
+  const html = buildIframeHtml(root.innerHTML, docData, filename);
+
+  const iframe = document.getElementById('print-iframe');
+  if (!iframe) { showToast('Print iframe missing', 'error'); return; }
+  const idoc = iframe.contentDocument || iframe.contentWindow.document;
+  idoc.open(); idoc.write(html); idoc.close();
+
+  await new Promise(resolve => {
+    if (idoc.readyState === 'complete') return resolve();
+    iframe.addEventListener('load', resolve, { once: true });
+    setTimeout(resolve, 800);
+  });
+  try { await idoc.fonts.ready; } catch {}
+  await new Promise(r => requestAnimationFrame(() => setTimeout(r, 100)));
+
   try {
-    // Inline all images (logo, PayNow QR) as data URLs so html2canvas
-    // can render them without race conditions or CORS issues.
     await inlineImagesAsDataUrls(idoc.body);
 
-    await html2pdf()
-      .from(idoc.body)
-      .set({
-        margin: 0,
-        filename: filename + '.pdf',
-        image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: {
-          scale: 2,                  // crisp text on retina screens
-          useCORS: true,
-          backgroundColor: '#ffffff',
-          windowWidth: 794,          // 210mm at 96dpi — forces desktop layout
-          letterRendering: true
-        },
-        jsPDF: {
-          unit: 'mm',
-          format: 'a4',
-          orientation: 'portrait',
-          compress: true
-        },
-        pagebreak: { mode: ['css', 'legacy'], avoid: ['.payment', '.foot', '.terms-section'] }
-      })
-      .save();
+    // Load html2canvas IN the iframe so it runs with the iframe's
+    // contentWindow as the rendering context — no parent-window
+    // innerWidth contamination, no centred offset.
+    const h2c = await loadH2CIntoFrame(iframe);
+
+    const pages = Array.from(idoc.querySelectorAll('.page'));
+    if (!pages.length) throw new Error('No .page elements rendered');
+
+    // Capture each .page to a canvas via the iframe's html2canvas.
+    const canvases = [];
+    for (const pageEl of pages) {
+      const canvas = await h2c(pageEl, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        letterRendering: true,
+        scrollX: 0, scrollY: 0,
+        windowWidth: 794,
+        windowHeight: pageEl.scrollHeight
+      });
+      canvases.push(canvas);
+    }
+
+    // Build the PDF from the canvases. We use html2pdf's chained API
+    // just to access the bundled jsPDF — `.toPdf()` returns the worker
+    // with a `pdf` instance we can add images to directly.
+    const worker = html2pdf().set({
+      margin: 0,
+      filename: filename + '.pdf',
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true }
+    }).from(document.createElement('div'));  // dummy "from" so toPdf works
+    await worker.toPdf();
+    const pdf = await worker.get('pdf');
+    // Clear the dummy first page
+    pdf.deletePage(1);
+    canvases.forEach((canvas, i) => {
+      pdf.addPage('a4', 'portrait');
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
+    });
+    pdf.save(filename + '.pdf');
+
     showToast('PDF downloaded');
   } catch (e) {
     console.error('[pdf] generation failed', e);
@@ -4456,17 +4491,36 @@ function buildIframeHtml(innerHtml, d, filename) {
   // is byte-identical-class to the standalone invoice templates. NO auto-
   // print snippet — every download now goes through html2pdf for a real
   // .pdf save. This iframe HTML is used as a render surface for html2pdf
-  // and as a passive preview when opened in a tab (e.g. the "Preview
-  // page 2" button in Advanced settings); both must NOT trigger print.
+  // and as a passive preview when opened in a tab.
   const css = INVOICE_CSS;
   const title = filename || (d.displayNumber || 'Invoice');
+  // Override body chrome inside the render iframe so the .page lands at
+  // (0,0) with no flex-centering offset, no padding, no shadow. Without
+  // this, html2canvas captures the body using parent-window innerWidth
+  // (e.g. 1280px), the flex-centered .page resolves to x=243 in that
+  // wider context, and the rendered canvas crops the left half of the
+  // page. Force the body to be EXACTLY 794px wide and block-display so
+  // the .page sits at (0,0) regardless of html2canvas's window context.
+  const renderReset = `
+    html, body { background: #ffffff !important; }
+    html { width: 794px !important; }
+    body { width: 794px !important; max-width: 794px !important;
+           padding: 0 !important; margin: 0 !important;
+           display: block !important; gap: 0 !important;
+           justify-content: flex-start !important;
+           align-items: flex-start !important; }
+    .page { box-shadow: none !important; border-radius: 0 !important;
+            margin: 0 !important; width: 794px !important;
+            min-width: 794px !important; max-width: 794px !important; }
+  `;
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
     <title>${escapeHtml(title)}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <style>${css}</style></head><body>${innerHtml}</body></html>`;
+    <style>${css}</style>
+    <style>${renderReset}</style></head><body>${innerHtml}</body></html>`;
 }
 
 // CSS lifted verbatim from invoice-template-with-terms.html (superset of single-page).

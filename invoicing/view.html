@@ -566,6 +566,18 @@ async function inlineImagesAsDataUrls(rootEl) {
   }));
 }
 
+async function loadH2CIntoFrame(iframe) {
+  if (iframe.contentWindow.html2canvas) return iframe.contentWindow.html2canvas;
+  return new Promise((resolve, reject) => {
+    const idoc = iframe.contentDocument;
+    const s = idoc.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+    s.onload = () => resolve(iframe.contentWindow.html2canvas);
+    s.onerror = () => reject(new Error('html2canvas failed to load in iframe'));
+    idoc.head.appendChild(s);
+  });
+}
+
 function setupDownloadButton(d, renderedRoot) {
   const btn = document.getElementById('download-pdf');
   document.getElementById('viewer-bar').style.display = '';
@@ -573,54 +585,94 @@ function setupDownloadButton(d, renderedRoot) {
     const original = btn.innerHTML;
     btn.innerHTML = 'Generating PDF…';
     btn.disabled = true;
+    let iframe = null;
     try {
-      // Wait for html2pdf CDN to finish loading (defer attr means it
-      // may not be ready instantly on first click).
       let waited = 0;
       while (typeof html2pdf === 'undefined' && waited < 5000) {
         await new Promise(r => setTimeout(r, 100)); waited += 100;
       }
       if (typeof html2pdf === 'undefined') throw new Error('PDF library failed to load');
 
-      // Clone the rendered DOM so we can mutate img sources without
-      // affecting what's on screen. Inline every image as data URL,
-      // then hand to html2pdf for rasterisation into A4 pages.
+      // Create an off-screen iframe at exact A4 width (794px). html2canvas
+      // is loaded INSIDE this iframe so it runs with the iframe's window
+      // context (innerWidth=794) instead of the parent's — that's the cure
+      // for the centred-offset bug that was cropping the left half.
+      iframe = document.createElement('iframe');
+      iframe.style.cssText = 'position:fixed; left:-10000px; top:0; width:794px; height:1123px; border:0;';
+      document.body.appendChild(iframe);
+      const idoc = iframe.contentDocument || iframe.contentWindow.document;
+
+      const baseCss = document.querySelector('style').textContent;
+      const resetCss = `
+        html, body { background: #ffffff !important; width: 794px !important; }
+        body { padding: 0 !important; margin: 0 !important;
+               display: block !important; gap: 0 !important;
+               overflow: visible !important; }
+        .page { box-shadow: none !important; border-radius: 0 !important;
+                margin: 0 !important; width: 794px !important;
+                min-height: 1123px !important; }
+        .viewer-bar, .viewer-foot { display: none !important; }
+      `;
+
       const clone = renderedRoot.cloneNode(true);
-      // Wrap clone in a fixed-width container so html2canvas reads the
-      // A4 layout regardless of the user's viewport.
-      const stage = document.createElement('div');
-      stage.style.cssText = 'position:fixed; left:-99999px; top:0; width:794px; background:white;';
-      stage.appendChild(clone);
-      document.body.appendChild(stage);
 
-      try {
-        await inlineImagesAsDataUrls(clone);
-        try { await document.fonts.ready; } catch {}
+      idoc.open();
+      idoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+        <style>${baseCss}</style>
+        <style>${resetCss}</style>
+        </head><body></body></html>`);
+      idoc.close();
+      idoc.body.appendChild(clone);
 
-        await html2pdf()
-          .from(clone)
-          .set({
-            margin: 0,
-            filename: pdfFilename(d) + '.pdf',
-            image: { type: 'jpeg', quality: 0.95 },
-            html2canvas: {
-              scale: 2,
-              useCORS: true,
-              backgroundColor: '#ffffff',
-              windowWidth: 794,
-              letterRendering: true
-            },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-            pagebreak: { mode: ['css', 'legacy'], avoid: ['.payment', '.foot', '.terms-section'] }
-          })
-          .save();
-      } finally {
-        if (stage.parentNode) stage.parentNode.removeChild(stage);
+      await new Promise(r => {
+        if (idoc.readyState === 'complete') return r();
+        iframe.addEventListener('load', r, { once: true });
+        setTimeout(r, 800);
+      });
+      try { await idoc.fonts.ready; } catch {}
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 100)));
+
+      await inlineImagesAsDataUrls(idoc.body);
+      const h2c = await loadH2CIntoFrame(iframe);
+
+      const pages = Array.from(idoc.querySelectorAll('.page'));
+      if (!pages.length) throw new Error('No .page elements rendered');
+
+      const canvases = [];
+      for (const pageEl of pages) {
+        const canvas = await h2c(pageEl, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          letterRendering: true,
+          scrollX: 0, scrollY: 0,
+          windowWidth: 794,
+          windowHeight: pageEl.scrollHeight
+        });
+        canvases.push(canvas);
       }
+
+      const worker = html2pdf().set({
+        margin: 0,
+        filename: pdfFilename(d) + '.pdf',
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true }
+      }).from(document.createElement('div'));
+      await worker.toPdf();
+      const pdf = await worker.get('pdf');
+      pdf.deletePage(1);
+      canvases.forEach(canvas => {
+        pdf.addPage('a4', 'portrait');
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
+      });
+      pdf.save(pdfFilename(d) + '.pdf');
     } catch (e) {
       console.error('[pdf] generation failed', e);
       alert('Couldn\'t generate the PDF. Please try refreshing the page. (' + (e.message || e) + ')');
     } finally {
+      if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
       btn.innerHTML = original;
       btn.disabled = false;
     }
