@@ -575,7 +575,15 @@ input[type="date"]::-webkit-datetime-edit { text-align: left; }
 }
 .list-head > span:nth-child(n+3) { text-align: right; }
 
-.list-cell-num { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13.5px; }
+.list-cell-num {
+  font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13.5px;
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.list-cell-num .list-cell-xref {
+  font-size: 11px; font-weight: 500; color: var(--ink-muted);
+  letter-spacing: 0; line-height: 1.2; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
 .list-cell-client { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .list-cell-client .client-name { font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list-cell-client .client-meta { font-size: 12px; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1433,11 +1441,12 @@ input[type="date"]::-webkit-datetime-edit { text-align: left; }
   .editor-page .total-row.grand .value { font-size: 20px; }
 
   .list-row, .list-head {
-    grid-template-columns: 70px 1fr 90px 32px;
+    grid-template-columns: 88px 1fr 90px 32px;
     gap: 8px;
     padding: 12px 14px;
     font-size: 12px;
   }
+  .list-cell-num .list-cell-xref { font-size: 10px; }
   .list-head > span:nth-child(3),
   .list-head > span:nth-child(5),
   .list-row > .list-cell-date,
@@ -1983,8 +1992,14 @@ function debounce(fn, ms) {
 
 function buildSearchBlob(d) {
   const items = (d.items || []).map(i => `${i.description || ''} ${i.subtitle || ''}`).join(' ');
+  // Cross-reference search: paid invoices remember their source quotation
+  // number (sourceQuotationNumber) so typing "QINV-005" on the Paid tab
+  // surfaces the invoice that came from it. The reverse (Drafts tab
+  // matching INV-####) is handled at row-render time because the
+  // converted invoice's displayNumber lives on a separate doc.
   return [
-    d.displayNumber, d.client?.name, d.client?.attn, d.client?.email,
+    d.displayNumber, d.sourceQuotationNumber,
+    d.client?.name, d.client?.attn, d.client?.email,
     items, fmtMoney(d.total), d.issueDate, d.status
   ].filter(Boolean).join(' ').toLowerCase();
 }
@@ -2877,7 +2892,16 @@ function filterDocs(docMap, q) {
   const arr = Array.from(docMap.values());
   if (!tokens.length) return arr;
   return arr.filter(d => {
-    const blob = d.searchBlob || buildSearchBlob(d);
+    let blob = d.searchBlob || buildSearchBlob(d);
+    // Cross-reference lookup at search time:
+    //   • Quotation → converted invoice's displayNumber (so typing
+    //     "INV-0042" on the Drafts tab surfaces the source QINV).
+    //   • Invoice → already covered by sourceQuotationNumber being
+    //     in the persisted searchBlob via buildSearchBlob.
+    if (d.convertedToInvoiceId) {
+      const inv = state.invoices.get(d.convertedToInvoiceId);
+      if (inv && inv.displayNumber) blob += ' ' + String(inv.displayNumber).toLowerCase();
+    }
     return tokens.every(t => blob.includes(t));
   });
 }
@@ -3786,8 +3810,26 @@ function buildListRow(kind, d, search) {
     }
   }
 
+  // Cross-reference line under the doc number — bridges the QINV ↔ INV
+  // gap when reconciling against bank statements.
+  //   • Paid invoices show the source quotation:        "from QINV-005"
+  //   • Converted quotations show where they went:      "→ INV-0042"
+  // Voided invoices keep the cross-ref so the trail is still visible.
+  let crossRefHtml = '';
+  if (kind === 'invoices' && d.sourceQuotationNumber) {
+    crossRefHtml = `<span class="list-cell-xref" title="Reference your client paid against">from ${escapeHtml(d.sourceQuotationNumber)}</span>`;
+  } else if (kind === 'quotations' && d.status === 'converted' && d.convertedToInvoiceId) {
+    const inv = state.invoices.get(d.convertedToInvoiceId);
+    if (inv && inv.displayNumber) {
+      crossRefHtml = `<span class="list-cell-xref" title="Paid as this invoice">→ ${escapeHtml(inv.displayNumber)}</span>`;
+    }
+  }
+
   row.innerHTML = `
-    <div class="list-cell-num">${escapeHtml(d.displayNumber || '—')}</div>
+    <div class="list-cell-num">
+      <span>${escapeHtml(d.displayNumber || '—')}</span>
+      ${crossRefHtml}
+    </div>
     <div class="list-cell-client">
       <span class="client-name">${escapeHtml(client.name || '—')}</span>
       ${client.attn ? `<span class="client-meta">${escapeHtml(client.attn)}</span>` : ''}
