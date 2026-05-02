@@ -139,7 +139,8 @@ async function test1_singleRecipient(browser) {
   assert(html.includes('202531855M'), 'email HTML contains UEN');
   assert(html.includes('view.html?i=x'), 'email HTML contains share URL link');
   assert(html.includes('Download Invoice PDF'), 'email HTML primary CTA labelled "Download Invoice PDF"');
-  assert(html.includes('download-icon.png'), 'email HTML primary CTA uses hosted PNG download icon');
+  assert(html.includes('&#10515;') || html.includes('⤓'), 'email HTML primary CTA uses Unicode download glyph (inherits text colour)');
+  assert(/color:inherit/.test(html), 'icon span inherits text colour (always matches in dark/light modes)');
   assert(html.includes('Contact Reputifly'), 'email HTML has "Contact Reputifly" secondary link');
   assert(html.includes('wa.me/6580111965'), 'email HTML secondary link points to WhatsApp');
   assert(/dl=1/.test(html), 'email HTML primary CTA has ?dl=1 for auto-download');

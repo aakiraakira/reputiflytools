@@ -3,8 +3,11 @@
 
 const { chromium } = require('playwright');
 
-const VIEW_URL = 'http://127.0.0.1:8585/view.html?i=b1i2xia0op2mxi02';
+// Usage: node test-real-send.js [recipient_email] [view_url]
+//   defaults: recipient = realjuliantung@gmail.com
+//             url       = local dev (127.0.0.1:8585)
 const RECIPIENT = process.argv[2] || 'realjuliantung@gmail.com';
+const VIEW_URL  = process.argv[3] || 'http://127.0.0.1:8585/view.html?i=b1i2xia0op2mxi02';
 
 (async () => {
   const browser = await chromium.launch();
