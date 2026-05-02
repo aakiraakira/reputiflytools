@@ -29,16 +29,20 @@ service cloud.firestore {
         allow create: if isOwner()
           && request.resource.data.value is int
           && request.resource.data.value >= 0;
-        // Invoice counter is strictly monotonic +1 (or unchanged) — preserves the
-        // immutable tax-invoice audit trail.
-        // Quotation counter may also decrement (when the most-recent draft is
-        // deleted, the QINV- number is reclaimed to avoid gaps).
+        // Invoice counter is FORWARD-ONLY — it may be incremented by the
+        // atomic +1 issued through convertQuotationToInvoice, OR jumped
+        // ahead manually through the Advanced "next invoice number" panel
+        // (handy for aligning with an external accounting sequence). What
+        // it can NEVER do is go backward — that would risk re-issuing a
+        // number that's already been used, breaking the audit trail.
+        // Quotation counter is permissive: it can move freely (decrements
+        // happen when the most-recent draft is deleted, to reclaim the
+        // QINV- number and avoid gaps).
         allow update: if isOwner()
           && request.resource.data.value is int
           && (
             (name == 'invoice'
-              && (request.resource.data.value == resource.data.value + 1
-                  || request.resource.data.value == resource.data.value))
+              && request.resource.data.value >= resource.data.value)
             || (name == 'quotation'
               && request.resource.data.value >= 0)
           );
