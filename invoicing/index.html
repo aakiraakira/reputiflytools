@@ -4344,7 +4344,7 @@ async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' 
     const canvases = [];
     for (const pageEl of pages) {
       const canvas = await h2c(pageEl, {
-        scale: 2,
+        scale: 3,                  // 3× for crisp sub-pixel text rendering
         useCORS: true,
         backgroundColor: '#ffffff',
         letterRendering: true,
@@ -4369,7 +4369,9 @@ async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' 
     pdf.deletePage(1);
     canvases.forEach((canvas, i) => {
       pdf.addPage('a4', 'portrait');
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
+      // PNG keeps text crisp (no JPEG ringing around dark glyphs); the
+      // larger file is the right trade-off for an invoice PDF.
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297, undefined, 'SLOW');
     });
     pdf.save(filename + '.pdf');
 
@@ -4494,13 +4496,15 @@ function buildIframeHtml(innerHtml, d, filename) {
   // and as a passive preview when opened in a tab.
   const css = INVOICE_CSS;
   const title = filename || (d.displayNumber || 'Invoice');
-  // Override body chrome inside the render iframe so the .page lands at
-  // (0,0) with no flex-centering offset, no padding, no shadow. Without
-  // this, html2canvas captures the body using parent-window innerWidth
-  // (e.g. 1280px), the flex-centered .page resolves to x=243 in that
-  // wider context, and the rendered canvas crops the left half of the
-  // page. Force the body to be EXACTLY 794px wide and block-display so
-  // the .page sits at (0,0) regardless of html2canvas's window context.
+  // Render reset for the iframe document:
+  //   • Force body width 794px and block layout so html2canvas captures
+  //     from (0,0) without flex-centering offset.
+  //   • Drop font-variant-numeric: tabular-nums everywhere — html2canvas
+  //     rasterises tabular figures with the WIDEST digit's width, which
+  //     pads narrow chars like "1" and "-" with visible gaps. Without
+  //     this, "QINV-001" renders as "QINV- 001" and "202531855M" as
+  //     "202531 855M" in the PDF only. Proportional digits look
+  //     identical to the on-screen original.
   const renderReset = `
     html, body { background: #ffffff !important; }
     html { width: 794px !important; }
@@ -4512,6 +4516,7 @@ function buildIframeHtml(innerHtml, d, filename) {
     .page { box-shadow: none !important; border-radius: 0 !important;
             margin: 0 !important; width: 794px !important;
             min-width: 794px !important; max-width: 794px !important; }
+    *, *::before, *::after { font-variant-numeric: normal !important; }
   `;
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
     <title>${escapeHtml(title)}</title>
