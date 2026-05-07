@@ -681,7 +681,7 @@
                 });
             },
 
-            handleOrderClick(e) {
+            async handleOrderClick(e) {
                 const btn = e.target.closest('button');
                 if (!btn) return;
                 const id = btn.dataset.id;
@@ -694,9 +694,22 @@
                     this.copyToClipboard(`${SITE_BASE}/track.html?order=${id}`, 'Tracking link copied!');
                 } else if (btn.classList.contains('copy-submission-link')) {
                     const order = this.state.orders.find(o => o.id === id);
-                    if (!order?.clientTrackingToken) { this.toast('No client token on this order. Edit the order to generate one.', 'error'); return; }
+                    if (!order) { this.toast('Order not found.', 'error'); return; }
+                    // Legacy orders may not have a clientTrackingToken yet — auto-generate one
+                    // transparently so the admin doesn't get stuck. Persists to Firestore.
+                    let token = order.clientTrackingToken;
+                    if (!token) {
+                        token = (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                        try {
+                            await db.collection('orders').doc(id).update({ clientTrackingToken: token, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+                            order.clientTrackingToken = token; // update local cache
+                        } catch (err) {
+                            this.toast('Failed to generate token: ' + err.message, 'error');
+                            return;
+                        }
+                    }
                     // Use query-string format so it works on both Firebase Hosting and GitHub Pages.
-                    this.copyToClipboard(`${SITE_BASE}/submit/?order=${id}&token=${order.clientTrackingToken}`, 'Submission link copied!');
+                    this.copyToClipboard(`${SITE_BASE}/submit/?order=${id}&token=${token}`, 'Submission link copied!');
                 } else if (btn.classList.contains('copy-sheet-row')) {
                     const o = this.state.orders.find(x => x.id === id);
                     if (o) {
@@ -2319,15 +2332,18 @@
             // ═══════════════════════════════════════════════════════
             async loadClientSubmissions() {
                 this.state._clientSubmissionsLoading = true;
+                this.state._clientSubmissionsError = null;
                 try {
                     const token = await auth.currentUser.getIdToken();
                     const resp = await fetch(`${API_BASE}/client-submissions`, {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                     const data = await resp.json();
                     this.state._clientSubmissions = data.submissions || [];
                 } catch(e) {
                     this.state._clientSubmissions = [];
+                    this.state._clientSubmissionsError = e.message || 'Network error';
                 }
                 this.state._clientSubmissionsLoading = false;
                 this.state._clientSubmissionsLoaded = true;
@@ -2338,15 +2354,10 @@
                 const subs = this.state._clientSubmissions || [];
                 const filter = this.state._submissionsFilter || { orderId: '', search: '' };
                 const orders = this.state.orders || [];
-                const filtered = subs.filter(s => {
-                    if (filter.orderId && s.orderId !== filter.orderId) return false;
-                    if (filter.search) {
-                        const order = orders.find(o => o.id === s.orderId);
-                        const name = (order?.companyName || '').toLowerCase();
-                        if (!name.includes(filter.search.toLowerCase())) return false;
-                    }
-                    return true;
-                });
+                // Row filter is applied via show/hide in attach phase — render ALL rows here
+                // so the search input doesn't lose focus on every keystroke (the input is part
+                // of the same innerHTML, and re-rendering it destroys focus).
+                const filtered = subs;
 
                 const fmt = (ts) => {
                     if (!ts) return '—';
@@ -2378,8 +2389,11 @@
                 if (this.state._clientSubmissionsLoading) {
                     return headerRow + `<div style="text-align:center;padding:60px"><div class="spinner" style="margin:0 auto 16px"></div><p style="color:var(--text-secondary)">Loading submissions...</p></div>`;
                 }
+                if (this.state._clientSubmissionsError) {
+                    return headerRow + `<div class="card" style="padding:40px;text-align:center"><p style="color:var(--error);font-weight:600;margin-bottom:8px">Could not load submissions.</p><p style="color:var(--text-secondary);font-size:13px;margin-bottom:16px">${(this.state._clientSubmissionsError + '').replace(/</g,'&lt;')}</p><button id="submissions-retry" class="btn btn-primary" style="width:auto;display:inline-flex">Retry</button></div>`;
+                }
                 if (filtered.length === 0) {
-                    return headerRow + `<div class="card" style="padding:40px;text-align:center"><p style="color:var(--text-secondary)">${subs.length === 0 ? 'No submissions yet. Share submission links with clients via the order cards.' : 'No matches for this filter.'}</p></div>`;
+                    return headerRow + `<div class="card" style="padding:40px;text-align:center"><p style="color:var(--text-secondary)">No submissions yet. Share submission links with clients via the order cards.</p></div>`;
                 }
 
                 return headerRow + `
@@ -2428,14 +2442,40 @@
                     this.loadClientSubmissions();
                 }
                 document.getElementById('submissions-refresh')?.addEventListener('click', () => {
+                    if (this.state._clientSubmissionsLoading) return;
                     this.state._clientSubmissionsLoaded = false;
                     this.loadClientSubmissions();
                 });
-                document.getElementById('submissions-search')?.addEventListener('input', e => {
-                    this.state._submissionsFilter.search = e.target.value;
-                    clearTimeout(this._subsFilterTimer);
-                    this._subsFilterTimer = setTimeout(() => this.updateView(), 250);
+                document.getElementById('submissions-retry')?.addEventListener('click', () => {
+                    this.state._clientSubmissionsLoaded = false;
+                    this.loadClientSubmissions();
                 });
+                // Search uses show/hide on rows so the input keeps focus across keystrokes.
+                // Falling back to orderId match handles the race where orders haven't loaded yet
+                // OR an order has been deleted (otherwise the submission would silently disappear).
+                const applyRowFilter = (q) => {
+                    const needle = q.trim().toLowerCase();
+                    const orders = this.state.orders || [];
+                    const rows = document.querySelectorAll('tr[data-sub-id]');
+                    rows.forEach(row => {
+                        if (!needle) { row.style.display = ''; return; }
+                        const subId = row.dataset.subId;
+                        const sub = (this.state._clientSubmissions || []).find(s => s.id === subId);
+                        if (!sub) { row.style.display = 'none'; return; }
+                        const order = orders.find(o => o.id === sub.orderId);
+                        const haystack = `${order?.companyName || ''} ${sub.orderId}`.toLowerCase();
+                        row.style.display = haystack.includes(needle) ? '' : 'none';
+                    });
+                };
+                const searchEl = document.getElementById('submissions-search');
+                if (searchEl) {
+                    // Apply current filter on first render
+                    applyRowFilter(searchEl.value);
+                    searchEl.addEventListener('input', (e) => {
+                        this.state._submissionsFilter.search = e.target.value;
+                        applyRowFilter(e.target.value);
+                    });
+                }
                 document.querySelectorAll('.sub-view').forEach(btn => {
                     btn.addEventListener('click', () => this.showSubmissionViewModal(btn.dataset.id));
                 });
@@ -2457,9 +2497,10 @@
                 const company = order?.companyName || `Order ${sub.orderId.slice(0, 8)}…`;
                 const escAttr = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
                 const reviewsHtml = (sub.reviews || []).map((r, i) => {
+                    // onclick uses this.src so URLs containing apostrophes can't break out of the JS string.
                     const photos = (r.imageDataUrls || []).map(u => `
                         <div style="position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
-                            <img src="${escAttr(u)}" style="width:100%;height:120px;object-fit:cover;display:block;cursor:pointer" onclick="window.open('${escAttr(u)}','_blank')" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<div style=&quot;height:120px;display:flex;align-items:center;justify-content:center;background:#F3F4F6;color:#9CA3AF;font-size:12px&quot;>image deleted</div>')">
+                            <img src="${escAttr(u)}" style="width:100%;height:120px;object-fit:cover;display:block;cursor:pointer" onclick="window.open(this.src,'_blank')" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<div style=&quot;height:120px;display:flex;align-items:center;justify-content:center;background:#F3F4F6;color:#9CA3AF;font-size:12px&quot;>image deleted</div>')">
                         </div>
                     `).join('');
                     return `
@@ -2528,6 +2569,7 @@
                         requiresImage: !!r.requiresImage,
                         imageDataUrls: r.imageDataUrls || []
                     }));
+                    if (newReviews.length === 0) throw new Error('Server returned no reviews to import.');
 
                     const existing = await IDB.get(derivedId);
                     const record = existing
@@ -2538,16 +2580,23 @@
                     this.state.companies = await IDB.getAll();
                     this.state.activeCompanyId = derivedId;
 
-                    // Force refresh of submissions list
+                    // Optimistically update local cache so the order-card "N new" indicator
+                    // disappears immediately rather than showing stale state until refresh resolves.
+                    this.state._clientSubmissions = (this.state._clientSubmissions || []).map(s =>
+                        s.id === subId ? { ...s, status: 'imported', importedAt: new Date(), deleteAfter: { _seconds: Math.floor((Date.now() + 24*60*60*1000) / 1000) } } : s
+                    );
                     this.state._clientSubmissionsLoaded = false;
+
                     this.toast(`Imported ${newReviews.length} reviews into Review Manager.`, 'success');
                     this.el.modal.innerHTML = '';
                     this.state.activeTab = 'reviews';
                     localStorage.setItem('activeTab', 'reviews');
                     this.renderShell();
+                    // Background refresh so server-side timestamps replace optimistic ones.
                     this.loadClientSubmissions().catch(() => {});
                 } catch(err) {
                     this.toast(err.message || 'Import failed', 'error');
+                    // Reset modal so user can retry without page reload.
                     if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Confirm Import'; }
                 }
             },

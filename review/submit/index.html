@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Submit Reviews</title>
     <link rel="icon" type="image/jpeg" href="https://reputifly.com/wp-content/uploads/2026/01/IMG_2123.jpg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,6 +17,11 @@
             .card { border-radius: 10px; padding: 20px 16px !important; }
             h1 { font-size: 22px !important; }
             input, textarea, select { font-size: 16px !important; }
+            /* Touch targets: WCAG 2.5.5 / Apple HIG require >= 44x44 */
+            .review-card .delete-x { width: 44px !important; height: 44px !important; font-size: 24px !important; }
+            .photo-thumb .x { width: 32px !important; height: 32px !important; padding: 4px !important; }
+            .refresh-btn { width: 44px !important; height: 44px !important; }
+            .dropzone { min-height: 80px !important; }
         }
         .card { background: #fff; border: 1px solid #E5E7EB; border-radius: 12px; padding: 20px; margin-bottom: 12px; }
         .input { width: 100%; padding: 10px 14px; border: 1px solid #E5E7EB; border-radius: 12px; font-family: inherit; font-size: 14px; background: #fff; color: #111; transition: border-color 0.2s; }
@@ -245,7 +250,8 @@
         },
     };
 
-    // ── Image compression (mirrors index.html:280-302) ──
+    // Image compression with WebP-then-JPEG fallback so iOS < 14 (which can't encode WebP)
+    // and Android Chrome (which can't decode HEIC) both produce a valid output.
     function compressImage(file, maxWidth = 1200, quality = 0.7) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -254,16 +260,22 @@
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
                     const scale = Math.min(1, maxWidth / img.width);
-                    canvas.width = img.width * scale;
-                    canvas.height = img.height * scale;
+                    canvas.width = Math.max(1, Math.round(img.width * scale));
+                    canvas.height = Math.max(1, Math.round(img.height * scale));
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('compression failed')), 'image/webp', quality);
+                    canvas.toBlob((blob) => {
+                        if (blob) return resolve(blob);
+                        // WebP not supported (iOS < 14) — fall back to JPEG.
+                        canvas.toBlob((jpgBlob) => {
+                            jpgBlob ? resolve(jpgBlob) : reject(new Error("Couldn't compress this photo. Try JPEG or PNG."));
+                        }, 'image/jpeg', quality);
+                    }, 'image/webp', quality);
                 };
-                img.onerror = () => reject(new Error('image load failed'));
+                img.onerror = () => reject(new Error("Couldn't read this photo. iPhone HEIC photos may not work on Android — try JPEG."));
                 img.src = e.target.result;
             };
-            reader.onerror = () => reject(new Error('file read failed'));
+            reader.onerror = () => reject(new Error("Couldn't read the file. Try a different photo."));
             reader.readAsDataURL(file);
         });
     }
@@ -291,7 +303,6 @@
     function escAttr(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
-    function escHtml(s) { return escAttr(s).replace(/\n/g, '<br>'); }
 
     function scheduleAutosave() {
         clearTimeout(state.saveTimer);
@@ -313,7 +324,18 @@
     }
 
     // ── Render reviews list ──
-    function renderReviews() {
+    // Note: textarea content uses escAttr, NOT a multi-line escape. HTML5 textareas treat
+    // their content as raw text — a `<br>` substitution would render literally as text.
+    // The browser preserves \n in textarea content as actual newlines.
+    function renderReviews(opts) {
+        const preserveFocus = opts && opts.preserveFocus;
+        let activeId = null, activeIdx = null, selStart = 0, selEnd = 0;
+        if (preserveFocus && document.activeElement && document.activeElement.dataset && document.activeElement.dataset.act === 'text') {
+            activeId = document.activeElement.tagName;
+            activeIdx = parseInt(document.activeElement.dataset.r);
+            selStart = document.activeElement.selectionStart || 0;
+            selEnd = document.activeElement.selectionEnd || 0;
+        }
         const list = document.getElementById('reviews-list');
         if (state.reviews.length === 0) {
             list.innerHTML = '<p style="color:#6B7280;font-size:14px;text-align:center;padding:24px 0">No reviews yet. Tap "+ Add Review" below to start.</p>';
@@ -326,16 +348,24 @@
                     <button type="button" class="x" data-act="rm-photo" data-r="${idx}" data-i="${i}" aria-label="Remove photo">×</button>
                 </div>
             `).join('');
+            const slotsLeft = MAX_PHOTOS - r.imageDataUrls.length;
+            const uploading = !!r._uploading;
+            const errMsg = r._photoError || '';
             const photoSection = r.requiresImage ? `
                 <div class="photo-section">
                     <p class="photo-counter">Photos (${r.imageDataUrls.length}/${MAX_PHOTOS})</p>
                     ${r.imageDataUrls.length > 0 ? `<div class="photo-grid">${photos}</div>` : ''}
-                    ${r.imageDataUrls.length < MAX_PHOTOS ? `
+                    ${slotsLeft > 0 ? (uploading ? `
+                        <div class="dropzone" style="opacity:0.6">
+                            <span class="dropzone-text"><span class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle"></span> Compressing photo${slotsLeft > 1 ? 's' : ''}...</span>
+                        </div>
+                    ` : `
                         <label class="dropzone" data-r="${idx}">
                             <input type="file" data-act="add-photo" data-r="${idx}" accept="image/*" multiple style="display:none">
                             <span class="dropzone-text">Tap to add photos · max ${MAX_PHOTOS} per review</span>
                         </label>
-                    ` : '<p class="inline-warn">Maximum 2 photos per review.</p>'}
+                    `) : '<p class="inline-warn">Maximum 2 photos per review.</p>'}
+                    ${errMsg ? `<p class="inline-warn" style="color:#DC2626">${escAttr(errMsg)}</p>` : ''}
                 </div>
             ` : '';
             return `
@@ -344,7 +374,7 @@
                     <div class="review-card-header">
                         <span class="review-num">Review #${idx + 1}</span>
                     </div>
-                    <textarea class="input" data-act="text" data-r="${idx}" placeholder="Write the review you'd like to post on Google...">${escHtml(r.text || '')}</textarea>
+                    <textarea class="input" data-act="text" data-r="${idx}" placeholder="Write the review you'd like to post on Google...">${escAttr(r.text || '')}</textarea>
                     <label class="checkbox-row">
                         <input type="checkbox" data-act="toggle-img" data-r="${idx}" ${r.requiresImage ? 'checked' : ''}>
                         <span style="font-size:14px">This review needs photos</span>
@@ -353,6 +383,15 @@
                 </div>
             `;
         }).join('');
+        // Restore focus + selection after the re-render (preserves IME composition + cursor position
+        // when an async event like photo upload triggers a re-render mid-typing).
+        if (preserveFocus && activeIdx !== null) {
+            const ta = list.querySelector(`textarea[data-r="${activeIdx}"]`);
+            if (ta) {
+                ta.focus();
+                try { ta.setSelectionRange(selStart, selEnd); } catch (_) { /* ignore */ }
+            }
+        }
     }
 
     // ── Event handlers (delegation) ──
@@ -395,25 +434,47 @@
         }
     }
 
+    // Photo cap is enforced atomically before any async work starts.
+    // Without snapshot-and-slice, two concurrent calls (e.g. user picks 2 files, then drag-drops 1
+    // before the first finishes) would both read length=0 and both bypass the cap → 3+ photos.
     async function handleFiles(reviewIdx, files) {
         const r = state.reviews[reviewIdx];
         if (!r) return;
-        for (const file of files) {
-            if (r.imageDataUrls.length >= MAX_PHOTOS) break;
-            if (!file.type.startsWith('image/')) continue;
-            // Soft warn for very large originals (compression handles them but be transparent)
+        if (r._uploading) return; // ignore concurrent calls while compression is in flight
+        const slotsLeft = MAX_PHOTOS - r.imageDataUrls.length;
+        if (slotsLeft <= 0) return;
+        // Take only as many files as we have slots for.
+        const accepted = Array.from(files).filter((f) => f.type.startsWith('image/')).slice(0, slotsLeft);
+        if (accepted.length === 0) return;
+        const dropped = files.length - accepted.length;
+        r._uploading = true;
+        r._photoError = '';
+        renderReviews({ preserveFocus: true });
+        let lastError = '';
+        for (const file of accepted) {
             try {
                 const blob = await compressImage(file, 1200, 0.7);
+                if (!blob) throw new Error('Could not process this photo. Try JPEG or PNG.');
                 const dataUrl = await blobToDataURL(blob);
+                if (r.imageDataUrls.length >= MAX_PHOTOS) break; // double-check after async
                 r.imageDataUrls.push(dataUrl);
             } catch (err) {
                 console.warn('compress failed:', err);
+                lastError = err && err.message ? err.message : "Couldn't process that photo. Try JPEG or PNG (HEIC may not work on Android).";
             }
         }
-        renderReviews(); scheduleAutosave();
+        r._uploading = false;
+        if (lastError) r._photoError = lastError;
+        else if (dropped > 0) r._photoError = `Only ${accepted.length} added — max ${MAX_PHOTOS} per review.`;
+        renderReviews({ preserveFocus: true });
+        scheduleAutosave();
     }
 
     // ── Submit ──
+    // Server enforces 25MB body limit and ~5MB per photo. We pre-flight at ~20MB total to give
+    // the user a friendly message before a big upload fails on cellular.
+    const MAX_PAYLOAD_BYTES = 20 * 1024 * 1024;
+
     async function submitForm() {
         if (state.submitting) return;
         state.submitting = true;
@@ -435,6 +496,23 @@
         if (reviews.length === 0) {
             errEl.textContent = 'Please add at least one review with text.';
             errEl.classList.remove('hidden');
+            errEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            state.submitting = false; updateSubmitState();
+            btn.textContent = 'Submit reviews';
+            return;
+        }
+
+        // Pre-flight payload size check (client-side, friendly error)
+        const photoBytes = reviews.reduce((sum, r) => sum + r.imageDataUrls.reduce((s, u) => {
+            const i = u.indexOf(',');
+            const b64 = i >= 0 ? u.length - i - 1 : 0;
+            return s + Math.floor(b64 * 3 / 4);
+        }, 0), 0);
+        if (photoBytes > MAX_PAYLOAD_BYTES) {
+            const mb = (photoBytes / 1024 / 1024).toFixed(1);
+            errEl.textContent = `Your photos total ${mb}MB — please reduce or split into a second submission. Max ${MAX_PAYLOAD_BYTES / 1024 / 1024}MB per submission.`;
+            errEl.classList.remove('hidden');
+            errEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
             state.submitting = false; updateSubmitState();
             btn.textContent = 'Submit reviews';
             return;
@@ -457,6 +535,7 @@
         } catch (err) {
             errEl.textContent = err.message || 'Submission failed. Please try again.';
             errEl.classList.remove('hidden');
+            errEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
             state.submitting = false; updateSubmitState();
             btn.textContent = 'Submit reviews';
         }
@@ -511,7 +590,10 @@
         const params = new URLSearchParams(location.search);
         const parts = location.pathname.split('/').filter(Boolean);
         const last = parts[parts.length - 1];
-        const pathOrderId = (last && last !== 'submit' && last !== 'index.html') ? last : null;
+        // Path-style orderId must look like a valid Firestore doc id (alphanumeric, _, -).
+        // This prevents a URL like /submit/foo/bar/?order=Y from hijacking with `last='bar'`.
+        const ID_RE = /^[A-Za-z0-9_-]{8,}$/;
+        const pathOrderId = (last && last !== 'submit' && last !== 'index.html' && ID_RE.test(last)) ? last : null;
         const orderId = pathOrderId || params.get('order') || null;
         const token = params.get('token');
         if (!orderId || !token) { show('error-token'); return; }
