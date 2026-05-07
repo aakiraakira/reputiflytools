@@ -93,11 +93,6 @@
             <p style="color:#DC2626;font-weight:600;margin-bottom:8px">Submission link is invalid or expired.</p>
             <p style="color:#6B7280;font-size:14px">Please contact us via WhatsApp at <a href="https://wa.me/6598287470" style="font-weight:600">+65 9828 7470</a> for a new link.</p>
         </div>
-        <div id="error-not-delivered" class="card hidden" style="text-align:center;padding:40px">
-            <p style="font-weight:600;margin-bottom:8px">Submissions open after delivery.</p>
-            <p style="color:#6B7280;font-size:14px;margin-bottom:16px">Your order isn't fully delivered yet. You can track progress here.</p>
-            <a id="link-tracking" href="#" style="display:inline-block;font-weight:600;text-decoration:underline">View Order Progress</a>
-        </div>
         <div id="error-tnc-unsigned" class="card hidden" style="text-align:center;padding:40px">
             <p style="font-weight:600;margin-bottom:8px">Please sign your Terms &amp; Conditions first.</p>
             <p style="color:#6B7280;font-size:14px;margin-bottom:16px">Submissions are unlocked after you sign the agreement.</p>
@@ -122,12 +117,12 @@
 
             <div class="step-pills">
                 <span class="pill pill-done">TNC signed ✓</span>
-                <span class="pill pill-done">Order delivered ✓</span>
                 <span class="pill pill-active">Submit reviews</span>
+                <span id="repl-context-pill" class="pill pill-muted hidden">Replacement reviews</span>
             </div>
 
             <div class="banner-info">
-                <strong>Add all your reviews now</strong> — you can submit multiple at once. Drafts are saved automatically as you type.
+                <strong id="banner-headline">Add all your reviews now</strong> — <span id="banner-detail">you can submit multiple at once. Our team will start posting them on Google. Drafts are saved automatically as you type.</span>
             </div>
 
             <!-- Review link card -->
@@ -296,7 +291,7 @@
 
     // ── Helpers ──
     function show(id) {
-        ['loading-state', 'error-token', 'error-not-delivered', 'error-tnc-unsigned', 'error-generic', 'form-state', 'success-state']
+        ['loading-state', 'error-token', 'error-tnc-unsigned', 'error-generic', 'form-state', 'success-state']
             .forEach((s) => document.getElementById(s).classList.toggle('hidden', s !== id));
     }
 
@@ -620,19 +615,27 @@
         state.tncSigned = order.tncSigned === true;
         state.delivered = (parseInt(order.completedCount) || 0) >= (parseInt(order.quantity) || 0) && (parseInt(order.quantity) || 0) > 0;
 
-        // Branch on state
+        // Submissions are open from the moment TNC is signed — same link works for
+        // initial review content AND replacement content after delivery.
         if (!state.tncSigned) {
             document.getElementById('link-tnc').href = `${SITE_BASE}/tnc.html?order=${orderId}`;
             show('error-tnc-unsigned'); return;
-        }
-        if (!state.delivered) {
-            document.getElementById('link-tracking').href = `${SITE_BASE}/track.html?order=${orderId}`;
-            show('error-not-delivered'); return;
         }
 
         // Hydrate UI chrome
         document.getElementById('company-name').textContent = state.companyName;
         document.getElementById('review-link-display').textContent = state.link || '—';
+
+        // Adapt copy based on whether this is the initial submission window or a replacement window.
+        if (state.delivered) {
+            document.getElementById('repl-context-pill').classList.remove('hidden');
+            document.getElementById('banner-headline').textContent = 'Submit replacement reviews';
+            document.getElementById('banner-detail').textContent = 'Add new review content to replace any reviews Google has removed. Drafts auto-save as you type.';
+        } else {
+            // Initial flow — order not yet delivered (or first batch still being delivered).
+            document.getElementById('banner-headline').textContent = 'Add all your reviews now';
+            document.getElementById('banner-detail').textContent = "you can submit multiple at once. Our team will start posting them on Google. Drafts auto-save as you type.";
+        }
 
         // Restore drafts if present
         const draft = await SubmissionIDB.get(orderId);
