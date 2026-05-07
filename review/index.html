@@ -74,6 +74,13 @@
         .tab-btn { padding: 10px 4px; font-size: 13px; font-weight: 500; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; transition: all 0.2s; background: none; border-top: none; border-left: none; border-right: none; }
         .tab-btn.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
         .tab-btn:hover:not(.active) { color: var(--text); }
+        /* Status sub-tabs (In Progress / Completed) inside Orders + Tracker */
+        .status-tabs { padding-bottom: 0; }
+        .status-tab { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; margin-bottom: -1px; font-size: 13px; font-weight: 500; color: var(--text-secondary); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: color 0.2s, border-color 0.2s; }
+        .status-tab:hover:not(.active) { color: var(--text); }
+        .status-tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
+        .status-tab-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--bg-secondary); font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+        .status-tab.active .status-tab-count { background: var(--text); color: #fff; }
 
         /* Badge */
         .badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
@@ -385,6 +392,9 @@
                 } else {
                     this.state.activeTab = savedTab && ['orders','tracker','reviews','ai','reports','submissions','employees','guide'].includes(savedTab) ? savedTab : 'orders';
                 }
+                // Restore status sub-tab choice (In Progress / Completed) — shared across Orders + Tracker.
+                const savedStatus = localStorage.getItem('activeStatus');
+                this.state.activeStatus = (savedStatus === 'completed' || savedStatus === 'in-progress') ? savedStatus : 'in-progress';
 
                 this.renderShell();
                 this.loadData();
@@ -594,14 +604,24 @@
                 const { orders, ordersLoading } = this.state;
                 if (ordersLoading) return `<div style="text-align:center;padding:60px"><div class="spinner" style="margin:0 auto 16px"></div><p style="color:var(--text-secondary)">Loading orders...</p></div>`;
 
+                const status = this.state.activeStatus || 'in-progress';
+                const isCompleted = (o) => (o.completedCount || 0) >= (o.quantity || 0) && (o.quantity || 0) > 0;
+                const inProgress = orders.filter((o) => !isCompleted(o));
+                const completed = orders.filter(isCompleted);
+                const visible = status === 'completed' ? completed : inProgress;
+
                 return `
-                    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:24px">
+                    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px">
                         <h2 style="font-size:20px;font-weight:700">Orders</h2>
                         <button id="new-order-btn" class="btn btn-primary btn-sm" style="width:auto">+ New Order</button>
                     </div>
-                    ${orders.length === 0
-                        ? `<div class="card" style="padding:60px;text-align:center"><p style="color:var(--text-secondary)">No orders yet. Create your first order to get started.</p></div>`
-                        : `<div style="display:flex;flex-direction:column;gap:12px">${orders.map(o => this.renderOrderCard(o)).join('')}</div>`
+                    <div class="status-tabs" style="display:flex;gap:6px;margin-bottom:20px;border-bottom:1px solid var(--border)">
+                        <button class="status-tab ${status === 'in-progress' ? 'active' : ''}" data-status="in-progress">In Progress <span class="status-tab-count">${inProgress.length}</span></button>
+                        <button class="status-tab ${status === 'completed' ? 'active' : ''}" data-status="completed">Completed <span class="status-tab-count">${completed.length}</span></button>
+                    </div>
+                    ${visible.length === 0
+                        ? `<div class="card" style="padding:60px;text-align:center"><p style="color:var(--text-secondary)">${orders.length === 0 ? 'No orders yet. Create your first order to get started.' : (status === 'completed' ? 'No completed orders yet.' : 'No orders in progress.')}</p></div>`
+                        : `<div style="display:flex;flex-direction:column;gap:12px">${visible.map(o => this.renderOrderCard(o)).join('')}</div>`
                     }`;
             },
 
@@ -662,6 +682,17 @@
                 container._delegated = true;
 
                 container.addEventListener('click', e => {
+                    // Status sub-tab toggle (In Progress / Completed). Shared across Orders + Tracker.
+                    const statusBtn = e.target.closest('.status-tab');
+                    if (statusBtn && statusBtn.dataset.status) {
+                        const newStatus = statusBtn.dataset.status;
+                        if (this.state.activeStatus !== newStatus) {
+                            this.state.activeStatus = newStatus;
+                            try { localStorage.setItem('activeStatus', newStatus); } catch(_) {}
+                            this.updateView();
+                        }
+                        return;
+                    }
                     // Orders tab delegation
                     this.handleOrderClick(e);
                     // Review manager delegation
@@ -1610,8 +1641,14 @@
                 const allOrders = isAdmin ? this.state.orders : (this.state._allOrders || this.state.orders);
                 const filter = this.state.trackerFilter || '';
                 const sort = this.state.trackerSort || { field: 'companyName', dir: 'asc' };
-                let activeOrders = allOrders.filter(o => o.status !== 'completed')
-                    .filter(o => !filter || o.companyName.toLowerCase().includes(filter.toLowerCase()));
+                const status = this.state.activeStatus || 'in-progress';
+                // Tab counts use the SAME completion logic as Orders tab — based on completedCount,
+                // not the status field, so replacement-activated orders correctly land back in In Progress.
+                const isCompleted = (o) => (o.completedCount || 0) >= (o.quantity || 0) && (o.quantity || 0) > 0;
+                const inProgressAll = allOrders.filter((o) => !isCompleted(o));
+                const completedAll = allOrders.filter(isCompleted);
+                const sourceList = status === 'completed' ? completedAll : inProgressAll;
+                let activeOrders = sourceList.filter(o => !filter || (o.companyName || '').toLowerCase().includes(filter.toLowerCase()));
                 // Sort
                 activeOrders = [...activeOrders].sort((a, b) => {
                     let va = a[sort.field], vb = b[sort.field];
@@ -1620,7 +1657,7 @@
                     return sort.dir === 'asc' ? String(va||'').localeCompare(String(vb||'')) : String(vb||'').localeCompare(String(va||''));
                 });
                 return `
-                    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px">
+                    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px">
                         <h2 style="font-size:20px;font-weight:700">Tracker</h2>
                         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                             <input type="text" id="tracker-filter" class="input" placeholder="Filter companies..." value="${filter}" style="width:180px;padding:6px 12px;font-size:13px">
@@ -1630,8 +1667,12 @@
                             <button id="copy-all-rows" class="btn btn-secondary btn-sm" style="width:auto">Copy All</button>
                         </div>
                     </div>
+                    <div class="status-tabs" style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border)">
+                        <button class="status-tab ${status === 'in-progress' ? 'active' : ''}" data-status="in-progress">In Progress <span class="status-tab-count">${inProgressAll.length}</span></button>
+                        <button class="status-tab ${status === 'completed' ? 'active' : ''}" data-status="completed">Completed <span class="status-tab-count">${completedAll.length}</span></button>
+                    </div>
                     ${activeOrders.length === 0
-                        ? `<div class="card" style="padding:40px;text-align:center"><p style="color:var(--text-secondary)">${filter ? 'No matching companies.' : 'No active orders. Create an order first.'}</p></div>`
+                        ? `<div class="card" style="padding:40px;text-align:center"><p style="color:var(--text-secondary)">${filter ? 'No matching companies.' : (status === 'completed' ? 'No completed orders yet.' : 'No active orders. Create an order first.')}</p></div>`
                         : `
                     <div class="card" style="padding:0;overflow-x:auto">
                         <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:800px">
