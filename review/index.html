@@ -343,6 +343,11 @@
                 // Tracker state
                 trackerFilter: '',
                 trackerSort: { field: 'companyName', dir: 'asc' },
+                // Client Submissions state
+                _clientSubmissions: [],
+                _clientSubmissionsLoading: false,
+                _clientSubmissionsLoaded: false,
+                _submissionsFilter: { orderId: '', search: '' },
             },
             el: {
                 app: document.getElementById('app'),
@@ -378,7 +383,7 @@
                 if (this.state.userRole === 'employee') {
                     this.state.activeTab = savedTab && ['assignments','reviews','tracker','ai','guide'].includes(savedTab) ? savedTab : 'assignments';
                 } else {
-                    this.state.activeTab = savedTab && ['orders','tracker','reviews','ai','reports','employees','guide'].includes(savedTab) ? savedTab : 'orders';
+                    this.state.activeTab = savedTab && ['orders','tracker','reviews','ai','reports','submissions','employees','guide'].includes(savedTab) ? savedTab : 'orders';
                 }
 
                 this.renderShell();
@@ -393,6 +398,9 @@
                     this.loadOrders();
                     this.loadCompanies();
                     this.loadEmployees();
+                    // Fire-and-forget — populates order-card "Submissions N new" indicators.
+                    // Silent on error so it never breaks existing flows.
+                    this.loadClientSubmissions().catch(() => {});
                 } else {
                     this.loadEmployeeAssignments();
                     this.loadCompanies(); // Load IndexedDB reviews for employee copy/paste
@@ -484,6 +492,7 @@
                         { id: 'reviews', label: 'Review Manager' },
                         { id: 'ai', label: 'AI Generator' },
                         { id: 'reports', label: 'Reports' },
+                        { id: 'submissions', label: 'Client Submissions' },
                         { id: 'employees', label: 'Employees' },
                         { id: 'guide', label: 'Guide' },
                     ]
@@ -552,6 +561,7 @@
                         }
                         break;
                     case 'reports': container.innerHTML = this.renderReports(); this.attachReportListeners(); break;
+                    case 'submissions': container.innerHTML = this.renderClientSubmissions(); this.attachClientSubmissionsListeners(); break;
                     case 'employees': container.innerHTML = this.renderEmployees(); this.attachEmployeeListeners(); break;
                     case 'guide': container.innerHTML = this.renderGuide(); break;
                     case 'assignments': container.innerHTML = this.renderAssignments(); this.attachAssignmentListeners(); break;
@@ -620,12 +630,18 @@
                                     <span style="width:6px;height:6px;border-radius:50%;background:#10B981;display:inline-block"></span>
                                     <span style="font-size:11px;color:var(--text-secondary)">Replacement Active +${o.replacementQty || 0}</span>
                                 </div>` : ''}
+                                ${(() => { const n = (this.state._clientSubmissions || []).filter(s => s.orderId === o.id && s.status === 'new').length; return n > 0 ? `
+                                <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-top:2px">
+                                    <span style="width:6px;height:6px;border-radius:50%;background:#3B82F6;display:inline-block"></span>
+                                    <span style="font-size:11px;color:var(--text-secondary)">Submissions ${n} new</span>
+                                </div>` : ''; })()}
                             </div>
                         </div>
                         <div class="progress-track" style="margin:12px 0"><div class="progress-fill" style="width:${progress}%"></div></div>
                         <div style="display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:12px;margin-top:4px;align-items:center">
                             <button class="order-action-btn copy-tnc-link" data-id="${o.id}" title="Copy TNC link">TNC</button>
                             <button class="order-action-btn copy-track-link" data-id="${o.id}" title="Copy tracking link">Tracking</button>
+                            <button class="order-action-btn copy-submission-link" data-id="${o.id}" title="Copy submission link">Submit</button>
                             <button class="order-action-btn copy-sheet-row" data-id="${o.id}" title="Copy sheet row">Row</button>
                             <span style="flex:1"></span>
                             <button class="order-action-btn view-proofs" data-id="${o.id}">Proofs</button>
@@ -676,6 +692,10 @@
                     const order = this.state.orders.find(o => o.id === id);
                     const token = order?.clientTrackingToken || id;
                     this.copyToClipboard(`${SITE_BASE}/track.html?order=${id}`, 'Tracking link copied!');
+                } else if (btn.classList.contains('copy-submission-link')) {
+                    const order = this.state.orders.find(o => o.id === id);
+                    if (!order?.clientTrackingToken) { this.toast('No client token on this order. Edit the order to generate one.', 'error'); return; }
+                    this.copyToClipboard(`${SITE_BASE}/submit/${id}?token=${order.clientTrackingToken}`, 'Submission link copied!');
                 } else if (btn.classList.contains('copy-sheet-row')) {
                     const o = this.state.orders.find(x => x.id === id);
                     if (o) {
@@ -2291,6 +2311,295 @@
                         this.toast('Failed to clear: ' + err.message, 'error');
                     }
                 });
+            },
+
+            // ═══════════════════════════════════════════════════════
+            // TAB: CLIENT SUBMISSIONS (Admin)
+            // ═══════════════════════════════════════════════════════
+            async loadClientSubmissions() {
+                this.state._clientSubmissionsLoading = true;
+                try {
+                    const token = await auth.currentUser.getIdToken();
+                    const resp = await fetch(`${API_BASE}/client-submissions`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const data = await resp.json();
+                    this.state._clientSubmissions = data.submissions || [];
+                } catch(e) {
+                    this.state._clientSubmissions = [];
+                }
+                this.state._clientSubmissionsLoading = false;
+                this.state._clientSubmissionsLoaded = true;
+                if (this.state.activeTab === 'submissions' || this.state.activeTab === 'orders') this.updateView();
+            },
+
+            renderClientSubmissions() {
+                const subs = this.state._clientSubmissions || [];
+                const filter = this.state._submissionsFilter || { orderId: '', search: '' };
+                const orders = this.state.orders || [];
+                const filtered = subs.filter(s => {
+                    if (filter.orderId && s.orderId !== filter.orderId) return false;
+                    if (filter.search) {
+                        const order = orders.find(o => o.id === s.orderId);
+                        const name = (order?.companyName || '').toLowerCase();
+                        if (!name.includes(filter.search.toLowerCase())) return false;
+                    }
+                    return true;
+                });
+
+                const fmt = (ts) => {
+                    if (!ts) return '—';
+                    const d = ts._seconds ? new Date(ts._seconds * 1000) : (ts.seconds ? new Date(ts.seconds * 1000) : new Date(ts));
+                    if (isNaN(d.getTime())) return '—';
+                    return d.toLocaleString('en-SG', { dateStyle: 'medium', timeStyle: 'short' });
+                };
+                const statusPill = (s) => {
+                    if (s.status === 'new') return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;background:#DBEAFE;color:#1E40AF;font-size:11px;font-weight:600"><span style="width:6px;height:6px;border-radius:50%;background:#3B82F6"></span>NEW</span>`;
+                    if (s.photosDeleted) return `<span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;background:#F3F4F6;color:#6B7280;font-size:11px;font-weight:600">IMPORTED · photos deleted</span>`;
+                    if (s.deleteAfter) {
+                        const sec = s.deleteAfter._seconds || s.deleteAfter.seconds;
+                        const ms = sec ? sec * 1000 : 0;
+                        const hoursLeft = ms ? Math.max(0, Math.round((ms - Date.now()) / 3600000)) : 0;
+                        return `<span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;background:#FEF3C7;color:#92400E;font-size:11px;font-weight:600">IMPORTED · deletes in ${hoursLeft}h</span>`;
+                    }
+                    return `<span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;background:#D1FAE5;color:#065F46;font-size:11px;font-weight:600">IMPORTED · preserved</span>`;
+                };
+
+                const headerRow = `
+                    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px">
+                        <h2 style="font-size:20px;font-weight:700">Client Submissions</h2>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                            <input type="text" id="submissions-search" class="input" placeholder="Filter by company..." value="${(filter.search || '').replace(/"/g,'&quot;')}" style="width:180px;padding:6px 12px;font-size:13px">
+                            <button id="submissions-refresh" class="btn btn-secondary btn-sm" style="width:auto">Refresh</button>
+                        </div>
+                    </div>`;
+
+                if (this.state._clientSubmissionsLoading) {
+                    return headerRow + `<div style="text-align:center;padding:60px"><div class="spinner" style="margin:0 auto 16px"></div><p style="color:var(--text-secondary)">Loading submissions...</p></div>`;
+                }
+                if (filtered.length === 0) {
+                    return headerRow + `<div class="card" style="padding:40px;text-align:center"><p style="color:var(--text-secondary)">${subs.length === 0 ? 'No submissions yet. Share submission links with clients via the order cards.' : 'No matches for this filter.'}</p></div>`;
+                }
+
+                return headerRow + `
+                <div class="card" style="padding:0;overflow-x:auto">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:720px">
+                        <thead>
+                            <tr style="background:var(--bg-secondary);border-bottom:2px solid var(--border)">
+                                <th style="padding:10px 12px;text-align:left;font-weight:600">Company</th>
+                                <th style="padding:10px 12px;text-align:left;font-weight:600;white-space:nowrap">Submitted</th>
+                                <th style="padding:10px 8px;text-align:center;font-weight:600">Reviews</th>
+                                <th style="padding:10px 8px;text-align:center;font-weight:600">Photos</th>
+                                <th style="padding:10px 12px;text-align:left;font-weight:600">Status</th>
+                                <th style="padding:10px 12px;text-align:right;font-weight:600">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${filtered.map(s => {
+                                const order = orders.find(o => o.id === s.orderId);
+                                const company = order?.companyName || `Order ${s.orderId.slice(0, 6)}…`;
+                                const isImported = s.status === 'imported';
+                                const canCancel = isImported && !!s.deleteAfter && !s.photosDeleted;
+                                return `
+                                <tr style="border-bottom:1px solid var(--border)" data-sub-id="${s.id}">
+                                    <td style="padding:10px 12px;font-weight:500">${(company || '').replace(/</g,'&lt;')}</td>
+                                    <td style="padding:10px 12px;color:var(--text-secondary);white-space:nowrap">${fmt(s.submittedAt)}</td>
+                                    <td style="padding:10px 8px;text-align:center;font-weight:600">${s.reviewCount || 0}</td>
+                                    <td style="padding:10px 8px;text-align:center;color:${s.photoCount > 0 ? 'var(--text)' : 'var(--text-secondary)'}">${s.photoCount || 0}</td>
+                                    <td style="padding:10px 12px">${statusPill(s)}</td>
+                                    <td style="padding:10px 12px;text-align:right">
+                                        <div style="display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
+                                            <button class="btn btn-secondary btn-sm sub-view" data-id="${s.id}" style="width:auto;padding:4px 10px;font-size:11px">View</button>
+                                            ${!isImported ? `<button class="btn btn-primary btn-sm sub-import" data-id="${s.id}" style="width:auto;padding:4px 10px;font-size:11px">Import</button>` : ''}
+                                            ${canCancel ? `<button class="btn btn-secondary btn-sm sub-cancel-deletion" data-id="${s.id}" style="width:auto;padding:4px 10px;font-size:11px">Keep Photos</button>` : ''}
+                                            <button class="btn btn-secondary btn-sm sub-delete" data-id="${s.id}" style="width:auto;padding:4px 10px;font-size:11px;color:var(--error)">Delete</button>
+                                        </div>
+                                    </td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>`;
+            },
+
+            attachClientSubmissionsListeners() {
+                if (!this.state._clientSubmissionsLoaded && !this.state._clientSubmissionsLoading) {
+                    this.loadClientSubmissions();
+                }
+                document.getElementById('submissions-refresh')?.addEventListener('click', () => {
+                    this.state._clientSubmissionsLoaded = false;
+                    this.loadClientSubmissions();
+                });
+                document.getElementById('submissions-search')?.addEventListener('input', e => {
+                    this.state._submissionsFilter.search = e.target.value;
+                    clearTimeout(this._subsFilterTimer);
+                    this._subsFilterTimer = setTimeout(() => this.updateView(), 250);
+                });
+                document.querySelectorAll('.sub-view').forEach(btn => {
+                    btn.addEventListener('click', () => this.showSubmissionViewModal(btn.dataset.id));
+                });
+                document.querySelectorAll('.sub-import').forEach(btn => {
+                    btn.addEventListener('click', () => this.showSubmissionImportModal(btn.dataset.id));
+                });
+                document.querySelectorAll('.sub-cancel-deletion').forEach(btn => {
+                    btn.addEventListener('click', () => this.cancelSubmissionDeletion(btn.dataset.id));
+                });
+                document.querySelectorAll('.sub-delete').forEach(btn => {
+                    btn.addEventListener('click', () => this.showSubmissionDeleteModal(btn.dataset.id));
+                });
+            },
+
+            showSubmissionViewModal(subId) {
+                const sub = (this.state._clientSubmissions || []).find(s => s.id === subId);
+                if (!sub) return;
+                const order = (this.state.orders || []).find(o => o.id === sub.orderId);
+                const company = order?.companyName || `Order ${sub.orderId.slice(0, 8)}…`;
+                const escAttr = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+                const reviewsHtml = (sub.reviews || []).map((r, i) => {
+                    const photos = (r.imageDataUrls || []).map(u => `
+                        <div style="position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
+                            <img src="${escAttr(u)}" style="width:100%;height:120px;object-fit:cover;display:block;cursor:pointer" onclick="window.open('${escAttr(u)}','_blank')" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<div style=&quot;height:120px;display:flex;align-items:center;justify-content:center;background:#F3F4F6;color:#9CA3AF;font-size:12px&quot;>image deleted</div>')">
+                        </div>
+                    `).join('');
+                    return `
+                        <div style="background:#F8F9FA;border-radius:10px;padding:14px;margin-bottom:10px">
+                            <p style="font-size:11px;color:var(--text-secondary);font-weight:600;margin-bottom:6px">Review #${i + 1}</p>
+                            <p style="font-size:13px;line-height:1.5;white-space:pre-wrap;margin-bottom:${(r.imageDataUrls || []).length > 0 ? '10px' : '0'}">${escAttr(r.text)}</p>
+                            ${(r.imageDataUrls || []).length > 0 ? `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px">${photos}</div>` : ''}
+                        </div>`;
+                }).join('');
+                this.el.modal.innerHTML = `
+                    <div class="modal-overlay" id="sub-view-modal">
+                        <div class="modal-content" style="max-width:680px;max-height:85vh;overflow-y:auto">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                                <div>
+                                    <h2 style="font-size:18px;font-weight:700">Submission from ${escAttr(company)}</h2>
+                                    <p style="font-size:12px;color:var(--text-secondary)">${(sub.reviews || []).length} reviews · ${sub.photoCount || 0} photos</p>
+                                </div>
+                                <button id="sub-view-close" class="btn btn-secondary btn-sm" style="width:auto">Close</button>
+                            </div>
+                            ${reviewsHtml || '<p style="color:var(--text-secondary);text-align:center;padding:40px">No reviews in this submission.</p>'}
+                        </div>
+                    </div>`;
+                document.getElementById('sub-view-close').onclick = () => this.el.modal.innerHTML = '';
+                document.getElementById('sub-view-modal').onclick = e => { if (e.target.id === 'sub-view-modal') this.el.modal.innerHTML = ''; };
+            },
+
+            showSubmissionImportModal(subId) {
+                const sub = (this.state._clientSubmissions || []).find(s => s.id === subId);
+                if (!sub) return;
+                const reviewCount = (sub.reviews || []).length;
+                this.el.modal.innerHTML = `
+                    <div class="modal-overlay" id="sub-import-modal">
+                        <div class="modal-content" style="max-width:480px">
+                            <h2 style="font-size:20px;font-weight:700;margin-bottom:8px">Import these ${reviewCount} reviews?</h2>
+                            <p style="font-size:14px;color:var(--text-secondary);margin-bottom:20px">Reviews will be added to your Review Manager queue. Photos will be auto-deleted from storage <strong>in 24 hours</strong> unless you click <strong>Keep Photos</strong> on this row.</p>
+                            <div style="display:flex;gap:12px;justify-content:flex-end">
+                                <button id="sub-import-cancel" class="btn btn-secondary" style="width:auto">Cancel</button>
+                                <button id="sub-import-confirm" class="btn btn-primary" style="width:auto">Confirm Import</button>
+                            </div>
+                        </div>
+                    </div>`;
+                document.getElementById('sub-import-cancel').onclick = () => this.el.modal.innerHTML = '';
+                document.getElementById('sub-import-modal').onclick = e => { if (e.target.id === 'sub-import-modal') this.el.modal.innerHTML = ''; };
+                document.getElementById('sub-import-confirm').onclick = () => this.importSubmission(subId);
+            },
+
+            async importSubmission(subId) {
+                const sub = (this.state._clientSubmissions || []).find(s => s.id === subId);
+                if (!sub) return;
+                const confirmBtn = document.getElementById('sub-import-confirm');
+                if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Importing...'; }
+                try {
+                    const token = await auth.currentUser.getIdToken();
+                    const resp = await fetch(`${API_BASE}/client-submission/${subId}/import`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok || !data.submission) throw new Error(data.error || 'Import failed');
+
+                    const order = (this.state.orders || []).find(o => o.id === sub.orderId);
+                    const derivedId = `comp_sub_${sub.orderId}`; // Stable per-order id — enables append-merge across multiple submissions
+                    const newReviews = (data.submission.reviews || []).map(r => ({
+                        text: r.text,
+                        status: 'undone',
+                        requiresImage: !!r.requiresImage,
+                        imageDataUrls: r.imageDataUrls || []
+                    }));
+
+                    const existing = await IDB.get(derivedId);
+                    const record = existing
+                        ? { ...existing, reviewLink: existing.reviewLink || data.submission.link || (order?.reviewLink || ''), reviews: [...(existing.reviews || []), ...newReviews] }
+                        : { id: derivedId, name: order?.companyName || `Order ${sub.orderId.slice(0,8)}`, reviewLink: data.submission.link || (order?.reviewLink || ''), reviews: newReviews };
+
+                    await IDB.put(record);
+                    this.state.companies = await IDB.getAll();
+                    this.state.activeCompanyId = derivedId;
+
+                    // Force refresh of submissions list
+                    this.state._clientSubmissionsLoaded = false;
+                    this.toast(`Imported ${newReviews.length} reviews into Review Manager.`, 'success');
+                    this.el.modal.innerHTML = '';
+                    this.state.activeTab = 'reviews';
+                    localStorage.setItem('activeTab', 'reviews');
+                    this.renderShell();
+                    this.loadClientSubmissions().catch(() => {});
+                } catch(err) {
+                    this.toast(err.message || 'Import failed', 'error');
+                    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Confirm Import'; }
+                }
+            },
+
+            async cancelSubmissionDeletion(subId) {
+                try {
+                    const token = await auth.currentUser.getIdToken();
+                    const resp = await fetch(`${API_BASE}/client-submission/${subId}/cancel-deletion`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (!resp.ok) throw new Error('Failed to cancel deletion');
+                    this.toast('Photos preserved indefinitely.', 'success');
+                    this.state._clientSubmissionsLoaded = false;
+                    this.loadClientSubmissions();
+                } catch(err) {
+                    this.toast(err.message, 'error');
+                }
+            },
+
+            showSubmissionDeleteModal(subId) {
+                this.el.modal.innerHTML = `
+                    <div class="modal-overlay" id="sub-del-modal">
+                        <div class="modal-content" style="max-width:480px">
+                            <h2 style="font-size:20px;font-weight:700;margin-bottom:8px">Delete this submission?</h2>
+                            <p style="font-size:14px;color:var(--text-secondary);margin-bottom:20px">This permanently deletes the submission record and all uploaded photos. This cannot be undone. Reviews already imported into Review Manager are not affected.</p>
+                            <div style="display:flex;gap:12px;justify-content:flex-end">
+                                <button id="sub-del-cancel" class="btn btn-secondary" style="width:auto">Cancel</button>
+                                <button id="sub-del-confirm" class="btn btn-primary" style="width:auto;background:var(--error)">Delete</button>
+                            </div>
+                        </div>
+                    </div>`;
+                document.getElementById('sub-del-cancel').onclick = () => this.el.modal.innerHTML = '';
+                document.getElementById('sub-del-modal').onclick = e => { if (e.target.id === 'sub-del-modal') this.el.modal.innerHTML = ''; };
+                document.getElementById('sub-del-confirm').onclick = async () => {
+                    const btn = document.getElementById('sub-del-confirm');
+                    btn.disabled = true; btn.textContent = 'Deleting...';
+                    try {
+                        const token = await auth.currentUser.getIdToken();
+                        const resp = await fetch(`${API_BASE}/client-submission/${subId}/delete`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (!resp.ok) throw new Error('Delete failed');
+                        this.toast('Submission deleted.', 'success');
+                        this.el.modal.innerHTML = '';
+                        this.state._clientSubmissionsLoaded = false;
+                        this.loadClientSubmissions();
+                    } catch(err) {
+                        this.toast(err.message, 'error');
+                        btn.disabled = false; btn.textContent = 'Delete';
+                    }
+                };
             },
 
             // ── Add Company Modal (Manual - no Google Places) ──
