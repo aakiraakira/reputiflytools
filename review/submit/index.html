@@ -434,7 +434,54 @@
         aiGenerating: false,
         aiLoopTimer: null,
         aiCountdownTimer: null,
+        placeId: null,
     };
+
+    // Lazy-load the Google Maps JS SDK only when AI generation is requested. The existing
+    // referer-restricted Maps API key works for client-side calls on this origin (it's
+    // whitelisted for reputifly.org and review-automation-dash.web.app). Server-side calls
+    // would require a separate unrestricted key.
+    const MAPS_API_KEY = 'AIzaSyBXdjRQZJd9ySH5mxql4tlXCEVpDH9GGbI';
+    let _mapsSdkPromise = null;
+    function loadMapsSdk() {
+        if (_mapsSdkPromise) return _mapsSdkPromise;
+        if (window.google?.maps?.places) return Promise.resolve();
+        _mapsSdkPromise = new Promise((resolve, reject) => {
+            const cb = '__submitMapsCb_' + Date.now();
+            window[cb] = () => { try { delete window[cb]; } catch(_){} resolve(); };
+            const script = document.createElement('script');
+            script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_API_KEY}&libraries=places&callback=${cb}`;
+            script.async = true; script.defer = true;
+            script.onerror = () => reject(new Error('Maps SDK failed to load'));
+            document.head.appendChild(script);
+            // Safety timeout — Maps SDK rarely takes more than 5s
+            setTimeout(() => reject(new Error('Maps SDK timeout')), 12000);
+        });
+        return _mapsSdkPromise;
+    }
+
+    async function fetchPlaceDetailsClientSide(placeId) {
+        await loadMapsSdk();
+        const div = document.createElement('div');
+        const service = new google.maps.places.PlacesService(div);
+        return new Promise((resolve, reject) => {
+            service.getDetails({
+                placeId,
+                fields: ['name', 'rating', 'reviews', 'user_ratings_total'],
+            }, (place, status) => {
+                if (status !== google.maps.places.PlacesServiceStatus.OK) {
+                    reject(new Error('Places: ' + status));
+                    return;
+                }
+                resolve({
+                    name: place.name || '',
+                    rating: place.rating || null,
+                    reviews: place.reviews || [],
+                    userRatingsTotal: place.user_ratings_total || 0,
+                });
+            });
+        });
+    }
 
     // ── IndexedDB (separate DB from admin's ReviewDashboard to avoid collision) ──
     const SubmissionIDB = {
@@ -836,10 +883,36 @@
         const startedAt = Date.now();
 
         try {
+            // Fetch real Google reviews client-side via Maps JS SDK to use as authentic context.
+            // This is wrapped in try/catch so a Maps SDK failure (network, ad-blocker) doesn't
+            // block generation — the server falls back to a generic prompt in that case.
+            let context = '';
+            try {
+                if (state.placeId) {
+                    const place = await fetchPlaceDetailsClientSide(state.placeId);
+                    if (!place.reviews || place.reviews.length === 0) {
+                        // Surface the no-reviews error specifically, since AI quality depends on having real ones.
+                        stopAiLoadingMessages();
+                        state.aiGenerating = false;
+                        document.getElementById('ai-error-msg').textContent = 'Your Google profile has no reviews yet — AI needs at least one existing review to learn from.';
+                        aiShow('ai-error');
+                        return;
+                    }
+                    const snippets = place.reviews
+                        .slice(0, 5)
+                        .map((r) => `- (${r.rating}★) "${String(r.text || '').replace(/\s+/g, ' ').trim().slice(0, 240)}"`)
+                        .join('\n');
+                    context = `Real recent customer reviews of ${place.name || state.companyName} (${place.userRatingsTotal} total):\n${snippets}`;
+                }
+            } catch (placeErr) {
+                console.warn('Place details fetch failed; falling back to generic context:', placeErr);
+                // Continue without context — server uses a generic prompt
+            }
+
             const resp = await fetch(`${API_BASE}/client-generate-reviews`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orderId: state.orderId, token: state.token }),
+                body: JSON.stringify({ orderId: state.orderId, token: state.token, context }),
             });
             const data = await resp.json();
 
@@ -1055,6 +1128,7 @@
         state.tncSigned = order.tncSigned === true;
         state.delivered = (parseInt(order.completedCount) || 0) >= (parseInt(order.quantity) || 0) && (parseInt(order.quantity) || 0) > 0;
         state.aiInfo = order.ai || null;
+        state.placeId = order.placeId || null;
 
         // Submissions are open from the moment TNC is signed — same link works for
         // initial review content AND replacement content after delivery.
