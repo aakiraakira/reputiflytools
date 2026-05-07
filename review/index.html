@@ -515,6 +515,9 @@
                     const snap = await db.collection('users').where('role', '==', 'employee').get();
                     this.state.employees = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                 } catch(e) { this.state.employees = []; }
+                // Re-render so the Employees tab + per-order assigned-to badges reflect fresh data.
+                // Mirrors the pattern in loadOrders/loadCompanies which also call updateView().
+                this.updateView();
             },
 
             // SGT-formatted YYYY-MM-DD — must match how /assign writes dailyAssignment[uid].date.
@@ -893,9 +896,11 @@
                 }
             },
 
-            showAssignModal(orderId) {
+            async showAssignModal(orderId) {
                 const order = this.state.orders.find(o => o.id === orderId);
                 if (!order) return;
+                // Refresh employees so newly-created ones appear in the dropdown immediately.
+                await this.loadEmployees();
                 this.el.modal.innerHTML = `
                     <div class="modal-overlay" id="assign-modal">
                         <div class="modal-content" style="max-width:480px">
@@ -2054,8 +2059,10 @@
                 }
             },
 
-            showBulkAssignModal(orderIds) {
+            async showBulkAssignModal(orderIds) {
                 const companies = orderIds.map(id => this.state.orders.find(o => o.id === id)).filter(Boolean);
+                // Refresh employees so newly-created ones appear in the dropdown.
+                await this.loadEmployees();
                 this.el.modal.innerHTML = `
                     <div class="modal-overlay" id="bulk-assign-modal">
                         <div class="modal-content" style="max-width:520px">
@@ -2137,12 +2144,14 @@
             },
 
             async showQuickAssignModal() {
+                // Refresh employees so the dropdown reflects newly-created ones immediately.
+                await this.loadEmployees();
                 // Force fresh server fetch (bypass client cache)
                 this.toast('Loading fresh data...', 'info');
                 const freshSnap = await db.collection('orders').get({ source: 'server' });
                 const freshData = freshSnap.docs.map(d => ({ id: d.id, ...d.data() }));
                 this.state.orders = freshData; // Update state with fresh data
-                const today = new Date().toISOString().split('T')[0];
+                const today = this.todayStr(); // SGT — single source of truth, matches /assign endpoint
                 // Show ALL active orders (even 0 remaining, so user can clean up stale assignments)
                 const activeOrders = freshData
                     .filter(o => o.status !== 'completed')
@@ -2180,7 +2189,7 @@
                             </div>
 
                             <div id="qa-helper" style="display:none;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:13px;color:#1E40AF">
-                                <strong id="qa-current-count">0</strong> companies currently assigned. Tick to add, untick to remove, then press Save.
+                                <strong id="qa-current-count">0</strong> companies currently assigned to this employee. Tick to assign, untick to remove. Daily count refreshes on Save.
                                 <button type="button" id="qa-clear-all" style="float:right;background:none;border:none;color:#DC2626;font-weight:600;cursor:pointer;font-size:12px;padding:0">Clear All</button>
                             </div>
 
@@ -2239,9 +2248,12 @@
                     }
                 };
 
-                // Source of truth: dailyAssignment[empUid].date === today
-                // Ticked = company is in employee's TODAY list
-                // Unticked companies that were previously assigned get cleaned up on save
+                // Tickbox source of truth: assignedEmployees.includes(empUid). Today's count
+                // shows in the count input + a "✓ today" green pill if the order is in TODAY's
+                // daily assignment for this employee. Previously-assigned-but-not-today rows show
+                // a grey "previously assigned" pill — admin must explicitly untick to remove them.
+                // This fixes the destructive default where opening the modal + saving without
+                // changes would scrub stale `dailyAssignment` entries.
                 const refreshCheckboxes = async () => {
                     const empUid = document.getElementById('qa-employee').value;
                     if (!empUid) {
@@ -2268,34 +2280,38 @@
                         }
                     });
 
-                    console.log('[ManageAssignments] Employee UID:', empUid, '| Today:', today);
-
                     let currentCount = 0;
                     document.querySelectorAll('.qa-check').forEach(cb => {
                         const orderId = cb.dataset.id;
                         const order = activeOrders.find(o => o.id === orderId);
-                        const assignment = order?.dailyAssignment?.[empUid];
-                        // TICK ONLY if assigned TODAY (using dailyAssignment.date === today)
-                        const isAssignedToday = assignment?.date === today;
+                        const isAssigned = (order?.assignedEmployees || []).includes(empUid);
+                        const todayAssignment = order?.dailyAssignment?.[empUid];
+                        const isAssignedToday = todayAssignment?.date === today;
                         const statusEl = document.querySelector(`.qa-status[data-id="${orderId}"]`);
                         const countInput = document.querySelector(`.qa-count[data-id="${orderId}"]`);
 
-                        if (isAssignedToday) {
-                            console.log(`  ✓ ${order.companyName} — today, count: ${assignment.count}`);
+                        if (isAssigned) {
                             cb.checked = true;
                             currentCount++;
-                            if (countInput) countInput.value = assignment.count;
+                            // Count input: today's saved count if assigned today, else default daily target.
+                            if (countInput) countInput.value = isAssignedToday
+                                ? (todayAssignment.count || order.dailyTarget || 5)
+                                : (order.dailyTarget || 5);
                             if (statusEl) {
                                 statusEl.style.display = '';
-                                statusEl.textContent = '✓ today';
-                                statusEl.style.color = '#10B981';
+                                if (isAssignedToday) {
+                                    statusEl.textContent = '✓ today';
+                                    statusEl.style.color = '#10B981';
+                                } else {
+                                    statusEl.textContent = 'previously assigned';
+                                    statusEl.style.color = '#6B7280';
+                                }
                             }
                         } else {
                             cb.checked = false;
                             if (statusEl) statusEl.style.display = 'none';
                         }
                     });
-                    console.log(`[ManageAssignments] Total ticked today: ${currentCount}`);
                     document.getElementById('qa-helper').style.display = '';
                     document.getElementById('qa-current-count').textContent = currentCount;
                     updateTotal();
@@ -2983,7 +2999,7 @@
             renderAssignments() {
                 const { ordersLoading } = this.state;
                 const uid = this.state.user?.uid;
-                const today = new Date().toISOString().split('T')[0];
+                const today = this.todayStr(); // SGT — single source of truth, matches /assign endpoint
                 const taskView = this.state._taskView || 'today';
 
                 // Split into today's assignments vs others
@@ -3016,7 +3032,7 @@
                                 const myAssignment = o.dailyAssignment?.[this.state.user?.uid];
                                 const assignedToday = myAssignment?.count || 0;
                                 const assignedDate = myAssignment?.date || '';
-                                const today = new Date().toISOString().split('T')[0];
+                                const today = this.todayStr(); // SGT — matches /assign endpoint
                                 const isCurrentAssignment = assignedDate === today;
                                 return `
                                 <div class="card" style="padding:20px">
