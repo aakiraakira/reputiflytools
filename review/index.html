@@ -146,29 +146,46 @@
         }
         .kebab-btn:hover { background: var(--bg-secondary); color: var(--text); border-color: var(--border); }
         .kebab-btn.is-open { background: var(--bg-secondary); border-color: var(--border); color: var(--text); }
-        .action-popover {
-            position: absolute; z-index: 1000; min-width: 220px; max-width: 280px;
-            background: #FFFFFF; border: 1px solid var(--border); border-radius: 12px;
-            box-shadow: 0 12px 32px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06);
-            padding: 6px; opacity: 0; transform: translateY(-4px) scale(0.98);
-            transition: opacity 0.12s ease, transform 0.12s ease;
-            pointer-events: none;
+        /* Centered action menu — modal-style overlay (works on desktop + mobile) */
+        .action-popover-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(4px);
+            z-index: 9999; display: flex; align-items: center; justify-content: center;
+            padding: 16px; opacity: 0; transition: opacity 0.15s ease;
         }
-        .action-popover.show { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+        .action-popover-overlay.show { opacity: 1; }
+        .action-popover {
+            background: #FFFFFF; border: 1px solid var(--border); border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.08);
+            padding: 10px; width: 100%; max-width: 360px; max-height: 80vh; overflow-y: auto;
+            transform: scale(0.96); transition: transform 0.15s ease;
+        }
+        .action-popover-overlay.show .action-popover { transform: scale(1); }
+        .action-popover-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 6px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 8px;
+        }
+        .action-popover-title { font-size: 14px; font-weight: 700; color: var(--text); }
+        .action-popover-close {
+            background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer;
+            color: var(--text-secondary); padding: 4px 8px; border-radius: 6px;
+            font-family: inherit; transition: all 0.15s;
+        }
+        .action-popover-close:hover { background: var(--bg-secondary); color: var(--text); }
         .action-popover-item {
             display: flex; align-items: center; gap: 10px; width: 100%;
-            padding: 10px 12px; border: none; background: none; cursor: pointer;
-            font-family: inherit; font-size: 13px; font-weight: 500; color: var(--text);
-            text-align: left; border-radius: 8px; transition: background 0.1s;
+            padding: 14px 14px; border: none; background: none; cursor: pointer;
+            font-family: inherit; font-size: 14px; font-weight: 500; color: var(--text);
+            text-align: left; border-radius: 10px; transition: background 0.1s;
+            min-height: 44px; /* WCAG touch target */
         }
         .action-popover-item:hover { background: var(--bg-secondary); }
         .action-popover-item.danger { color: var(--error); }
         .action-popover-item.danger:hover { background: #FEE2E2; }
         .action-popover-item:disabled { color: var(--text-secondary); opacity: 0.5; cursor: not-allowed; }
-        .action-popover-divider { height: 1px; background: var(--border); margin: 6px 4px; }
+        .action-popover-divider { height: 1px; background: var(--border); margin: 8px 6px; }
         .action-popover-section-label {
             font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
-            color: var(--text-secondary); padding: 8px 12px 4px;
+            color: var(--text-secondary); padding: 10px 14px 6px;
         }
 
         /* Mobile optimizations */
@@ -3358,25 +3375,36 @@
                 this.copyToClipboard(row, 'Sheet Row Copied!');
             },
 
-            _showActionPopover(anchorEl, items) {
+            _showActionPopover(anchorEl, items, titleText) {
                 this._hideActionPopover();
-                const pop = document.createElement('div');
-                pop.className = 'action-popover';
-                pop.id = '_action-popover';
-                pop.innerHTML = items.map(it => {
-                    if (it.divider) return '<div class="action-popover-divider"></div>';
-                    if (it.section) return `<div class="action-popover-section-label">${it.section}</div>`;
-                    const cls = ['action-popover-item'];
-                    if (it.danger) cls.push('danger');
-                    const disabled = it.disabled ? 'disabled' : '';
-                    return `<button type="button" class="${cls.join(' ')}" ${disabled}>${it.label}</button>`;
-                }).join('');
-                document.body.appendChild(pop);
-                anchorEl.classList.add('is-open');
+                const overlay = document.createElement('div');
+                overlay.className = 'action-popover-overlay';
+                overlay.id = '_action-popover-overlay';
+                const title = titleText || (anchorEl.closest('[data-order-id]')
+                    ? (this.state.orders.find(o => o.id === anchorEl.closest('[data-order-id]').dataset.orderId)?.companyName || 'Actions')
+                    : 'Actions');
+                overlay.innerHTML = `
+                    <div class="action-popover" role="dialog" aria-modal="true">
+                        <div class="action-popover-header">
+                            <span class="action-popover-title">${title}</span>
+                            <button type="button" class="action-popover-close" aria-label="Close">&times;</button>
+                        </div>
+                        ${items.map(it => {
+                            if (it.divider) return '<div class="action-popover-divider"></div>';
+                            if (it.section) return `<div class="action-popover-section-label">${it.section}</div>`;
+                            const cls = ['action-popover-item'];
+                            if (it.danger) cls.push('danger');
+                            const disabled = it.disabled ? 'disabled' : '';
+                            return `<button type="button" class="${cls.join(' ')}" ${disabled}>${it.label}</button>`;
+                        }).join('')}
+                    </div>`;
+                document.body.appendChild(overlay);
+                if (anchorEl) anchorEl.classList.add('is-open');
+                this._popoverAnchor = anchorEl;
 
                 // Wire item clicks (clickable[] and DOM buttons map 1:1 in source order).
                 const clickable = items.filter(it => !it.divider && !it.section);
-                pop.querySelectorAll('.action-popover-item').forEach((btn, i) => {
+                overlay.querySelectorAll('.action-popover-item').forEach((btn, i) => {
                     btn.addEventListener('click', e => {
                         e.stopPropagation();
                         if (btn.disabled) return;
@@ -3386,49 +3414,28 @@
                     });
                 });
 
-                // Position relative to anchor
-                const r = anchorEl.getBoundingClientRect();
-                const vw = window.innerWidth, vh = window.innerHeight;
-                pop.style.visibility = 'hidden'; // measure first
-                requestAnimationFrame(() => {
-                    const pw = pop.offsetWidth, ph = pop.offsetHeight;
-                    let left = r.right - pw;
-                    if (left < 8) left = 8;
-                    if (left + pw > vw - 8) left = vw - pw - 8;
-                    let top = r.bottom + 6;
-                    if (top + ph > vh - 8) top = r.top - ph - 6; // flip up
-                    pop.style.left = (left + window.scrollX) + 'px';
-                    pop.style.top = (top + window.scrollY) + 'px';
-                    pop.style.visibility = 'visible';
-                    pop.classList.add('show');
-                });
-
-                // Outside-click + ESC + scroll handlers (one-shot)
-                this._popoverOutside = (e) => {
-                    if (pop.contains(e.target) || anchorEl.contains(e.target)) return;
-                    this._hideActionPopover();
-                };
+                // Backdrop click + close button + ESC
+                overlay.addEventListener('click', e => { if (e.target === overlay) this._hideActionPopover(); });
+                overlay.querySelector('.action-popover-close').addEventListener('click', () => this._hideActionPopover());
                 this._popoverEsc = (e) => { if (e.key === 'Escape') this._hideActionPopover(); };
-                this._popoverScroll = () => this._hideActionPopover();
-                this._popoverAnchor = anchorEl;
-                setTimeout(() => {
-                    document.addEventListener('click', this._popoverOutside, true);
-                    document.addEventListener('keydown', this._popoverEsc);
-                    window.addEventListener('scroll', this._popoverScroll, true);
-                    window.addEventListener('resize', this._popoverScroll);
-                }, 0);
+                document.addEventListener('keydown', this._popoverEsc);
+
+                // Lock background scroll while modal is open
+                this._prevBodyOverflow = document.body.style.overflow;
+                document.body.style.overflow = 'hidden';
+
+                // Animate in
+                requestAnimationFrame(() => overlay.classList.add('show'));
             },
 
             _hideActionPopover() {
-                const pop = document.getElementById('_action-popover');
-                if (pop) pop.remove();
+                const overlay = document.getElementById('_action-popover-overlay');
+                if (overlay) overlay.remove();
                 if (this._popoverAnchor) { this._popoverAnchor.classList.remove('is-open'); this._popoverAnchor = null; }
-                if (this._popoverOutside) { document.removeEventListener('click', this._popoverOutside, true); this._popoverOutside = null; }
                 if (this._popoverEsc) { document.removeEventListener('keydown', this._popoverEsc); this._popoverEsc = null; }
-                if (this._popoverScroll) {
-                    window.removeEventListener('scroll', this._popoverScroll, true);
-                    window.removeEventListener('resize', this._popoverScroll);
-                    this._popoverScroll = null;
+                if (this._prevBodyOverflow !== undefined) {
+                    document.body.style.overflow = this._prevBodyOverflow;
+                    this._prevBodyOverflow = undefined;
                 }
             },
 
