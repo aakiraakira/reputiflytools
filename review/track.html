@@ -111,15 +111,35 @@
                 </div>
             </div>
 
-            <!-- Proof Gallery -->
+            <!-- Replacement Status -->
+            <div id="replacement-status-card" class="card">
+                <div style="display:flex;align-items:center;gap:12px">
+                    <div id="repl-icon" style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0"></div>
+                    <div>
+                        <p id="repl-status-title" style="font-weight:600;font-size:15px"></p>
+                        <p id="repl-status-sub" style="font-size:13px;color:#6B7280"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Original Delivery Gallery (legacy flat grid) -->
             <div class="card">
                 <div style="display:flex;justify-content:space-between;align-items:center">
-                    <h3 style="font-size:16px;font-weight:600">Review Screenshots</h3>
-                    <span id="proof-count" style="font-size:13px;color:#6B7280"></span>
+                    <h3 style="font-size:16px;font-weight:600">Original Delivery</h3>
+                    <span id="proof-count-orig" style="font-size:13px;color:#6B7280"></span>
                 </div>
-                <div id="proof-gallery" class="proof-grid">
+                <div id="proof-gallery-orig" class="proof-grid">
                     <p style="color:#6B7280;font-size:14px;grid-column:1/-1;text-align:center;padding:24px 0">No screenshots uploaded yet.</p>
                 </div>
+            </div>
+
+            <!-- Replacement Gallery (date-grouped, only shown when activated) -->
+            <div id="replacement-gallery-card" class="card hidden">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                    <h3 style="font-size:16px;font-weight:600">Replacement</h3>
+                    <span id="proof-count-rep" style="font-size:13px;color:#6B7280"></span>
+                </div>
+                <div id="proof-gallery-rep"></div>
             </div>
         </div>
     </div>
@@ -137,6 +157,13 @@
         appId: "1:868503238911:web:ecc55148b2edc56fca34ca"
     });
     const db = firebase.firestore();
+    let currentOrder = null;
+    let lastProofs = null;
+
+    // Defensive: escape strings before injecting into HTML attributes (defense-in-depth for proof URLs).
+    const escAttr = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[c]);
 
     (async () => {
         const params = new URLSearchParams(location.search);
@@ -168,7 +195,8 @@
             db.collection('orders').doc(orderId).collection('proofs')
                 .orderBy('uploadedAt', 'desc')
                 .onSnapshot(snap => {
-                    renderProofs(snap.docs.map(d => d.data()));
+                    lastProofs = snap.docs.map(d => d.data());
+                    renderProofs(lastProofs);
                 });
 
         } catch(err) {
@@ -178,6 +206,7 @@
     })();
 
     function renderOrder(o) {
+        currentOrder = o;
         document.getElementById('track-company').textContent = o.companyName || 'Order';
         const completed = o.completedCount || 0;
         const total = o.quantity || 0;
@@ -212,6 +241,37 @@
             tncTitle.textContent = 'Terms & Conditions Pending';
             tncSub.textContent = 'Please sign the agreement to proceed.';
         }
+
+        // Replacement status
+        const replIcon = document.getElementById('repl-icon');
+        const replTitle = document.getElementById('repl-status-title');
+        const replSub = document.getElementById('repl-status-sub');
+        const isActive = o.replacementActivated === true;
+        const replN = o.replacementQty || (isActive ? 0 : Math.round((o.quantity || 0) * 0.3));
+        const origQ = o.originalQuantity || (isActive ? ((o.quantity || 0) - replN) : (o.quantity || 0));
+        const isDelivered = origQ > 0 && completed >= origQ;
+        const isEligible = isDelivered && origQ >= 10 && !isActive;
+        if (isActive) {
+            const ts = o.replacementActivatedAt?.toDate ? o.replacementActivatedAt.toDate() : null;
+            const dateStr = ts ? ts.toLocaleDateString('en-SG', { dateStyle: 'medium' }) : '';
+            replIcon.style.background = '#D1FAE5';
+            replIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+            replTitle.textContent = `Replacement Active — +${replN} reviews`;
+            replSub.textContent = dateStr ? `Activated on ${dateStr}` : 'Activated';
+        } else if (isEligible) {
+            replIcon.style.background = '#FEF3C7';
+            replIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-6.219-8.56"></path><polyline points="21 4 21 12 13 12"></polyline></svg>';
+            replTitle.textContent = `Replacement Available — +${replN} reviews`;
+            replSub.textContent = 'Open your TNC link to activate.';
+        } else {
+            replIcon.style.background = '#F3F4F6';
+            replIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>';
+            replTitle.textContent = 'Replacement Coverage';
+            replSub.textContent = 'Available once your order is fully delivered.';
+        }
+
+        // Re-render proofs whenever order changes (replacement activation re-splits the gallery).
+        if (lastProofs !== null) renderProofs(lastProofs);
     }
 
     function loadProofs(orderId) {
@@ -219,18 +279,87 @@
     }
 
     function renderProofs(proofs) {
-        const gallery = document.getElementById('proof-gallery');
-        const count = document.getElementById('proof-count');
-        count.textContent = `${proofs.length} screenshot${proofs.length !== 1 ? 's' : ''}`;
+        const o = currentOrder || {};
+        const isActive = o.replacementActivated === true;
+        const activationTs = o.replacementActivatedAt?.toDate ? o.replacementActivatedAt.toDate().getTime() : null;
 
-        if (proofs.length === 0) {
-            gallery.innerHTML = '<p style="color:#6B7280;font-size:14px;grid-column:1/-1;text-align:center;padding:24px 0">No screenshots uploaded yet.</p>';
-            return;
+        const orig = [], rep = [];
+        proofs.forEach(p => {
+            if (!isActive || activationTs === null) { orig.push(p); return; }
+            const t = p.uploadedAt?.toDate ? p.uploadedAt.toDate().getTime() : null;
+            if (t === null) rep.push({ ...p, _undated: true });
+            else if (t <= activationTs) orig.push(p);
+            else rep.push(p);
+        });
+
+        const galleryOrig = document.getElementById('proof-gallery-orig');
+        const countOrig = document.getElementById('proof-count-orig');
+        countOrig.textContent = `${orig.length} screenshot${orig.length !== 1 ? 's' : ''}`;
+        if (orig.length === 0) {
+            galleryOrig.innerHTML = '<p style="color:#6B7280;font-size:14px;grid-column:1/-1;text-align:center;padding:24px 0">No screenshots uploaded yet.</p>';
+        } else {
+            galleryOrig.innerHTML = orig.map(p =>
+                `<img src="${p.imageUrl}" alt="Proof" loading="lazy" onclick="window.open('${p.imageUrl}','_blank')">`
+            ).join('');
         }
 
-        gallery.innerHTML = proofs.map(p =>
-            `<img src="${p.imageUrl}" alt="Proof" loading="lazy" onclick="window.open('${p.imageUrl}','_blank')">`
-        ).join('');
+        const replCard = document.getElementById('replacement-gallery-card');
+        const galleryRep = document.getElementById('proof-gallery-rep');
+        const countRep = document.getElementById('proof-count-rep');
+        if (!isActive || rep.length === 0) {
+            replCard.classList.toggle('hidden', !isActive);
+            if (isActive) {
+                countRep.textContent = '0 screenshots';
+                galleryRep.innerHTML = '<p style="color:#6B7280;font-size:14px;text-align:center;padding:24px 0">No replacement screenshots yet.</p>';
+            }
+            return;
+        }
+        replCard.classList.remove('hidden');
+        countRep.textContent = `${rep.length} screenshot${rep.length !== 1 ? 's' : ''}`;
+
+        const grouped = {};
+        const dated = [];
+        const undated = [];
+        rep.forEach(p => {
+            if (p._undated) { undated.push(p); return; }
+            const ts = p.uploadedAt.toDate();
+            const key = ts.toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+            if (!grouped[key]) { grouped[key] = []; dated.push({ key, ts }); }
+            grouped[key].push(p);
+        });
+        dated.sort((a, b) => b.ts.getTime() - a.ts.getTime());
+
+        const tile = (p) => `<a href="${escAttr(p.imageUrl)}" target="_blank" rel="noopener noreferrer" style="display:block;border-radius:8px;overflow:hidden;border:1px solid #E5E7EB"><img src="${escAttr(p.imageUrl)}" alt="Proof" loading="lazy" style="width:100%;height:100px;object-fit:cover;display:block"></a>`;
+
+        let html = dated.map(({ key }) => {
+            const items = grouped[key];
+            return `
+                <div style="margin-bottom:20px">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                        <p style="font-size:13px;font-weight:600;color:#374151">${escAttr(key)}</p>
+                        <span style="font-size:12px;color:#6B7280">${items.length} screenshot${items.length !== 1 ? 's' : ''} (${items.length} review${items.length !== 1 ? 's' : ''})</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px">
+                        ${items.map(tile).join('')}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        if (undated.length > 0) {
+            html += `
+                <div style="margin-bottom:20px">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                        <p style="font-size:13px;font-weight:600;color:#9CA3AF">Undated</p>
+                        <span style="font-size:12px;color:#6B7280">${undated.length} screenshot${undated.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px">
+                        ${undated.map(tile).join('')}
+                    </div>
+                </div>
+            `;
+        }
+        galleryRep.innerHTML = html;
     }
 
     function show(id) {

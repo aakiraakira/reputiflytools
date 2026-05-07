@@ -1,6 +1,6 @@
 // Network-first strategy: always try network, fall back to cache
 // Cache name includes timestamp so each deploy gets fresh cache
-const CACHE_NAME = 'review-dash-v3';
+const CACHE_NAME = 'review-dash-v4';
 
 self.addEventListener('install', e => {
   self.skipWaiting(); // Immediately activate new SW
