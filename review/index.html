@@ -136,6 +136,41 @@
         }
         .order-action-btn:hover { color: var(--text); background: var(--bg-secondary); }
 
+        /* Kebab (3-dot) action menu — used on Order cards + Tracker rows */
+        .kebab-btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 32px; height: 32px; border-radius: 8px; border: 1px solid transparent;
+            background: transparent; color: var(--text-secondary); cursor: pointer;
+            font-size: 18px; line-height: 1; padding: 0; transition: all 0.15s;
+            font-family: inherit;
+        }
+        .kebab-btn:hover { background: var(--bg-secondary); color: var(--text); border-color: var(--border); }
+        .kebab-btn.is-open { background: var(--bg-secondary); border-color: var(--border); color: var(--text); }
+        .action-popover {
+            position: absolute; z-index: 1000; min-width: 220px; max-width: 280px;
+            background: #FFFFFF; border: 1px solid var(--border); border-radius: 12px;
+            box-shadow: 0 12px 32px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06);
+            padding: 6px; opacity: 0; transform: translateY(-4px) scale(0.98);
+            transition: opacity 0.12s ease, transform 0.12s ease;
+            pointer-events: none;
+        }
+        .action-popover.show { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+        .action-popover-item {
+            display: flex; align-items: center; gap: 10px; width: 100%;
+            padding: 10px 12px; border: none; background: none; cursor: pointer;
+            font-family: inherit; font-size: 13px; font-weight: 500; color: var(--text);
+            text-align: left; border-radius: 8px; transition: background 0.1s;
+        }
+        .action-popover-item:hover { background: var(--bg-secondary); }
+        .action-popover-item.danger { color: var(--error); }
+        .action-popover-item.danger:hover { background: #FEE2E2; }
+        .action-popover-item:disabled { color: var(--text-secondary); opacity: 0.5; cursor: not-allowed; }
+        .action-popover-divider { height: 1px; background: var(--border); margin: 6px 4px; }
+        .action-popover-section-label {
+            font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+            color: var(--text-secondary); padding: 8px 12px 4px;
+        }
+
         /* Mobile optimizations */
         @media (max-width: 640px) {
             .card { border-radius: 10px; }
@@ -658,14 +693,13 @@
                             </div>
                         </div>
                         <div class="progress-track" style="margin:12px 0"><div class="progress-fill" style="width:${progress}%"></div></div>
-                        <div style="display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:12px;margin-top:4px;align-items:center">
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:12px;margin-top:4px;align-items:center">
                             <button class="order-action-btn copy-tnc-link" data-id="${o.id}" title="Copy TNC link">TNC</button>
                             <button class="order-action-btn copy-track-link" data-id="${o.id}" title="Copy tracking link">Tracking</button>
                             <button class="order-action-btn copy-submission-link" data-id="${o.id}" title="Copy submission link">Submit</button>
-                            <button class="order-action-btn copy-sheet-row" data-id="${o.id}" title="Copy sheet row">Row</button>
                             <span style="flex:1"></span>
-                            <button class="order-action-btn view-proofs" data-id="${o.id}">Proofs</button>
-                            <button class="order-action-btn download-proofs-zip" data-id="${o.id}" data-name="${o.companyName}" style="color:var(--success)">ZIP</button>
+                            ${o.tncSigned ? `<button class="order-action-btn download-archive-quick" data-id="${o.id}" data-name="${o.companyName}" title="Download Full Archive (PDF + Screenshots)" style="color:var(--success);font-weight:600">Archive</button>` : ''}
+                            <button class="kebab-btn order-kebab" data-id="${o.id}" title="More actions" aria-label="More actions">&vellip;</button>
                         </div>
                     </div>`;
             },
@@ -717,6 +751,19 @@
                 if (!btn) return;
                 const id = btn.dataset.id;
                 if (!id) return;
+                if (btn.classList.contains('order-kebab')) {
+                    e.stopPropagation();
+                    this.openOrderActionMenu(btn, id);
+                    return;
+                } else if (btn.classList.contains('download-archive-quick')) {
+                    const order = this.state.orders.find(o => o.id === id);
+                    this.downloadArchive(id, 'zip', order?.companyName || btn.dataset.name);
+                    return;
+                } else if (btn.classList.contains('tracker-kebab')) {
+                    e.stopPropagation();
+                    this.openOrderActionMenu(btn, id);
+                    return;
+                }
                 if (btn.classList.contains('copy-tnc-link')) {
                     this.copyToClipboard(`${SITE_BASE}/tnc.html?order=${id}`, 'TNC link copied!');
                 } else if (btn.classList.contains('copy-track-link')) {
@@ -1687,7 +1734,7 @@
                                     <th style="padding:10px 4px;text-align:center;font-weight:600;white-space:nowrap">End</th>
                                     <th class="sort-header" data-sort="left" style="padding:10px 4px;text-align:center;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap">Left<span style="font-size:10px;margin-left:2px">${sort.field==='left'?(sort.dir==='asc'?'▲':'▼'):''}</span></th>
                                     <th style="padding:10px 8px;text-align:left;font-weight:600">Comments</th>
-                                    <th style="padding:10px 4px;text-align:center;font-weight:600;width:${isAdmin?'130':'50'}px">Actions</th>
+                                    <th style="padding:10px 4px;text-align:center;font-weight:600;width:60px">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1708,13 +1755,10 @@
                                         <td style="padding:8px 4px;text-align:center;font-size:13px">${endCount}</td>
                                         <td style="padding:8px 4px;text-align:center;font-weight:600;font-size:13px;color:${left > 0 ? 'var(--error)' : 'var(--success)'}">${left}</td>
                                         <td style="padding:4px 6px"><input type="text" class="tracker-edit" data-id="${o.id}" data-field="comments" value="${(o.comments || '').replace(/"/g, '&quot;')}" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px;color:var(--text);background:white" placeholder="Add comment..."></td>
-                                        <td style="padding:10px 8px;text-align:center">
-                                            <div style="display:flex;gap:3px;justify-content:center;flex-wrap:wrap">
-                                                <button class="btn btn-secondary btn-sm copy-sheet-row" data-id="${o.id}" style="width:auto;padding:3px 7px;font-size:11px">Copy</button>
-                                                ${isAdmin ? `<button class="btn btn-primary btn-sm assign-order" data-id="${o.id}" style="width:auto;padding:3px 7px;font-size:11px">Assign</button>
-                                                <button class="btn btn-secondary btn-sm edit-link-btn" data-id="${o.id}" style="width:auto;padding:3px 7px;font-size:11px" title="Edit review link">Link</button>
-                                                <button class="btn btn-secondary btn-sm delete-order-btn" data-id="${o.id}" data-name="${o.companyName}" style="width:auto;padding:3px 7px;font-size:11px;color:var(--error)" title="Delete order">X</button>` : ''}
-                                            </div>
+                                        <td style="padding:6px 4px;text-align:center">
+                                            <button class="kebab-btn tracker-kebab" data-id="${o.id}" title="More actions" aria-label="More actions">&vellip;</button>
+                                            <button class="edit-link-btn" data-id="${o.id}" style="display:none" aria-hidden="true"></button>
+                                            <button class="delete-order-btn" data-id="${o.id}" data-name="${o.companyName}" style="display:none" aria-hidden="true"></button>
                                         </td>
                                     </tr>`;
                                 }).join('')}
@@ -3213,6 +3257,178 @@
                     this.toast('ZIP downloaded!', 'success');
                 } catch(err) {
                     this.toast(err.message === 'No proofs found' ? 'No proofs uploaded yet for this order.' : `Download failed: ${err.message}`, 'error');
+                }
+            },
+
+            // Download archive (mode='pdf' → just signed-TNC PDF; mode='zip' → PDF + screenshots)
+            async downloadArchive(orderId, mode, companyName) {
+                const isPdf = mode === 'pdf';
+                this.toast(isPdf ? 'Generating PDF…' : 'Building archive ZIP…', 'info');
+                try {
+                    const token = await auth.currentUser.getIdToken();
+                    const url = isPdf
+                        ? `${API_BASE}/orders/${orderId}/archive?format=pdf`
+                        : `${API_BASE}/orders/${orderId}/archive`;
+                    const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({}));
+                        throw new Error(err.error || `HTTP ${resp.status}`);
+                    }
+                    const blob = await resp.blob();
+                    const safe = (companyName || orderId).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60);
+                    const filename = isPdf ? `tnc-${safe}-${orderId}.pdf` : `archive-${safe}-${orderId}.zip`;
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = filename;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                    URL.revokeObjectURL(a.href);
+                    this.toast(isPdf ? 'PDF downloaded!' : 'Archive downloaded!', 'success');
+                } catch(err) {
+                    this.toast(`Download failed: ${err.message}`, 'error');
+                }
+            },
+
+            // ── Kebab action menu (3-dot popover) — shared across Orders + Tracker ──
+            // Single global popover instance. Closes on outside-click, ESC, scroll, or another kebab.
+            openOrderActionMenu(anchorEl, orderId) {
+                const order = this.state.orders.find(o => o.id === orderId);
+                if (!order) return;
+                const isAdmin = this.state.userRole === 'admin';
+                const hasProofs = (order.completedCount || 0) > 0;
+                const items = [
+                    { section: 'Share Links' },
+                    { label: 'Copy TNC Link', action: () => this.copyToClipboard(`${SITE_BASE}/tnc.html?order=${order.id}`, 'TNC Link Copied!') },
+                    { label: 'Copy Tracking Link', action: () => this.copyToClipboard(`${SITE_BASE}/track.html?order=${order.id}`, 'Tracking Link Copied!') },
+                    { label: 'Copy Submission Link', action: () => this.copySubmissionLinkFor(order) },
+                    { label: 'Copy Sheet Row', action: () => this.copySheetRowFor(order) },
+                    { divider: true },
+                    { section: 'View & Download' },
+                    { label: 'View Proofs', disabled: !hasProofs, action: () => this.showProofGallery(order.id) },
+                    { label: 'Download TNC PDF', disabled: !order.tncSigned, action: () => this.downloadArchive(order.id, 'pdf', order.companyName) },
+                    { label: 'Download Full Archive', disabled: !order.tncSigned, action: () => this.downloadArchive(order.id, 'zip', order.companyName) },
+                    { label: 'Download Proofs Only', disabled: !hasProofs, action: () => this.downloadProofsZip(order.id, order.companyName) },
+                ];
+                if (isAdmin) {
+                    items.push({ divider: true });
+                    items.push({ section: 'Manage' });
+                    items.push({ label: 'Assign Reviews', action: () => this.showAssignModal(order.id) });
+                    items.push({ label: 'Edit Review Link', action: () => this._invokeEditLinkForOrder(order.id) });
+                    items.push({ label: 'Delete Order', danger: true, action: () => this._invokeDeleteOrder(order.id, order.companyName) });
+                }
+                this._showActionPopover(anchorEl, items);
+            },
+
+            _invokeEditLinkForOrder(orderId) {
+                // Reuse the existing edit-link-btn handler if present, else inline a minimal prompt.
+                const btn = document.querySelector(`.edit-link-btn[data-id="${orderId}"]`);
+                if (btn) { btn.click(); return; }
+                const order = this.state.orders.find(o => o.id === orderId);
+                const next = prompt('Review link:', order?.reviewLink || '');
+                if (next == null) return;
+                db.collection('orders').doc(orderId).update({ reviewLink: next.trim(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+                  .then(() => this.toast('Review link updated.', 'success'))
+                  .catch(e => this.toast('Update failed: ' + e.message, 'error'));
+            },
+
+            _invokeDeleteOrder(orderId, companyName) {
+                const btn = document.querySelector(`.delete-order-btn[data-id="${orderId}"]`);
+                if (btn) { btn.click(); return; }
+                if (!confirm(`Delete "${companyName || orderId}"? This cannot be undone.`)) return;
+                db.collection('orders').doc(orderId).delete()
+                  .then(() => this.toast('Order deleted.', 'success'))
+                  .catch(e => this.toast('Delete failed: ' + e.message, 'error'));
+            },
+
+            async copySubmissionLinkFor(order) {
+                let token = order.clientTrackingToken;
+                if (!token) {
+                    token = (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                    try {
+                        await db.collection('orders').doc(order.id).update({ clientTrackingToken: token, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+                        order.clientTrackingToken = token;
+                    } catch (err) { this.toast('Failed to generate token: ' + err.message, 'error'); return; }
+                }
+                this.copyToClipboard(`${SITE_BASE}/submit/?order=${order.id}&token=${token}`, 'Submission Link Copied!');
+            },
+
+            copySheetRowFor(order) {
+                const endCount = (order.startingCount || 0) + (order.quantity || 0);
+                const left = (order.quantity || 0) - (order.completedCount || 0);
+                const row = `${order.companyName}\t${order.dailyTarget || 5}\t${order.completedCount || 0}\t${order.quantity}\t${order.startingCount || 0}\t${endCount}\t\t${left}\t${order.comments || ''}`;
+                this.copyToClipboard(row, 'Sheet Row Copied!');
+            },
+
+            _showActionPopover(anchorEl, items) {
+                this._hideActionPopover();
+                const pop = document.createElement('div');
+                pop.className = 'action-popover';
+                pop.id = '_action-popover';
+                pop.innerHTML = items.map(it => {
+                    if (it.divider) return '<div class="action-popover-divider"></div>';
+                    if (it.section) return `<div class="action-popover-section-label">${it.section}</div>`;
+                    const cls = ['action-popover-item'];
+                    if (it.danger) cls.push('danger');
+                    const disabled = it.disabled ? 'disabled' : '';
+                    return `<button type="button" class="${cls.join(' ')}" ${disabled}>${it.label}</button>`;
+                }).join('');
+                document.body.appendChild(pop);
+                anchorEl.classList.add('is-open');
+
+                // Wire item clicks (clickable[] and DOM buttons map 1:1 in source order).
+                const clickable = items.filter(it => !it.divider && !it.section);
+                pop.querySelectorAll('.action-popover-item').forEach((btn, i) => {
+                    btn.addEventListener('click', e => {
+                        e.stopPropagation();
+                        if (btn.disabled) return;
+                        const it = clickable[i];
+                        this._hideActionPopover();
+                        try { it.action && it.action(); } catch(err) { console.error(err); this.toast('Action failed: ' + err.message, 'error'); }
+                    });
+                });
+
+                // Position relative to anchor
+                const r = anchorEl.getBoundingClientRect();
+                const vw = window.innerWidth, vh = window.innerHeight;
+                pop.style.visibility = 'hidden'; // measure first
+                requestAnimationFrame(() => {
+                    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+                    let left = r.right - pw;
+                    if (left < 8) left = 8;
+                    if (left + pw > vw - 8) left = vw - pw - 8;
+                    let top = r.bottom + 6;
+                    if (top + ph > vh - 8) top = r.top - ph - 6; // flip up
+                    pop.style.left = (left + window.scrollX) + 'px';
+                    pop.style.top = (top + window.scrollY) + 'px';
+                    pop.style.visibility = 'visible';
+                    pop.classList.add('show');
+                });
+
+                // Outside-click + ESC + scroll handlers (one-shot)
+                this._popoverOutside = (e) => {
+                    if (pop.contains(e.target) || anchorEl.contains(e.target)) return;
+                    this._hideActionPopover();
+                };
+                this._popoverEsc = (e) => { if (e.key === 'Escape') this._hideActionPopover(); };
+                this._popoverScroll = () => this._hideActionPopover();
+                this._popoverAnchor = anchorEl;
+                setTimeout(() => {
+                    document.addEventListener('click', this._popoverOutside, true);
+                    document.addEventListener('keydown', this._popoverEsc);
+                    window.addEventListener('scroll', this._popoverScroll, true);
+                    window.addEventListener('resize', this._popoverScroll);
+                }, 0);
+            },
+
+            _hideActionPopover() {
+                const pop = document.getElementById('_action-popover');
+                if (pop) pop.remove();
+                if (this._popoverAnchor) { this._popoverAnchor.classList.remove('is-open'); this._popoverAnchor = null; }
+                if (this._popoverOutside) { document.removeEventListener('click', this._popoverOutside, true); this._popoverOutside = null; }
+                if (this._popoverEsc) { document.removeEventListener('keydown', this._popoverEsc); this._popoverEsc = null; }
+                if (this._popoverScroll) {
+                    window.removeEventListener('scroll', this._popoverScroll, true);
+                    window.removeEventListener('resize', this._popoverScroll);
+                    this._popoverScroll = null;
                 }
             },
 
