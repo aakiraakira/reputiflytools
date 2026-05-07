@@ -169,11 +169,11 @@
                         </div>
                         <div>
                             <h2 style="font-size:18px;font-weight:700">Replacement Coverage</h2>
-                            <p style="font-size:13px;color:#6B7280">Your order has been delivered. Activate your courtesy replacement.</p>
+                            <p style="font-size:13px;color:#6B7280">Your service includes a courtesy 30% replacement.</p>
                         </div>
                     </div>
-                    <p style="font-size:14px;color:#374151;line-height:1.6;margin-bottom:16px">As a courtesy, we'll add <strong id="repl-eligible-qty">+0 reviews</strong> to your order — a one-time activation. Click below to confirm.</p>
-                    <button id="btn-activate-replacement" class="btn btn-primary" style="width:100%">Activate Replacement (<span id="repl-btn-qty">+0</span>)</button>
+                    <button id="btn-activate-replacement" class="btn btn-primary" style="width:100%">Activate <span id="repl-btn-qty">0</span> Replacement Reviews</button>
+                    <p style="font-size:12px;color:#6B7280;text-align:center;margin-top:8px">One-time activation under your signed agreement.</p>
                 </div>
 
                 <div id="repl-active" class="hidden">
@@ -210,7 +210,7 @@
         <div id="repl-modal" class="repl-modal-backdrop hidden">
             <div class="card" style="max-width:480px;width:100%;margin:0;max-height:90vh;overflow-y:auto">
                 <h2 style="font-size:20px;font-weight:700;margin-bottom:6px">Confirm Activation</h2>
-                <p style="font-size:13px;color:#6B7280;margin-bottom:20px">This adds <strong id="repl-modal-qty">+0 reviews</strong> to your order. To confirm, re-enter the name and email used when you signed.</p>
+                <p style="font-size:13px;color:#6B7280;margin-bottom:20px">This adds <strong id="repl-modal-qty">0 reviews</strong> to your order. One-time courtesy replacement under your signed Terms &amp; Conditions.</p>
                 <div class="field">
                     <label>Signing Name *</label>
                     <input type="text" id="repl-name" class="input" placeholder="As entered on your TNC signature" required>
@@ -221,7 +221,7 @@
                 </div>
                 <div class="checkbox-row" style="margin-top:8px">
                     <input type="checkbox" id="repl-agree">
-                    <label for="repl-agree" style="margin-bottom:0;font-size:14px;cursor:pointer">I confirm activation of my courtesy replacement.</label>
+                    <label for="repl-agree" style="margin-bottom:0;font-size:14px;cursor:pointer">I confirm activation of my <strong>one-time</strong> 30% replacement (<span id="repl-cb-qty">+0 reviews</span>). I understand this <strong>cannot be undone</strong>.</label>
                 </div>
                 <p id="repl-error" class="hidden" style="color:#DC2626;font-size:14px;font-weight:500;text-align:center;padding:12px;background:#FEE2E2;border-radius:8px;margin-top:12px"></p>
                 <div style="display:flex;gap:12px;margin-top:20px">
@@ -263,12 +263,14 @@
                 const tncCard = document.querySelector('#tnc-form-state .card');
                 if (tncCard) document.getElementById('signed-tnc-text').innerHTML = tncCard.outerHTML;
 
-                // Fetch signature details
+                // Fetch signature details (also used to prefill replacement modal)
+                let sigForReplacement = null;
                 if (order.tncSignatureId) {
                     try {
                         const sigDoc = await db.collection('signatures').doc(order.tncSignatureId).get();
                         if (sigDoc.exists) {
                             const sig = sigDoc.data();
+                            sigForReplacement = sig;
                             const signedDate = sig.signedAt?.toDate ? sig.signedAt.toDate() : new Date(sig.signedAtIso || 0);
                             const details = document.getElementById('signed-details');
                             details.innerHTML = `
@@ -288,8 +290,8 @@
                     } catch(e) { /* signature fetch failed, show basic info */ }
                 }
 
-                // Replacement state machine
-                renderReplacementState(orderId, order);
+                // Replacement state machine (sig used to prefill name + email in the modal)
+                renderReplacementState(orderId, order, sigForReplacement);
 
                 show('already-signed-state');
                 const trackLink = document.getElementById('tracking-link-2');
@@ -416,7 +418,7 @@
         return { qty, completed, isDelivered, isActive, isEligible, replN, origQty };
     }
 
-    function renderReplacementState(orderId, order) {
+    function renderReplacementState(orderId, order, sig) {
         const state = computeReplacementState(order);
         const elig = document.getElementById('repl-eligible');
         const active = document.getElementById('repl-active');
@@ -434,18 +436,18 @@
             document.getElementById('repl-added-qty').textContent = `+${state.replN}`;
             active.classList.remove('hidden');
         } else if (state.isEligible) {
-            document.getElementById('repl-eligible-qty').textContent = `+${state.replN} reviews`;
-            document.getElementById('repl-btn-qty').textContent = `+${state.replN} reviews`;
-            document.getElementById('repl-modal-qty').textContent = `+${state.replN} reviews`;
+            document.getElementById('repl-btn-qty').textContent = state.replN;
+            document.getElementById('repl-modal-qty').textContent = `${state.replN} reviews`;
+            document.getElementById('repl-cb-qty').textContent = `+${state.replN} reviews`;
             elig.classList.remove('hidden');
         } else {
             pending.classList.remove('hidden');
         }
 
-        wireReplacementModal(orderId, order, state);
+        wireReplacementModal(orderId, order, state, sig);
     }
 
-    function wireReplacementModal(orderId, order, state) {
+    function wireReplacementModal(orderId, order, state, sig) {
         const btn = document.getElementById('btn-activate-replacement');
         const modal = document.getElementById('repl-modal');
         const cancelBtn = document.getElementById('repl-cancel');
@@ -458,8 +460,9 @@
         const reset = () => {
             errEl.classList.add('hidden');
             errEl.textContent = '';
-            nameInp.value = '';
-            emailInp.value = '';
+            // Prefill from the original signature (editable in case a different person is clicking)
+            nameInp.value = sig?.signingName || '';
+            emailInp.value = sig?.email || '';
             agreeBox.checked = false;
             confirmBtn.disabled = true;
             confirmBtn.textContent = 'Confirm';
