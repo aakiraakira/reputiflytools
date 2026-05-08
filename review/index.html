@@ -531,18 +531,12 @@
                         .where('assignedEmployees', 'array-contains', this.state.user.uid)
                         .where('status', '==', 'active')
                         .get();
-                    let orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-                    // Standard-tier filter: show orders with an ACTIVE dailyAssignment (not yet submitted).
-                    // The list persists until the employee submits a daily report (which marks
-                    // submittedAt) OR admin re-assigns (which overwrites the entry, dropping submittedAt).
-                    if (this.state.userTier === 'standard') {
-                        const uid = this.state.user.uid;
-                        orders = orders.filter(o => {
-                            const d = o.dailyAssignment?.[uid];
-                            return d && !d.submittedAt;
-                        });
-                    }
-                    this.state.orders = orders;
+                    // Both trusted and standard tiers see the SAME assignment list:
+                    // every active order they're in assignedEmployees for. The list refreshes only
+                    // when admin approves their daily report (clears via /daily-report/:id/approve)
+                    // OR admin re-saves Manage Assignments. Standard-tier's restriction is purely
+                    // UI-side — they don't see the Tracker tab.
+                    this.state.orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                 } catch(e) { this.state.orders = []; }
                 this.state.ordersLoading = false;
                 this.updateView();
@@ -767,10 +761,10 @@
                                     <span style="font-size:11px;color:var(--text-secondary)">Submissions ${n} new</span>
                                 </div>` : ''; })()}
                                 ${(() => {
-                                    // Show employees with ACTIVE dailyAssignment (not yet submitted) on this order.
+                                    // Show all employees currently assigned to this order (in assignedEmployees
+                                    // AND with a dailyAssignment[uid] entry). Cleared on admin approval.
                                     const assignedActive = (this.state.employees || []).filter(e => {
-                                        const d = o.dailyAssignment?.[e.id];
-                                        return d && !d.submittedAt;
+                                        return (o.assignedEmployees || []).includes(e.id) && o.dailyAssignment?.[e.id];
                                     });
                                     if (!assignedActive.length) return '';
                                     return `<div style="display:flex;gap:4px;justify-content:flex-end;margin-top:6px;flex-wrap:wrap">
@@ -778,7 +772,7 @@
                                             const label = (e.name || e.email || '?').trim();
                                             const initials = label.split(/\s+/).map(w => w[0]).slice(0,2).join('').toUpperCase() || label.slice(0,2).toUpperCase();
                                             const da = o.dailyAssignment[e.id];
-                                            return `<span title="${label} — ${da.count || 0} active${da.date ? ' (assigned ' + da.date + ')' : ''}" style="background:#EFF6FF;color:#1E40AF;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;letter-spacing:0.3px">${initials}</span>`;
+                                            return `<span title="${label} — ${da.count || 0} reviews${da.date ? ' (assigned ' + da.date + ')' : ''}" style="background:#EFF6FF;color:#1E40AF;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;letter-spacing:0.3px">${initials}</span>`;
                                         }).join('')}
                                     </div>`;
                                 })()}
@@ -2197,13 +2191,11 @@
                             </div>
 
                             <div id="qa-helper" style="display:none;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:13px;color:#1E40AF">
-                                <strong id="qa-current-count">0</strong> companies currently assigned to this employee. Tick to assign, untick to remove.
+                                <strong id="qa-current-count">0</strong> companies currently assigned to this employee. Tick to assign, untick to remove. List clears when you approve their daily report.
                                 <button type="button" id="qa-clear-all" style="float:right;background:none;border:none;color:#DC2626;font-weight:600;cursor:pointer;font-size:12px;padding:0">Clear All</button>
                             </div>
 
-                            <div id="qa-stale-banner" style="display:none;background:#FEF3C7;border:1px solid #FCD34D;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:13px;color:#92400E">
-                                <strong>Heads up:</strong> <span id="qa-stale-count">0</span> companies were already submitted by this employee. They no longer appear in their My Tasks. Click <strong>Save</strong> below to re-activate ticked rows for them — or untick to permanently remove.
-                            </div>
+                            <div id="qa-stale-banner" style="display:none"></div>
 
                             <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:20px">
                                 <div style="display:flex;justify-content:space-between;padding:12px 16px;background:var(--bg-secondary);border-bottom:1px solid var(--border);font-size:13px;font-weight:600;color:var(--text-secondary)">
@@ -2258,7 +2250,7 @@
                         btn.textContent = `Save (clear all assignments)`;
                         btn.disabled = false;
                     } else {
-                        btn.textContent = `Save Active List (${checkedCount} companies, ${total} reviews)`;
+                        btn.textContent = `Save Assignment List (${checkedCount} companies, ${total} reviews)`;
                         btn.disabled = false;
                     }
                 };
@@ -2296,38 +2288,23 @@
                     });
 
                     let currentCount = 0;
-                    let staleCount = 0;
                     document.querySelectorAll('.qa-check').forEach(cb => {
                         const orderId = cb.dataset.id;
                         const order = activeOrders.find(o => o.id === orderId);
                         const isAssigned = (order?.assignedEmployees || []).includes(empUid);
                         const da = order?.dailyAssignment?.[empUid];
-                        const hasActive = !!(da && !da.submittedAt);
-                        const isSubmitted = !!(da && da.submittedAt);
                         const statusEl = document.querySelector(`.qa-status[data-id="${orderId}"]`);
                         const countInput = document.querySelector(`.qa-count[data-id="${orderId}"]`);
 
                         if (isAssigned) {
                             cb.checked = true;
                             currentCount++;
-                            if (isSubmitted) staleCount++;
-                            // Count input: existing daily count if active, else default daily target.
-                            if (countInput) countInput.value = hasActive
-                                ? (da.count || order.dailyTarget || 5)
-                                : (order.dailyTarget || 5);
+                            // Count input: existing daily count if present, else default daily target.
+                            if (countInput) countInput.value = da?.count || order.dailyTarget || 5;
                             if (statusEl) {
                                 statusEl.style.display = '';
-                                if (hasActive) {
-                                    statusEl.textContent = da?.date ? `✓ active · ${da.date}` : '✓ active';
-                                    statusEl.style.color = '#10B981';
-                                } else if (isSubmitted) {
-                                    statusEl.textContent = 'submitted';
-                                    statusEl.style.color = '#6B7280';
-                                } else {
-                                    // In assignedEmployees but no daily map entry (legacy / no current task).
-                                    statusEl.textContent = 'no active task';
-                                    statusEl.style.color = '#6B7280';
-                                }
+                                statusEl.textContent = da?.date ? `✓ assigned · ${da.date}` : '✓ assigned';
+                                statusEl.style.color = '#10B981';
                             }
                         } else {
                             cb.checked = false;
@@ -2336,15 +2313,6 @@
                     });
                     document.getElementById('qa-helper').style.display = '';
                     document.getElementById('qa-current-count').textContent = currentCount;
-                    // Stale banner: warn that submitted rows are no longer in employee's My Tasks.
-                    const staleBanner = document.getElementById('qa-stale-banner');
-                    const staleCountEl = document.getElementById('qa-stale-count');
-                    if (staleCount > 0) {
-                        if (staleCountEl) staleCountEl.textContent = staleCount;
-                        if (staleBanner) staleBanner.style.display = '';
-                    } else {
-                        if (staleBanner) staleBanner.style.display = 'none';
-                    }
                     updateTotal();
                 };
 
@@ -3030,20 +2998,15 @@
             renderAssignments() {
                 const { ordersLoading } = this.state;
                 const uid = this.state.user?.uid;
+                const today = this.todayStr(); // SGT
                 const taskView = this.state._taskView || 'today';
 
-                // Split into ACTIVE (current tasks not yet submitted) vs OTHERS
-                // (already submitted via daily report, or assigned without current task).
-                // For trusted-tier employees state.orders includes everything they're assigned to;
-                // for standard-tier the load already filters to active only, so 'others' will be empty.
-                const todayOrders = this.state.orders.filter(o => {
-                    const d = o.dailyAssignment?.[uid];
-                    return d && !d.submittedAt;
-                });
-                const otherOrders = this.state.orders.filter(o => {
-                    const d = o.dailyAssignment?.[uid];
-                    return !d || d.submittedAt;
-                });
+                // Split: orders with TODAY's daily assignment vs older / no daily assignment.
+                // Both tiers see the same data — the list refreshes when admin approves their
+                // daily report (clears the order from assignedEmployees) OR admin re-saves
+                // Manage Assignments. Submitting the report DOES NOT clear anything.
+                const todayOrders = this.state.orders.filter(o => o.dailyAssignment?.[uid]?.date === today);
+                const otherOrders = this.state.orders.filter(o => o.dailyAssignment?.[uid]?.date !== today);
                 const orders = taskView === 'today' ? todayOrders : otherOrders;
 
                 const expandedId = this.state._expandedOrderId;
@@ -3055,15 +3018,13 @@
                         <h2 style="font-size:20px;font-weight:700">My Tasks</h2>
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:16px;background:var(--bg-secondary);border-radius:var(--radius);border:1px solid var(--border);padding:3px">
-                        <button class="task-view-btn" data-view="today" style="padding:10px;text-align:center;font-weight:600;font-size:13px;border:none;border-radius:9px;cursor:pointer;background:${taskView === 'today' ? 'var(--accent)' : 'transparent'};color:${taskView === 'today' ? '#fff' : 'var(--text-secondary)'};transition:all 0.2s">Active (${todayOrders.length})</button>
-                        <button class="task-view-btn" data-view="others" style="padding:10px;text-align:center;font-weight:600;font-size:13px;border:none;border-radius:9px;cursor:pointer;background:${taskView === 'others' ? 'var(--accent)' : 'transparent'};color:${taskView === 'others' ? '#fff' : 'var(--text-secondary)'};transition:all 0.2s">Submitted (${otherOrders.length})</button>
+                        <button class="task-view-btn" data-view="today" style="padding:10px;text-align:center;font-weight:600;font-size:13px;border:none;border-radius:9px;cursor:pointer;background:${taskView === 'today' ? 'var(--accent)' : 'transparent'};color:${taskView === 'today' ? '#fff' : 'var(--text-secondary)'};transition:all 0.2s">Today (${todayOrders.length})</button>
+                        <button class="task-view-btn" data-view="others" style="padding:10px;text-align:center;font-weight:600;font-size:13px;border:none;border-radius:9px;cursor:pointer;background:${taskView === 'others' ? 'var(--accent)' : 'transparent'};color:${taskView === 'others' ? '#fff' : 'var(--text-secondary)'};transition:all 0.2s">Others (${otherOrders.length})</button>
                     </div>
                     ${orders.length === 0
                         ? `<div class="card" style="padding:40px;text-align:center">
-                            <p style="color:var(--text-secondary);margin-bottom:8px">${taskView === 'today' ? 'No active assignments yet.' : 'Nothing here yet.'}</p>
-                            ${this.state.userTier === 'standard' && taskView === 'today'
-                                ? '<p style="color:var(--text-secondary);font-size:12px">Your admin assigns companies to you. After you submit your daily report, the list clears and your admin will re-assign.</p>'
-                                : '<p style="color:var(--text-secondary);font-size:12px">Ask your admin to assign companies to you.</p>'}
+                            <p style="color:var(--text-secondary);margin-bottom:8px">${taskView === 'today' ? 'No assignments for today.' : 'Nothing in this list.'}</p>
+                            <p style="color:var(--text-secondary);font-size:12px">Ask your admin to assign companies to you.</p>
                         </div>`
                         : `<div style="display:flex;flex-direction:column;gap:12px">
                             ${orders.map(o => {
@@ -3076,14 +3037,14 @@
                                 const myAssignment = o.dailyAssignment?.[this.state.user?.uid];
                                 const assignedToday = myAssignment?.count || 0;
                                 const assignedDate = myAssignment?.date || '';
-                                // "Active" = has dailyAssignment + not yet submitted via daily report
-                                const isCurrentAssignment = !!(myAssignment && !myAssignment.submittedAt);
+                                const today = this.todayStr();
+                                const isCurrentAssignment = assignedDate === today;
                                 return `
                                 <div class="card" style="padding:20px">
                                     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
                                         <div style="flex:1;min-width:0">
                                             <h3 style="font-weight:600;font-size:16px">${o.companyName}</h3>
-                                            ${assignedToday > 0 ? `<p style="font-size:14px;font-weight:700;color:${isCurrentAssignment ? 'var(--accent)' : 'var(--text-secondary)'};margin-top:2px">${assignedToday} reviews assigned${assignedDate ? ' · ' + assignedDate : ''}${myAssignment?.submittedAt ? ' · submitted' : ''}</p>` : ''}
+                                            ${assignedToday > 0 ? `<p style="font-size:14px;font-weight:700;color:${isCurrentAssignment ? 'var(--accent)' : 'var(--text-secondary)'};margin-top:2px">${assignedToday} reviews assigned${isCurrentAssignment ? ' today' : ` (${assignedDate})`}</p>` : ''}
                                             <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">${o.completedCount || 0}/${o.quantity} total done (${left} left)</p>
                                             ${todayCount > 0 && !isExpanded ? `<p style="font-size:12px;color:var(--success);font-weight:600;margin-top:4px">${uploads.reviewCount} reviews, ${todayCount} screenshots uploaded</p>` : ''}
                                         </div>
