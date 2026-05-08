@@ -2189,8 +2189,12 @@
                             </div>
 
                             <div id="qa-helper" style="display:none;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:13px;color:#1E40AF">
-                                <strong id="qa-current-count">0</strong> companies currently assigned to this employee. Tick to assign, untick to remove. Daily count refreshes on Save.
+                                <strong id="qa-current-count">0</strong> companies currently assigned to this employee. Tick to assign, untick to remove.
                                 <button type="button" id="qa-clear-all" style="float:right;background:none;border:none;color:#DC2626;font-weight:600;cursor:pointer;font-size:12px;padding:0">Clear All</button>
+                            </div>
+
+                            <div id="qa-stale-banner" style="display:none;background:#FEF3C7;border:1px solid #FCD34D;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:13px;color:#92400E">
+                                <strong>Heads up:</strong> <span id="qa-stale-count">0</span> companies were assigned on previous days but not today. Standard-tier employees only see <strong>today's</strong> assignments. Click <strong>Save</strong> below to refresh all ticked companies to today's date — or untick the ones you no longer want.
                             </div>
 
                             <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:20px">
@@ -2242,8 +2246,11 @@
                     if (!empSelected) {
                         btn.textContent = 'Select an employee first';
                         btn.disabled = true;
+                    } else if (checkedCount === 0) {
+                        btn.textContent = `Save (clear all assignments)`;
+                        btn.disabled = false;
                     } else {
-                        btn.textContent = `Save List (${checkedCount} companies, ${total} reviews)`;
+                        btn.textContent = `Save Today's List (${checkedCount} companies, ${total} reviews)`;
                         btn.disabled = false;
                     }
                 };
@@ -2281,6 +2288,7 @@
                     });
 
                     let currentCount = 0;
+                    let staleCount = 0;
                     document.querySelectorAll('.qa-check').forEach(cb => {
                         const orderId = cb.dataset.id;
                         const order = activeOrders.find(o => o.id === orderId);
@@ -2293,6 +2301,7 @@
                         if (isAssigned) {
                             cb.checked = true;
                             currentCount++;
+                            if (!isAssignedToday) staleCount++;
                             // Count input: today's saved count if assigned today, else default daily target.
                             if (countInput) countInput.value = isAssignedToday
                                 ? (todayAssignment.count || order.dailyTarget || 5)
@@ -2314,6 +2323,16 @@
                     });
                     document.getElementById('qa-helper').style.display = '';
                     document.getElementById('qa-current-count').textContent = currentCount;
+                    // Stale banner: warn admin that standard-tier employees only see TODAY'S assignments,
+                    // and previously-assigned (rolled-over) rows need a Save to refresh to today's date.
+                    const staleBanner = document.getElementById('qa-stale-banner');
+                    const staleCountEl = document.getElementById('qa-stale-count');
+                    if (staleCount > 0) {
+                        if (staleCountEl) staleCountEl.textContent = staleCount;
+                        if (staleBanner) staleBanner.style.display = '';
+                    } else {
+                        if (staleBanner) staleBanner.style.display = 'none';
+                    }
                     updateTotal();
                 };
 
@@ -3020,7 +3039,12 @@
                         <button class="task-view-btn" data-view="others" style="padding:10px;text-align:center;font-weight:600;font-size:13px;border:none;border-radius:9px;cursor:pointer;background:${taskView === 'others' ? 'var(--accent)' : 'transparent'};color:${taskView === 'others' ? '#fff' : 'var(--text-secondary)'};transition:all 0.2s">Others (${otherOrders.length})</button>
                     </div>
                     ${orders.length === 0
-                        ? `<div class="card" style="padding:40px;text-align:center"><p style="color:var(--text-secondary)">No assignments yet. Ask your admin to assign companies to you.</p></div>`
+                        ? `<div class="card" style="padding:40px;text-align:center">
+                            <p style="color:var(--text-secondary);margin-bottom:8px">No assignments ${taskView === 'today' ? 'for today' : 'in this list'} yet.</p>
+                            ${this.state.userTier === 'standard' && taskView === 'today'
+                                ? '<p style="color:var(--text-secondary);font-size:12px">Your admin sets today\'s tasks each morning. If you\'re expecting work, message them on WhatsApp.</p>'
+                                : '<p style="color:var(--text-secondary);font-size:12px">Ask your admin to assign companies to you.</p>'}
+                        </div>`
                         : `<div style="display:flex;flex-direction:column;gap:12px">
                             ${orders.map(o => {
                                 const pct = o.quantity > 0 ? Math.round((o.completedCount/o.quantity)*100) : 0;
