@@ -3600,9 +3600,10 @@
 
                 // Multi-select state for bulk delete (held inside this modal closure).
                 const selectedProofs = new Set();
+                let decrementOnDelete = false; // Default OFF — count is managed via daily reports + manual edit.
 
                 const renderProofsGrid = () => {
-                    if (!proofs.length) return '<p style="color:var(--text-secondary);font-size:13px;text-align:center;padding:20px">No proof screenshots uploaded yet.</p>';
+                    if (!proofs.length) return '<p style="color:var(--text-secondary);font-size:14px;text-align:center;padding:60px">No proof screenshots uploaded yet.</p>';
                     // Group by date (mirrors the public tracking page layout)
                     const groups = {};
                     proofs.forEach(p => {
@@ -3613,175 +3614,153 @@
                         groups[dateKey].push(p);
                     });
                     const sortedDates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
-                    const selectedCount = selectedProofs.size;
-                    return `
-                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-                            <button type="button" class="btn btn-secondary btn-sm eo-select-all" style="width:auto;padding:6px 12px;font-size:12px">${selectedCount === proofs.length && proofs.length > 0 ? 'Deselect All' : 'Select All'}</button>
-                            <span style="font-size:13px;color:${selectedCount > 0 ? 'var(--accent)' : 'var(--text-secondary)'};font-weight:${selectedCount > 0 ? '700' : '500'}">${selectedCount} selected</span>
-                            <span style="flex:1"></span>
-                            <button type="button" class="btn btn-sm eo-bulk-delete" ${selectedCount === 0 ? 'disabled' : ''} style="width:auto;padding:6px 14px;font-size:12px;background:${selectedCount > 0 ? 'var(--error)' : 'var(--border)'};color:white;font-weight:700;cursor:${selectedCount > 0 ? 'pointer' : 'not-allowed'};border:none;border-radius:6px">Delete Selected${selectedCount > 0 ? ' (' + selectedCount + ')' : ''}</button>
-                        </div>
-                        <div style="max-height:340px;overflow-y:auto;padding:4px">
-                            ${sortedDates.map(dateKey => {
-                                const groupAllSelected = groups[dateKey].every(p => selectedProofs.has(p.id));
-                                return `
-                                <div style="margin-bottom:14px">
-                                    <div style="display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px;padding:0 2px">
-                                        <span>${dateKey} <span style="color:var(--text-secondary);font-weight:500">· ${groups[dateKey].length} screenshot${groups[dateKey].length === 1 ? '' : 's'}</span></span>
-                                        <button type="button" class="eo-select-date" data-date-key="${dateKey}" style="background:none;border:none;color:var(--accent);font-size:10px;font-weight:700;cursor:pointer;padding:0;text-transform:uppercase;letter-spacing:0.4px">${groupAllSelected ? '✓ Selected' : 'Select All'}</button>
-                                    </div>
-                                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px">
-                                        ${groups[dateKey].map(p => {
-                                            const empName = (this.state.employees || []).find(e => e.id === p.employeeId)?.name || (p.employeeId ? p.employeeId.slice(0, 6) : '?');
-                                            const isSelected = selectedProofs.has(p.id);
-                                            return `<div class="edit-proof-item" data-proof-id="${p.id}" style="position:relative">
-                                                <img src="${p.imageUrl}" style="width:100%;height:120px;object-fit:cover;border-radius:8px;border:${isSelected ? '3px solid var(--accent)' : '1px solid var(--border)'};cursor:pointer;box-sizing:border-box" loading="lazy">
-                                                <input type="checkbox" class="eo-proof-check" data-proof-id="${p.id}" ${isSelected ? 'checked' : ''} title="Select for bulk delete" style="position:absolute;top:6px;left:6px;width:20px;height:20px;cursor:pointer;accent-color:var(--accent);background:white;border-radius:4px">
-                                                <button class="edit-proof-delete" data-proof-id="${p.id}" data-storage-path="${p.storagePath || ''}" title="Delete this proof + decrement count" style="position:absolute;top:-6px;right:-6px;width:24px;height:24px;border-radius:50%;background:var(--error);color:white;border:2px solid white;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,0.2)">x</button>
-                                                <div style="position:absolute;bottom:2px;left:2px;right:2px;background:rgba(0,0,0,0.6);color:white;font-size:10px;padding:2px 5px;border-radius:4px;text-align:center;font-weight:500">${empName}</div>
-                                            </div>`;
-                                        }).join('')}
-                                    </div>
-                                </div>`;
-                            }).join('')}
+                    return sortedDates.map(dateKey => {
+                        const groupAllSelected = groups[dateKey].every(p => selectedProofs.has(p.id));
+                        return `
+                        <div style="margin-bottom:22px">
+                            <div style="display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px;padding:0 2px;position:sticky;top:0;background:var(--bg);padding-top:6px;padding-bottom:6px;z-index:1">
+                                <span>${dateKey}</span>
+                                <span style="color:var(--text-secondary);font-weight:500;font-size:12px">${groups[dateKey].length} screenshot${groups[dateKey].length === 1 ? '' : 's'}</span>
+                                <button type="button" class="eo-select-date" data-date-key="${dateKey}" style="background:${groupAllSelected ? 'var(--accent)' : 'var(--bg-secondary)'};color:${groupAllSelected ? 'white' : 'var(--accent)'};border:1px solid ${groupAllSelected ? 'var(--accent)' : 'var(--border)'};font-size:11px;font-weight:700;cursor:pointer;padding:4px 10px;border-radius:6px;text-transform:uppercase;letter-spacing:0.3px">${groupAllSelected ? '✓ All Selected' : 'Select Day'}</button>
+                            </div>
+                            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">
+                                ${groups[dateKey].map(p => {
+                                    const empName = (this.state.employees || []).find(e => e.id === p.employeeId)?.name || (p.employeeId ? p.employeeId.slice(0, 6) : '?');
+                                    const isSelected = selectedProofs.has(p.id);
+                                    return `<div class="edit-proof-item" data-proof-id="${p.id}" style="position:relative">
+                                        <img src="${p.imageUrl}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;border:${isSelected ? '3px solid var(--accent)' : '1px solid var(--border)'};cursor:pointer;box-sizing:border-box;background:var(--bg-secondary)" loading="lazy">
+                                        <input type="checkbox" class="eo-proof-check" data-proof-id="${p.id}" ${isSelected ? 'checked' : ''} title="Select for bulk delete" style="position:absolute;top:8px;left:8px;width:22px;height:22px;cursor:pointer;accent-color:var(--accent);background:white;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.3)">
+                                        <button class="edit-proof-delete" data-proof-id="${p.id}" data-storage-path="${p.storagePath || ''}" title="Delete this proof" style="position:absolute;top:-7px;right:-7px;width:26px;height:26px;border-radius:50%;background:var(--error);color:white;border:2px solid white;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,0.2)">x</button>
+                                        <div style="position:absolute;bottom:4px;left:4px;right:4px;background:rgba(0,0,0,0.65);color:white;font-size:11px;padding:3px 6px;border-radius:4px;text-align:center;font-weight:500">${empName}</div>
+                                    </div>`;
+                                }).join('')}
+                            </div>
                         </div>`;
+                    }).join('');
                 };
 
+                const renderToolbar = () => {
+                    const sel = selectedProofs.size;
+                    return `
+                        <button type="button" class="btn btn-secondary btn-sm eo-select-all" style="width:auto;padding:8px 14px;font-size:13px">${sel === proofs.length && proofs.length > 0 ? 'Deselect All' : 'Select All'}</button>
+                        <span style="font-size:14px;color:${sel > 0 ? 'var(--accent)' : 'var(--text-secondary)'};font-weight:${sel > 0 ? '700' : '500'}">${sel} of ${proofs.length} selected</span>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;user-select:none">
+                            <input type="checkbox" id="eo-decrement-toggle" ${decrementOnDelete ? 'checked' : ''} style="cursor:pointer;accent-color:var(--accent)">
+                            Also decrement Completed Count
+                        </label>
+                        <span style="flex:1"></span>
+                        <button type="button" class="eo-bulk-delete" ${sel === 0 ? 'disabled' : ''} style="padding:8px 18px;font-size:13px;background:${sel > 0 ? 'var(--error)' : 'var(--border)'};color:white;font-weight:700;cursor:${sel > 0 ? 'pointer' : 'not-allowed'};border:none;border-radius:8px">Delete Selected${sel > 0 ? ' (' + sel + ')' : ''}</button>`;
+                };
+
+                // Full-screen modal — no centered card. Focus is the proof gallery; order metadata
+                // sits in a compact strip at top, sticky save button always visible.
                 const modal = document.createElement('div');
-                modal.className = 'modal-overlay';
                 modal.id = 'edit-order-modal';
+                modal.style.cssText = 'position:fixed;inset:0;background:var(--bg);z-index:9999;overflow-y:auto;padding:0';
                 modal.innerHTML = `
-                    <div class="modal-content" style="max-width:560px;max-height:90vh;overflow-y:auto">
-                        <h2 style="font-size:20px;font-weight:700;margin-bottom:6px">Edit Order</h2>
-                        <p style="color:var(--text-secondary);font-size:14px;margin-bottom:18px">${order.companyName}</p>
-                        <form id="edit-order-form" style="display:flex;flex-direction:column;gap:14px">
-                            <div>
-                                <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">Review Link</label>
-                                <input type="text" id="eo-link" class="input" value="${(order.reviewLink || '').replace(/"/g, '&quot;')}" placeholder="https://maps.app.goo.gl/...">
-                            </div>
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                    <div style="position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--border);z-index:10;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+                        <button type="button" id="eo-cancel" class="btn btn-secondary btn-sm" style="width:auto;padding:8px 14px">&larr; Close</button>
+                        <div style="flex:1;min-width:180px">
+                            <h2 style="font-size:18px;font-weight:800;margin:0">${order.companyName}</h2>
+                            <p style="color:var(--text-secondary);font-size:12px;margin:0">Edit Order · ${proofs.length} proof screenshot${proofs.length === 1 ? '' : 's'}</p>
+                        </div>
+                        <button type="button" id="eo-save" class="btn btn-primary btn-sm" style="width:auto;padding:8px 18px;font-weight:700">Save Order Settings</button>
+                    </div>
+
+                    <div style="max-width:1200px;margin:0 auto;padding:20px;padding-bottom:80px">
+                        <details style="margin-bottom:24px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:14px 18px" id="eo-settings-panel">
+                            <summary style="cursor:pointer;font-size:14px;font-weight:700;list-style:none;display:flex;align-items:center;gap:8px">
+                                <span>Order Settings</span>
+                                <span style="color:var(--text-secondary);font-weight:400;font-size:12px">link · quantity · count · daily · starting · comments</span>
+                            </summary>
+                            <form id="edit-order-form" style="display:flex;flex-direction:column;gap:12px;margin-top:14px">
                                 <div>
-                                    <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">Quantity</label>
-                                    <input type="number" id="eo-quantity" class="input" value="${order.quantity || 0}" min="0" inputmode="numeric">
+                                    <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--text-secondary)">Review Link</label>
+                                    <input type="text" id="eo-link" class="input" value="${(order.reviewLink || '').replace(/"/g, '&quot;')}" placeholder="https://maps.app.goo.gl/...">
+                                </div>
+                                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+                                    <div>
+                                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--text-secondary)">Quantity</label>
+                                        <input type="number" id="eo-quantity" class="input" value="${order.quantity || 0}" min="0" inputmode="numeric">
+                                    </div>
+                                    <div>
+                                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--text-secondary)">Completed Count</label>
+                                        <input type="number" id="eo-completed" class="input" value="${order.completedCount || 0}" min="0" inputmode="numeric">
+                                    </div>
+                                    <div>
+                                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--text-secondary)">Daily Target</label>
+                                        <input type="number" id="eo-daily" class="input" value="${order.dailyTarget || 5}" min="1" inputmode="numeric">
+                                    </div>
+                                    <div>
+                                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--text-secondary)">Starting Count</label>
+                                        <input type="number" id="eo-starting" class="input" value="${order.startingCount || 0}" min="0" inputmode="numeric">
+                                    </div>
                                 </div>
                                 <div>
-                                    <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">Completed Count</label>
-                                    <input type="number" id="eo-completed" class="input" value="${order.completedCount || 0}" min="0" inputmode="numeric">
-                                    <p style="font-size:11px;color:var(--text-secondary);margin-top:3px">Manual fix for double-submits</p>
+                                    <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--text-secondary)">Comments</label>
+                                    <textarea id="eo-comments" class="input" rows="2" style="resize:vertical">${(order.comments || '').replace(/</g, '&lt;')}</textarea>
                                 </div>
+                            </form>
+                        </details>
+
+                        <div style="margin-bottom:14px">
+                            <h3 style="font-size:16px;font-weight:700;margin:0 0 4px">Proof Screenshots</h3>
+                            <p style="color:var(--text-secondary);font-size:12px;margin:0 0 12px"><span id="eo-proof-count">${proofs.length}</span> total · tap a thumbnail to view full-size · "Decrement Count" is OFF by default (count tracks daily reports, not raw uploads)</p>
+                            <div id="eo-toolbar" style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;padding:10px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;position:sticky;top:62px;z-index:9">
+                                ${renderToolbar()}
                             </div>
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-                                <div>
-                                    <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">Daily Target</label>
-                                    <input type="number" id="eo-daily" class="input" value="${order.dailyTarget || 5}" min="1" inputmode="numeric">
-                                </div>
-                                <div>
-                                    <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">Starting Count</label>
-                                    <input type="number" id="eo-starting" class="input" value="${order.startingCount || 0}" min="0" inputmode="numeric">
-                                </div>
-                            </div>
-                            <div>
-                                <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">Comments</label>
-                                <textarea id="eo-comments" class="input" rows="2" style="resize:vertical">${(order.comments || '').replace(/</g, '&lt;')}</textarea>
-                            </div>
-                            <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:6px">
-                                <p style="font-size:13px;font-weight:600;margin-bottom:8px">Proof Screenshots <span style="color:var(--text-secondary);font-weight:400">(<span id="eo-proof-count">${proofs.length}</span> total · click <span style="color:var(--error)">x</span> to delete)</span></p>
-                                <div id="eo-proofs-grid">${renderProofsGrid()}</div>
-                            </div>
-                            <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:8px">
-                                <button type="button" id="eo-cancel" class="btn btn-secondary" style="width:auto">Close</button>
-                                <button type="submit" class="btn btn-primary" style="width:auto">Save Changes</button>
-                            </div>
-                        </form>
-                    </div>`;
+                            <div id="eo-proofs-grid">${renderProofsGrid()}</div>
+                        </div>
+                    </div>
+                `;
                 this.el.modal.innerHTML = '';
                 this.el.modal.appendChild(modal);
 
                 document.getElementById('eo-cancel').onclick = () => this.el.modal.innerHTML = '';
-                modal.addEventListener('click', e => { if (e.target === modal) this.el.modal.innerHTML = ''; });
+                document.getElementById('eo-save').onclick = (e) => {
+                    document.getElementById('edit-order-form').requestSubmit
+                        ? document.getElementById('edit-order-form').requestSubmit()
+                        : document.getElementById('edit-order-form').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                };
 
                 const grid = document.getElementById('eo-proofs-grid');
+                const toolbar = document.getElementById('eo-toolbar');
 
-                // Helper: refresh just the proofs grid HTML in-place (preserves the rest of the modal).
                 const refreshGrid = () => { grid.innerHTML = renderProofsGrid(); };
+                const refreshToolbar = () => { toolbar.innerHTML = renderToolbar(); };
+                const refreshAll = () => { refreshToolbar(); refreshGrid(); };
 
-                // Helper: delete a single proof server-side. Returns the new completedCount or throws.
                 const deleteOneProof = async (proofId, storagePath) => {
                     const token = await auth.currentUser.getIdToken();
                     const resp = await fetch(`${API_BASE}/delete-proof`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ orderId, proofId, storagePath: storagePath || null })
+                        body: JSON.stringify({ orderId, proofId, storagePath: storagePath || null, decrementCount: decrementOnDelete })
                     });
                     const data = await resp.json().catch(() => ({}));
                     if (!resp.ok) throw new Error(data.error || 'Delete failed');
                     return data.completedCount;
                 };
 
-                grid.addEventListener('click', async (ev) => {
-                    // Per-proof X delete (single)
-                    const xBtn = ev.target.closest('.edit-proof-delete');
-                    if (xBtn) {
-                        const proofId = xBtn.dataset.proofId;
-                        const storagePath = xBtn.dataset.storagePath || null;
-                        if (!confirm('Delete this proof screenshot? Completed Count will decrement by 1. Cannot be undone.')) return;
-                        xBtn.disabled = true; xBtn.textContent = '...';
-                        try {
-                            const newCount = await deleteOneProof(proofId, storagePath);
-                            proofs = proofs.filter(p => p.id !== proofId);
-                            selectedProofs.delete(proofId);
-                            document.getElementById('eo-proof-count').textContent = proofs.length;
-                            if (typeof newCount === 'number') {
-                                document.getElementById('eo-completed').value = newCount;
-                                order.completedCount = newCount;
-                            }
-                            refreshGrid();
-                            this.toast('Proof deleted, count -1.', 'success');
-                        } catch (err) {
-                            this.toast(err.message || 'Delete failed', 'error');
-                            xBtn.disabled = false; xBtn.textContent = 'x';
-                        }
+                // Toolbar: select-all + bulk-delete + decrement-toggle (event-delegated).
+                toolbar.addEventListener('click', async (ev) => {
+                    const selAll = ev.target.closest('.eo-select-all');
+                    if (selAll) {
+                        if (selectedProofs.size === proofs.length) selectedProofs.clear();
+                        else proofs.forEach(p => selectedProofs.add(p.id));
+                        refreshAll();
                         return;
                     }
-
-                    // Top "Select All" / "Deselect All"
-                    const selectAllBtn = ev.target.closest('.eo-select-all');
-                    if (selectAllBtn) {
-                        if (selectedProofs.size === proofs.length) {
-                            selectedProofs.clear();
-                        } else {
-                            proofs.forEach(p => selectedProofs.add(p.id));
-                        }
-                        refreshGrid();
-                        return;
-                    }
-
-                    // Per-date "Select All"
-                    const dateBtn = ev.target.closest('.eo-select-date');
-                    if (dateBtn) {
-                        const dateKey = dateBtn.dataset.dateKey;
-                        const groupProofs = proofs.filter(p => {
-                            const ua = p.uploadedAt;
-                            const dt = ua?.toDate ? ua.toDate() : (ua?._seconds ? new Date(ua._seconds * 1000) : null);
-                            return (dt ? dt.toLocaleDateString('en-CA') : 'No date') === dateKey;
-                        });
-                        const allSelected = groupProofs.every(p => selectedProofs.has(p.id));
-                        groupProofs.forEach(p => allSelected ? selectedProofs.delete(p.id) : selectedProofs.add(p.id));
-                        refreshGrid();
-                        return;
-                    }
-
-                    // Bulk delete
                     const bulkBtn = ev.target.closest('.eo-bulk-delete');
                     if (bulkBtn) {
                         if (bulkBtn.disabled || selectedProofs.size === 0) return;
                         const n = selectedProofs.size;
-                        if (!confirm(`Delete ${n} selected screenshot${n === 1 ? '' : 's'}? Completed Count will decrement by ${n}. Cannot be undone.`)) return;
+                        const decMsg = decrementOnDelete ? ` Completed Count will decrement by ${n}.` : '';
+                        if (!confirm(`Delete ${n} selected screenshot${n === 1 ? '' : 's'}?${decMsg} Cannot be undone.`)) return;
                         bulkBtn.disabled = true; bulkBtn.textContent = `Deleting 0/${n}...`;
                         const ids = [...selectedProofs];
                         const proofMap = new Map(proofs.map(p => [p.id, p]));
                         let done = 0, failed = 0, lastCount = order.completedCount;
-                        // Sequential delete (safer for /delete-proof transaction; max 50-100 is fine).
                         for (const pid of ids) {
                             const p = proofMap.get(pid);
                             try {
@@ -3797,15 +3776,63 @@
                             }
                         }
                         document.getElementById('eo-proof-count').textContent = proofs.length;
-                        document.getElementById('eo-completed').value = lastCount;
-                        order.completedCount = lastCount;
-                        refreshGrid();
-                        if (failed === 0) this.toast(`Deleted ${done} screenshot${done === 1 ? '' : 's'}, count -${done}.`, 'success');
-                        else this.toast(`Deleted ${done}, failed ${failed}. Count adjusted.`, 'error');
+                        if (decrementOnDelete) {
+                            document.getElementById('eo-completed').value = lastCount;
+                            order.completedCount = lastCount;
+                        }
+                        refreshAll();
+                        const countNote = decrementOnDelete ? `, count -${done}` : '';
+                        if (failed === 0) this.toast(`Deleted ${done} screenshot${done === 1 ? '' : 's'}${countNote}.`, 'success');
+                        else this.toast(`Deleted ${done}, failed ${failed}.`, 'error');
                         return;
                     }
+                });
+                toolbar.addEventListener('change', (ev) => {
+                    if (ev.target.id === 'eo-decrement-toggle') {
+                        decrementOnDelete = ev.target.checked;
+                    }
+                });
 
-                    // Click on a thumbnail (img) opens full-size in new tab — but only if no checkbox/X clicked.
+                // Grid: per-proof delete + per-date select-day + thumbnail full-size open + checkboxes.
+                grid.addEventListener('click', async (ev) => {
+                    const xBtn = ev.target.closest('.edit-proof-delete');
+                    if (xBtn) {
+                        const proofId = xBtn.dataset.proofId;
+                        const storagePath = xBtn.dataset.storagePath || null;
+                        const decMsg = decrementOnDelete ? ' Completed Count -1.' : '';
+                        if (!confirm(`Delete this screenshot?${decMsg} Cannot be undone.`)) return;
+                        xBtn.disabled = true; xBtn.textContent = '...';
+                        try {
+                            const newCount = await deleteOneProof(proofId, storagePath);
+                            proofs = proofs.filter(p => p.id !== proofId);
+                            selectedProofs.delete(proofId);
+                            document.getElementById('eo-proof-count').textContent = proofs.length;
+                            if (decrementOnDelete && typeof newCount === 'number') {
+                                document.getElementById('eo-completed').value = newCount;
+                                order.completedCount = newCount;
+                            }
+                            refreshAll();
+                            this.toast(`Proof deleted${decrementOnDelete ? ', count -1' : ''}.`, 'success');
+                        } catch (err) {
+                            this.toast(err.message || 'Delete failed', 'error');
+                            xBtn.disabled = false; xBtn.textContent = 'x';
+                        }
+                        return;
+                    }
+                    const dateBtn = ev.target.closest('.eo-select-date');
+                    if (dateBtn) {
+                        const dateKey = dateBtn.dataset.dateKey;
+                        const groupProofs = proofs.filter(p => {
+                            const ua = p.uploadedAt;
+                            const dt = ua?.toDate ? ua.toDate() : (ua?._seconds ? new Date(ua._seconds * 1000) : null);
+                            return (dt ? dt.toLocaleDateString('en-CA') : 'No date') === dateKey;
+                        });
+                        const allSelected = groupProofs.every(p => selectedProofs.has(p.id));
+                        groupProofs.forEach(p => allSelected ? selectedProofs.delete(p.id) : selectedProofs.add(p.id));
+                        refreshAll();
+                        return;
+                    }
+                    // Click thumbnail to open full-size (only if not on checkbox or X)
                     const img = ev.target.closest('.edit-proof-item img');
                     if (img && !ev.target.closest('.eo-proof-check') && !ev.target.closest('.edit-proof-delete')) {
                         const proofId = ev.target.closest('.edit-proof-item').dataset.proofId;
@@ -3813,15 +3840,13 @@
                         if (p?.imageUrl) window.open(p.imageUrl, '_blank');
                     }
                 });
-
-                // Checkbox change events (separate listener since checkboxes use `change`, not `click`)
                 grid.addEventListener('change', (ev) => {
                     const cb = ev.target.closest('.eo-proof-check');
                     if (!cb) return;
                     const proofId = cb.dataset.proofId;
                     if (cb.checked) selectedProofs.add(proofId);
                     else selectedProofs.delete(proofId);
-                    refreshGrid();
+                    refreshAll();
                 });
 
                 document.getElementById('edit-order-form').onsubmit = async (e) => {
@@ -3833,9 +3858,9 @@
                     const startingCount = parseInt(document.getElementById('eo-starting').value) || 0;
                     const comments = document.getElementById('eo-comments').value;
 
-                    const submitBtn = e.target.querySelector('[type="submit"]');
-                    submitBtn.disabled = true;
-                    submitBtn.textContent = 'Saving...';
+                    // Save button now lives in the sticky header (not inside the form).
+                    const saveBtn = document.getElementById('eo-save');
+                    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
                     try {
                         await db.collection('orders').doc(orderId).update({
                             reviewLink,
@@ -3848,13 +3873,13 @@
                         });
                         // Update local state too so the UI reflects immediately.
                         Object.assign(order, { reviewLink, quantity, completedCount, dailyTarget, startingCount, comments });
-                        this.toast('Order updated.', 'success');
-                        this.el.modal.innerHTML = '';
+                        this.toast('Order settings saved.', 'success');
+                        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Saved ✓'; setTimeout(() => { if (saveBtn) saveBtn.textContent = 'Save Order Settings'; }, 1500); }
+                        // Reflect on order card without closing the modal — user may still be deleting proofs.
                         this.updateView();
                     } catch (err) {
                         this.toast('Save failed: ' + err.message, 'error');
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = 'Save Changes';
+                        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Order Settings'; }
                     }
                 };
             },
