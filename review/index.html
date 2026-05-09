@@ -2591,12 +2591,16 @@
                                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                                 body: JSON.stringify({ editedEntries })
                             });
-                            if (!resp.ok) throw new Error('Approve failed');
+                            const respData = await resp.json().catch(() => ({}));
+                            if (!resp.ok) throw new Error(respData.error || 'Approve failed');
 
-                            this.toast('Report approved! Counts updated.', 'success');
-                            this.state._reports = null; // Force reload
-                            this.loadOrders(); // Refresh tracker counts
-                            this.updateView();
+                            const credited = typeof respData.creditedReviews === 'number' ? respData.creditedReviews : null;
+                            const msg = credited != null ? `Approved! Credited ${credited} review${credited === 1 ? '' : 's'} across ${respData.creditedOrders || 0} order${(respData.creditedOrders || 0) === 1 ? '' : 's'}.` : 'Report approved! Counts updated.';
+                            this.toast(msg, 'success');
+                            // Force reports list reload AND wait for orders to refresh before re-rendering.
+                            this.state._reports = null;
+                            await this.loadOrders(); // critical: await so updateView shows fresh counts
+                            await this.loadDailyReports(); // refresh report list (also triggers updateView)
                         } catch(err) {
                             this.toast(err.message, 'error');
                             btn.disabled = false;
