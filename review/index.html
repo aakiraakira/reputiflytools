@@ -537,6 +537,39 @@
                     // OR admin re-saves Manage Assignments. Standard-tier's restriction is purely
                     // UI-side — they don't see the Tracker tab.
                     this.state.orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+                    // Populate _todayUploads with PERSISTED proofs (across days within the same
+                    // assignment lifecycle). Counts every proof the employee uploaded since their
+                    // current `dailyAssignment[uid].assignedAt` for this order. When admin approves
+                    // and re-assigns, assignedAt resets and the prior counts age out naturally.
+                    if (!this.state._todayUploads) this.state._todayUploads = {};
+                    const uid = this.state.user.uid;
+                    await Promise.all(this.state.orders.map(async (order) => {
+                        const assignedAtRaw = order.dailyAssignment?.[uid]?.assignedAt;
+                        if (!assignedAtRaw) return;
+                        const assignedAtMs = new Date(assignedAtRaw).getTime();
+                        if (!Number.isFinite(assignedAtMs)) return;
+                        try {
+                            const proofsSnap = await db.collection('orders').doc(order.id)
+                                .collection('proofs').where('employeeId', '==', uid).get();
+                            const persisted = proofsSnap.docs
+                                .filter(d => {
+                                    const ua = d.data().uploadedAt;
+                                    const uaMs = ua?.toMillis ? ua.toMillis() : (ua?._seconds ? ua._seconds * 1000 : 0);
+                                    return uaMs >= assignedAtMs;
+                                })
+                                .map(d => ({ url: d.data().imageUrl, _persisted: true }));
+                            // Merge with any in-session uploads (preserve previews + reviewCount).
+                            const existing = this.state._todayUploads[order.id] || { screenshots: [], reviewCount: 0 };
+                            // Restore reviewCount from localStorage (per-assignment lifecycle key).
+                            const lsKey = `_reviewCount_${order.id}_${assignedAtMs}`;
+                            const savedCount = parseInt(localStorage.getItem(lsKey) || '0', 10);
+                            this.state._todayUploads[order.id] = {
+                                screenshots: persisted.length ? persisted : existing.screenshots,
+                                reviewCount: existing.reviewCount || savedCount || 0,
+                            };
+                        } catch (_) { /* fail-soft, keep existing UI state */ }
+                    }));
                 } catch(e) { this.state.orders = []; }
                 this.state.ordersLoading = false;
                 this.updateView();
@@ -3066,8 +3099,10 @@
                                             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:6px">
                                                 ${uploads.screenshots.map((s, i) => `
                                                     <div style="position:relative">
-                                                        <img src="${s.preview}" style="width:100%;height:70px;object-fit:cover;border-radius:8px">
-                                                        <button class="remove-screenshot" data-order-id="${o.id}" data-idx="${i}" style="position:absolute;top:-5px;right:-5px;width:20px;height:20px;border-radius:50%;background:var(--error);color:white;border:none;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">x</button>
+                                                        <img src="${s.preview || s.url}" style="width:100%;height:70px;object-fit:cover;border-radius:8px${s._persisted ? ';opacity:0.95' : ''}" loading="lazy">
+                                                        ${s._persisted
+                                                            ? `<span title="Saved — admin only can remove" style="position:absolute;top:-5px;right:-5px;width:20px;height:20px;border-radius:50%;background:var(--success);color:white;font-size:11px;display:flex;align-items:center;justify-content:center;line-height:1">&check;</span>`
+                                                            : `<button class="remove-screenshot" data-order-id="${o.id}" data-idx="${i}" style="position:absolute;top:-5px;right:-5px;width:20px;height:20px;border-radius:50%;background:var(--error);color:white;border:none;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">x</button>`}
                                                     </div>
                                                 `).join('')}
                                             </div>
@@ -3179,12 +3214,20 @@
                         this.updateView();
                     });
                 });
-                // Review count input
+                // Review count input — persist to localStorage so Day 2 shows the prior day's
+                // entered count (per-assignment lifecycle key, auto-resets when admin re-assigns).
                 document.querySelectorAll('.review-count-input').forEach(input => {
                     input.addEventListener('input', e => {
                         const orderId = e.target.dataset.orderId;
                         if (!this.state._todayUploads[orderId]) this.state._todayUploads[orderId] = { screenshots: [], reviewCount: 0 };
-                        this.state._todayUploads[orderId].reviewCount = parseInt(e.target.value) || 0;
+                        const count = parseInt(e.target.value) || 0;
+                        this.state._todayUploads[orderId].reviewCount = count;
+                        const order = this.state.orders.find(o => o.id === orderId);
+                        const assignedAt = order?.dailyAssignment?.[this.state.user?.uid]?.assignedAt;
+                        if (assignedAt) {
+                            const ms = new Date(assignedAt).getTime();
+                            try { localStorage.setItem(`_reviewCount_${orderId}_${ms}`, String(count)); } catch(_) {}
+                        }
                     });
                 });
                 // Save progress for a company
@@ -3265,6 +3308,18 @@
                         if (!resp.ok) throw new Error(data.error || 'Failed');
 
                         this.toast('Report submitted! Waiting for admin approval.', 'success');
+                        // Clear per-order localStorage reviewCount entries from this submission.
+                        try {
+                            const uid = this.state.user?.uid;
+                            for (const e of reportLines) {
+                                const order = this.state.orders.find(o => o.id === e.orderId);
+                                const assignedAt = order?.dailyAssignment?.[uid]?.assignedAt;
+                                if (assignedAt) {
+                                    const ms = new Date(assignedAt).getTime();
+                                    localStorage.removeItem(`_reviewCount_${e.orderId}_${ms}`);
+                                }
+                            }
+                        } catch(_) {}
                         this.state._todayUploads = {}; // Clear uploads
                         this.el.modal.innerHTML = '';
                         this.loadEmployeeAssignments();
