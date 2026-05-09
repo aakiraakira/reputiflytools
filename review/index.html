@@ -526,11 +526,24 @@
             },
 
             async loadEmployeeAssignments() {
+                // Defensive: bail if auth state isn't ready yet.
+                if (!this.state.user?.uid) {
+                    this.state.orders = [];
+                    this.state.ordersLoading = false;
+                    this.updateView();
+                    return;
+                }
+                // Generation counter — if loadEmployeeAssignments is called again while we're still
+                // in the Promise.all below, the second call's writes to _todayUploads must NOT be
+                // overwritten by the first call's stragglers. Each await checkpoint compares.
+                this._loadGen = (this._loadGen || 0) + 1;
+                const myGen = this._loadGen;
                 try {
                     const snap = await db.collection('orders')
                         .where('assignedEmployees', 'array-contains', this.state.user.uid)
                         .where('status', '==', 'active')
                         .get();
+                    if (myGen !== this._loadGen) return; // a newer call superseded us
                     // Both trusted and standard tiers see the SAME assignment list:
                     // every active order they're in assignedEmployees for. The list refreshes only
                     // when admin approves their daily report (clears via /daily-report/:id/approve)
@@ -538,21 +551,36 @@
                     // UI-side — they don't see the Tracker tab.
                     this.state.orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-                    // Populate _todayUploads with PERSISTED proofs (across days within the same
-                    // assignment lifecycle). Counts every proof the employee uploaded since their
-                    // current `dailyAssignment[uid].assignedAt` for this order. assignedAt is
-                    // preserved across admin re-saves (see /assign endpoint), so the multi-day
-                    // proof view survives until admin approves OR unticks the employee.
+                    // Prune stale _todayUploads entries for orders no longer in the list (after
+                    // admin approval/untick, the order disappears and we shouldn't carry old state).
                     if (!this.state._todayUploads) this.state._todayUploads = {};
+                    const liveOrderIds = new Set(this.state.orders.map(o => o.id));
+                    for (const oid of Object.keys(this.state._todayUploads)) {
+                        if (!liveOrderIds.has(oid)) delete this.state._todayUploads[oid];
+                    }
+
+                    // Populate _todayUploads with PERSISTED proofs (across days within the same
+                    // assignment lifecycle). assignedAt is preserved across admin re-saves so the
+                    // multi-day proof view survives until admin approves OR unticks the employee.
                     const uid = this.state.user.uid;
                     await Promise.all(this.state.orders.map(async (order) => {
+                        if (myGen !== this._loadGen) return; // bail if superseded
                         const assignedAtRaw = order.dailyAssignment?.[uid]?.assignedAt;
                         if (!assignedAtRaw) return;
-                        const assignedAtMs = new Date(assignedAtRaw).getTime();
+                        // Handle both ISO string (current writer) AND Firestore Timestamp object (legacy).
+                        let assignedAtMs;
+                        if (typeof assignedAtRaw === 'string') {
+                            assignedAtMs = new Date(assignedAtRaw).getTime();
+                        } else if (assignedAtRaw?.toMillis) {
+                            assignedAtMs = assignedAtRaw.toMillis();
+                        } else if (assignedAtRaw?._seconds) {
+                            assignedAtMs = assignedAtRaw._seconds * 1000;
+                        }
                         if (!Number.isFinite(assignedAtMs)) return;
                         try {
                             const proofsSnap = await db.collection('orders').doc(order.id)
                                 .collection('proofs').where('employeeId', '==', uid).get();
+                            if (myGen !== this._loadGen) return; // bail if superseded
                             const persisted = proofsSnap.docs
                                 .filter(d => {
                                     const ua = d.data().uploadedAt;
@@ -563,7 +591,6 @@
                             const existing = this.state._todayUploads[order.id] || { screenshots: [], reviewCount: 0 };
                             // Merge: keep in-session items (preserves their `preview` blobs for
                             // instant thumbnails), then add persisted entries not already present.
-                            // Dedupe by URL so the same upload doesn't appear twice.
                             const merged = [];
                             const seenUrls = new Set();
                             for (const s of existing.screenshots) {
@@ -573,8 +600,6 @@
                                 if (s.url && !seenUrls.has(s.url)) { seenUrls.add(s.url); merged.push(s); }
                             }
                             // reviewCount priority: in-session typed value > localStorage > screenshot count > 0.
-                            // Default to the persisted screenshot count so Day-2 users see a sensible
-                            // pre-fill (rather than always starting from 0 after a report submit).
                             const lsKey = `_reviewCount_${order.id}_${assignedAtMs}`;
                             const savedCount = parseInt(localStorage.getItem(lsKey) || '0', 10);
                             const reviewCount = existing.reviewCount > 0
@@ -586,7 +611,11 @@
                             };
                         } catch (_) { /* fail-soft, keep existing UI state */ }
                     }));
-                } catch(e) { this.state.orders = []; }
+                } catch(e) {
+                    if (myGen !== this._loadGen) return;
+                    this.state.orders = [];
+                }
+                if (myGen !== this._loadGen) return;
                 this.state.ordersLoading = false;
                 this.updateView();
             },
