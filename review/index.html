@@ -540,8 +540,9 @@
 
                     // Populate _todayUploads with PERSISTED proofs (across days within the same
                     // assignment lifecycle). Counts every proof the employee uploaded since their
-                    // current `dailyAssignment[uid].assignedAt` for this order. When admin approves
-                    // and re-assigns, assignedAt resets and the prior counts age out naturally.
+                    // current `dailyAssignment[uid].assignedAt` for this order. assignedAt is
+                    // preserved across admin re-saves (see /assign endpoint), so the multi-day
+                    // proof view survives until admin approves OR unticks the employee.
                     if (!this.state._todayUploads) this.state._todayUploads = {};
                     const uid = this.state.user.uid;
                     await Promise.all(this.state.orders.map(async (order) => {
@@ -559,14 +560,29 @@
                                     return uaMs >= assignedAtMs;
                                 })
                                 .map(d => ({ url: d.data().imageUrl, _persisted: true }));
-                            // Merge with any in-session uploads (preserve previews + reviewCount).
                             const existing = this.state._todayUploads[order.id] || { screenshots: [], reviewCount: 0 };
-                            // Restore reviewCount from localStorage (per-assignment lifecycle key).
+                            // Merge: keep in-session items (preserves their `preview` blobs for
+                            // instant thumbnails), then add persisted entries not already present.
+                            // Dedupe by URL so the same upload doesn't appear twice.
+                            const merged = [];
+                            const seenUrls = new Set();
+                            for (const s of existing.screenshots) {
+                                if (s.url && !seenUrls.has(s.url)) { seenUrls.add(s.url); merged.push(s); }
+                            }
+                            for (const s of persisted) {
+                                if (s.url && !seenUrls.has(s.url)) { seenUrls.add(s.url); merged.push(s); }
+                            }
+                            // reviewCount priority: in-session typed value > localStorage > screenshot count > 0.
+                            // Default to the persisted screenshot count so Day-2 users see a sensible
+                            // pre-fill (rather than always starting from 0 after a report submit).
                             const lsKey = `_reviewCount_${order.id}_${assignedAtMs}`;
                             const savedCount = parseInt(localStorage.getItem(lsKey) || '0', 10);
+                            const reviewCount = existing.reviewCount > 0
+                                ? existing.reviewCount
+                                : (savedCount > 0 ? savedCount : merged.length);
                             this.state._todayUploads[order.id] = {
-                                screenshots: persisted.length ? persisted : existing.screenshots,
-                                reviewCount: existing.reviewCount || savedCount || 0,
+                                screenshots: merged,
+                                reviewCount,
                             };
                         } catch (_) { /* fail-soft, keep existing UI state */ }
                     }));
