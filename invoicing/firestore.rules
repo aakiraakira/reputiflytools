@@ -59,10 +59,20 @@ service cloud.firestore {
           && request.resource.data.number > 0
           && request.resource.data.createdAt == request.time
           && request.resource.data.status in ['paid'];
+        // Invoice numbering is keyed to PAYMENT DATE in this workflow —
+        // the latest payment gets the highest number, so the dashboard
+        // reads as a clean chronological ledger. That means three fields
+        // that used to be immutable now have to be mutable:
+        //   • issueDate     (the recorded payment date — user can correct it)
+        //   • number        (re-permuted across the existing pool when
+        //                    payment dates shift or a new payment lands)
+        //   • displayNumber (the formatted twin of `number`)
+        // `createdAt` (the original Firestore write time) stays pinned so
+        // there is a stable tiebreaker when two payments share a date, and
+        // the status flow stays one-way (paid → void).
         allow update: if isOwner()
-          && request.resource.data.number == resource.data.number
-          && request.resource.data.displayNumber == resource.data.displayNumber
-          && request.resource.data.issueDate == resource.data.issueDate
+          && request.resource.data.number is int
+          && request.resource.data.number > 0
           && request.resource.data.createdAt == resource.data.createdAt
           && request.resource.data.status in ['paid','void']
           && (resource.data.status != 'void' || request.resource.data.status == 'void');

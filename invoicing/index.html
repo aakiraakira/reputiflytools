@@ -1823,7 +1823,7 @@ input[type="date"]::-webkit-datetime-edit { text-align: left; }
     <section id="view-invoices" class="view" hidden>
       <div class="view-head">
         <div>
-          <h1 class="view-title">Paid invoices</h1>
+          <h1 class="view-title">Paid Invoices</h1>
           <div class="view-sub" id="invoices-count">—</div>
         </div>
       </div>
@@ -1904,7 +1904,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';
 import {
   getFirestore, doc, collection, onSnapshot, getDoc, setDoc, addDoc,
-  updateDoc, deleteDoc, runTransaction, serverTimestamp, query,
+  updateDoc, deleteDoc, runTransaction, serverTimestamp, writeBatch, query,
   orderBy, getDocs, Timestamp
 } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
@@ -2531,7 +2531,11 @@ async function convertQuotationToInvoice(quotationId, paymentDate) {
     state.counters.invoice = { ...state.counters.invoice, value: next };
     state.quotations.set(quotationId, { ...quote, status: 'converted', convertedToInvoiceId: newId, shareToken });
     render();
-    return { invoiceId: newId, displayNumber };
+    // Re-permute numbers by payment date so the just-converted invoice
+    // lands in the right chronological slot, not necessarily at the top.
+    try { await renumberInvoicesByPaymentDate(); } catch (e) { /* swallow */ }
+    const finalDev = state.invoices.get(newId);
+    return { invoiceId: newId, displayNumber: finalDev?.displayNumber || displayNumber };
   }
   const result = await runTransaction(db, async (txn) => {
     const counterRef = doc(db, `users/${uid}/counters/invoice`);
@@ -2592,7 +2596,19 @@ async function convertQuotationToInvoice(quotationId, paymentDate) {
     displayNumber: result.displayNumber
   }, 'invoice'));
 
-  return { invoiceId: result.invoiceId, displayNumber: result.displayNumber };
+  // Re-permute the existing pool of numbers by payment date so the
+  // newly converted invoice slots into the right chronological position.
+  // If its paymentDate is the latest, nothing changes; if it predates
+  // already-paid invoices, those shift up and this one drops in below.
+  try { await renumberInvoicesByPaymentDate(); } catch (e) { console.warn('[renumber] post-convert renumber failed', e); }
+
+  // Read back the final displayNumber from local state (which the
+  // snapshot listener / our optimistic batch has refreshed) so the
+  // toast we show the user matches what they'll see in the list.
+  const final = state.invoices.get(result.invoiceId);
+  const finalDisplay = final?.displayNumber || result.displayNumber;
+
+  return { invoiceId: result.invoiceId, displayNumber: finalDisplay };
 }
 
 async function setCounterValue(name, value) {
@@ -2608,6 +2624,160 @@ async function setCounterValue(name, value) {
     padding: name === 'invoice' ? 4 : 3,
     updatedAt: serverTimestamp()
   }, { merge: true });
+}
+
+// REGION: payment-date-driven renumbering ───────────────────────────
+// The accountant reads bank-statement deposit dates top-down; invoice
+// numbers should mirror that exact order. Whenever a payment date
+// shifts (or a new payment lands), we re-permute the existing pool of
+// invoice numbers across all invoices ordered by issueDate ascending —
+// the oldest payment keeps the lowest number, the newest payment ends
+// up with the highest number. The counter itself stays untouched
+// (forward-only), so future invoices keep getting fresh numbers.
+function invoicePaymentSortKey(inv) {
+  // Sort key: (issueDate, createdAt). issueDate is the payment date
+  // (a yyyy-mm-dd string, lexicographically chronological). createdAt
+  // breaks ties between two payments received on the same day — the
+  // earlier-converted one keeps the lower number, which is what feels
+  // right: it was the first one the user marked paid that day.
+  const date = inv.issueDate || '';
+  let createdSec = 0;
+  if (inv.createdAt) {
+    if (typeof inv.createdAt.seconds === 'number') createdSec = inv.createdAt.seconds;
+    else if (typeof inv.createdAt.toMillis === 'function') createdSec = inv.createdAt.toMillis() / 1000;
+    else if (inv.createdAt instanceof Date) createdSec = inv.createdAt.getTime() / 1000;
+  }
+  return { date, createdSec };
+}
+
+function detectInvoiceOrderingMismatch() {
+  // Returns true if the current set of invoices is NOT already sorted
+  // by payment date — i.e. clicking "Re-sequence" would actually move
+  // numbers. Cheap O(n log n) check used to render a soft hint in the
+  // numbering panel.
+  const invs = Array.from(state.invoices.values());
+  if (invs.length < 2) return false;
+  const sorted = [...invs].sort((a, b) => {
+    const A = invoicePaymentSortKey(a);
+    const B = invoicePaymentSortKey(b);
+    if (A.date !== B.date) return A.date.localeCompare(B.date);
+    return A.createdSec - B.createdSec;
+  });
+  const pool = invs.map(i => i.number || 0).sort((a, b) => a - b);
+  for (let i = 0; i < sorted.length; i++) {
+    if ((sorted[i].number || 0) !== pool[i]) return true;
+  }
+  return false;
+}
+
+async function renumberInvoicesByPaymentDate() {
+  const invs = Array.from(state.invoices.values());
+  if (invs.length < 2) return { changed: 0 };
+
+  // Order by payment date asc (oldest = lowest number)
+  const sorted = [...invs].sort((a, b) => {
+    const A = invoicePaymentSortKey(a);
+    const B = invoicePaymentSortKey(b);
+    if (A.date !== B.date) return A.date.localeCompare(B.date);
+    return A.createdSec - B.createdSec;
+  });
+
+  // The pool of available numbers = the numbers currently in use.
+  // Re-permute them across the sorted list — no new numbers minted,
+  // no numbers retired, the counter is never touched.
+  const pool = invs.map(i => i.number).filter(n => typeof n === 'number').sort((a, b) => a - b);
+  if (pool.length !== sorted.length) return { changed: 0 };
+
+  const counterMeta = state.counters.invoice || {};
+  const prefix  = counterMeta.prefix  || 'INV-';
+  const padding = counterMeta.padding || 4;
+
+  const updates = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const inv = sorted[i];
+    const newNumber = pool[i];
+    if (inv.number === newNumber) continue;
+    updates.push({
+      id: inv.id,
+      newNumber,
+      newDisplay: formatNumber(newNumber, prefix, padding)
+    });
+  }
+  if (updates.length === 0) return { changed: 0 };
+
+  if (DEV_MODE) {
+    for (const u of updates) {
+      const cur = state.invoices.get(u.id);
+      if (cur) state.invoices.set(u.id, { ...cur, number: u.newNumber, displayNumber: u.newDisplay });
+    }
+    render();
+    return { changed: updates.length };
+  }
+
+  const uid = state.user.uid;
+  // Single batch = atomic on the server, so number-swaps (where two
+  // invoices trade numbers) never leave the dataset with a duplicate
+  // mid-flight from any reader's perspective.
+  const batch = writeBatch(db);
+  for (const u of updates) {
+    batch.update(doc(db, `users/${uid}/invoices/${u.id}`), {
+      number: u.newNumber,
+      displayNumber: u.newDisplay,
+      updatedAt: serverTimestamp()
+    });
+  }
+  await batch.commit();
+
+  // Re-publish the public share mirror for each renumbered invoice so
+  // anyone holding a share link sees the new INV- number on the page.
+  for (const u of updates) {
+    const inv = state.invoices.get(u.id);
+    if (inv && inv.shareToken) {
+      try {
+        upsertShareDoc(inv.shareToken, buildSharePayload(
+          { ...inv, number: u.newNumber, displayNumber: u.newDisplay },
+          'invoice'
+        ));
+      } catch (e) { /* best-effort; do not fail the renumber */ }
+    }
+  }
+
+  return { changed: updates.length };
+}
+
+async function updateInvoicePaymentDate(id, newDate) {
+  const cur = state.invoices.get(id);
+  if (!cur) throw new Error('Invoice not found');
+  if (!newDate) throw new Error('Payment date is required');
+  if (cur.issueDate === newDate) return { changed: false };
+
+  if (DEV_MODE) {
+    state.invoices.set(id, { ...cur, issueDate: newDate });
+    await renumberInvoicesByPaymentDate();
+    return { changed: true };
+  }
+
+  const uid = state.user.uid;
+  await updateDoc(doc(db, `users/${uid}/invoices/${id}`), {
+    issueDate: newDate,
+    updatedAt: serverTimestamp()
+  });
+  // Audit the date change so the trail still shows who moved what.
+  try {
+    await addDoc(collection(db, `users/${uid}/invoices/${id}/audit`), {
+      ts: serverTimestamp(), actor: uid, event: 'payment-date-changed',
+      before: { issueDate: cur.issueDate || null },
+      after:  { issueDate: newDate }
+    });
+  } catch (e) { /* audit is best-effort */ }
+  // Refresh the public share mirror with the new date.
+  if (cur.shareToken) {
+    try {
+      upsertShareDoc(cur.shareToken, buildSharePayload({ ...cur, issueDate: newDate }, 'invoice'));
+    } catch (e) { /* best-effort */ }
+  }
+  await renumberInvoicesByPaymentDate();
+  return { changed: true };
 }
 
 async function nextQuotationNumber() {
@@ -3714,6 +3884,7 @@ function renderInvoiceNumbering() {
   const issuedCount = state.invoices.size;
   const nextDisplay = formatNumber(invCur + 1, 'INV-', 4);
   const lastDisplay = invCur > 0 ? formatNumber(invCur, 'INV-', 4) : null;
+  const outOfOrder = detectInvoiceOrderingMismatch();
 
   host.innerHTML = `
     <div class="ip-info">
@@ -3727,6 +3898,16 @@ function renderInvoiceNumbering() {
       <input type="number" min="1" id="ip-next-input" value="${invCur + 1}">
       <button class="btn" id="ip-save">Update</button>
     </div>
+    ${issuedCount > 1 ? `
+      <div class="ip-resequence" style="grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hairline);">
+        <button class="btn sm ${outOfOrder ? 'primary' : ''}" id="ip-resequence">Re-sequence by payment date</button>
+        <span style="font-size: 11.5px; color: ${outOfOrder ? 'var(--danger, #B91C1C)' : 'var(--ink-muted)'};">
+          ${outOfOrder
+            ? 'Numbers are not in payment-date order — click to align with the bank statement.'
+            : 'Already aligned with payment dates.'}
+        </span>
+      </div>
+    ` : ''}
   `;
 
   host.querySelector('#ip-save').addEventListener('click', async () => {
@@ -3754,6 +3935,25 @@ function renderInvoiceNumbering() {
       await proceed();
     }
   });
+
+  const resequenceBtn = host.querySelector('#ip-resequence');
+  if (resequenceBtn) {
+    resequenceBtn.addEventListener('click', async () => {
+      resequenceBtn.disabled = true;
+      try {
+        const { changed } = await renumberInvoicesByPaymentDate();
+        if (changed > 0) {
+          showToast(`Re-sequenced ${changed} invoice${changed === 1 ? '' : 's'} by payment date`);
+        } else {
+          showToast('Already in payment-date order');
+        }
+      } catch (e) {
+        showToast(e.message || 'Re-sequence failed', 'error');
+      } finally {
+        resequenceBtn.disabled = false;
+      }
+    });
+  }
 }
 
 // REGION: list-render ───────────────────────────────────────────────
@@ -3761,8 +3961,21 @@ function renderList(kind) {
   const host = document.getElementById(`${kind}-list`);
   const search = state.search[kind];
   const arr = filterDocs(state[kind], search);
-  // sort: recent first by number desc
-  arr.sort((a, b) => (b.number || 0) - (a.number || 0));
+  // Paid invoices: order by payment date (latest at top), then by
+  // number so two payments on the same day stay in their assigned
+  // chronological slot. This mirrors what an accountant reads off the
+  // bank statement top-down.
+  // Drafts: stick with number desc — most-recent draft on top.
+  if (kind === 'invoices') {
+    arr.sort((a, b) => {
+      const dateA = a.issueDate || '';
+      const dateB = b.issueDate || '';
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+      return (b.number || 0) - (a.number || 0);
+    });
+  } else {
+    arr.sort((a, b) => (b.number || 0) - (a.number || 0));
+  }
   const { items, total, hasMore } = paginate(arr, state.page[kind]);
 
   document.getElementById(`${kind}-count`).textContent =
@@ -3777,9 +3990,12 @@ function renderList(kind) {
     return;
   }
 
-  // Header
+  // Header — "Payment Made" on the Paid Invoices tab makes it obvious
+  // that the date column reflects when the money landed (not when the
+  // draft was first issued). Quotations keep the "Issued" label.
+  const dateColLabel = kind === 'invoices' ? 'Payment Made' : 'Issued';
   const head = document.createElement('div'); head.className = 'list-head';
-  head.innerHTML = `<span>Number</span><span>Client</span><span>Issued</span><span>Total</span><span>Status</span><span></span>`;
+  head.innerHTML = `<span>Number</span><span>Client</span><span>${dateColLabel}</span><span>Total</span><span>Status</span><span></span>`;
   host.appendChild(head);
 
   items.forEach(d => host.appendChild(buildListRow(kind, d, search)));
@@ -4104,7 +4320,12 @@ function renderDrawer() {
     body.appendChild(showAll);
   }
 
-  // ── META (only for drafts — paid invoices are locked) ─────────
+  // ── META ─────────────────────────────────────────────────────
+  // Drafts: "Issue date" — when the QINV- quotation was first written.
+  // Paid invoices: "Payment date" — when the money actually landed.
+  //   Editing it triggers a re-sequence so this invoice's INV- number
+  //   slides into the correct chronological slot. A void invoice still
+  //   shows the date but locks it (the void is the final state).
   if (kind === 'quotation') {
     const sec2 = document.createElement('div'); sec2.className = 'section-title'; sec2.textContent = 'Issue date';
     body.appendChild(sec2);
@@ -4112,6 +4333,22 @@ function renderDrawer() {
     meta.innerHTML = `
       <div class="form-row full">
         <input class="input" type="date" id="meta-issue" value="${escapeHtml(d.issueDate)}">
+      </div>
+    `;
+    body.appendChild(meta);
+  } else if (kind === 'invoice') {
+    const locked = d.status === 'void';
+    const sec2 = document.createElement('div'); sec2.className = 'section-title'; sec2.textContent = 'Payment date';
+    body.appendChild(sec2);
+    const meta = document.createElement('div'); meta.className = 'form-grid';
+    meta.innerHTML = `
+      <div class="form-row full">
+        <input class="input" type="date" id="meta-payment-date" value="${escapeHtml(d.issueDate || '')}" ${locked ? 'disabled' : ''}>
+        <div class="field-help" style="font-size: 11.5px; color: var(--ink-muted); margin-top: 6px;">
+          ${locked
+            ? 'Voided invoices keep their original payment date.'
+            : 'When you change this, INV- numbers re-sequence so the latest payment date is the highest number.'}
+        </div>
       </div>
     `;
     body.appendChild(meta);
@@ -4213,7 +4450,14 @@ function renderDrawer() {
         if (issueEl) patch.issueDate = issueEl.value;
         await updateQuotation(d.id, patch);
       } else {
+        // Paid invoice: client/items go through the standard updater.
+        // A payment-date change is a separate write because it also
+        // triggers a renumber across every existing invoice.
         await updateInvoiceClient(d.id, patch);
+        const dateEl = document.getElementById('meta-payment-date');
+        if (dateEl && dateEl.value && dateEl.value !== d.issueDate && d.status !== 'void') {
+          await updateInvoicePaymentDate(d.id, dateEl.value);
+        }
       }
       showToast('Saved');
       closeDrawer();
@@ -5109,6 +5353,9 @@ window.__reputifly = {
   _test_delete:  async (id) => { await deleteQuotation(id); },
   _test_convert: async (id, paymentDate) => convertQuotationToInvoice(id, paymentDate || new Date().toISOString().slice(0,10)),
   _test_void:    async (id, reason) => voidInvoice(id, reason || 'test'),
+  _test_setPaymentDate: async (id, date) => updateInvoicePaymentDate(id, date),
+  _test_renumber: async () => renumberInvoicesByPaymentDate(),
+  _test_detectOutOfOrder: () => detectInvoiceOrderingMismatch(),
   _test_buildShareUrl: (displayNumber, token) => buildShareUrl(displayNumber, token),
   _test_genToken: () => generateShareToken()
 };
