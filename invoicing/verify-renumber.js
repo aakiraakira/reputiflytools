@@ -221,6 +221,61 @@ const eq    = (a, b, m) => (a === b ? pass(m) : fail(`${m}  got=${JSON.stringify
   eq(drawerHas.sections.includes('Payment date'), true, 'Drawer for paid invoice shows "Payment date" section');
   eq(drawerHas.hasInput, true, '#meta-payment-date input is rendered');
 
+  // Close drawer for the next steps
+  await page.evaluate(() => document.getElementById('drawer-close')?.click());
+  await page.waitForTimeout(100);
+
+  console.log('\n[12] Month summary panel renders + computes correct totals');
+  // After step [9] above we left invoices at:
+  //   gavan (13-May) → 8507,  dsfloor (12-May) → 8506,  ancient (12-May) → 8505,
+  //   eugene (10-May) → 8504, newdays (10-May) → 8503, eben (09-May) → 8502,
+  //   purposeful (08-May) → 8501, gentech (07-May) → 8500.
+  // All payments are in 2026-05 so the May 2026 paid revenue = 8 × $100 = $800.
+  await page.evaluate(() => { window.__reputifly.getState().monthFilter = '2026-05'; window.__reputifly.forceRender(); });
+  await page.waitForTimeout(100);
+  const ms = await page.evaluate(() => {
+    const host = document.getElementById('month-summary-panel');
+    const sel = host?.querySelector('select.ms-month');
+    const paidVal = host?.querySelectorAll('.ms-stat')?.[0]?.querySelector('.ms-stat-value')?.textContent.trim();
+    const paidCount = host?.querySelectorAll('.ms-stat')?.[0]?.querySelector('.ms-stat-meta')?.textContent.trim();
+    const pendingVal = host?.querySelectorAll('.ms-stat')?.[1]?.querySelector('.ms-stat-value')?.textContent.trim();
+    return { selected: sel?.value, paidVal, paidCount, pendingVal };
+  });
+  console.log('  Month summary state:', ms);
+  eq(ms.selected, '2026-05', 'Month picker selects 2026-05');
+  eq(ms.paidVal, 'S$800.00', 'Paid revenue for May 2026 = S$800.00 (8 × S$100)');
+  eq(ms.paidCount, '8 invoices', 'Paid count = 8 invoices');
+
+  // Switch to "all time" → totals should not exceed full data set (still S$800 paid here)
+  await page.evaluate(() => { window.__reputifly.getState().monthFilter = 'all'; window.__reputifly.forceRender(); });
+  await page.waitForTimeout(100);
+  const msAll = await page.evaluate(() => {
+    const host = document.getElementById('month-summary-panel');
+    return host?.querySelectorAll('.ms-stat')?.[0]?.querySelector('.ms-stat-value')?.textContent.trim();
+  });
+  eq(msAll, 'S$800.00', 'All-time paid revenue = S$800.00');
+
+  console.log('\n[13] 3-dot row menu includes "Edit payment date…" for paid invoices');
+  // Trigger the row menu function directly so we don't have to position-click.
+  const menuLabels = await page.evaluate(() => {
+    const s = window.__reputifly.getState();
+    const inv = s.invoices.get('eugene');
+    // Call openRowMenu indirectly: it's not on the test API but we can
+    // grab the items by mimicking what it does — call it via a dispatched click on the
+    // 3-dot button.
+    const rows = document.querySelectorAll('#invoices-list .list-row');
+    let target;
+    for (const r of rows) if (r.querySelector('.list-cell-num span')?.textContent.trim() === inv.displayNumber) { target = r; break; }
+    if (!target) return ['<row not found>'];
+    target.querySelector('.list-cell-actions button')?.click();
+    // The popover is appended to document.body
+    return Array.from(document.body.querySelectorAll('div[style*="position: fixed"] button')).map(b => b.textContent);
+  });
+  console.log('  Menu items:', menuLabels);
+  eq(menuLabels.includes('Edit payment date…'), true, 'Row menu includes "Edit payment date…"');
+  eq(menuLabels.includes('Void invoice…'), true, 'Row menu still includes "Void invoice…"');
+  eq(menuLabels.includes('Open'), true, 'Row menu still includes "Open"');
+
   console.log('\n──── Summary ────');
   if (failed === 0) console.log('  ALL CHECKS PASSED ✓');
   else console.log(`  ${failed} CHECK(S) FAILED ✗`);

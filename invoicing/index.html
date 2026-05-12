@@ -519,6 +519,67 @@ input[type="date"]::-webkit-datetime-edit { text-align: left; }
   .invoice-numbering-panel .ip-edit input { width: 100%; }
   .invoice-numbering-panel .ip-edit .btn { padding: 9px 18px; }
 }
+
+/* Monthly revenue summary — month picker + paid total + pending total.
+   Same card chrome as the numbering panel so the two read as a pair. */
+.month-summary-panel {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: 14px 18px;
+  margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: 18px;
+  align-items: center;
+}
+.month-summary-panel .ms-picker {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.month-summary-panel .ms-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.month-summary-panel select.ms-month {
+  font: inherit; font-size: 14px; font-weight: 600;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  outline: none;
+  background: var(--surface);
+  color: var(--ink);
+  min-width: 180px;
+  cursor: pointer;
+}
+.month-summary-panel select.ms-month:focus { border-color: var(--ink); }
+.month-summary-panel .ms-stat {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  padding-left: 18px;
+  border-left: 1px solid var(--hairline);
+}
+.month-summary-panel .ms-stat .ms-stat-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.month-summary-panel .ms-stat .ms-stat-value {
+  font-size: 18px; font-weight: 700; color: var(--ink);
+  letter-spacing: -0.015em; font-variant-numeric: tabular-nums;
+}
+.month-summary-panel .ms-stat.pending .ms-stat-value { color: var(--ink-muted); }
+.month-summary-panel .ms-stat .ms-stat-meta {
+  font-size: 11.5px; color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 760px) {
+  .month-summary-panel {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 12px 14px;
+  }
+  .month-summary-panel .ms-picker { grid-column: 1 / -1; }
+  .month-summary-panel .ms-stat { padding-left: 12px; }
+  .month-summary-panel select.ms-month { min-width: 0; width: 100%; }
+}
 .search-input {
   flex: 1;
   min-width: 220px;
@@ -1827,6 +1888,7 @@ input[type="date"]::-webkit-datetime-edit { text-align: left; }
           <div class="view-sub" id="invoices-count">—</div>
         </div>
       </div>
+      <div class="month-summary-panel" id="month-summary-panel"></div>
       <div class="invoice-numbering-panel" id="invoice-numbering-panel"></div>
       <div class="toolbar">
         <div class="search-input"><input type="search" id="search-invoices" placeholder="Search invoices…" autocomplete="off"></div>
@@ -1950,6 +2012,9 @@ const state = {
   page: { quotations: 1, invoices: 1 },
   drawer: { open: false, kind: null, id: null },
   draft: null,           // current Creation tab draft
+  // Month-summary picker on the Paid Invoices tab. 'all' = show YTD totals.
+  // Otherwise it's a yyyy-mm string matching what the date inputs produce.
+  monthFilter: null,
   loading: { initial: true }
 };
 const PAGE_SIZE = 25;
@@ -3876,6 +3941,101 @@ async function handleSave(downloadAfter, shareAfter = false) {
   }
 }
 
+// REGION: month-summary-panel ───────────────────────────────────────
+// Month picker + at-a-glance revenue for the Paid Invoices tab.
+//   • Paid    = sum of total for non-void invoices whose payment date
+//               falls inside the chosen month.
+//   • Pending = sum of total for draft quotations whose issueDate falls
+//               inside the chosen month (these haven't been paid yet,
+//               so they're potential revenue you're still waiting on).
+// "All time" shows YTD-style totals so the user can see overall too.
+function getMonthOptions() {
+  // Build the dropdown from every yyyy-mm seen in both maps + the
+  // current month. Sorted newest-first so the latest month is at the top.
+  const months = new Set();
+  const cur = new Date();
+  months.add(`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}`);
+  for (const inv of state.invoices.values()) {
+    if (inv.issueDate && inv.issueDate.length >= 7) months.add(inv.issueDate.slice(0, 7));
+  }
+  for (const q of state.quotations.values()) {
+    if (q.status === 'converted') continue; // converted drafts are no longer pending
+    if (q.issueDate && q.issueDate.length >= 7) months.add(q.issueDate.slice(0, 7));
+  }
+  return Array.from(months).sort((a, b) => b.localeCompare(a));
+}
+
+function fmtMonthLabel(ym) {
+  // 'yyyy-mm' → 'May 2026'
+  if (!ym || ym.length < 7) return ym;
+  const [y, m] = ym.split('-');
+  const name = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(m)-1] || m;
+  return `${name} ${y}`;
+}
+
+function computeMonthTotals(ymOrAll) {
+  let paidTotal = 0, paidCount = 0;
+  let pendingTotal = 0, pendingCount = 0;
+  const inMonth = (dateStr) => {
+    if (ymOrAll === 'all') return true;
+    if (!dateStr || dateStr.length < 7) return false;
+    return dateStr.slice(0, 7) === ymOrAll;
+  };
+  for (const inv of state.invoices.values()) {
+    if (inv.status === 'void') continue;
+    if (!inMonth(inv.issueDate)) continue;
+    paidTotal += Number(inv.total) || 0;
+    paidCount += 1;
+  }
+  for (const q of state.quotations.values()) {
+    if (q.status === 'converted') continue;
+    if (!inMonth(q.issueDate)) continue;
+    pendingTotal += Number(q.total) || 0;
+    pendingCount += 1;
+  }
+  return { paidTotal, paidCount, pendingTotal, pendingCount };
+}
+
+function renderMonthSummary() {
+  const host = document.getElementById('month-summary-panel');
+  if (!host) return;
+
+  const months = getMonthOptions();
+  // Default = current month on first render; sticky after that.
+  if (!state.monthFilter) {
+    const now = new Date();
+    state.monthFilter = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  }
+  const selected = state.monthFilter;
+  const totals = computeMonthTotals(selected);
+
+  const opts = ['<option value="all">All time</option>']
+    .concat(months.map(m => `<option value="${escapeHtml(m)}" ${m === selected ? 'selected' : ''}>${escapeHtml(fmtMonthLabel(m))}</option>`))
+    .join('');
+
+  host.innerHTML = `
+    <div class="ms-picker">
+      <span class="ms-label">Month</span>
+      <select class="ms-month" id="ms-month-select">${opts}</select>
+    </div>
+    <div class="ms-stat">
+      <span class="ms-stat-label">Paid revenue</span>
+      <span class="ms-stat-value">${escapeHtml(fmtMoney(totals.paidTotal))}</span>
+      <span class="ms-stat-meta">${totals.paidCount} invoice${totals.paidCount === 1 ? '' : 's'}</span>
+    </div>
+    <div class="ms-stat pending">
+      <span class="ms-stat-label">Pending</span>
+      <span class="ms-stat-value">${escapeHtml(fmtMoney(totals.pendingTotal))}</span>
+      <span class="ms-stat-meta">${totals.pendingCount} draft${totals.pendingCount === 1 ? '' : 's'}</span>
+    </div>
+  `;
+
+  host.querySelector('#ms-month-select').addEventListener('change', (e) => {
+    state.monthFilter = e.target.value;
+    renderMonthSummary();
+  });
+}
+
 // REGION: invoice-numbering-panel ───────────────────────────────────
 function renderInvoiceNumbering() {
   const host = document.getElementById('invoice-numbering-panel');
@@ -4093,6 +4253,9 @@ function openRowMenu(anchor, kind, d) {
     items.push({ label: 'Delete', fn: () => promptDelete(d), danger: true });
   } else {
     if (d.status !== 'void') {
+      // Quick payment-date edit straight from the 3-dot menu — no need
+      // to open the full drawer. Triggers the same auto-renumber.
+      items.push({ label: 'Edit payment date…', fn: () => promptEditPaymentDate(d) });
       items.push({ label: 'Void invoice…', fn: () => promptVoid(d), danger: true });
     }
   }
@@ -4102,6 +4265,51 @@ function openRowMenu(anchor, kind, d) {
   } else {
     openRowPopover(anchor, items);
   }
+}
+
+function promptEditPaymentDate(invoice) {
+  const scrim = document.getElementById('modal-scrim');
+  const card = document.getElementById('modal-card');
+  card.innerHTML = '';
+
+  const h = document.createElement('h3');
+  h.textContent = `Edit payment date · ${invoice.displayNumber}`;
+  const p = document.createElement('p');
+  p.textContent = 'Changing this date re-sequences INV- numbers so the latest payment date is the highest number. The QINV- reference and the share link stay the same.';
+
+  const lab = document.createElement('div'); lab.className = 'field-label'; lab.textContent = 'Payment date';
+  const inp = document.createElement('input');
+  inp.type = 'date'; inp.className = 'input';
+  inp.value = invoice.issueDate || todayIso();
+
+  const a = document.createElement('div'); a.className = 'modal-actions';
+  const cancel = document.createElement('button'); cancel.className = 'btn'; cancel.textContent = 'Cancel';
+  const ok = document.createElement('button'); ok.className = 'btn primary'; ok.textContent = 'Save';
+  a.appendChild(cancel); a.appendChild(ok);
+
+  card.appendChild(h); card.appendChild(p); card.appendChild(lab); card.appendChild(inp); card.appendChild(a);
+  scrim.classList.add('open');
+
+  cancel.addEventListener('click', () => scrim.classList.remove('open'));
+  ok.addEventListener('click', async () => {
+    const newDate = inp.value;
+    if (!newDate) { showToast('Pick a date', 'warn'); return; }
+    if (newDate === invoice.issueDate) { scrim.classList.remove('open'); return; }
+    ok.disabled = true;
+    try {
+      await updateInvoicePaymentDate(invoice.id, newDate);
+      // Read back the new number — the invoice may have shifted slots.
+      const after = state.invoices.get(invoice.id);
+      const moved = after && after.displayNumber !== invoice.displayNumber;
+      scrim.classList.remove('open');
+      showToast(moved
+        ? `${invoice.displayNumber} → ${after.displayNumber} (re-sequenced by payment date)`
+        : `${invoice.displayNumber} payment date updated`);
+    } catch (e) {
+      showToast(e.message || 'Update failed', 'error');
+      ok.disabled = false;
+    }
+  });
 }
 
 function openRowPopover(anchor, items) {
@@ -5168,6 +5376,7 @@ function render() {
     renderList('quotations');
   }
   if (state.route === 'invoices') {
+    renderMonthSummary();
     renderInvoiceNumbering();
     renderList('invoices');
   }
