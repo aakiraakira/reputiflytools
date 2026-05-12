@@ -804,6 +804,38 @@ body { padding: 56px 24px 96px; display: flex; flex-direction: column; align-ite
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
 import { getFirestore, doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
+// ── iOS zoom-on-focus guard ─────────────────────────────────────────
+// The page sets meta viewport width=794 so the invoice renders at a
+// readable A4-ish width and scales down to fit the phone. With that
+// scaled viewport, iOS Safari STILL auto-zooms when the recipient
+// taps an input (e.g. their email address to forward this invoice to
+// their accountant), even though .es-input is bumped to 22px on
+// mobile — the auto-zoom kicks in based on the scaled rendered size,
+// not the computed CSS px.
+//
+// Fix: when an input gains focus on a touch device, temporarily add
+// `maximum-scale=1` to the viewport. iOS treats this as "do not
+// auto-zoom above the current scale on focus". On blur we restore the
+// original viewport string so pinch-zoom on the invoice itself keeps
+// working everywhere else on the page. Pure-mouse devices skip this
+// entirely (no auto-zoom problem to begin with).
+(() => {
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (!meta) return;
+  if (!matchMedia('(pointer: coarse)').matches) return;  // mouse → bail
+  const original = meta.getAttribute('content');
+  const locked = original.includes('maximum-scale')
+    ? original
+    : original + ', maximum-scale=1';
+  const isField = (el) => el && el.matches && el.matches('input, textarea, select, [contenteditable="true"]');
+  document.addEventListener('focusin', (e) => {
+    if (isField(e.target)) meta.setAttribute('content', locked);
+  });
+  document.addEventListener('focusout', (e) => {
+    if (isField(e.target)) meta.setAttribute('content', original);
+  });
+})();
+
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCm6E-0T9nOy5TKxX2D6-HdMVER2xrUZWA",
   authDomain: "reputifly-accounting.firebaseapp.com",
