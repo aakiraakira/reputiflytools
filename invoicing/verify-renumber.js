@@ -162,6 +162,15 @@ const eq    = (a, b, m) => (a === b ? pass(m) : fail(`${m}  got=${JSON.stringify
   eq(JSON.stringify(rows.map(r => r.number)), JSON.stringify(expectedNums),
      'Dashboard renders newest payment date at top, INV-numbers descend');
 
+  console.log('\n[4b] Verify the Re-sequence button is GONE (auto behaviour now)');
+  const hasButton = await page.evaluate(() => !!document.getElementById('ip-resequence'));
+  eq(hasButton, false, 'No #ip-resequence button rendered (renumber is automatic)');
+  const hasHint = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('.invoice-numbering-panel *'))
+      .some(el => /not in payment-date order|aligned with payment dates/i.test(el.textContent || ''));
+  });
+  eq(hasHint, false, 'No alignment-hint text shown — UI is clean');
+
   console.log('\n[5] Verify the "Payment Made" column header');
   const headerCells = await page.evaluate(() => {
     return Array.from(document.querySelectorAll('#invoices-list .list-head span')).map(s => s.textContent);
