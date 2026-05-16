@@ -850,6 +850,24 @@ const FIREBASE_CONFIG = {
 const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, c => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
+// Terms-body renderer: HTML-escape, autolink URLs (http(s)://… or
+// www.…), convert single newlines to <br>. Mirrors the helper in
+// index.html so the share view matches the PDF the user sees.
+const linkifyTermsBody = (text) => {
+  if (!text) return '';
+  let safe = escapeHtml(text);
+  const urlRe = /\b(https?:\/\/|www\.)[^\s<>"']+/gi;
+  safe = safe.replace(urlRe, (match) => {
+    let trailing = '';
+    while (match.length && '.,;:!?)]}'.includes(match[match.length - 1])) {
+      trailing = match[match.length - 1] + trailing;
+      match = match.slice(0, -1);
+    }
+    const href = match.toLowerCase().startsWith('http') ? match : `https://${match}`;
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${match}</a>${trailing}`;
+  });
+  return safe.replace(/\n/g, '<br>');
+};
 const fmtMoney = (n) => 'S$' + (Number(n) || 0).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (iso) => {
   if (!iso) return '';
@@ -942,7 +960,10 @@ function bindData(root, d) {
       sections.forEach((sec, i) => {
         const sd = document.createElement('div');
         sd.className = 'terms-section';
-        const paras = (sec.body || '').split(/\n\n+/).map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('');
+        // Escape + autolink URLs so legal-terms references render as
+        // real clickable <a> tags. Trailing punctuation stays in the
+        // surrounding text, not the link.
+        const paras = (sec.body || '').split(/\n\n+/).map(p => `<p>${linkifyTermsBody(p)}</p>`).join('');
         sd.innerHTML = `
           <div class="head">
             <span class="num">${String(i + 1).padStart(2, '0')}</span>

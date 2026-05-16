@@ -2600,13 +2600,21 @@ async function convertQuotationToInvoice(quotationId, paymentDate) {
     const newId = 'i' + Math.random().toString(36).slice(2, 9);
     // Transfer the share token so old QINV- links keep working.
     const shareToken = quote.shareToken || generateShareToken();
+    // Lock the THEN-CURRENT defaultTerms into the paid invoice, not
+    // whatever stale snapshot the draft happened to carry. From this
+    // point on the invoice's terms are frozen — even if the user edits
+    // Default Terms later, this invoice keeps the version the client
+    // received at payment time.
+    const lockedTerms = quote.terms
+      ? JSON.parse(JSON.stringify(state.settings?.defaultTerms || DEFAULT_TERMS))
+      : null;
     state.invoices.set(newId, {
       id: newId, version: 1, number: next, displayNumber,
       issueDate: paymentDate,
       client: { ...quote.client },
       items: [...quote.items.map(i => ({ ...i }))],
       subtotal: quote.subtotal, total: quote.total,
-      terms: quote.terms || null,
+      terms: lockedTerms,
       sourceQuotationId: quotationId,
       sourceQuotationNumber: quote.displayNumber,
       shareToken,
@@ -2644,13 +2652,20 @@ async function convertQuotationToInvoice(quotationId, paymentDate) {
     const invoiceRef = doc(collection(db, `users/${uid}/invoices`));
     const auditRef = doc(collection(invoiceRef, 'audit'));
 
+    // Lock the THEN-CURRENT defaultTerms into the paid invoice (see
+    // note in the DEV_MODE branch above). The draft's stale snapshot
+    // is intentionally ignored — only its presence/absence matters as
+    // the "include terms" signal.
+    const lockedTerms = quote.terms
+      ? JSON.parse(JSON.stringify(state.settings?.defaultTerms || DEFAULT_TERMS))
+      : null;
     const invoiceData = {
       version: 1, number: next, displayNumber,
       issueDate: paymentDate,
       client: { ...quote.client },
       items: [...quote.items],
       subtotal: quote.subtotal, total: quote.total,
-      terms: quote.terms || null,
+      terms: lockedTerms,
       sourceQuotationId: quotationId,
       sourceQuotationNumber: quote.displayNumber,
       shareToken,
@@ -3225,7 +3240,11 @@ function createBlankDraft(mode = 'quotation') {
     notes: '',
     optional: { ...(s.optionalFieldDefaults || DEFAULT_OPTIONAL) },
     includeTerms: false,
-    terms: JSON.parse(JSON.stringify(s.defaultTerms || DEFAULT_TERMS))
+    // Don't snapshot defaultTerms into the draft. The renderer and the
+    // save path both pull state.settings.defaultTerms live, so changes
+    // made in Advanced → Default Terms always propagate to the current
+    // draft (and the PDF the user is about to download).
+    terms: null
   };
 }
 
@@ -3912,6 +3931,11 @@ async function handleSave(downloadAfter, shareAfter = false) {
     return rest;
   });
 
+  // Pull the LATEST defaults at save time so the saved draft (and the
+  // PDF / share viewer built off it) always reflect whatever the user
+  // most recently saved in Advanced → Default Terms. Deep-cloned so the
+  // saved doc has no shared reference to the live settings object.
+  const liveTerms = state.settings?.defaultTerms || DEFAULT_TERMS;
   const baseDoc = {
     issueDate: d.issueDate,
     status: 'draft',
@@ -3920,7 +3944,7 @@ async function handleSave(downloadAfter, shareAfter = false) {
     subtotal: d.subtotal,
     total: d.total,
     notes: d.notes || '',
-    terms: d.includeTerms ? d.terms : null,
+    terms: d.includeTerms ? JSON.parse(JSON.stringify(liveTerms)) : null,
     optional: { ...d.optional }
   };
 
@@ -4826,6 +4850,38 @@ async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' 
   }
 }
 
+// Escape HTML then auto-link http(s)://… or www.… URLs inside the safe
+// string, so legal terms can contain real clickable links in both the
+// PDF and the share viewer. Trailing punctuation like '.', ',', ')' is
+// stripped from the link target — it almost always belongs to the
+// surrounding sentence, not the URL.
+function linkifyTermsBody(text) {
+  if (!text) return '';
+  let safe = escapeHtml(text);
+  const urlRe = /\b(https?:\/\/|www\.)[^\s<>"']+/gi;
+  safe = safe.replace(urlRe, (match) => {
+    let trailing = '';
+    while (match.length && '.,;:!?)]}'.includes(match[match.length - 1])) {
+      trailing = match[match.length - 1] + trailing;
+      match = match.slice(0, -1);
+    }
+    const href = match.toLowerCase().startsWith('http') ? match : `https://${match}`;
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${match}</a>${trailing}`;
+  });
+  return safe.replace(/\n/g, '<br>');
+}
+
+// Drafts always read terms from the live settings; paid invoices keep
+// their frozen snapshot (the version the client received). Voided
+// invoices behave like paid (still frozen).
+function termsForRender(d) {
+  const settings = state.settings || DEFAULT_SETTINGS;
+  const isPaidOrVoid = d && (d.status === 'paid' || d.status === 'void');
+  return isPaidOrVoid
+    ? (d.terms || settings.defaultTerms || DEFAULT_TERMS)
+    : (settings.defaultTerms || DEFAULT_TERMS);
+}
+
 function bindPdfData(root, d, variant) {
   const settings = state.settings || DEFAULT_SETTINGS;
   const s = settings.company || {};
@@ -4865,8 +4921,8 @@ function bindPdfData(root, d, variant) {
     'footerContact': variant === 'invoice-with-terms' ? 'Continued on next page →' : `Questions? ${s.email || ''}`,
     'footerWordmark': variant === 'invoice-with-terms' ? 'REPUTIFLY · 1 / 2' : (s.name || 'REPUTIFLY').split(' ')[0].toUpperCase(),
     'termsRef': `${d.displayNumber} · ${fmtDate(d.issueDate)}`,
-    'termsTitle': d.terms?.title || (settings.defaultTerms?.title || DEFAULT_TERMS.title),
-    'termsSubtitle': d.terms?.subtitle || (settings.defaultTerms?.subtitle || DEFAULT_TERMS.subtitle),
+    'termsTitle': (termsForRender(d).title) || DEFAULT_TERMS.title,
+    'termsSubtitle': (termsForRender(d).subtitle) || DEFAULT_TERMS.subtitle,
     'footerThanks2': 'Thank you for your business.',
     'footerContact2': `Questions? ${s.email || ''}`
   };
@@ -4899,11 +4955,13 @@ function bindPdfData(root, d, variant) {
     }
     if (key === 'termsSections') {
       el.innerHTML = '';
-      const sections = d.terms?.sections || (settings.defaultTerms?.sections) || DEFAULT_TERMS.sections;
+      const sections = termsForRender(d).sections || DEFAULT_TERMS.sections;
       sections.forEach((sec, i) => {
         const sd = document.createElement('div');
         sd.className = 'terms-section';
-        const paras = (sec.body || '').split(/\n\n+/).map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('');
+        // Split on blank-line paragraph breaks, escape+linkify each
+        // paragraph so URLs become real <a> tags in the PDF.
+        const paras = (sec.body || '').split(/\n\n+/).map(p => `<p>${linkifyTermsBody(p)}</p>`).join('');
         sd.innerHTML = `
           <div class="head">
             <span class="num">${String(i + 1).padStart(2, '0')}</span>
