@@ -105,14 +105,15 @@ const truthy = (a, m) => (a ? pass(m) : fail(`${m}  got=${JSON.stringify(a)}`));
     const fn = (text) => {
       const escapeHtml = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
       let safe = escapeHtml(text);
-      const urlRe = /\b(https?:\/\/|www\.)[^\s<>"']+/gi;
+      const urlRe = /\b(?:https?:\/\/|www\.)[^\s<>"']+|\b(?:[a-z0-9][-a-z0-9]*\.)+[a-z]{2,}\/[^\s<>"']*/gi;
       safe = safe.replace(urlRe, (match) => {
         let trailing = '';
         while (match.length && '.,;:!?)]}'.includes(match[match.length - 1])) {
           trailing = match[match.length - 1] + trailing;
           match = match.slice(0, -1);
         }
-        const href = match.toLowerCase().startsWith('http') ? match : `https://${match}`;
+        const lower = match.toLowerCase();
+        const href = lower.startsWith('http') ? match : `https://${match}`;
         return `<a href="${href}" target="_blank" rel="noopener noreferrer">${match}</a>${trailing}`;
       });
       return safe.replace(/\n/g, '<br>');
@@ -124,7 +125,15 @@ const truthy = (a, m) => (a ? pass(m) : fail(`${m}  got=${JSON.stringify(a)}`));
       query: fn('See https://example.com/path?a=1&b=2 for the spec.'),
       multi: fn('Two links: https://a.com and https://b.com here.'),
       trailing: fn('End with a link: https://reputifly.com.'),
-      newline: fn('Line one\nLine two with https://reputifly.com')
+      newline: fn('Line one\nLine two with https://reputifly.com'),
+      // user's real terms text — bare-domain with path, no prefix
+      barePath: fn('Service terms (available at reputifly.com/terms or on request).'),
+      barePathDeep: fn('See policy at foo.bar.example.com/legal/v2 for full text.'),
+      // false-positive guards — these must NOT become links
+      email: fn('Email us at hello@reputifly.com if questions arise.'),
+      version: fn('We use library version 1.2.3 of the SDK.'),
+      sentence: fn('That was great. Now we move on.'),
+      shortTld: fn('See e.g. fig 1 below.')
     };
   });
   console.log('  bare:', linkRes.bare);
@@ -142,6 +151,23 @@ const truthy = (a, m) => (a ? pass(m) : fail(`${m}  got=${JSON.stringify(a)}`));
     'single newlines become <br>');
   truthy(!linkRes.plain.includes('<a '),
     'plain text without URLs is left alone');
+
+  console.log('  barePath:', linkRes.barePath);
+  truthy(linkRes.barePath.includes('<a href="https://reputifly.com/terms"'),
+    'bare-domain WITH path (reputifly.com/terms) gets linked, no prefix needed');
+  truthy(linkRes.barePathDeep.includes('<a href="https://foo.bar.example.com/legal/v2"'),
+    'multi-subdomain bare URL with deep path also gets linked');
+
+  // False-positives that MUST stay plain text
+  console.log('  email:', linkRes.email);
+  truthy(!linkRes.email.includes('<a '),
+    'email address "hello@reputifly.com" is NOT auto-linked (no path → not matched)');
+  truthy(!linkRes.version.includes('<a '),
+    'version number "1.2.3" is NOT auto-linked');
+  truthy(!linkRes.sentence.includes('<a '),
+    'plain sentence "That was great. Now we…" is NOT auto-linked');
+  truthy(!linkRes.shortTld.includes('<a '),
+    '"e.g." style abbreviations are NOT auto-linked');
 
   // [3] Edge case: empty + null inputs don't blow up.
   console.log('\n[3] linkifyTermsBody handles empty / null safely');
