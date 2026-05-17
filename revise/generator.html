@@ -273,15 +273,53 @@
             border-color: rgba(239, 68, 68, 0.4);
         }
 
-        .stage-card {
-            opacity: 1;
-            transition: opacity 0.4s, transform 0.4s;
+        /* v3: wizard mode — one stage at a time. Use .active-stage to reveal one. */
+        .stage-card { display: none; transition: opacity 0.3s ease; }
+        .stage-card.active-stage {
+            display: block;
+            animation: stage-fade-in 0.32s cubic-bezier(0.25, 0.8, 0.25, 1);
         }
-        .stage-card.locked {
-            opacity: 0.35;
-            pointer-events: none;
-            filter: grayscale(0.5);
+        /* `.locked` retained for callers that still toggle it for state, but visually a no-op now */
+        .stage-card.locked { opacity: 1; pointer-events: auto; filter: none; }
+
+        @keyframes stage-fade-in {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
         }
+
+        /* Stepper click — done nodes are clickable to jump back */
+        .stepper-node.done { cursor: pointer; }
+        .stepper-node.done:hover .stepper-circle {
+            transform: scale(1.06);
+            box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.12);
+        }
+        .stepper-node.active { cursor: default; }
+
+        /* Per-stage Back button (top-right of each stage) */
+        .stage-back-btn {
+            position: absolute;
+            top: 22px;
+            right: 22px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #aaa;
+            padding: 7px 14px;
+            border-radius: 9999px;
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .stage-back-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        .stage-card { position: relative; }
 
         .pill {
             display: inline-flex;
@@ -394,7 +432,7 @@
         </nav>
 
         <!-- STAGE 1: JSON Upload -->
-        <div id="stage1" class="stage-card glass-panel rounded-3xl p-8 mb-6">
+        <div id="stage1" class="stage-card active-stage glass-panel rounded-3xl p-8 mb-6">
             <div class="flex items-center gap-3 mb-1">
                 <span class="text-xs font-bold text-[#E6397F] uppercase tracking-widest">Stage 1</span>
                 <div class="h-px flex-1 bg-white/10"></div>
@@ -456,6 +494,7 @@
 
         <!-- STAGE 2: Page Picker -->
         <div id="stage2" class="stage-card locked glass-panel rounded-3xl p-8 mb-6">
+            <button type="button" class="stage-back-btn" onclick="setStepperStep(1)"><i data-feather="arrow-left" class="w-3 h-3"></i> Back</button>
             <div class="flex items-center gap-3 mb-1">
                 <span class="text-xs font-bold text-[#E6397F] uppercase tracking-widest">Stage 2</span>
                 <div class="h-px flex-1 bg-white/10"></div>
@@ -478,6 +517,7 @@
 
         <!-- STAGE 3: Link Details -->
         <div id="stage3" class="stage-card locked glass-panel rounded-3xl p-8 mb-6">
+            <button type="button" class="stage-back-btn" onclick="setStepperStep(2)"><i data-feather="arrow-left" class="w-3 h-3"></i> Back</button>
             <div class="flex items-center gap-3 mb-1">
                 <span class="text-xs font-bold text-[#E6397F] uppercase tracking-widest">Stage 3</span>
                 <div class="h-px flex-1 bg-white/10"></div>
@@ -504,6 +544,7 @@
 
         <!-- STAGE 4: Generated Link -->
         <div id="stage4" class="stage-card locked glass-panel rounded-3xl p-8 mb-6 border border-emerald-500/20">
+            <button type="button" class="stage-back-btn" onclick="setStepperStep(3)"><i data-feather="arrow-left" class="w-3 h-3"></i> Back</button>
             <div class="flex items-center gap-3 mb-1">
                 <span class="text-xs font-bold text-emerald-400 uppercase tracking-widest">Done</span>
                 <div class="h-px flex-1 bg-emerald-500/20"></div>
@@ -991,23 +1032,41 @@
         };
 
         // --------------------------------------------------
-        // STEPPER STATE
+        // STEPPER STATE — wizard mode (one stage visible at a time)
         // --------------------------------------------------
-        // Highest reached step (1-4). Once the user advances we don't downgrade so they can scroll back.
         let __maxStep = 1;
         function setStepperStep(step) {
             __maxStep = Math.max(__maxStep, step);
+            // Update stepper-node visuals
             document.querySelectorAll('.stepper-node').forEach((node) => {
                 const s = parseInt(node.dataset.step, 10);
-                node.classList.toggle('active', s === step);
-                node.classList.toggle('done', s < __maxStep && s !== step);
+                const isActive = s === step;
+                const isDone = s < __maxStep && !isActive;
+                node.classList.toggle('active', isActive);
+                node.classList.toggle('done', isDone);
             });
             document.querySelectorAll('.stepper-bar').forEach((bar) => {
                 const after = parseInt(bar.dataset.barAfter, 10);
                 bar.classList.toggle('done', after < __maxStep);
             });
+            // Swap which stage card is visible
+            document.querySelectorAll('.stage-card').forEach((card) => {
+                card.classList.toggle('active-stage', card.id === 'stage' + step);
+            });
+            // Refresh feather icons inside newly-rendered Back buttons
+            if (typeof feather !== 'undefined') feather.replace();
+            // Scroll page to top so the user sees the new stage cleanly
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
         window.setStepperStep = setStepperStep;
+
+        // Done-step click → jump back. Wire once on load.
+        document.addEventListener('click', (e) => {
+            const node = e.target.closest('.stepper-node.done');
+            if (!node) return;
+            const step = parseInt(node.dataset.step, 10);
+            if (!isNaN(step)) setStepperStep(step);
+        });
 
         // --------------------------------------------------
         // UTIL
