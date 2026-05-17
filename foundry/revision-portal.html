@@ -14,10 +14,17 @@
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
+    <!-- v3 revision-pack libraries (shared with revision-v2 editor) -->
+    <script src="../revise/lib/normalize.js"></script>
+    <script src="../revise/lib/instructions-template.js"></script>
+    <script src="../revise/lib/dom-diff.js"></script>
+    <script src="../revise/lib/pack-builder.js"></script>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
         import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-storage.js";
-        import { getFirestore, collection, addDoc, doc, getDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, doc, getDoc, query, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDqpzqEVtrEtQvvmcMie_Et7xiNh8QU_Ao",
@@ -28,7 +35,17 @@
             appId: "1:455384979132:web:9079ec81182115b16622b9"
         };
 
+        const authConfig = {
+            apiKey: "AIzaSyB4_6wJOcQddUFz8BemeG9HQgbuZtoHp20",
+            authDomain: "reputifly-automation.firebaseapp.com",
+            projectId: "reputifly-automation",
+            storageBucket: "reputifly-automation.firebasestorage.app",
+            messagingSenderId: "1095726999398",
+            appId: "1:1095726999398:web:4e26ec90770da0244c0aa7"
+        };
+
         const app = initializeApp(firebaseConfig);
+        const authApp = initializeApp(authConfig, "authApp");
         window.storage = getStorage(app);
         window.storageRef = ref;
         window.uploadBytes = uploadBytes;
@@ -38,6 +55,13 @@
         window.addDoc = addDoc;
         window.doc = doc;
         window.getDoc = getDoc;
+        window.query = query;
+        window.orderBy = orderBy;
+        window.getDocs = getDocs;
+        window.auth = getAuth(authApp);
+        window.signInWithEmailAndPassword = signInWithEmailAndPassword;
+        window.onAuthStateChanged = onAuthStateChanged;
+        window.signOut = signOut;
         window.dispatchEvent(new Event('firebaseReady'));
     </script>
 
@@ -126,12 +150,62 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            position: relative;
         }
 
         .tab-btn.active {
             background: rgba(230, 57, 127, 0.1);
             color: #E6397F;
             border: 1px solid rgba(230, 57, 127, 0.3);
+        }
+
+        .tab-btn .tab-error-dot {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 8px;
+            height: 8px;
+            background: #EF4444;
+            border-radius: 50%;
+            animation: pulse-dot 1.5s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.3); }
+        }
+
+        @keyframes flash-error {
+            0% { background: transparent; }
+            25% { background: rgba(239, 68, 68, 0.15); }
+            100% { background: transparent; }
+        }
+
+        .section-flash-error {
+            animation: flash-error 1.2s ease-out;
+            border-radius: 12px;
+        }
+
+        .char-counter {
+            font-size: 11px;
+            margin-top: 4px;
+            transition: color 0.2s;
+        }
+
+        .toast-notification {
+            position: fixed;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-20px);
+            opacity: 0;
+            z-index: 999999;
+            pointer-events: none;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .toast-notification.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
         }
 
         /* Feedback Zone */
@@ -194,30 +268,90 @@
         class="fixed bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-[#10B981]/10 rounded-full blur-[150px] pointer-events-none z-0">
     </div>
 
+    <!-- Auth Overlay -->
+    <div id="authOverlay" class="fixed inset-0 bg-[#050507] z-[99999] flex flex-col items-center justify-center hidden transition-opacity duration-300">
+        <!-- Loading spinner -->
+        <div id="authLoadingState" class="flex flex-col items-center hidden">
+            <div class="w-10 h-10 border-[3px] border-pink-500/30 border-t-pink-500 rounded-full animate-spin mb-4"></div>
+            <h2 class="text-xl font-bold text-white" style="font-family:'Space Grotesk',sans-serif;">Verifying Access...</h2>
+        </div>
+        <!-- Login form -->
+        <div id="authLoginState" class="hidden w-full max-w-sm glass-panel rounded-2xl p-8 relative overflow-hidden text-center border border-white/10">
+            <div class="w-16 h-16 rounded-full bg-pink-500/10 flex items-center justify-center mx-auto mb-6 border border-pink-500/20">
+                <i data-feather="lock" class="w-6 h-6 text-pink-500"></i>
+            </div>
+            <h2 class="text-2xl font-bold text-white mb-2" style="font-family:'Space Grotesk',sans-serif;">Revision Portal</h2>
+            <p class="text-gray-400 text-sm mb-6">Staff login required.</p>
+            <form id="authLoginForm" class="space-y-4 text-left">
+                <div>
+                    <input type="email" id="authEmail" required placeholder="Email Address" class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none transition-all focus:border-pink-500">
+                </div>
+                <div>
+                    <input type="password" id="authPassword" required placeholder="Password" class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none transition-all focus:border-pink-500">
+                </div>
+                <button type="submit" class="w-full py-3 mt-2 rounded-xl font-bold text-white transition-all" style="background:#E6397F; box-shadow: 0 10px 20px -5px rgba(230,57,127,0.4);">Login</button>
+                <p id="authErrorMsg" class="text-red-400 text-xs text-center hidden mt-2"></p>
+            </form>
+        </div>
+        <!-- Access denied -->
+        <div id="authDeniedState" class="w-full max-w-md hidden">
+            <div class="glass-panel rounded-3xl p-10 text-center border border-white/10">
+                <div class="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-5">
+                    <i data-feather="shield-off" class="w-8 h-8 text-red-400"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-white mb-2 tracking-tight">Access Denied</h2>
+                <p class="text-gray-400 text-sm mb-6">Your account does not have staff privileges for the Revision Portal.</p>
+                <button onclick="window.signOut(window.auth).then(() => window.location.reload())" class="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold py-3.5 rounded-xl transition-all">Sign Out & Try Again</button>
+            </div>
+        </div>
+    </div>
+
     <div id="adminView"
-        class="w-full max-w-2xl mx-auto my-auto glass-panel rounded-[2rem] p-8 hidden z-10 relative shadow-[0_0_80px_rgba(0,0,0,0.8)]">
+        class="w-full max-w-5xl mx-auto my-auto glass-panel rounded-[2rem] px-10 py-8 hidden z-10 relative shadow-[0_0_80px_rgba(0,0,0,0.8)]">
         <div class="text-center mb-8">
             <img src="https://reputifly.com/wp-content/uploads/2025/05/cropped-reputifly-new-e1746390492876.png"
                 class="h-12 mx-auto mb-4" alt="Reputifly">
             <h1 class="text-3xl font-bold mb-2">Automated Revision Portal</h1>
-            <p class="text-gray-400 text-sm">Upload a scope.json file to generate a stateless Client Revision Portal
-                link.</p>
+            <p class="text-gray-400 text-sm">Select a project to generate a Client Revision Portal link.</p>
         </div>
 
-        <input type="file" id="scopeUpload" accept=".json" class="hidden">
-        <button onclick="document.getElementById('scopeUpload').click()"
-            class="w-full bg-black/40 border border-dashed border-white/20 hover:border-[#E6397F]/50 hover:bg-[#E6397F]/5 hover:shadow-[0_0_30px_rgba(230,57,127,0.1)] p-12 rounded-3xl flex flex-col items-center justify-center gap-4 transition-all duration-300 mb-6 cursor-pointer group">
-            <div
-                class="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-hover:scale-110 group-hover:bg-[#E6397F]/20 group-hover:border-[#E6397F]/50 transition-all duration-300">
-                <i data-feather="upload-cloud"
-                    class="w-8 h-8 text-[#E6397F] group-hover:text-white transition-colors"></i>
+        <!-- Manual Upload Section (always visible by default) -->
+        <div id="manualUploadSection">
+            <input type="file" id="scopeUpload" accept=".json" class="hidden">
+            <button onclick="document.getElementById('scopeUpload').click()"
+                class="w-full bg-black/40 border border-dashed border-white/20 hover:border-[#E6397F]/50 hover:bg-[#E6397F]/5 hover:shadow-[0_0_30px_rgba(230,57,127,0.1)] p-10 rounded-3xl flex flex-col items-center justify-center gap-4 transition-all duration-300 mb-6 cursor-pointer group">
+                <div
+                    class="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-hover:scale-110 group-hover:bg-[#E6397F]/20 group-hover:border-[#E6397F]/50 transition-all duration-300">
+                    <i data-feather="upload-cloud"
+                        class="w-7 h-7 text-[#E6397F] group-hover:text-white transition-colors"></i>
+                </div>
+                <div class="space-y-1 text-center">
+                    <span class="font-bold text-lg text-white group-hover:text-[#E6397F] transition-colors block">Upload scope.json</span>
+                    <p class="text-xs text-gray-500 font-medium">Click to browse or drag & drop</p>
+                </div>
+            </button>
+        </div>
+
+        <!-- Divider -->
+        <div id="projectDivider" class="flex items-center gap-3 mb-6">
+            <div class="flex-1 h-px bg-white/10"></div>
+            <span class="text-xs text-gray-500 font-semibold uppercase tracking-widest">or import from project</span>
+            <div class="flex-1 h-px bg-white/10"></div>
+        </div>
+
+        <!-- Project Import Section -->
+        <div id="projectImportSection" class="mb-6">
+            <div class="relative mb-3">
+                <i data-feather="search" class="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+                <input type="text" id="projectSearchInput" placeholder="Search projects..." oninput="filterProjects(this.value)" class="w-full bg-black/30 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-gray-500 outline-none transition-all focus:border-pink-500/50">
             </div>
-            <div class="space-y-1 text-center">
-                <span class="font-bold text-lg text-white group-hover:text-[#E6397F] transition-colors block">Select
-                    scope.json</span>
-                <p class="text-xs text-gray-500 font-medium">Click to browse or drag & drop</p>
+            <div id="projectListContainer" class="space-y-2">
+                <div class="text-center py-4">
+                    <div class="w-6 h-6 border-2 border-pink-500/30 border-t-pink-500 rounded-full animate-spin mx-auto mb-2"></div>
+                    <p class="text-gray-500 text-xs">Loading projects...</p>
+                </div>
             </div>
-        </button>
+        </div>
 
         <div id="urlMappingContainer" class="hidden mb-6">
             <h3 class="text-white font-bold mb-3 text-sm flex items-center gap-2"><i data-feather="link"
@@ -551,13 +685,13 @@
                         alert("Scope not found or link has expired.");
                         document.getElementById('clientView').classList.add('hidden');
                         document.getElementById('clientView').classList.remove('flex');
-                        document.getElementById('adminView').classList.remove('hidden');
+                        initPortalAuth();
                     }
                 }).catch(err => {
                     alert("Error loading scope: " + err.message);
                     document.getElementById('clientView').classList.add('hidden');
                     document.getElementById('clientView').classList.remove('flex');
-                    document.getElementById('adminView').classList.remove('hidden');
+                    initPortalAuth();
                 });
             };
 
@@ -576,13 +710,175 @@
                     alert("The revision link is broken or corrupted.");
                     document.getElementById('clientView').classList.add('hidden');
                     document.getElementById('clientView').classList.remove('flex');
-                    document.getElementById('adminView').classList.remove('hidden');
+                    initPortalAuth();
                 }
             };
             initEncoded();
         } else {
-            document.getElementById('adminView').classList.remove('hidden');
+            if (window.onAuthStateChanged) initPortalAuth();
+            else window.addEventListener('firebaseReady', () => initPortalAuth());
         }
+
+        // --- AUTH + PROJECT IMPORT LOGIC ---
+        function initPortalAuth() {
+            const overlay = document.getElementById('authOverlay');
+            const loadingState = document.getElementById('authLoadingState');
+            const loginState = document.getElementById('authLoginState');
+            const deniedState = document.getElementById('authDeniedState');
+
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+
+            window.onAuthStateChanged(window.auth, async (user) => {
+                if (user) {
+                    loadingState.classList.remove('hidden');
+                    loginState.classList.add('hidden');
+                    deniedState.classList.add('hidden');
+                    try {
+                        const token = await user.getIdToken();
+                        const res = await fetch("https://listsamples-5resuz4f5a-as.a.run.app", {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (!res.ok) throw new Error("Verification failed.");
+                        const data = await res.json();
+                        if (data.userRole === 'superadmin' || data.userRole === 'staff') {
+                            overlay.style.opacity = '0';
+                            overlay.style.transition = 'opacity 0.3s';
+                            setTimeout(() => overlay.remove(), 300);
+                            document.getElementById('adminView').classList.remove('hidden');
+                            loadProjectList();
+                            feather.replace();
+                        } else {
+                            loadingState.classList.add('hidden');
+                            deniedState.classList.remove('hidden');
+                            feather.replace();
+                        }
+                    } catch (err) {
+                        console.error("Auth Error:", err);
+                        loadingState.classList.add('hidden');
+                        deniedState.classList.remove('hidden');
+                        feather.replace();
+                    }
+                } else {
+                    loadingState.classList.add('hidden');
+                    loginState.classList.remove('hidden');
+                    deniedState.classList.add('hidden');
+                    feather.replace();
+                }
+            });
+
+            document.getElementById('authLoginForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const email = document.getElementById('authEmail').value;
+                const password = document.getElementById('authPassword').value;
+                const errMsg = document.getElementById('authErrorMsg');
+                errMsg.classList.add('hidden');
+                try {
+                    await window.signInWithEmailAndPassword(window.auth, email, password);
+                } catch (err) {
+                    errMsg.textContent = "Invalid credentials. Please try again.";
+                    errMsg.classList.remove('hidden');
+                }
+            });
+        }
+
+        async function loadProjectList() {
+            const container = document.getElementById('projectListContainer');
+            try {
+                const q = window.query(window.collection(window.db, "projects"), window.orderBy("createdAt", "desc"));
+                const snapshot = await window.getDocs(q);
+
+                const seen = new Set();
+                const projects = [];
+                snapshot.forEach(d => {
+                    const data = d.data();
+                    if (!seen.has(data.projectName)) {
+                        seen.add(data.projectName);
+                        projects.push({ id: d.id, ...data });
+                    }
+                });
+
+                if (projects.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500 text-sm text-center py-6">No projects found.</p>';
+                    return;
+                }
+
+                container.innerHTML = projects.map(p => {
+                    const safeName = p.projectName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    return `<button onclick="importProject('${safeName}')" class="w-full text-left bg-white/5 hover:bg-white/10 border border-white/10 hover:border-pink-500/30 rounded-xl p-3 transition-all group">
+                        <div class="font-bold text-sm text-white group-hover:text-pink-400 transition-colors">${p.projectName}</div>
+                        ${p.domain ? `<div class="text-xs text-gray-500 mt-0.5">${p.domain}</div>` : ''}
+                    </button>`;
+                }).join('');
+                feather.replace();
+            } catch (err) {
+                console.error("Failed to load projects:", err);
+                container.innerHTML = '<p class="text-red-400 text-sm text-center py-6">Failed to load projects.</p>';
+            }
+        }
+
+        function filterProjects(query) {
+            const buttons = document.querySelectorAll('#projectListContainer button');
+            const q = query.toLowerCase().trim();
+            buttons.forEach(btn => {
+                const name = btn.querySelector('.font-bold')?.textContent?.toLowerCase() || '';
+                const domain = btn.querySelector('.text-gray-500')?.textContent?.toLowerCase() || '';
+                btn.style.display = (name.includes(q) || domain.includes(q)) ? '' : 'none';
+            });
+        }
+
+        async function importProject(projectName) {
+            const container = document.getElementById('projectListContainer');
+            const originalHtml = container.innerHTML;
+            container.innerHTML = `<div class="text-center py-6"><div class="w-6 h-6 border-2 border-pink-500/30 border-t-pink-500 rounded-full animate-spin mx-auto mb-2"></div><p class="text-gray-500 text-xs">Loading ${projectName}...</p></div>`;
+
+            try {
+                const docSnap = await window.getDoc(window.doc(window.db, "project_metadata", projectName));
+                if (!docSnap.exists()) throw new Error("Project metadata not found.");
+
+                const meta = docSnap.data();
+                const scope = meta.scope;
+                if (!scope || !scope.pages) throw new Error("No scope data found for this project.");
+
+                const leanData = {
+                    p: projectName,
+                    pgs: scope.pages.filter(p => !p.exclude).map(page => ({
+                        n: page.name,
+                        s: page.sections.map(sec => {
+                            if (typeof sec === 'string') return sec;
+                            if (sec.description || sec.purpose) {
+                                return { n: sec.name, d: sec.description || sec.purpose };
+                            }
+                            return sec.name;
+                        })
+                    }))
+                };
+
+                window.tempLeanData = leanData;
+
+                document.getElementById('manualUploadSection').classList.add('hidden');
+                document.getElementById('projectDivider').classList.add('hidden');
+                document.getElementById('projectImportSection').classList.add('hidden');
+                document.getElementById('urlMappingContainer').classList.remove('hidden');
+
+                const listContainer = document.getElementById('urlInputsList');
+                listContainer.innerHTML = leanData.pgs.map((page, idx) => `
+                    <div class="mb-3 bg-black/40 p-3 rounded-xl border border-white/5">
+                        <label class="text-xs font-bold text-white mb-2 block flex items-center gap-2"><i data-feather="file" class="w-3 h-3 text-gray-400"></i> ${page.n}</label>
+                        <input type="text" id="page-url-${idx}" class="input-dark w-full rounded-lg p-2.5 text-xs font-mono" placeholder="https:// (Optional)">
+                    </div>
+                `).join('');
+                feather.replace();
+            } catch (err) {
+                console.error("Import failed:", err);
+                container.innerHTML = originalHtml;
+                alert("Failed to import project: " + err.message);
+            }
+        }
+
+        // Toggle functions kept for backward compat
+        function showManualUpload() {}
+        function showProjectImport() {}
 
         // --- PHASE 1: ADMIN LOGIC ---
         document.getElementById('scopeUpload').addEventListener('change', function (e) {
@@ -609,7 +905,9 @@
 
                     window.tempLeanData = leanData;
 
-                    document.getElementById('scopeUpload').nextElementSibling.classList.add('hidden');
+                    document.getElementById('manualUploadSection').classList.add('hidden');
+                    document.getElementById('projectDivider').classList.add('hidden');
+                    document.getElementById('projectImportSection').classList.add('hidden');
                     document.getElementById('urlMappingContainer').classList.remove('hidden');
 
                     const listContainer = document.getElementById('urlInputsList');
@@ -714,6 +1012,7 @@
                 const secDesc = typeof secObj === 'object' && secObj.d ? secObj.d : null;
 
                 const secEl = document.createElement('div');
+                secEl.id = `section-${key}`;
                 secEl.className = "bg-white/[0.02] border border-white/10 rounded-2xl p-6 shadow-xl";
 
                 const tooltipHtml = secDesc ? `
@@ -787,6 +1086,19 @@
             saveLocalState();
         }
 
+        function updateCharCounter(key, idx, val) {
+            const counter = document.getElementById(`char-counter-${key}-${idx}`);
+            if (!counter) return;
+            const len = (val || '').trim().length;
+            if (len >= 10) {
+                counter.className = 'char-counter text-emerald-500';
+                counter.innerHTML = '<span class="text-emerald-500">&#10003;</span> Good to go';
+            } else {
+                counter.className = 'char-counter text-gray-500';
+                counter.innerHTML = `<span>${len}/10</span> min. characters`;
+            }
+        }
+
         function updateCardType(key, type, idx, val) {
             appState.data[key][type][idx].itemType = val;
             document.getElementById(`cards-${key}-${type}`).innerHTML = renderCards(key, type);
@@ -829,20 +1141,27 @@
                         </button>
                     </div>
                     <div class="flex-1 flex flex-col gap-3 w-full sm:pl-2">
-                        <div>
-                            <label class="block text-[10px] font-bold text-gray-400 mb-1 uppercase tracking-wider">Type of Upload:</label>
-                            <div class="relative">
-                                <select id="select-${key}-${i}" class="w-full bg-black/40 border border-white/10 rounded-lg p-2 pr-8 text-xs text-white outline-none focus:border-[#E6397F] cursor-pointer appearance-none shadow-inner transition-all duration-300" onchange="updateCardType('${key}', '${type}', ${i}, this.value)">
-                                    <option value="" disabled ${isUnselected ? 'selected' : ''} class="bg-[#160D1E] text-gray-500">Select (Compulsory)</option>
-                                    <option value="fix" ${isFix ? 'selected' : ''} class="bg-[#160D1E] text-white">Fix (Reference)</option>
-                                    <option value="asset" ${isAsset ? 'selected' : ''} class="bg-[#160D1E] text-white">New Asset (File)</option>
-                                </select>
-                                <div class="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none">
-                                    <i data-feather="chevron-down" class="w-4 h-4 text-gray-400"></i>
-                                </div>
+                        <div id="select-${key}-${i}">
+                            <label class="block text-[10px] font-bold text-gray-400 mb-1.5 uppercase tracking-wider">${isUnselected ? 'What is this image?' : 'Type of Upload:'}</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <button onclick="updateCardType('${key}', '${type}', ${i}, 'fix')" class="relative flex flex-col items-center gap-1 py-2.5 px-3 rounded-xl border text-xs font-bold transition-all duration-200 ${isFix ? 'bg-orange-500/15 border-orange-500/60 text-orange-400 shadow-[0_0_12px_rgba(249,115,22,0.15)]' : 'bg-white/[0.03] border-white/10 text-gray-400 hover:bg-orange-500/5 hover:border-orange-500/30 hover:text-orange-300'}">
+                                    <i data-feather="alert-circle" class="w-4 h-4"></i>
+                                    <span>Fix This</span>
+                                    <span class="text-[9px] font-normal ${isFix ? 'text-orange-400/70' : 'text-gray-600'}">Something needs changing</span>
+                                </button>
+                                <button onclick="updateCardType('${key}', '${type}', ${i}, 'asset')" class="relative flex flex-col items-center gap-1 py-2.5 px-3 rounded-xl border text-xs font-bold transition-all duration-200 ${isAsset ? 'bg-teal-500/15 border-teal-500/60 text-teal-400 shadow-[0_0_12px_rgba(20,184,166,0.15)]' : 'bg-white/[0.03] border-white/10 text-gray-400 hover:bg-teal-500/5 hover:border-teal-500/30 hover:text-teal-300'}">
+                                    <i data-feather="plus-circle" class="w-4 h-4"></i>
+                                    <span>New Asset</span>
+                                    <span class="text-[9px] font-normal ${isAsset ? 'text-teal-400/70' : 'text-gray-600'}">Add this to the site</span>
+                                </button>
                             </div>
+                            ${isUnselected ? '<p class="text-[10px] text-amber-500/80 mt-1.5 font-medium text-center">&#9650; Please select one to continue</p>' : ''}
                         </div>
-                        <textarea id="comment-${key}-${i}" class="w-full input-dark rounded-xl p-3 text-sm resize-none flex-1 min-h-[60px] shadow-inner transition-colors duration-300" placeholder="${placeholderText}" oninput="updateCardComment('${key}', '${type}', ${i}, this.value)" ${isUnselected ? 'disabled' : ''}>${item.comment}</textarea>
+                        ${isUnselected ? `<div class="relative flex-1">
+                            <textarea id="comment-${key}-${i}" class="w-full input-dark rounded-xl p-3 text-sm resize-none min-h-[60px] shadow-inner opacity-40 cursor-not-allowed" placeholder="Select a type above first..." disabled></textarea>
+                            <div class="absolute inset-0 cursor-pointer rounded-xl" onclick="onDisabledTextareaClick('${key}', ${i})"></div>
+                        </div>` : `<textarea id="comment-${key}-${i}" class="w-full input-dark rounded-xl p-3 text-sm resize-none flex-1 min-h-[60px] shadow-inner transition-colors duration-300" placeholder="${placeholderText}" oninput="updateCardComment('${key}', '${type}', ${i}, this.value); updateCharCounter('${key}', ${i}, this.value)">${item.comment}</textarea>
+                        <div id="char-counter-${key}-${i}" class="char-counter ${(item.comment || '').trim().length >= 10 ? 'text-emerald-500' : 'text-gray-500'}">${(item.comment || '').trim().length >= 10 ? '<span class="text-emerald-500">&#10003;</span> Good to go' : '<span>' + (item.comment || '').trim().length + '/10</span> min. characters'}</div>`}
                     </div>
                 </div>
             `}).join('');
@@ -1102,7 +1421,7 @@
                         img.onload = () => {
                             const cvs = document.createElement('canvas');
                             let w = img.width, h = img.height;
-                            const MAX = 2500;
+                            const MAX = 1900;
                             if (w > MAX || h > MAX) { if (w > h) { h *= MAX / w; w = MAX; } else { w *= MAX / h; h = MAX; } }
                             cvs.width = w; cvs.height = h;
                             cvs.getContext('2d').drawImage(img, 0, 0, w, h);
@@ -1111,30 +1430,24 @@
                         img.src = base64;
                     });
 
-                    // Upload to WordPress CDN (Hardcoded Auth for Headless)
-                    const WP_URL = "https://reputifly3.sg-host.com/wp-json/wp/v2/media";
-                    const WP_AUTH = "Basic " + btoa("julian:6ZMS Y66m DHcE Ghgr pGH3 HKVh");
-
+                    // Upload to Firebase Storage (replaces decommissioned reputifly3 WP CDN)
                     const safeName = file.name ? file.name.substring(0, file.name.lastIndexOf('.')).replace(/[^a-zA-Z0-9]/g, '-') : 'pasted-image';
-                    const wpFileName = `${safeName}-${Date.now().toString(36).substring(4)}.webp`;
+                    const fileName = `${safeName}-${Date.now().toString(36).substring(4)}.webp`;
 
                     const byteChars = atob(optBase64);
                     const byteArr = new Uint8Array(byteChars.length);
                     for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
                     const blob = new Blob([byteArr], { type: 'image/webp' });
 
-                    const res = await fetch(WP_URL, {
-                        method: "POST",
-                        headers: { "Authorization": WP_AUTH, "Content-Disposition": `attachment; filename="${wpFileName}"` },
-                        body: blob
-                    });
-
-                    if (!res.ok) throw new Error("WP Server rejected the image.");
-                    const data = await res.json();
+                    const draftId = firestoreId || 'local-draft';
+                    const storagePath = `revision-reference-images/${draftId}/${fileName}`;
+                    const sRef = window.storageRef(window.storage, storagePath);
+                    await window.uploadBytes(sRef, blob, { contentType: 'image/webp' });
+                    const downloadUrl = await window.getDownloadURL(sRef);
 
                     // Save to Data State including Base64 for the ZIP
                     appState.data[key][type].push({
-                        url: data.source_url,
+                        url: downloadUrl,
                         comment: "",
                         itemType: '', // Leaves it empty so they MUST select
                         b64: optBase64
@@ -1154,26 +1467,36 @@
 
         // --- PHASE 3: COMPILER & API HANDOFF ---
         async function submitRevisions() {
-            // New Validation Loop
+            // --- VALIDATION ---
             let isValid = true;
+            let firstErrorPage = null;
             let firstInvalidInput = null;
+            const pagesWithErrors = new Set();
 
-            // Clear previous errors
+            // Clear previous error states
             document.querySelectorAll('.border-red-500').forEach(el => {
                 el.classList.remove('border-red-500');
                 el.classList.add('border-white/10');
             });
+            document.querySelectorAll('.tab-error-dot').forEach(el => el.remove());
+            document.querySelectorAll('.section-error-badge').forEach(el => el.remove());
 
             appState.pages.forEach((page, pIdx) => {
-                page.s.forEach((secName, sIdx) => {
+                page.s.forEach((secObj, sIdx) => {
                     const key = `${pIdx}-${sIdx}`;
                     const d = appState.data[key];
+                    let sectionHasError = false;
+
                     d.feedbackItems.forEach((item, i) => {
                         const isCommentInvalid = !item.comment || item.comment.trim().length < 10;
                         const isTypeInvalid = !item.itemType || item.itemType === "";
 
                         if (isCommentInvalid || isTypeInvalid) {
                             isValid = false;
+                            sectionHasError = true;
+                            pagesWithErrors.add(pIdx);
+
+                            if (firstErrorPage === null) firstErrorPage = pIdx;
 
                             const textarea = document.getElementById(`comment-${key}-${i}`);
                             const selectEl = document.getElementById(`select-${key}-${i}`);
@@ -1188,23 +1511,73 @@
                             }
 
                             if (!firstInvalidInput) {
-                                firstInvalidInput = textarea || selectEl;
-                                const tabBtns = document.querySelectorAll('.tab-btn');
-                                if (tabBtns[pIdx]) tabBtns[pIdx].click();
-                                setTimeout(() => {
-                                    firstInvalidInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                }, 100);
+                                firstInvalidInput = { el: textarea || selectEl, pIdx, sIdx };
                             }
                         }
                     });
+
+                    // Add error badge to section header if this section has errors
+                    if (sectionHasError) {
+                        const sectionEl = document.getElementById(`section-${key}`);
+                        if (sectionEl) {
+                            const header = sectionEl.querySelector('h3');
+                            if (header && !header.querySelector('.section-error-badge')) {
+                                const badge = document.createElement('span');
+                                badge.className = 'section-error-badge ml-2 bg-red-500/20 text-red-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-red-500/30 uppercase tracking-wider';
+                                badge.textContent = 'Needs attention';
+                                header.appendChild(badge);
+                            }
+                        }
+                    }
                 });
             });
 
+            // Add error dots to page tabs with issues
+            pagesWithErrors.forEach(pIdx => {
+                const tabBtns = document.querySelectorAll('.tab-btn');
+                if (tabBtns[pIdx] && !tabBtns[pIdx].querySelector('.tab-error-dot')) {
+                    const dot = document.createElement('span');
+                    dot.className = 'tab-error-dot';
+                    tabBtns[pIdx].appendChild(dot);
+                }
+            });
+
             if (!isValid) {
+                // Navigate to the first error
+                if (firstInvalidInput) {
+                    const tabBtns = document.querySelectorAll('.tab-btn');
+                    if (tabBtns[firstInvalidInput.pIdx]) tabBtns[firstInvalidInput.pIdx].click();
+
+                    setTimeout(() => {
+                        // Re-query after tab switch re-renders sections
+                        const key = `${firstInvalidInput.pIdx}-${firstInvalidInput.sIdx}`;
+                        const sectionEl = document.getElementById(`section-${key}`);
+                        if (sectionEl) {
+                            sectionEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            sectionEl.classList.add('section-flash-error');
+                            setTimeout(() => sectionEl.classList.remove('section-flash-error'), 1500);
+                        }
+
+                        // Re-apply red borders after tab switch re-render
+                        appState.pages[firstInvalidInput.pIdx].s.forEach((sec, sIdx) => {
+                            const k = `${firstInvalidInput.pIdx}-${sIdx}`;
+                            const d = appState.data[k];
+                            d.feedbackItems.forEach((item, i) => {
+                                if (!item.comment || item.comment.trim().length < 10) {
+                                    const ta = document.getElementById(`comment-${k}-${i}`);
+                                    if (ta) { ta.classList.remove('border-white/10'); ta.classList.add('border-red-500'); }
+                                }
+                                if (!item.itemType || item.itemType === "") {
+                                    const sel = document.getElementById(`select-${k}-${i}`);
+                                    if (sel) { sel.classList.remove('border-white/10'); sel.classList.add('border-red-500'); }
+                                }
+                            });
+                        });
+                    }, 150);
+                }
+
                 setTimeout(() => {
                     let errorMsg = "Please ensure all fields are filled out for your uploads.";
-
-                    // Find exactly what is missing to give specific feedback
                     const firstInvalidData = appState.pages.flatMap((page, pIdx) =>
                         page.s.flatMap((sec, sIdx) => appState.data[`${pIdx}-${sIdx}`].feedbackItems)
                     ).find(item => !item.comment || item.comment.trim() === "" || !item.itemType || item.itemType === "");
@@ -1214,19 +1587,24 @@
                         const noComment = !firstInvalidData.comment || firstInvalidData.comment.trim().length < 10;
 
                         if (noType && noComment) {
-                            errorMsg = "Please select an <b>Upload Type</b> AND add a <b>Specific Comment</b> for your images.";
+                            errorMsg = "Please select an <b>Upload Type</b> AND add a <b>Specific Comment</b> (at least 10 characters) for your images.";
                         } else if (noType) {
                             errorMsg = "You forgot to select an <b>Upload Type</b> for one or more images.";
                         } else if (noComment) {
-    errorMsg = "Your comment is too short. Please provide a detailed instruction (at least 10 characters) explaining exactly what needs to be changed or where the asset goes.";
-}
+                            errorMsg = "Your comment is too short. Please provide a detailed instruction <b>(at least 10 characters)</b> explaining exactly what needs to be changed or where the asset goes.";
+                        }
+                    }
+
+                    if (pagesWithErrors.size > 0) {
+                        const pageNames = [...pagesWithErrors].map(idx => appState.pages[idx].n);
+                        errorMsg += `<br><br><span class="text-xs text-gray-500">Issues found on: <b class="text-red-400">${pageNames.join(', ')}</b></span>`;
                     }
 
                     document.getElementById('validationMessage').innerHTML = errorMsg;
                     document.getElementById('validationModal').classList.remove('hidden');
                     document.getElementById('validationModal').classList.add('flex');
                     feather.replace();
-                }, 150);
+                }, 200);
                 return;
             }
 
@@ -1254,113 +1632,154 @@
             overlay.classList.add('flex');
 
             try {
-                statusSub.innerText = "Processing Revision Assets...";
-                let hasChanges = false;
-                const masterZip = new JSZip();
+                statusSub.innerText = "Translating revisions into v3 pack format...";
+
+                // ─── V3 PACK BUILD (replaces the old per-page markdown ZIP nest) ───
+
+                // 1. Translate appState.pages + appState.data → v3 pack-builder input shape.
+                //    v1 has no direct HTML edits, only comments. Each (page, section) with
+                //    globalText OR feedbackItems becomes a v3 'section'-scoped comment.
+                //    Page-wide directives become a 'page'-scoped comment.
+                let hasAnyContent = false;
+                const packPages = [];
 
                 for (let pIdx = 0; pIdx < appState.pages.length; pIdx++) {
                     const page = appState.pages[pIdx];
-                    let pageHasChanges = false;
-                    let pageMd = `# REVISION DIRECTIVE FOR CURSOR AI\n**Project:** ${appState.project}\n**Page:** ${page.n}\n\n`;
+                    const slug = (page.n || `page_${pIdx}`).replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase().replace(/^-+|-+$/g, '') || `page-${pIdx}`;
+                    const v3Comments = [];
 
-pageMd += `> **CRITICAL AI DIRECTIVE:** You are strictly forbidden from writing or modifying any code until you have physically opened and visually analyzed the \`.webp\` files associated with each task.\n`;
-pageMd += `> * For **"Fix"** tasks: The client has drawn mandatory red annotations on the image. The text comment is only half the instruction; the visual red annotation is the ground truth.\n`;
-pageMd += `> * For **"Asset"** tasks: Visually inspect the provided image to understand its dimensions, transparency, and content so you can implement it correctly based on the client's text comment.\n\n---\n\n`;
-
-if (page.url) {
-    pageMd += `**Live Page URL:** ${page.url}\n*(AI: Crawl this link for live DOM/CSS context before writing code)*\n\n`;
-}
-
-                    // --- INJECT PAGE-WIDE DIRECTIVES FIRST ---
-                    const pageGlobalDir = appState.data[`${pIdx}-page-directive`];
-                    if (pageGlobalDir && pageGlobalDir.trim() !== "") {
-                        pageMd += `## ⚠️ PAGE-WIDE DIRECTIVES\n`;
-                        pageMd += `<global_rules>\n`;
-                        pageMd += `Apply the following instructions to the existing page structure.\n`;
-                        pageMd += `CONSTRAINT: Execute these changes surgically. Do NOT remove, rewrite, or truncate previously established sections of the code unless explicitly told to do so. Keep the existing content intact.\n\n`;
-                        pageMd += `CLIENT DIRECTIVE:\n${pageGlobalDir.trim()}\n`;
-                        pageMd += `</global_rules>\n\n---\n\n`;
-                        
-                        pageHasChanges = true;
-                        hasChanges = true;
-                    }
-
-                    const pageZip = new JSZip();
-                    const imgFolder = pageZip.folder("images");
-
-                    let globalTaskCount = 1;
-                    let refCount = 1;
-                    let assetCount = 1;
-
+                    // Per-section comments
                     page.s.forEach((secObj, sIdx) => {
-                        const secName = typeof secObj === 'string' ? secObj : secObj.n;
+                        const secName = typeof secObj === 'string' ? secObj : (secObj.n || `Section ${sIdx + 1}`);
                         const d = appState.data[`${pIdx}-${sIdx}`];
-                        if (d.globalText.trim() !== "" || d.feedbackItems.length > 0) {
-                            pageHasChanges = true;
-                            hasChanges = true;
-                            pageMd += `## SECTION: ${secName}\n`;
+                        if (!d) return;
+                        const hasGlobal = d.globalText && d.globalText.trim().length > 0;
+                        const hasItems = d.feedbackItems && d.feedbackItems.length > 0;
+                        if (!hasGlobal && !hasItems) return;
 
-                            if (d.globalText.trim() !== "") {
-                                pageMd += `**General Notes:** ${d.globalText.trim()}\n\n`;
-                            }
-
-                            if (d.feedbackItems.length > 0) {
-                                d.feedbackItems.forEach((item) => {
-                                    const isFix = item.itemType === 'fix';
-                                    const tag = isFix ? `REF-${refCount++}` : `ASSET-${assetCount++}`;
-                                    const taskTitle = isFix ? `Visual Fix (Reference Image: \`${tag}.webp\`)` : `New Asset (Asset Image: \`${tag}.webp\`)`;
-
-                                    pageMd += `### TASK ${globalTaskCount++}: ${taskTitle}\n`;
-                                    pageMd += `**Client Comment:** "${item.comment || ''}"\n`;
-                                    pageMd += `**WP CDN Link:** ${item.url}\n\n`;
-
-                                    imgFolder.file(`${tag}.webp`, item.b64, { base64: true });
-                                });
-                            }
-                        }
+                        v3Comments.push({
+                            id: `cmt_v1_${pIdx}_${sIdx}_${Date.now()}`,
+                            scope: 'section',
+                            anchor: {
+                                data_section: null,
+                                selector: null, // v1 portal has no live-DOM selector; staff/agent locates by section_name
+                                surrounding_html: null,
+                                section_name: secName,
+                                fallback_innerHTML_slice: ''
+                            },
+                            globalText: hasGlobal ? d.globalText.trim() : '',
+                            items: (d.feedbackItems || []).map((item, iIdx) => ({
+                                id: `itm_v1_${pIdx}_${sIdx}_${iIdx}`,
+                                itemType: item.itemType || 'fix',
+                                comment: item.comment || '',
+                                image_url: item.url || '',           // Firebase Storage URL (v1 just uploaded to FB after the reputifly3 rewrite)
+                                image_storage_path: null,
+                                image_filename: (item.url || '').split('/').pop() || `${item.itemType === 'asset' ? 'ASSET' : 'REF'}-${iIdx + 1}.webp`,
+                                image_thumb_b64: item.b64 ? 'data:image/webp;base64,' + item.b64 : null,
+                                isAnnotated: !!item.isAnnotated
+                            })),
+                            createdAt: Date.now(),
+                            updatedAt: Date.now()
+                        });
                     });
 
-                    if (pageHasChanges) {
-                        pageZip.file("instructions.md", pageMd);
-                        const pageZipBlob = await pageZip.generateAsync({ type: "blob" });
-                        const safePageName = page.n.replace(/[^a-zA-Z0-9]/g, '_') || `Page_${pIdx}`;
-                        masterZip.file(`${safePageName}.zip`, pageZipBlob);
+                    // Page-wide directive → synthetic page-scoped comment
+                    const pageGlobalDir = appState.data[`${pIdx}-page-directive`];
+                    if (pageGlobalDir && pageGlobalDir.trim().length > 0) {
+                        v3Comments.unshift({
+                            id: `cmt_v1_pagewide_${pIdx}_${Date.now()}`,
+                            scope: 'page',
+                            anchor: {
+                                selector: 'body',
+                                section_name: 'Page-wide directive',
+                                surrounding_html: null,
+                                fallback_innerHTML_slice: ''
+                            },
+                            globalText: pageGlobalDir.trim(),
+                            items: [],
+                            createdAt: Date.now(),
+                            updatedAt: Date.now()
+                        });
                     }
+
+                    if (v3Comments.length > 0) hasAnyContent = true;
+
+                    packPages.push({
+                        slug,
+                        title: page.n || slug,
+                        page_id: null,
+                        file_path: slug + '.html',
+                        original_url: page.url || null, // live WP URL; pack-builder will attempt to fetch (CORS-allowing) or skip
+                        edited_html: null,
+                        comments: v3Comments.length > 0 ? { comments: v3Comments } : null
+                    });
                 }
 
-                if (!hasChanges) throw new Error("No revisions or images were added. Nothing to send.");
+                if (!hasAnyContent) throw new Error('No revisions or images were added. Nothing to send.');
 
-                // Generate Master ZIP Blob
-                statusSub.innerText = "Compressing Delivery Files (.zip)...";
-                const zipBlob = await masterZip.generateAsync({ type: "blob" });
+                // 2. Build the pack via the shared builder
+                statusSub.innerText = "Assembling pack...";
+                const safeProject = (appState.project || 'untitled').replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'untitled';
+                const token = firestoreId || ('v1-' + safeProject + '-' + Date.now());
+                const built = await window.RFLY_buildRevisionPack({
+                    token,
+                    site_url: (appState.pages.find(p => p.url) || {}).url
+                        ? (new URL(appState.pages.find(p => p.url).url)).origin
+                        : '',
+                    client_label: appState.project || 'Untitled',
+                    source_portal: 'v1-acrp',
+                    pages: packPages
+                });
 
-                // Upload ZIP to Firebase Storage
-                statusSub.innerText = "Securing Payload on Server...";
-                const safeProject = appState.project.replace(/[^a-zA-Z0-9]/g, '-');
-                const zipFileName = `revision-packs/${safeProject}-ACRP-${Date.now()}.zip`;
-
+                // 3. Upload pack to Firebase Storage
+                statusSub.innerText = "Securing pack on server...";
+                const zipFileName = `revision-packs/${safeProject}-v3-${Date.now()}.zip`;
                 const storageRef = window.storageRef(window.storage, zipFileName);
-                await window.uploadBytes(storageRef, zipBlob);
+                await window.uploadBytes(storageRef, built.blob, { contentType: 'application/zip' });
                 const zipDownloadUrl = await window.getDownloadURL(storageRef);
 
-                // Dispatch Email
+                // 4. Email staff with the pack URL
                 statusSub.innerText = "Dispatching delivery via Reputifly API...";
-
-                const emailText = `🔥 NEW SETUP RECEIVED 🔥\n\nA client has finalized automated revisions for project: ${appState.project}\n\n⬇️ DOWNLOAD REVISION PACK (.ZIP) ⬇️\n${zipDownloadUrl}\n\nReady for immediate parsing. Extract this payload into the main project root to grant complete visual context.`;
-
-                const apiRes = await fetch("https://asia-southeast1-b2b-software.cloudfunctions.net/reputifly", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                const pagesIncluded = built.manifest.pages.length;
+                const totalComments = built.manifest.pages.reduce((a, p) => a + (p.comment_count || 0), 0);
+                const apiRes = await fetch('https://asia-southeast1-b2b-software.cloudfunctions.net/reputifly', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        _to: "runikojane@gmail.com",
-                        _subject: `URGENT: ACRP V6 Revisions for ${appState.project}`,
-                        Revision_Payload: emailText
+                        _to: 'runikojane@gmail.com',
+                        _subject: `🎯 Revision Pack v3 (ACRP) — ${appState.project} (${pagesIncluded} page${pagesIncluded === 1 ? '' : 's'}, ${totalComments} comment${totalComments === 1 ? '' : 's'})`,
+                        _sender_name: 'Reputifly Revision Portal',
+                        'Project': appState.project || '',
+                        'Token': token,
+                        'Pack Version': '3.0',
+                        'Source Portal': 'v1-acrp',
+                        'Pages Included': String(pagesIncluded),
+                        'Total Comments': String(totalComments),
+                        'Pack URL': zipDownloadUrl,
+                        'Message': 'Client has submitted a comment-only revision pack via the ACRP portal. Hand the Pack URL + the site\'s agentic-JSON profile to Claude Code to interpret the comments and apply changes.'
                     })
                 });
 
-                if (!apiRes.ok) throw new Error("Failed to dispatch email to developers.");
+                if (!apiRes.ok) throw new Error('Failed to dispatch email to developers.');
 
-                // Clear the IndexedDB draft so the client starts fresh next time
+                // 5. Firestore pending_revisions (so the staff dashboard sees it)
+                statusSub.innerText = "Syncing with staff dashboard...";
+                await window.addDoc(window.collection(window.db, 'pending_revisions'), {
+                    pack_version: '3.0',
+                    projectName: appState.project,
+                    token,
+                    siteUrl: (appState.pages.find(p => p.url) || {}).url || '',
+                    zipUrl: zipDownloadUrl,
+                    pages_included: pagesIncluded,
+                    total_edits: 0,
+                    total_comments: totalComments,
+                    source_portal: 'v1-acrp',
+                    status: 'pending',
+                    submittedAt: new Date().toISOString(),
+                    timestamp: Date.now()
+                });
+
+                // 6. Clear local draft
                 const storageKey = firestoreId || 'local_draft';
                 deleteFromDB(`revision_state_${storageKey}`);
 
@@ -1381,6 +1800,37 @@ if (page.url) {
                 document.getElementById('validationModal').classList.remove('hidden');
                 document.getElementById('validationModal').classList.add('flex');
             }
+        }
+        // --- TOAST NOTIFICATION ---
+        let toastTimeout = null;
+        function showToast(msg, type = 'warn') {
+            let toast = document.getElementById('toastNotification');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toastNotification';
+                toast.className = 'toast-notification';
+                document.body.appendChild(toast);
+            }
+            const colors = {
+                warn: 'bg-amber-500/90 border-amber-400/50',
+                error: 'bg-red-500/90 border-red-400/50',
+                success: 'bg-emerald-500/90 border-emerald-400/50'
+            };
+            toast.innerHTML = `<div class="${colors[type] || colors.warn} backdrop-blur-xl text-white text-sm font-semibold px-5 py-3 rounded-xl border shadow-2xl flex items-center gap-2"><i data-feather="alert-circle" class="w-4 h-4 shrink-0"></i> ${msg}</div>`;
+            feather.replace();
+            toast.classList.add('show');
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function onDisabledTextareaClick(key, i) {
+            const selectArea = document.getElementById(`select-${key}-${i}`);
+            if (selectArea) {
+                selectArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                selectArea.classList.add('section-flash-error');
+                setTimeout(() => selectArea.classList.remove('section-flash-error'), 1500);
+            }
+            showToast('Pick "Fix This" or "New Asset" above first.', 'warn');
         }
     </script>
 </body>

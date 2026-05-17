@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Revision Pack v3 — Test Runner</title>
+<style>
+  body { font-family: 'SF Mono', Menlo, monospace; background: #0B0A14; color: #f0f0f0; padding: 28px; line-height: 1.5; }
+  h1 { font-family: Inter, sans-serif; color: #E6397F; letter-spacing: -0.025em; margin: 0 0 8px 0; }
+  h2 { font-family: Inter, sans-serif; color: #FF8A00; margin: 24px 0 10px 0; font-size: 18px; letter-spacing: -0.02em; }
+  .test { border-left: 3px solid #555; padding: 10px 14px; margin: 10px 0; background: rgba(255,255,255,0.03); border-radius: 6px; }
+  .test.pass { border-left-color: #34d399; }
+  .test.fail { border-left-color: #ef4444; background: rgba(239,68,68,0.06); }
+  .test .label { font-weight: 600; color: white; }
+  .test .detail { color: #999; font-size: 12px; margin-top: 4px; white-space: pre-wrap; word-break: break-all; }
+  .test.pass .label::before { content: '✓ '; color: #34d399; }
+  .test.fail .label::before { content: '✗ '; color: #ef4444; }
+  button { background: linear-gradient(90deg, #E6397F, #FF8A00); color: white; border: none; padding: 10px 22px; border-radius: 9999px; font-family: Inter, sans-serif; font-weight: 700; cursor: pointer; font-size: 13px; }
+  button:hover { transform: translateY(-1px); }
+  pre { background: rgba(0,0,0,0.4); padding: 14px; border-radius: 8px; overflow-x: auto; font-size: 12px; max-height: 400px; overflow-y: auto; }
+  .summary { font-family: Inter, sans-serif; padding: 14px 18px; border-radius: 10px; margin: 20px 0; }
+  .summary.allpass { background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.4); }
+  .summary.anyfail { background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.4); }
+  details { margin: 8px 0; }
+  details summary { cursor: pointer; color: #aaa; font-size: 12px; }
+</style>
+
+<!-- JSZip first -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- Pack-builder deps -->
+<script src="lib/normalize.js"></script>
+<script src="lib/instructions-template.js"></script>
+<script src="lib/dom-diff.js"></script>
+<script src="lib/pack-builder.js"></script>
+
+</head>
+<body>
+
+<h1>Revision Pack v3 — Test Runner</h1>
+<p>Runs unit tests on the normaliser + differ + pack-builder + a dry-run-apply simulation against the bundled fixtures. No live API calls. No iframes.</p>
+
+<button onclick="runAll()">Run all tests</button>
+
+<div id="results"></div>
+
+<h2>Generated pack inspector</h2>
+<details><summary>Click to expand the most recent generated pack's manifest.json</summary>
+<pre id="lastManifest">(run tests first)</pre>
+</details>
+<details><summary>Click to expand the most recent generated pack's edits.json</summary>
+<pre id="lastEdits">(run tests first)</pre>
+</details>
+<details><summary>Click to expand the most recent generated pack's INSTRUCTIONS.md</summary>
+<pre id="lastInstructions">(run tests first)</pre>
+</details>
+
+<script>
+const results = document.getElementById('results');
+let lastBuiltPack = null;
+
+function logTest(label, pass, detail) {
+    const div = document.createElement('div');
+    div.className = 'test ' + (pass ? 'pass' : 'fail');
+    div.innerHTML = `<div class="label">${label}</div>${detail ? `<div class="detail">${detail}</div>` : ''}`;
+    results.appendChild(div);
+    return pass;
+}
+
+function logHeader(text) {
+    const h = document.createElement('h2');
+    h.textContent = text;
+    results.appendChild(h);
+}
+
+function assertEq(label, actual, expected) {
+    const pass = actual === expected;
+    return logTest(label, pass, pass ? '' : `expected: ${JSON.stringify(expected)}\nactual:   ${JSON.stringify(actual)}`);
+}
+
+function assertTrue(label, val, detail) {
+    return logTest(label, !!val, val ? '' : (detail || 'value was falsy: ' + JSON.stringify(val)));
+}
+
+async function fetchFixture(name) {
+    const r = await fetch('tests/fixtures/' + name);
+    if (!r.ok) throw new Error('failed to load fixture ' + name + ': HTTP ' + r.status);
+    return r.text();
+}
+
+// ───────────────────────────────────────────────────────────────────
+// dryRunApply — simulates the receiving agent. Takes a pack (JSZip),
+// the original HTML, and a sentinel→url map; returns the post-apply HTML.
+// ───────────────────────────────────────────────────────────────────
+async function dryRunApply(zip, slug, originalHtmlOverride, sentinelUrlMap) {
+    const dir = zip.folder('pages/' + slug);
+    if (!dir) throw new Error('no pages/' + slug + ' in pack');
+    const originalHtml = originalHtmlOverride || await dir.file('original.html').async('string');
+    const editsJsonFile = dir.file('edits.json');
+    if (!editsJsonFile) return originalHtml; // no edits → unchanged
+
+    const editsJson = JSON.parse(await editsJsonFile.async('string'));
+    let current = originalHtml;
+
+    for (const op of editsJson.operations) {
+        let applied = false;
+        for (const strat of op.match_strategies) {
+            let newCurrent = applyStrategy(current, strat, sentinelUrlMap);
+            if (newCurrent !== null) {
+                current = newCurrent;
+                applied = true;
+                break;
+            }
+        }
+        if (!applied) {
+            console.warn('op failed (all strategies):', op.id, op.type, op.selector);
+        }
+    }
+    return current;
+}
+
+function substituteSentinels(s, sentinelUrlMap) {
+    if (!s || !sentinelUrlMap) return s;
+    let out = s;
+    for (const [sentinel, url] of Object.entries(sentinelUrlMap)) {
+        out = out.split(sentinel).join(url);
+    }
+    return out;
+}
+
+function applyStrategy(html, strat, sentinelUrlMap) {
+    try {
+        if (strat.strategy === 'exact') {
+            const oldStr = substituteSentinels(strat.old_string, sentinelUrlMap);
+            const newStr = substituteSentinels(strat.new_string, sentinelUrlMap);
+            if (html.indexOf(oldStr) < 0) return null;
+            return html.split(oldStr).join(newStr);
+        }
+        if (strat.strategy === 'selector+innerText') {
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const el = doc.querySelector(strat.selector);
+            if (!el) return null;
+            const cur = (el.textContent || '').trim();
+            if (strat.expected_innerText_contains && cur.indexOf(strat.expected_innerText_contains) < 0) return null;
+            el.textContent = strat.new_innerText;
+            return doc.documentElement.outerHTML;
+        }
+        if (strat.strategy === 'selector+attr') {
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const el = doc.querySelector(strat.selector);
+            if (!el) return null;
+            el.setAttribute(strat.attr, substituteSentinels(strat.new_value, sentinelUrlMap));
+            return doc.documentElement.outerHTML;
+        }
+        if (strat.strategy === 'subtree-replace') {
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const el = doc.querySelector(strat.selector);
+            if (!el) return null;
+            el.outerHTML = substituteSentinels(strat.new_outerHTML, sentinelUrlMap);
+            return doc.documentElement.outerHTML;
+        }
+    } catch (e) {
+        console.warn('strategy threw:', strat.strategy, e);
+    }
+    return null;
+}
+
+async function runAll() {
+    results.innerHTML = '';
+    lastBuiltPack = null;
+
+    // ───── Test 1: normaliser ─────
+    logHeader('1. normalizeHTML');
+    const html = `<html><body><h1 style="opacity:0;transform:translateY(20px)">Hi</h1><meta name="generator" content="WP 6.0"></body></html>`;
+    const n1 = window.RFLY_normalizeHTML(html);
+    const n2 = window.RFLY_normalizeHTML(n1);
+    assertEq('normalizeHTML is idempotent (normalize(normalize(x)) === normalize(x))', n2, n1);
+    assertTrue('GSAP opacity/transform stripped', !/opacity|transform/.test(n1), 'normalized: ' + n1);
+    assertTrue('<meta name="generator"> stripped', !/generator/.test(n1), 'normalized: ' + n1);
+
+    const h1 = window.RFLY_normalizeHTML(`<html><body><h1 class="a" id="x">Hi</h1></body></html>`);
+    const h2 = window.RFLY_normalizeHTML(`<html><body><h1 id="x" class="a">Hi</h1></body></html>`);
+    assertEq('Attribute order normalized to be identical', h1, h2);
+
+    // ───── Test 2: differ ─────
+    logHeader('2. domDiff — text-only fixture');
+    const textOrig = await fetchFixture('text-only-original.html');
+    const textEdit = await fetchFixture('text-only-edited.html');
+    const textOrigN = window.RFLY_normalizeHTML(textOrig);
+    const textEditN = window.RFLY_normalizeHTML(textEdit);
+    const textDiff = window.RFLY_domDiff(textOrigN, textEditN, { pageSlug: 'fixture-text' });
+
+    assertTrue('text-only diff produces at least 3 ops', textDiff.operations.length >= 3,
+        'got ' + textDiff.operations.length + ' ops: ' + textDiff.operations.map(o => o.type + ' @ ' + o.selector).join(', '));
+    assertTrue('text-only diff has zero image_sentinels', textDiff.image_sentinels.length === 0,
+        'sentinels: ' + JSON.stringify(textDiff.image_sentinels));
+    const textTypes = textDiff.operations.map(o => o.type);
+    assertTrue('all text-only ops are text-replace or attr-change or subtree-replace',
+        textTypes.every(t => ['text-replace', 'attr-change', 'subtree-replace'].includes(t)),
+        'op types: ' + textTypes.join(', '));
+
+    // ───── Test 3: differ — image swap ─────
+    logHeader('3. domDiff — image-swap fixture');
+    const imgOrig = await fetchFixture('image-swap-original.html');
+    const imgEdit = await fetchFixture('image-swap-edited.html');
+    const imgDiff = window.RFLY_domDiff(window.RFLY_normalizeHTML(imgOrig), window.RFLY_normalizeHTML(imgEdit), { pageSlug: 'fixture-img' });
+    const imgSwaps = imgDiff.operations.filter(o => o.type === 'image-swap');
+    assertEq('image-swap fixture produces exactly 2 image-swap ops', imgSwaps.length, 2);
+    assertEq('image-swap fixture produces exactly 2 image_sentinels', imgDiff.image_sentinels.length, 2);
+    assertTrue('all image_sentinels contain firebasestorage urls',
+        imgDiff.image_sentinels.every(s => s.firebase_url.includes('firebasestorage')),
+        JSON.stringify(imgDiff.image_sentinels));
+
+    // ───── Test 4: identity diff → empty ─────
+    logHeader('4. domDiff — identity (no changes)');
+    const identityDiff = window.RFLY_domDiff(textOrigN, textOrigN, { pageSlug: 'identity' });
+    assertEq('identity diff returns zero operations', identityDiff.operations.length, 0);
+
+    // ───── Test 5: pack-builder produces a valid ZIP ─────
+    logHeader('5. pack-builder');
+    // Stub the network fetch so pack-builder can pretend the originals come from Firebase
+    const origFetch = window.fetch;
+    const FAKE_URL_TEXT = 'http://fake/text-original';
+    const FAKE_URL_IMG = 'http://fake/img-original';
+    const FAKE_URL_CMT = 'http://fake/cmt-original';
+    window.fetch = function(url) {
+        if (url === FAKE_URL_TEXT) return Promise.resolve(new Response(textOrig, { status: 200 }));
+        if (url === FAKE_URL_IMG) return Promise.resolve(new Response(imgOrig, { status: 200 }));
+        if (url === FAKE_URL_CMT) return Promise.resolve(new Response(textOrig, { status: 200 }));
+        return origFetch(url);
+    };
+
+    const commentsFixture = {
+        comments: [
+            {
+                id: 'cmt_fixture_001',
+                scope: 'section',
+                anchor: {
+                    selector: 'section[data-section="hero"]',
+                    section_name: 'Hero',
+                    surrounding_html: '<section class="hero" data-section="hero">',
+                    fallback_innerHTML_slice: 'Welcome'
+                },
+                globalText: 'make this 2 columns instead of 3',
+                items: [
+                    {
+                        id: 'itm_fixture_001',
+                        itemType: 'fix',
+                        comment: 'change this hero image to a wider landscape shot',
+                        image_url: 'https://firebasestorage.googleapis.com/v0/b/reputifly-editor.firebasestorage.app/o/test%2Fcomment-fix.webp?alt=media&token=test',
+                        image_storage_path: 'revision-comments-images/test/home/cmt_xxx/comment-fix.webp',
+                        image_filename: 'comment-fix.webp',
+                        image_thumb_b64: 'data:image/webp;base64,UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AA/vuUAAA=',
+                        isAnnotated: true
+                    }
+                ],
+                createdAt: 1779004000000,
+                updatedAt: 1779004000000
+            }
+        ]
+    };
+
+    try {
+        const built = await window.RFLY_buildRevisionPack({
+            token: 'test-token',
+            site_url: 'https://dsflooring.reputifly.cloud',
+            client_label: 'Fixture Test',
+            source_portal: 'v2-editor',
+            pages: [
+                { slug: 'page-text', title: 'Text-only', original_url: FAKE_URL_TEXT, edited_html: textEdit, comments: null },
+                { slug: 'page-img', title: 'Image swap', original_url: FAKE_URL_IMG, edited_html: imgEdit, comments: null },
+                { slug: 'page-cmt', title: 'Comment-only', original_url: FAKE_URL_CMT, edited_html: null, comments: commentsFixture }
+            ]
+        });
+        lastBuiltPack = built;
+        assertTrue('pack builder returns a Blob', built.blob instanceof Blob, 'got ' + typeof built.blob);
+        assertEq('manifest has 3 pages', built.manifest.pages.length, 3);
+        assertEq('manifest pack_version is 3.0', built.manifest.pack_version, '3.0');
+        const pageText = built.manifest.pages.find(p => p.slug === 'page-text');
+        const pageImg = built.manifest.pages.find(p => p.slug === 'page-img');
+        const pageCmt = built.manifest.pages.find(p => p.slug === 'page-cmt');
+        assertTrue('page-text has_edits=true, has_comments=false', pageText.has_edits && !pageText.has_comments);
+        assertTrue('page-img has_edits=true', pageImg.has_edits);
+        assertTrue('page-cmt has_edits=false, has_comments=true', !pageCmt.has_edits && pageCmt.has_comments);
+        assertTrue('manifest has SHA hashes', !!pageText.original_sha256 && !!pageText.edited_sha256);
+
+        // Open the zip and verify file structure
+        const zip = await JSZip.loadAsync(built.blob);
+        assertTrue('zip contains manifest.json', !!zip.file('manifest.json'));
+        assertTrue('zip contains INSTRUCTIONS.md', !!zip.file('INSTRUCTIONS.md'));
+        assertTrue('zip contains image_upload_plan.json', !!zip.file('image_upload_plan.json'));
+        assertTrue('zip contains pages/page-text/original.html', !!zip.file('pages/page-text/original.html'));
+        assertTrue('zip contains pages/page-text/edited.html', !!zip.file('pages/page-text/edited.html'));
+        assertTrue('zip contains pages/page-text/edits.json', !!zip.file('pages/page-text/edits.json'));
+        assertTrue('zip OMITS pages/page-text/comments.json (no comments)', !zip.file('pages/page-text/comments.json'));
+        assertTrue('zip contains pages/page-cmt/comments.json', !!zip.file('pages/page-cmt/comments.json'));
+        assertTrue('zip OMITS pages/page-cmt/edits.json (no edits)', !zip.file('pages/page-cmt/edits.json'));
+        assertTrue('zip contains pages/page-cmt/images/thumb-itm_fixture_001.webp', !!zip.file('pages/page-cmt/images/thumb-itm_fixture_001.webp'));
+
+        // ───── Test 6: dryRunApply on text-only ─────
+        logHeader('6. dryRunApply — text-only fixture');
+        const appliedText = await dryRunApply(zip, 'page-text', null, {});
+        // Verify expected text changes are present in the applied output
+        assertTrue('applied text contains "Welcome to DS Flooring SG"', appliedText.indexOf('Welcome to DS Flooring SG') >= 0,
+            'first 500 chars of applied: ' + appliedText.substring(0, 500));
+        assertTrue('applied text contains "Singapore\'s Premier Pure-Play Vinyl Specialists"', appliedText.indexOf("Singapore's Premier Pure-Play Vinyl Specialists") >= 0);
+        assertTrue('applied text contains href="/quote"', appliedText.indexOf('href="/quote"') >= 0);
+        assertTrue('applied text contains "Request a quote"', appliedText.indexOf('Request a quote') >= 0);
+        assertTrue('applied text contains "premium vinyl flooring"', appliedText.indexOf('premium vinyl flooring') >= 0);
+        // And original text should be gone
+        assertTrue('applied text NO LONGER contains "Welcome to DS Flooring</h1>"', appliedText.indexOf('Welcome to DS Flooring</h1>') < 0);
+
+        // ───── Test 7: dryRunApply on image-swap with sentinel map ─────
+        logHeader('7. dryRunApply — image-swap fixture');
+        const sentinelMap = {};
+        const planJson = JSON.parse(await zip.file('image_upload_plan.json').async('string'));
+        planJson.uploads.forEach(u => {
+            // Simulate WP-side upload: each Firebase URL maps to a fake WP URL
+            sentinelMap[u.sentinel] = 'https://dsflooring.reputifly.cloud/wp-content/uploads/2026/05/' + u.filename_hint;
+        });
+        const appliedImg = await dryRunApply(zip, 'page-img', null, sentinelMap);
+        assertTrue('applied img contains new-hero.webp', appliedImg.indexOf('new-hero.webp') >= 0,
+            'first 800 chars of applied: ' + appliedImg.substring(0, 800));
+        assertTrue('applied img contains g2-new.webp', appliedImg.indexOf('g2-new.webp') >= 0);
+        // Untouched images survive
+        assertTrue('applied img still contains g1.jpg (untouched)', appliedImg.indexOf('g1.jpg') >= 0);
+        assertTrue('applied img still contains g3.jpg (untouched)', appliedImg.indexOf('g3.jpg') >= 0);
+        // Original hero src is gone
+        assertTrue('applied img NO LONGER contains hero-old.jpg', appliedImg.indexOf('hero-old.jpg') < 0);
+        // No sentinel survived
+        assertTrue('applied img has zero unresolved {{IMAGE_URL_*}} sentinels', appliedImg.indexOf('{{IMAGE_URL_') < 0);
+
+        // Render manifest, edits, instructions
+        document.getElementById('lastManifest').textContent = JSON.stringify(built.manifest, null, 2);
+        const editsTextSample = await zip.file('pages/page-text/edits.json').async('string');
+        document.getElementById('lastEdits').textContent = editsTextSample;
+        document.getElementById('lastInstructions').textContent = await zip.file('INSTRUCTIONS.md').async('string');
+
+    } catch (e) {
+        logTest('pack-builder threw', false, e.stack || e.message || String(e));
+    } finally {
+        window.fetch = origFetch;
+    }
+
+    // ───── Summary ─────
+    const passes = results.querySelectorAll('.test.pass').length;
+    const fails = results.querySelectorAll('.test.fail').length;
+    const sum = document.createElement('div');
+    sum.className = 'summary ' + (fails === 0 ? 'allpass' : 'anyfail');
+    sum.textContent = `${passes} passed · ${fails} failed`;
+    results.insertBefore(sum, results.firstChild);
+}
+
+// auto-run on load
+window.addEventListener('load', runAll);
+</script>
+
+</body>
+</html>
