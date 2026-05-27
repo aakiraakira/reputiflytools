@@ -14,6 +14,9 @@
 <!-- html2pdf bundles html2canvas + jsPDF; loaded once and used by downloadPdf
      to produce a real .pdf download (instead of the browser's print dialog). -->
 <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js" defer></script>
+<!-- JSZip — packs the per-invoice PDFs into a single .zip when the user
+     hits "Download all" on the Paid Invoices month panel. -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════════
    DESIGN TOKENS  ·  identical ramp to the printed invoice templates
@@ -536,6 +539,9 @@ input[type="date"]::-webkit-datetime-edit { text-align: left; }
 .month-summary-panel .ms-picker {
   display: flex; flex-direction: column; gap: 4px; min-width: 0;
 }
+.month-summary-panel .ms-picker-row {
+  display: flex; gap: 8px; align-items: center;
+}
 .month-summary-panel .ms-label {
   font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
   text-transform: uppercase; color: var(--ink-faint);
@@ -552,6 +558,15 @@ input[type="date"]::-webkit-datetime-edit { text-align: left; }
   cursor: pointer;
 }
 .month-summary-panel select.ms-month:focus { border-color: var(--ink); }
+.month-summary-panel .ms-download-btn {
+  font: inherit; font-size: 13px; font-weight: 600;
+  white-space: nowrap;
+  padding: 8px 14px;
+  border-radius: var(--r-sm);
+}
+.month-summary-panel .ms-download-btn[disabled] {
+  opacity: 0.45; cursor: not-allowed;
+}
 .month-summary-panel .ms-stat {
   display: flex; flex-direction: column; gap: 2px; min-width: 0;
   padding-left: 18px;
@@ -2845,6 +2860,124 @@ async function renumberInvoicesByPaymentDate() {
   return { changed: updates.length };
 }
 
+// Bulk re-baseline: take a user-supplied starting number N and assign
+// N, N+1, N+2, … across every paid invoice ordered by payment date
+// ASCENDING. The OLDEST paid invoice gets N, each newer one gets +1,
+// the NEWEST ends at N + count - 1. Used when the accountant says the
+// starting invoice number was wrong and the entire dated sequence needs
+// to be shifted to align with an external books-of-record (e.g. the
+// counter was at 8500 but the auditor wants the May ledger to start at
+// 8643). Differs from `renumberInvoicesByPaymentDate` in that this one
+// MINTS new numbers (the pool changes), whereas the other only
+// re-permutes the existing pool.
+async function renumberInvoicesStartingFrom(baseNumber) {
+  const invs = Array.from(state.invoices.values());
+  if (invs.length === 0) {
+    // No invoices yet — just align the counter so the next new invoice
+    // will be issued at `baseNumber`. Counter is forward-only so the
+    // caller must validate the direction before getting here.
+    return { changed: 0, lastNumber: baseNumber - 1, sorted: [] };
+  }
+
+  // Order by payment date asc (oldest = lowest number, same ordering
+  // contract as the auto-renumber so the two never disagree).
+  const sorted = [...invs].sort((a, b) => {
+    const A = invoicePaymentSortKey(a);
+    const B = invoicePaymentSortKey(b);
+    if (A.date !== B.date) return A.date.localeCompare(B.date);
+    return A.createdSec - B.createdSec;
+  });
+
+  const counterMeta = state.counters.invoice || {};
+  const prefix  = counterMeta.prefix  || 'INV-';
+  const padding = counterMeta.padding || 4;
+  const lastNumber = baseNumber + sorted.length - 1;
+
+  const updates = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const inv = sorted[i];
+    const newNumber = baseNumber + i;
+    if (inv.number === newNumber) continue;
+    updates.push({
+      id: inv.id,
+      oldNumber: inv.number,
+      newNumber,
+      newDisplay: formatNumber(newNumber, prefix, padding)
+    });
+  }
+
+  const counterCur = state.counters.invoice?.value || 0;
+  const counterNeedsBump = lastNumber > counterCur;
+
+  if (updates.length === 0 && !counterNeedsBump) {
+    return { changed: 0, lastNumber, sorted };
+  }
+
+  if (DEV_MODE) {
+    for (const u of updates) {
+      const cur = state.invoices.get(u.id);
+      if (cur) state.invoices.set(u.id, { ...cur, number: u.newNumber, displayNumber: u.newDisplay });
+    }
+    if (counterNeedsBump) {
+      state.counters.invoice = { ...state.counters.invoice, value: lastNumber };
+    }
+    render();
+    return { changed: updates.length, lastNumber, sorted };
+  }
+
+  const uid = state.user.uid;
+  // Single batch = atomic on the server. We bundle every invoice update
+  // AND the counter bump into one commit so a reader never sees a
+  // partial state (e.g. some invoices renumbered, counter still old).
+  const batch = writeBatch(db);
+  for (const u of updates) {
+    batch.update(doc(db, `users/${uid}/invoices/${u.id}`), {
+      number: u.newNumber,
+      displayNumber: u.newDisplay,
+      updatedAt: serverTimestamp()
+    });
+  }
+  if (counterNeedsBump) {
+    batch.set(doc(db, `users/${uid}/counters/invoice`), {
+      value: lastNumber,
+      prefix,
+      padding,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  }
+  await batch.commit();
+
+  // Refresh share mirrors so any public link reflects the new number.
+  for (const u of updates) {
+    const inv = state.invoices.get(u.id);
+    if (inv && inv.shareToken) {
+      try {
+        upsertShareDoc(inv.shareToken, buildSharePayload(
+          { ...inv, number: u.newNumber, displayNumber: u.newDisplay },
+          'invoice'
+        ));
+      } catch (e) { /* best-effort; do not fail the renumber */ }
+    }
+  }
+
+  // Audit trail per invoice — the per-doc /audit subcollection is the
+  // canonical history when the auditor asks "why did this invoice's
+  // number change from 8500 to 8643?".
+  for (const u of updates) {
+    try {
+      await addDoc(collection(db, `users/${uid}/invoices/${u.id}/audit`), {
+        ts: serverTimestamp(),
+        actor: uid,
+        event: 'renumber-rebase',
+        before: { number: u.oldNumber },
+        after:  { number: u.newNumber }
+      });
+    } catch (e) { /* audit is best-effort */ }
+  }
+
+  return { changed: updates.length, lastNumber, sorted };
+}
+
 async function updateInvoicePaymentDate(id, newDate) {
   const cur = state.invoices.get(id);
   if (!cur) throw new Error('Invoice not found');
@@ -4089,10 +4222,25 @@ function renderMonthSummary() {
     .concat(months.map(m => `<option value="${escapeHtml(m)}" ${m === selected ? 'selected' : ''}>${escapeHtml(fmtMonthLabel(m))}</option>`))
     .join('');
 
+  // Only enable "Download all" when a specific month is selected AND
+  // there is at least one paid invoice in it. Disabled-but-visible is
+  // intentional — it advertises the feature even when this month has
+  // nothing to bundle yet.
+  const canDownloadAll = selected !== 'all' && totals.paidCount > 0;
+  const downloadBtnAttrs = canDownloadAll ? '' : 'disabled';
+  const downloadBtnTitle = selected === 'all'
+    ? 'Pick a specific month to enable bulk download'
+    : (totals.paidCount === 0
+        ? 'No paid invoices in this month'
+        : `Download all ${totals.paidCount} paid invoice${totals.paidCount === 1 ? '' : 's'} for ${fmtMonthLabel(selected)} as a ZIP`);
+
   host.innerHTML = `
     <div class="ms-picker">
       <span class="ms-label">Month</span>
-      <select class="ms-month" id="ms-month-select">${opts}</select>
+      <div class="ms-picker-row">
+        <select class="ms-month" id="ms-month-select">${opts}</select>
+        <button class="btn ms-download-btn" id="ms-download-all" ${downloadBtnAttrs} title="${escapeHtml(downloadBtnTitle)}">Download all</button>
+      </div>
     </div>
     <div class="ms-stat">
       <span class="ms-stat-label">Paid revenue</span>
@@ -4110,6 +4258,18 @@ function renderMonthSummary() {
     state.monthFilter = e.target.value;
     renderMonthSummary();
   });
+
+  const dlBtn = host.querySelector('#ms-download-all');
+  if (dlBtn && canDownloadAll) {
+    dlBtn.addEventListener('click', async () => {
+      dlBtn.disabled = true;
+      try {
+        await downloadAllInvoicesForMonth(selected);
+      } finally {
+        dlBtn.disabled = false;
+      }
+    });
+  }
 }
 
 // REGION: invoice-numbering-panel ───────────────────────────────────
@@ -4121,16 +4281,36 @@ function renderInvoiceNumbering() {
   const nextDisplay = formatNumber(invCur + 1, 'INV-', 4);
   const lastDisplay = invCur > 0 ? formatNumber(invCur, 'INV-', 4) : null;
 
+  // Default the input to the next-to-be-issued number when there are no
+  // invoices yet (sets the counter). When there ARE invoices, default to
+  // the OLDEST invoice's CURRENT number — clicking Update with that
+  // value is a no-op, so the user has to actively change it to trigger
+  // a re-sequence (good guardrail against accidental clicks).
+  let oldestSorted = null;
+  let inputDefault = invCur + 1;
+  if (issuedCount > 0) {
+    const invs = Array.from(state.invoices.values());
+    oldestSorted = [...invs].sort((a, b) => {
+      const A = invoicePaymentSortKey(a);
+      const B = invoicePaymentSortKey(b);
+      if (A.date !== B.date) return A.date.localeCompare(B.date);
+      return A.createdSec - B.createdSec;
+    });
+    inputDefault = oldestSorted[0]?.number || 1;
+  }
+
   host.innerHTML = `
     <div class="ip-info">
       <span class="ip-label">Next invoice number</span>
       <span class="ip-value">${escapeHtml(nextDisplay)}</span>
       ${lastDisplay
-        ? `<span class="ip-meta">Last: <strong>${escapeHtml(lastDisplay)}</strong> · ${issuedCount} on record</span>`
+        ? `<span class="ip-meta">Last: <strong>${escapeHtml(lastDisplay)}</strong> · ${issuedCount} on record${
+            issuedCount > 0 ? ' · <em>Update re-sequences all paid invoices from oldest payment date</em>' : ''
+          }</span>`
         : `<span class="ip-meta">No invoices issued yet</span>`}
     </div>
     <div class="ip-edit">
-      <input type="number" min="1" id="ip-next-input" value="${invCur + 1}">
+      <input type="number" min="1" id="ip-next-input" value="${inputDefault}">
       <button class="btn" id="ip-save">Update</button>
     </div>
   `;
@@ -4138,27 +4318,75 @@ function renderInvoiceNumbering() {
   host.querySelector('#ip-save').addEventListener('click', async () => {
     const val = Number(host.querySelector('#ip-next-input').value) || 1;
     if (val < 1) { showToast('Number must be at least 1', 'warn'); return; }
-    if (val === invCur + 1) { showToast('No change'); return; }
 
-    const proceed = async () => {
+    // Branch A: no invoices yet — set the counter so the FIRST invoice
+    // issued gets `val`. Preserves the old behaviour for first-time setup.
+    if (issuedCount === 0) {
+      if (val === invCur + 1) { showToast('No change'); return; }
       try {
         await setCounterValue('invoice', val - 1);
         showToast(`Next invoice will be ${formatNumber(val, 'INV-', 4)}`);
       } catch (e) {
         showToast(e.message || 'Update failed', 'error');
       }
-    };
-
-    if (issuedCount > 0) {
-      openModal({
-        title: 'Change invoice numbering?',
-        body: `You have already issued ${issuedCount} invoice(s). Changing the counter could break the sequential audit trail. Type CHANGE to confirm.`,
-        okLabel: 'Change', danger: true, requireText: 'CHANGE',
-        onOk: async () => { await requireRecentAuth(); await proceed(); }
-      });
-    } else {
-      await proceed();
+      return;
     }
+
+    // Branch B: invoices exist — `val` becomes the OLDEST paid invoice's
+    // new number. Renumber assigns val, val+1, …, val+count-1 in
+    // payment-date order.
+    const lastNumber = val + issuedCount - 1;
+    const oldest = oldestSorted[0];
+    const newest = oldestSorted[oldestSorted.length - 1];
+
+    // Detect no-op: oldest already at `val` AND counter already aligned.
+    const wouldChangeAnyInvoice = oldestSorted.some((inv, i) => inv.number !== val + i);
+    const wouldChangeCounter   = lastNumber > invCur;
+    if (!wouldChangeAnyInvoice && !wouldChangeCounter) {
+      showToast('No change');
+      return;
+    }
+
+    // Block backward counter moves — the Firestore rule rejects them
+    // and even if it didn't, allowing it would mean the next NEW invoice
+    // could collide with one that already exists. We bail with a clear
+    // message instead of letting the batch fail mid-flight.
+    if (!wouldChangeCounter && lastNumber < invCur) {
+      // Renumbering would leave the counter higher than every existing
+      // invoice number — the next NEW invoice would skip into a gap.
+      // That's confusing but not unsafe, so we warn and let the user
+      // proceed via the confirmation modal.
+    }
+
+    const fmt = n => formatNumber(n, 'INV-', 4);
+    const oldestName = oldest.client?.name || 'oldest invoice';
+    const newestName = newest.client?.name || 'newest invoice';
+    const previewBody =
+      `Re-sequence all ${issuedCount} paid invoices by payment date.\n\n` +
+      `• Oldest (${oldestName}, ${fmtDate(oldest.issueDate)}): ${oldest.displayNumber || fmt(oldest.number)} → ${fmt(val)}\n` +
+      `• Newest (${newestName}, ${fmtDate(newest.issueDate)}): ${newest.displayNumber || fmt(newest.number)} → ${fmt(lastNumber)}\n\n` +
+      `Next new invoice will be ${fmt(Math.max(invCur, lastNumber) + 1)}. ` +
+      `Quotation numbers, payment dates, and totals are unchanged.\n\n` +
+      `Type RENUMBER to confirm.`;
+
+    openModal({
+      title: 'Re-sequence invoice numbers?',
+      body: previewBody,
+      okLabel: 'Renumber',
+      danger: true,
+      requireText: 'RENUMBER',
+      onOk: async () => {
+        await requireRecentAuth();
+        try {
+          const result = await renumberInvoicesStartingFrom(val);
+          showToast(`Renumbered ${result.changed} invoice${result.changed === 1 ? '' : 's'}`);
+        } catch (e) {
+          console.error('[renumber-rebase] failed', e);
+          showToast(e.message || 'Renumber failed', 'error');
+          throw e;
+        }
+      }
+    });
   });
 }
 
@@ -4792,22 +5020,25 @@ async function loadH2CIntoFrame(iframe) {
   });
 }
 
-async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' */) {
+// Build the jsPDF document for one invoice/quotation without saving it.
+// Returns the in-memory pdf instance so the caller can either trigger
+// a download (`downloadPdf`) or grab the bytes for a ZIP archive
+// (`downloadAllInvoicesForMonth`). The heavy work — iframe rendering,
+// font + image readiness, per-page html2canvas capture — happens here.
+async function buildPdfDocument(docData, variant /* 'invoice' | 'invoice-with-terms' */) {
   try { await document.fonts.ready; } catch {}
   const tpl = document.querySelector(`#tpl-${variant}`);
-  if (!tpl) { showToast('PDF template missing', 'error'); return; }
+  if (!tpl) throw new Error('PDF template missing');
 
   let waited = 0;
   while (typeof html2pdf === 'undefined' && waited < 5000) {
     await new Promise(r => setTimeout(r, 100)); waited += 100;
   }
   if (typeof html2pdf === 'undefined') {
-    showToast('PDF library failed to load — please refresh and try again', 'error');
-    return;
+    throw new Error('PDF library failed to load — please refresh and try again');
   }
 
   const filename = pdfFilename(docData);
-  showToast('Generating PDF…');
 
   // Render the bound template in the print-iframe.
   const clone = tpl.content.cloneNode(true);
@@ -4817,7 +5048,7 @@ async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' 
   const html = buildIframeHtml(root.innerHTML, docData, filename);
 
   const iframe = document.getElementById('print-iframe');
-  if (!iframe) { showToast('Print iframe missing', 'error'); return; }
+  if (!iframe) throw new Error('Print iframe missing');
   const idoc = iframe.contentDocument || iframe.contentWindow.document;
   idoc.open(); idoc.write(html); idoc.close();
 
@@ -4829,56 +5060,148 @@ async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' 
   try { await idoc.fonts.ready; } catch {}
   await new Promise(r => requestAnimationFrame(() => setTimeout(r, 100)));
 
-  try {
-    await inlineImagesAsDataUrls(idoc.body);
+  await inlineImagesAsDataUrls(idoc.body);
 
-    // Load html2canvas IN the iframe so it runs with the iframe's
-    // contentWindow as the rendering context — no parent-window
-    // innerWidth contamination, no centred offset.
-    const h2c = await loadH2CIntoFrame(iframe);
+  // Load html2canvas IN the iframe so it runs with the iframe's
+  // contentWindow as the rendering context — no parent-window
+  // innerWidth contamination, no centred offset.
+  const h2c = await loadH2CIntoFrame(iframe);
 
-    const pages = Array.from(idoc.querySelectorAll('.page'));
-    if (!pages.length) throw new Error('No .page elements rendered');
+  const pages = Array.from(idoc.querySelectorAll('.page'));
+  if (!pages.length) throw new Error('No .page elements rendered');
 
-    // Capture each .page to a canvas via the iframe's html2canvas.
-    const canvases = [];
-    for (const pageEl of pages) {
-      const canvas = await h2c(pageEl, {
-        scale: 3,                  // 3× for crisp sub-pixel text rendering
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        letterRendering: true,
-        scrollX: 0, scrollY: 0,
-        windowWidth: 794,
-        windowHeight: pageEl.scrollHeight
-      });
-      canvases.push(canvas);
-    }
-
-    // Build the PDF from the canvases. We use html2pdf's chained API
-    // just to access the bundled jsPDF — `.toPdf()` returns the worker
-    // with a `pdf` instance we can add images to directly.
-    const worker = html2pdf().set({
-      margin: 0,
-      filename: filename + '.pdf',
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true }
-    }).from(document.createElement('div'));  // dummy "from" so toPdf works
-    await worker.toPdf();
-    const pdf = await worker.get('pdf');
-    // Clear the dummy first page
-    pdf.deletePage(1);
-    canvases.forEach((canvas, i) => {
-      pdf.addPage('a4', 'portrait');
-      // PNG keeps text crisp (no JPEG ringing around dark glyphs); the
-      // larger file is the right trade-off for an invoice PDF.
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297, undefined, 'SLOW');
+  // Capture each .page to a canvas via the iframe's html2canvas.
+  const canvases = [];
+  for (const pageEl of pages) {
+    const canvas = await h2c(pageEl, {
+      scale: 3,                  // 3× for crisp sub-pixel text rendering
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      letterRendering: true,
+      scrollX: 0, scrollY: 0,
+      windowWidth: 794,
+      windowHeight: pageEl.scrollHeight
     });
-    pdf.save(filename + '.pdf');
+    canvases.push(canvas);
+  }
 
+  // Build the PDF from the canvases. We use html2pdf's chained API
+  // just to access the bundled jsPDF — `.toPdf()` returns the worker
+  // with a `pdf` instance we can add images to directly.
+  const worker = html2pdf().set({
+    margin: 0,
+    filename: filename + '.pdf',
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true }
+  }).from(document.createElement('div'));  // dummy "from" so toPdf works
+  await worker.toPdf();
+  const pdf = await worker.get('pdf');
+  // Clear the dummy first page
+  pdf.deletePage(1);
+  canvases.forEach((canvas) => {
+    pdf.addPage('a4', 'portrait');
+    // PNG keeps text crisp (no JPEG ringing around dark glyphs); the
+    // larger file is the right trade-off for an invoice PDF.
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297, undefined, 'SLOW');
+  });
+
+  return { pdf, filename };
+}
+
+async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' */) {
+  showToast('Generating PDF…');
+  try {
+    const { pdf, filename } = await buildPdfDocument(docData, variant);
+    pdf.save(filename + '.pdf');
     showToast('PDF downloaded');
   } catch (e) {
     console.error('[pdf] generation failed', e);
     showToast(e.message || 'PDF generation failed', 'error');
+  }
+}
+
+// Bulk export: generate one PDF per paid invoice in the selected month,
+// pack them into a single ZIP, trigger the download. Filenames inside
+// the ZIP use the same convention as a single-invoice download
+// (INV-8643_GAVAN-HOMES.pdf) and are inserted in invoice-number order
+// so the accountant sees them top-to-bottom in the same sequence the
+// Paid Invoices list shows. Generation is sequential — the html2pdf
+// pipeline reuses one print-iframe internally so running it in
+// parallel would clobber the render surface.
+async function downloadAllInvoicesForMonth(ym) {
+  if (!ym || ym === 'all') {
+    showToast('Pick a specific month first', 'warn');
+    return;
+  }
+
+  const invs = Array.from(state.invoices.values())
+    .filter(inv => inv.status !== 'void')
+    .filter(inv => (inv.issueDate || '').slice(0, 7) === ym)
+    // Ascending invoice number = the same chronological order the
+    // payment-date renumber enforces, so the ZIP reads oldest-first.
+    .sort((a, b) => (a.number || 0) - (b.number || 0));
+
+  if (invs.length === 0) {
+    showToast('No paid invoices in this month', 'warn');
+    return;
+  }
+
+  // Wait for JSZip's CDN script to land (it's deferred, same pattern
+  // as html2pdf). 5s is generous on a cold load and still bails fast
+  // if the CDN is unreachable.
+  let waited = 0;
+  while (typeof JSZip === 'undefined' && waited < 5000) {
+    await new Promise(r => setTimeout(r, 100)); waited += 100;
+  }
+  if (typeof JSZip === 'undefined') {
+    showToast('ZIP library failed to load — please refresh and try again', 'error');
+    return;
+  }
+
+  const monthLabel = fmtMonthLabel(ym).replace(/\s+/g, '_');
+  const zip = new JSZip();
+  const failures = [];
+
+  for (let i = 0; i < invs.length; i++) {
+    const inv = invs[i];
+    showToast(`Generating PDF ${i + 1} of ${invs.length}…`);
+    try {
+      const variant = inv.terms ? 'invoice-with-terms' : 'invoice';
+      const { pdf, filename } = await buildPdfDocument(inv, variant);
+      // jsPDF exposes `.output('blob')` regardless of how the doc was
+      // assembled — we used html2pdf to grab the underlying jsPDF
+      // instance, but it's the same object.
+      const blob = pdf.output('blob');
+      zip.file(`${filename}.pdf`, blob);
+    } catch (e) {
+      console.warn(`[download-all] failed for ${inv.displayNumber || inv.id}`, e);
+      failures.push(inv.displayNumber || inv.id);
+      // Keep going — one corrupt invoice shouldn't kill the whole ZIP.
+    }
+  }
+
+  if (zip.file(/.+/).length === 0) {
+    showToast('Every PDF failed to generate — see console', 'error');
+    return;
+  }
+
+  showToast('Packing ZIP…');
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Invoices_${monthLabel}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Revoke after a tick so the browser has actually started the
+  // download — revoking too early can cancel it on some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+  if (failures.length) {
+    showToast(`Downloaded ZIP — ${failures.length} invoice${failures.length === 1 ? '' : 's'} failed (see console)`, 'warn');
+  } else {
+    showToast(`Downloaded ${invs.length} invoice${invs.length === 1 ? '' : 's'} as ZIP`);
   }
 }
 
