@@ -17,6 +17,10 @@
 <!-- JSZip — packs the per-invoice PDFs into a single .zip when the user
      hits "Download all" on the Paid Invoices month panel. -->
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
+<!-- ExcelJS — builds the styled .xlsx monthly invoice-listing summary
+     (pink header, frozen row, real date/number cells) the accountant
+     reconciles against the bank statement. Loaded on demand. -->
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" defer></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════════
    DESIGN TOKENS  ·  identical ramp to the printed invoice templates
@@ -1452,6 +1456,110 @@ input[type="date"]::-webkit-datetime-edit { text-align: left; }
   flex-wrap: wrap;
 }
 .modal-card .input { margin-bottom: 14px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   DOWNLOAD DIALOG — month listing showcase + export options.
+   Centered card on desktop; slide-up sheet that fills the screen on
+   mobile (mirrors the bottom-sheet language). Fully self-contained —
+   does NOT reuse #modal-scrim, so the generic openModal is untouched.
+   ═══════════════════════════════════════════════════════════════════ */
+.dl-scrim {
+  position: fixed; inset: 0;
+  background: rgba(10,10,10,0.45);
+  z-index: 300;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  opacity: 0; transition: opacity 180ms ease;
+}
+.dl-scrim.open { opacity: 1; }
+.dl-modal {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  width: 100%; max-width: 780px;
+  max-height: 86vh;
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow-pop);
+  transform: scale(0.97); opacity: 0;
+  transition: transform 200ms ease, opacity 200ms ease;
+  overflow: hidden;
+}
+.dl-scrim.open .dl-modal { transform: scale(1); opacity: 1; }
+.dl-modal-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; padding: 22px 24px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+.dl-modal-head h3 { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; }
+.dl-modal-head .dl-sub {
+  font-size: 12.5px; color: var(--ink-muted); margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.dl-close {
+  background: var(--surface-soft); border: 0;
+  width: 32px; height: 32px; border-radius: 50%;
+  cursor: pointer; font-size: 20px; line-height: 1; color: var(--ink-muted);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.dl-close:hover { background: var(--hairline); color: var(--ink); }
+.dl-preview {
+  overflow: auto; padding: 14px 24px; flex: 1;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Summary table — hot-pink header echoes the accountant's existing sheet
+   AND the Reputifly brand gradient. */
+.sum-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sum-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: linear-gradient(135deg, #E5006D 0%, #FF2E8B 100%);
+  color: #fff; font-weight: 700; font-size: 9.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; padding: 11px 12px; text-align: left; white-space: nowrap;
+}
+.sum-table thead th.amt { text-align: right; }
+.sum-table tbody td {
+  padding: 9px 12px; border-bottom: 1px solid var(--hairline);
+  vertical-align: top; color: var(--ink-soft);
+}
+.sum-table tbody tr:nth-child(even) td { background: var(--surface-soft); }
+.sum-table td.date { white-space: nowrap; color: var(--ink-muted); }
+.sum-table td.inv { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+.sum-table td.cust { font-weight: 600; color: var(--ink); }
+.sum-table td.amt {
+  text-align: right; font-variant-numeric: tabular-nums;
+  white-space: nowrap; font-weight: 700; color: var(--ink);
+}
+.sum-table .sum-title { display: block; }
+.sum-table .sum-title + .sum-title { margin-top: 3px; color: var(--ink-muted); }
+.sum-table tfoot td {
+  padding: 13px 12px; border-top: 2px solid var(--ink);
+  font-weight: 800; font-size: 13px; color: var(--ink);
+  position: sticky; bottom: 0; background: var(--surface);
+}
+.sum-table tfoot td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+.dl-modal-foot {
+  display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;
+  padding: 16px 24px 20px; border-top: 1px solid var(--hairline);
+}
+.dl-modal-foot .btn[disabled] { opacity: 0.55; cursor: progress; }
+@media (max-width: 760px) {
+  .dl-scrim { padding: 0; align-items: flex-end; }
+  .dl-modal {
+    max-width: none; width: 100%;
+    height: 92vh; max-height: 92vh;
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    transform: translateY(100%);
+  }
+  .dl-scrim.open .dl-modal { transform: translateY(0); }
+  .dl-modal-foot { flex-direction: column-reverse; }
+  .dl-modal-foot .btn { width: 100%; }
+  /* Tighten the showcase table so more columns fit a narrow screen;
+     it still scrolls horizontally if the customer/description run long.
+     (The downloaded .xlsx is identical regardless of viewport.) */
+  .dl-preview { padding: 12px 14px; }
+  .sum-table { font-size: 11px; }
+  .sum-table thead th { padding: 9px 8px; font-size: 8.5px; letter-spacing: 0.06em; }
+  .sum-table tbody td, .sum-table tfoot td { padding: 8px 8px; }
+}
 
 /* ═══════════════════════════════════════════════════════════════════
    PDF STAGE — hidden iframe target
@@ -4222,24 +4330,23 @@ function renderMonthSummary() {
     .concat(months.map(m => `<option value="${escapeHtml(m)}" ${m === selected ? 'selected' : ''}>${escapeHtml(fmtMonthLabel(m))}</option>`))
     .join('');
 
-  // Only enable "Download all" when a specific month is selected AND
-  // there is at least one paid invoice in it. Disabled-but-visible is
-  // intentional — it advertises the feature even when this month has
-  // nothing to bundle yet.
+  // Only enable "Download" when a specific month is selected AND there is
+  // at least one paid invoice in it. Disabled-but-visible is intentional —
+  // it advertises the feature even when this month has nothing yet.
   const canDownloadAll = selected !== 'all' && totals.paidCount > 0;
   const downloadBtnAttrs = canDownloadAll ? '' : 'disabled';
   const downloadBtnTitle = selected === 'all'
-    ? 'Pick a specific month to enable bulk download'
+    ? 'Pick a specific month to enable download'
     : (totals.paidCount === 0
         ? 'No paid invoices in this month'
-        : `Download all ${totals.paidCount} paid invoice${totals.paidCount === 1 ? '' : 's'} for ${fmtMonthLabel(selected)} as a ZIP`);
+        : `Download ${totals.paidCount} paid invoice${totals.paidCount === 1 ? '' : 's'} + summary for ${fmtMonthLabel(selected)}`);
 
   host.innerHTML = `
     <div class="ms-picker">
       <span class="ms-label">Month</span>
       <div class="ms-picker-row">
         <select class="ms-month" id="ms-month-select">${opts}</select>
-        <button class="btn ms-download-btn" id="ms-download-all" ${downloadBtnAttrs} title="${escapeHtml(downloadBtnTitle)}">Download all</button>
+        <button class="btn ms-download-btn" id="ms-download-all" ${downloadBtnAttrs} title="${escapeHtml(downloadBtnTitle)}">Download</button>
       </div>
     </div>
     <div class="ms-stat">
@@ -4261,14 +4368,9 @@ function renderMonthSummary() {
 
   const dlBtn = host.querySelector('#ms-download-all');
   if (dlBtn && canDownloadAll) {
-    dlBtn.addEventListener('click', async () => {
-      dlBtn.disabled = true;
-      try {
-        await downloadAllInvoicesForMonth(selected);
-      } finally {
-        dlBtn.disabled = false;
-      }
-    });
+    // Opens the showcase popup (preview + "Download Summary" / "Download
+    // Invoices + Summary"). The modal owns its own busy state.
+    dlBtn.addEventListener('click', () => openDownloadModal(selected));
   }
 }
 
@@ -5025,7 +5127,8 @@ async function loadH2CIntoFrame(iframe) {
 // a download (`downloadPdf`) or grab the bytes for a ZIP archive
 // (`downloadAllInvoicesForMonth`). The heavy work — iframe rendering,
 // font + image readiness, per-page html2canvas capture — happens here.
-async function buildPdfDocument(docData, variant /* 'invoice' | 'invoice-with-terms' */) {
+async function buildPdfDocument(docData, variant /* 'invoice' | 'invoice-with-terms' */, opts = {}) {
+  const captureScale = opts.scale || 3;   // 3× single download · 2× bulk
   try { await document.fonts.ready; } catch {}
   const tpl = document.querySelector(`#tpl-${variant}`);
   if (!tpl) throw new Error('PDF template missing');
@@ -5074,7 +5177,7 @@ async function buildPdfDocument(docData, variant /* 'invoice' | 'invoice-with-te
   const canvases = [];
   for (const pageEl of pages) {
     const canvas = await h2c(pageEl, {
-      scale: 3,                  // 3× for crisp sub-pixel text rendering
+      scale: captureScale,       // 3× single (crisp) · 2× bulk (faster)
       useCORS: true,
       backgroundColor: '#ffffff',
       letterRendering: true,
@@ -5119,14 +5222,294 @@ async function downloadPdf(docData, variant /* 'invoice' | 'invoice-with-terms' 
   }
 }
 
+// ── REGION: monthly summary (invoice-listing xlsx) ──────────────────
+// The accountant reconciles each month against the bank statement using
+// a flat listing — DATE / INV NO# / CUSTOMER / DESCRIPTION / AMT with a
+// grand total. We rebuild that listing from the paid invoices and export
+// it as a styled .xlsx (so she can sort, sum, and paste into her master
+// sheet) plus showcase it in a preview modal.
+
+// Generic CDN-script readiness gate (mirrors the JSZip wait-loop). The
+// vendor libs are loaded with `defer`, so on a cold first click they may
+// not have parsed yet — poll briefly, then fail loud rather than throw a
+// ReferenceError.
+async function ensureGlobal(globalName, label) {
+  let waited = 0;
+  while (typeof window[globalName] === 'undefined' && waited < 6000) {
+    await new Promise(r => setTimeout(r, 100)); waited += 100;
+  }
+  if (typeof window[globalName] === 'undefined') {
+    throw new Error(`${label} failed to load — please refresh and try again`);
+  }
+  return window[globalName];
+}
+
+// Save a Blob to disk under `filename`. Single choke-point so the
+// object-URL lifecycle (revoke-after-a-tick) is handled consistently.
+function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  // Revoke after a tick so the browser has actually committed the
+  // download — revoking too eagerly cancels it on some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function summaryXlsxName(ym) {
+  return `Invoice_Listing_${fmtMonthLabel(ym).replace(/\s+/g, '_')}.xlsx`;
+}
+
+// Shape the paid invoices of a month into listing rows. Sorted by invoice
+// number ascending — which, because numbers track payment date, is the
+// same chronological order the accountant reads off the bank statement
+// (and the same order the Paid list and the PDF ZIP use).
+function buildMonthSummaryRows(ym) {
+  const invs = Array.from(state.invoices.values())
+    .filter(inv => inv.status !== 'void')
+    .filter(inv => (inv.issueDate || '').slice(0, 7) === ym)
+    .sort((a, b) => (a.number || 0) - (b.number || 0));
+
+  const rows = invs.map(inv => {
+    // DESCRIPTION = the item TITLE(s) only (item.description is the title;
+    // item.subtitle is the detail line, which the accountant doesn't want).
+    // Multi-item invoices stack every title; AMT stays the single invoice
+    // total (what actually hit the bank).
+    const titles = (inv.items || [])
+      .map(it => (it.description || '').trim())
+      .filter(Boolean);
+    if (titles.length === 0) titles.push('—');
+    return {
+      dateIso:  inv.issueDate || '',
+      invNo:    inv.displayNumber || formatNumber(inv.number || 0, 'INV-', 4),
+      customer: inv.client?.name || '—',
+      titles,
+      total:    Number(inv.total) || 0
+    };
+  });
+
+  const grandTotal = rows.reduce((s, r) => s + r.total, 0);
+  return { rows, grandTotal };
+}
+
+// HTML preview rendered inside the download modal. Same columns and order
+// as the xlsx so what you see is what you get.
+function renderSummaryPreviewTable(data) {
+  const { rows, grandTotal } = data;
+  const body = rows.map(r => `
+    <tr>
+      <td class="date">${escapeHtml(fmtDate(r.dateIso))}</td>
+      <td class="inv">${escapeHtml(r.invNo)}</td>
+      <td class="cust">${escapeHtml(r.customer)}</td>
+      <td class="desc">${r.titles.map(t => `<span class="sum-title">${escapeHtml(t)}</span>`).join('')}</td>
+      <td class="amt">${escapeHtml(fmtMoney(r.total))}</td>
+    </tr>`).join('');
+  return `
+    <table class="sum-table">
+      <thead><tr>
+        <th class="date">Date</th>
+        <th class="inv">Inv No#</th>
+        <th class="cust">Customer</th>
+        <th class="desc">Description</th>
+        <th class="amt">Amount</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr>
+        <td colspan="4">TOTAL · ${rows.length} invoice${rows.length === 1 ? '' : 's'}</td>
+        <td class="amt">${escapeHtml(fmtMoney(grandTotal))}</td>
+      </tr></tfoot>
+    </table>`;
+}
+
+// Build the styled .xlsx workbook → Blob via ExcelJS. Dates and amounts
+// are written as REAL date/number cells (with display formats) so the
+// accountant can sort and SUM natively — not as pre-formatted strings.
+async function buildSummaryWorkbook(data, ym) {
+  const ExcelJSLib = await ensureGlobal('ExcelJS', 'Excel library');
+  const { rows, grandTotal } = data;
+
+  const PINK  = 'FFE5006D';   // brand hot-pink header fill
+  const ZEBRA = 'FFF6F6F6';   // --surface-soft
+  const INK   = 'FF0A0A0A';
+  const MUTE  = 'FF6B6B6B';
+  const HAIR  = 'FFE0E0E0';
+  const thin  = { style: 'thin', color: { argb: HAIR } };
+  const allThin = { top: thin, left: thin, bottom: thin, right: thin };
+
+  const wb = new ExcelJSLib.Workbook();
+  wb.creator = 'Reputifly Pte Ltd';
+  const ws = wb.addWorksheet('INV LISTING', {
+    views: [{ state: 'frozen', ySplit: 3 }]   // keep title + subtitle + header visible
+  });
+  ws.columns = [
+    { width: 13 }, { width: 12 }, { width: 34 }, { width: 46 }, { width: 16 }
+  ];
+
+  // Row 1 — title (merged A1:E1)
+  ws.mergeCells('A1:E1');
+  const t = ws.getCell('A1');
+  t.value = `INVOICE LISTING — ${fmtMonthLabel(ym)}`;
+  t.font = { name: 'Inter', size: 15, bold: true, color: { argb: INK } };
+  t.alignment = { vertical: 'middle' };
+  ws.getRow(1).height = 24;
+
+  // Row 2 — subtitle (merged A2:E2)
+  ws.mergeCells('A2:E2');
+  const sub = ws.getCell('A2');
+  sub.value = 'Reputifly Pte Ltd';
+  sub.font = { name: 'Inter', size: 10, color: { argb: MUTE } };
+
+  // Row 3 — header
+  const headers = ['DATE', 'INV NO#', 'CUSTOMER', 'DESCRIPTION', 'AMT'];
+  const hr = ws.getRow(3);
+  headers.forEach((h, i) => {
+    const c = hr.getCell(i + 1);
+    c.value = h;
+    c.font = { name: 'Inter', bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PINK } };
+    c.alignment = { vertical: 'middle', horizontal: i === 4 ? 'right' : 'left' };
+    c.border = allThin;
+  });
+  hr.height = 20;
+
+  // Data rows (from row 4)
+  let r = 4;
+  rows.forEach((row, idx) => {
+    const tr = ws.getRow(r);
+    const d = row.dateIso ? new Date(row.dateIso) : null;
+    const dateCell = tr.getCell(1);
+    if (d && !isNaN(d.getTime())) { dateCell.value = d; dateCell.numFmt = 'd/m/yyyy'; }
+    else { dateCell.value = row.dateIso || '—'; }
+    tr.getCell(2).value = row.invNo;
+    tr.getCell(3).value = row.customer;
+    tr.getCell(4).value = row.titles.join('\n');
+    tr.getCell(4).alignment = { wrapText: true, vertical: 'top' };
+    const amt = tr.getCell(5);
+    amt.value = row.total;
+    amt.numFmt = '"S$"#,##0.00';
+    amt.alignment = { horizontal: 'right', vertical: 'top' };
+
+    for (let c = 1; c <= 5; c++) {
+      const cell = tr.getCell(c);
+      cell.font = cell.font || { name: 'Inter', size: 10, color: { argb: INK } };
+      if (!cell.font.name) cell.font = { ...cell.font, name: 'Inter', size: 10 };
+      cell.border = allThin;
+      if (idx % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ZEBRA } };
+      if (!cell.alignment) cell.alignment = { vertical: 'top' };
+    }
+    tr.getCell(1).font = { name: 'Inter', size: 10, color: { argb: MUTE } };
+    tr.getCell(2).font = { name: 'Inter', size: 10, bold: true, color: { argb: INK } };
+    tr.getCell(3).font = { name: 'Inter', size: 10, bold: true, color: { argb: INK } };
+    tr.getCell(5).font = { name: 'Inter', size: 10, bold: true, color: { argb: INK } };
+    r++;
+  });
+
+  // Grand-total row
+  const totalRow = ws.getRow(r);
+  const lbl = totalRow.getCell(4);
+  lbl.value = `TOTAL · ${rows.length} invoice${rows.length === 1 ? '' : 's'}`;
+  lbl.alignment = { horizontal: 'right' };
+  lbl.font = { name: 'Inter', bold: true, size: 11, color: { argb: INK } };
+  const sumCell = totalRow.getCell(5);
+  sumCell.value = rows.length ? { formula: `SUM(E4:E${r - 1})`, result: grandTotal } : 0;
+  sumCell.numFmt = '"S$"#,##0.00';
+  sumCell.font = { name: 'Inter', bold: true, size: 11, color: { argb: INK } };
+  sumCell.alignment = { horizontal: 'right' };
+  for (let c = 1; c <= 5; c++) {
+    totalRow.getCell(c).border = { top: { style: 'medium', color: { argb: INK } } };
+  }
+
+  const buf = await wb.xlsx.writeBuffer();
+  return new Blob([buf], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+}
+
+// "Download Summary" — just the .xlsx.
+async function downloadSummaryXlsx(ym) {
+  const data = buildMonthSummaryRows(ym);
+  if (data.rows.length === 0) { showToast('No paid invoices in this month', 'warn'); return; }
+  showToast('Building summary…');
+  const blob = await buildSummaryWorkbook(data, ym);
+  triggerBlobDownload(blob, summaryXlsxName(ym));
+  showToast('Summary downloaded');
+}
+
+// The download popup: showcases the listing, offers both exports. Built
+// fresh each open and torn down on close — self-contained, no shared
+// modal state. Desktop = centered card; mobile = slide-up sheet.
+function openDownloadModal(ym) {
+  const data = buildMonthSummaryRows(ym);
+  if (data.rows.length === 0) { showToast('No paid invoices in this month', 'warn'); return; }
+  const label = fmtMonthLabel(ym);
+
+  const scrim = document.createElement('div');
+  scrim.className = 'dl-scrim';
+  scrim.innerHTML = `
+    <div class="dl-modal" role="dialog" aria-modal="true" aria-label="Download ${escapeHtml(label)}">
+      <div class="dl-modal-head">
+        <div>
+          <h3>Download — ${escapeHtml(label)}</h3>
+          <div class="dl-sub">${data.rows.length} paid invoice${data.rows.length === 1 ? '' : 's'} · ${escapeHtml(fmtMoney(data.grandTotal))} total</div>
+        </div>
+        <button class="dl-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="dl-preview">${renderSummaryPreviewTable(data)}</div>
+      <div class="dl-modal-foot">
+        <button class="btn" id="dl-summary">Download Summary</button>
+        <button class="btn primary" id="dl-both">Download Invoices + Summary</button>
+      </div>
+    </div>`;
+  document.body.appendChild(scrim);
+  requestAnimationFrame(() => scrim.classList.add('open'));
+
+  const sumBtn  = scrim.querySelector('#dl-summary');
+  const bothBtn = scrim.querySelector('#dl-both');
+  const sumLabel  = sumBtn.textContent;
+  const bothLabel = bothBtn.textContent;
+  let busy = false;
+
+  const close = () => {
+    if (busy) return;   // don't tear down mid-export
+    scrim.classList.remove('open');
+    document.removeEventListener('keydown', onKey);
+    setTimeout(() => scrim.remove(), 220);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
+  scrim.querySelector('.dl-close').addEventListener('click', close);
+
+  const run = async (btn, runningText, fn) => {
+    if (busy) return;
+    busy = true;
+    sumBtn.disabled = true; bothBtn.disabled = true;
+    btn.textContent = runningText;
+    try {
+      await fn();
+      busy = false;
+      close();
+    } catch (e) {
+      console.error('[download-modal]', e);
+      showToast(e.message || 'Download failed', 'error');
+      busy = false;
+      sumBtn.disabled = false; bothBtn.disabled = false;
+      sumBtn.textContent = sumLabel; bothBtn.textContent = bothLabel;
+    }
+  };
+
+  sumBtn.addEventListener('click', () => run(sumBtn, 'Building…', () => downloadSummaryXlsx(ym)));
+  bothBtn.addEventListener('click', () => run(bothBtn, 'Generating…', () => downloadAllInvoicesForMonth(ym)));
+}
+
 // Bulk export: generate one PDF per paid invoice in the selected month,
-// pack them into a single ZIP, trigger the download. Filenames inside
-// the ZIP use the same convention as a single-invoice download
-// (INV-8643_GAVAN-HOMES.pdf) and are inserted in invoice-number order
-// so the accountant sees them top-to-bottom in the same sequence the
-// Paid Invoices list shows. Generation is sequential — the html2pdf
-// pipeline reuses one print-iframe internally so running it in
-// parallel would clobber the render surface.
+// add the styled summary .xlsx, pack them into a single ZIP, trigger the
+// download. Filenames inside the ZIP use the same convention as a
+// single-invoice download (INV-8643_GAVAN-HOMES.pdf) and are inserted in
+// invoice-number order so the accountant sees them top-to-bottom in the
+// same sequence the Paid Invoices list shows. PDF generation is
+// sequential — the html2pdf pipeline reuses one print-iframe internally
+// so running it in parallel would clobber the render surface.
 async function downloadAllInvoicesForMonth(ym) {
   if (!ym || ym === 'all') {
     showToast('Pick a specific month first', 'warn');
@@ -5166,7 +5549,9 @@ async function downloadAllInvoicesForMonth(ym) {
     showToast(`Generating PDF ${i + 1} of ${invs.length}…`);
     try {
       const variant = inv.terms ? 'invoice-with-terms' : 'invoice';
-      const { pdf, filename } = await buildPdfDocument(inv, variant);
+      // Bulk path renders at 2× (vs 3× for a single download): still crisp
+      // for an accountant's records, roughly halves per-invoice render time.
+      const { pdf, filename } = await buildPdfDocument(inv, variant, { scale: 2 });
       // jsPDF exposes `.output('blob')` regardless of how the doc was
       // assembled — we used html2pdf to grab the underlying jsPDF
       // instance, but it's the same object.
@@ -5184,24 +5569,25 @@ async function downloadAllInvoicesForMonth(ym) {
     return;
   }
 
+  // Drop the styled summary .xlsx in alongside the PDFs. Non-fatal: if the
+  // workbook build fails we still ship the invoice PDFs.
+  showToast('Building summary…');
+  try {
+    const data = buildMonthSummaryRows(ym);
+    const xlsxBlob = await buildSummaryWorkbook(data, ym);
+    zip.file(summaryXlsxName(ym), xlsxBlob);
+  } catch (e) {
+    console.warn('[download-all] summary xlsx failed', e);
+  }
+
   showToast('Packing ZIP…');
   const zipBlob = await zip.generateAsync({ type: 'blob' });
-
-  const url = URL.createObjectURL(zipBlob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `Invoices_${monthLabel}.zip`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  // Revoke after a tick so the browser has actually started the
-  // download — revoking too early can cancel it on some browsers.
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  triggerBlobDownload(zipBlob, `Invoices_${monthLabel}.zip`);
 
   if (failures.length) {
     showToast(`Downloaded ZIP — ${failures.length} invoice${failures.length === 1 ? '' : 's'} failed (see console)`, 'warn');
   } else {
-    showToast(`Downloaded ${invs.length} invoice${invs.length === 1 ? '' : 's'} as ZIP`);
+    showToast(`Downloaded ${invs.length} invoice${invs.length === 1 ? '' : 's'} + summary`);
   }
 }
 
@@ -5946,7 +6332,10 @@ window.__reputifly = {
   _test_renumber: async () => renumberInvoicesByPaymentDate(),
   _test_detectOutOfOrder: () => detectInvoiceOrderingMismatch(),
   _test_buildShareUrl: (displayNumber, token) => buildShareUrl(displayNumber, token),
-  _test_genToken: () => generateShareToken()
+  _test_genToken: () => generateShareToken(),
+  openDownloadModal,
+  _test_summaryRows: (ym) => buildMonthSummaryRows(ym),
+  _test_downloadSummary: (ym) => downloadSummaryXlsx(ym)
 };
 
 </script>
