@@ -4293,10 +4293,21 @@ function fmtMonthLabel(ym) {
 function computeMonthTotals(ymOrAll) {
   let paidTotal = 0, paidCount = 0;
   let pendingTotal = 0, pendingCount = 0;
+  // PAID revenue is bucketed to the exact month the money landed.
   const inMonth = (dateStr) => {
     if (ymOrAll === 'all') return true;
     if (!dateStr || dateStr.length < 7) return false;
     return dateStr.slice(0, 7) === ymOrAll;
+  };
+  // PENDING is cumulative / carry-forward: an unpaid quotation is money
+  // still owed, so it stays "pending" in the month it was issued AND every
+  // month after — until it's marked paid (converted). A May quote you
+  // expect paid in June therefore still shows as pending when you look at
+  // June. 'YYYY-MM' strings compare lexicographically = chronologically.
+  const issuedOnOrBefore = (dateStr) => {
+    if (ymOrAll === 'all') return true;
+    if (!dateStr || dateStr.length < 7) return false;
+    return dateStr.slice(0, 7) <= ymOrAll;
   };
   for (const inv of state.invoices.values()) {
     if (inv.status === 'void') continue;
@@ -4305,8 +4316,8 @@ function computeMonthTotals(ymOrAll) {
     paidCount += 1;
   }
   for (const q of state.quotations.values()) {
-    if (q.status === 'converted') continue;
-    if (!inMonth(q.issueDate)) continue;
+    if (q.status === 'converted') continue;        // already paid → no longer pending
+    if (!issuedOnOrBefore(q.issueDate)) continue;   // not issued yet as of this month
     pendingTotal += Number(q.total) || 0;
     pendingCount += 1;
   }
