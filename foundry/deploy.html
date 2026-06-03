@@ -1853,6 +1853,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getStorage, ref as storageRefFn, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
         // FIREBASE SECRETS
         const firebaseConfig = {
@@ -1880,6 +1881,7 @@
 
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
+        const storage = getStorage(app); // reputifly-automation bucket — replaces dead WP CDN for image uploads
         let currentIdToken = null;
         window.repoData = {}; // Global store for branch calculation
         window.currentUserEmail = null;
@@ -4331,9 +4333,8 @@ Include CHANGELOG.md and sitemap.json in the deployed files array.`;
 
                 const files = resData.files;
                 
-                // WP Credentials (Hardcoded for Experimental)
-                const WP_URL = "https://reputifly3.sg-host.com/wp-json/wp/v2/media";
-                const WP_AUTH = "Basic " + btoa("julian:6ZMS Y66m DHcE Ghgr pGH3 HKVh");
+                // Firebase Storage upload (reputifly-automation bucket) — WordPress CDN (reputifly3.sg-host.com) is decommissioned.
+                const uploadSession = `${client}-${ver}-${Date.now().toString(36)}`;
 
                 const getMimeType = (filename) => {
                     const ext = filename.split('.').pop().toLowerCase();
@@ -4391,27 +4392,21 @@ Include CHANGELOG.md and sitemap.json in the deployed files array.`;
                         descEl.innerText = `Uploading ${wpFileName}...`;
                         const blob = b64toBlob(base64Data, getMimeType(wpFileName));
                         
-                        const wpRes = await fetch(WP_URL, {
-                            method: "POST",
-                            headers: {
-                                "Authorization": WP_AUTH,
-                                "Content-Disposition": `attachment; filename="${wpFileName}"`
-                            },
-                            body: blob
-                        });
-                        
-                        if (!wpRes.ok) {
-                            console.warn("CORS or Upload error on WP:", await wpRes.text());
-                            throw new Error("WP Upload Failed. Install a 'Allow CORS' plugin on your WP site.");
+                        const imgRef = storageRefFn(storage, `foundry-uploads/${uploadSession}/${wpFileName}`);
+                        try {
+                            await uploadBytes(imgRef, blob, { contentType: getMimeType(wpFileName) });
+                        } catch (err) {
+                            console.warn("Firebase Storage upload error:", err);
+                            throw new Error("Image upload to Firebase Storage failed: " + (err && err.message ? err.message : err));
                         }
-                        
-                        const wpData = await wpRes.json();
+                        const finalUrl = await getDownloadURL(imgRef);
+
                         const cleanPath = file.path.replace(/^\.\/|^\//, '');
                         try {
                             const decodedPath = decodeURIComponent(cleanPath);
-                            imageMap[decodedPath] = wpData.source_url;
+                            imageMap[decodedPath] = finalUrl;
                         } catch(e) {}
-                        imageMap[cleanPath] = wpData.source_url;
+                        imageMap[cleanPath] = finalUrl;
                         
                     } else if (isHtml) {
                         const binaryString = atob(file.content);
