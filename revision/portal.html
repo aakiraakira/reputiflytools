@@ -1424,30 +1424,24 @@
                         img.src = base64;
                     });
 
-                    // Upload to WordPress CDN (Hardcoded Auth for Headless)
-                    const WP_URL = "https://reputifly3.sg-host.com/wp-json/wp/v2/media";
-                    const WP_AUTH = "Basic " + btoa("julian:6ZMS Y66m DHcE Ghgr pGH3 HKVh");
-
+                    // Upload to Firebase Storage (replaces decommissioned reputifly3 WP CDN)
                     const safeName = file.name ? file.name.substring(0, file.name.lastIndexOf('.')).replace(/[^a-zA-Z0-9]/g, '-') : 'pasted-image';
-                    const wpFileName = `${safeName}-${Date.now().toString(36).substring(4)}.webp`;
+                    const fileName = `${safeName}-${Date.now().toString(36).substring(4)}.webp`;
 
                     const byteChars = atob(optBase64);
                     const byteArr = new Uint8Array(byteChars.length);
                     for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
                     const blob = new Blob([byteArr], { type: 'image/webp' });
 
-                    const res = await fetch(WP_URL, {
-                        method: "POST",
-                        headers: { "Authorization": WP_AUTH, "Content-Disposition": `attachment; filename="${wpFileName}"` },
-                        body: blob
-                    });
-
-                    if (!res.ok) throw new Error("WP Server rejected the image.");
-                    const data = await res.json();
+                    const draftId = firestoreId || 'local-draft';
+                    const storagePath = `revision-reference-images/${draftId}/${fileName}`;
+                    const sRef = window.storageRef(window.storage, storagePath);
+                    await window.uploadBytes(sRef, blob, { contentType: 'image/webp' });
+                    const downloadUrl = await window.getDownloadURL(sRef);
 
                     // Save to Data State including Base64 for the ZIP
                     appState.data[key][type].push({
-                        url: data.source_url,
+                        url: downloadUrl,
                         comment: "",
                         itemType: '', // Leaves it empty so they MUST select
                         b64: optBase64
