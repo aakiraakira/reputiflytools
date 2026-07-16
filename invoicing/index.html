@@ -2645,18 +2645,20 @@ async function bootstrapData(uid) {
   await ensureCounter(uid, 'quotation', 'QINV-', 3);
 
   // Live listeners
+  // NOTE: these use renderBackground(), not render() — see the background-render
+  // guard. They fire while the user may be mid-sentence in the Create editor.
   listeners.push(onSnapshot(doc(db, `users/${uid}/counters/invoice`), (s) => {
-    state.counters.invoice = s.data() || null; render();
+    state.counters.invoice = s.data() || null; renderBackground();
   }));
   listeners.push(onSnapshot(doc(db, `users/${uid}/counters/quotation`), (s) => {
-    state.counters.quotation = s.data() || null; render();
+    state.counters.quotation = s.data() || null; renderBackground();
   }));
   listeners.push(onSnapshot(settingsRef, (s) => {
     if (s.exists()) {
       state.settings = { ...DEFAULT_SETTINGS, ...s.data() };
       state.settings.defaultTerms = normalizeTerms(state.settings.defaultTerms);
       if (!state.settings.optionalFieldDefaults) state.settings.optionalFieldDefaults = DEFAULT_OPTIONAL;
-      render();
+      renderBackground();
     }
   }));
 
@@ -2666,7 +2668,7 @@ async function bootstrapData(uid) {
     (snap) => {
       state.quotations.clear();
       snap.forEach(d => state.quotations.set(d.id, { id: d.id, ...d.data() }));
-      render();
+      renderBackground();
     }
   ));
 
@@ -2688,7 +2690,7 @@ async function bootstrapData(uid) {
     (snap) => {
       state.invoices.clear();
       snap.forEach(d => state.invoices.set(d.id, { id: d.id, ...d.data() }));
-      render();
+      renderBackground();
       if (!autoRenumberInFlight && detectInvoiceOrderingMismatch()) {
         autoRenumberInFlight = true;
         setTimeout(async () => {
@@ -3989,7 +3991,12 @@ function buildBilledToBlock(d) {
 
   // Wire client.name editor
   const nameEl = block.querySelector('.party-name');
+  // Commit on input, not just on blur. Firestore snapshots repaint this editor
+  // from state seconds after load; anything typed but not yet blurred lived
+  // only in the DOM and was silently wiped. Raw (untrimmed) here so a repaint
+  // reproduces exactly what's on screen — blur still trims the final value.
   nameEl.addEventListener('input', () => {
+    d.client.name = nameEl.textContent;
     nameEl.dataset.empty = !nameEl.textContent.trim();
   });
   nameEl.addEventListener('blur', () => {
@@ -4006,6 +4013,7 @@ function buildBilledToBlock(d) {
     span.innerHTML = `<button class="opt-x" title="Remove">×</button><span class="ce" contenteditable="true" data-empty="${!val}" data-placeholder="${escapeHtml(line.placeholder)}">${escapeHtml(val)}</span>`;
     const ce = span.querySelector('.ce');
     ce.addEventListener('input', () => {
+      d.client[line.key] = ce.textContent;   // see note on .party-name above
       ce.dataset.empty = !ce.textContent.trim();
     });
     ce.addEventListener('blur', () => {
@@ -4071,11 +4079,13 @@ function buildItemsSection(d) {
       </button></div>
     `;
     const desc = row.querySelector('.item-desc-main');
-    desc.addEventListener('input', () => { desc.dataset.empty = !desc.textContent.trim(); });
+    // Commit on input — see the note on .party-name. Without this, a background
+    // repaint mid-typing threw the line item's text away.
+    desc.addEventListener('input', () => { item.description = desc.textContent; desc.dataset.empty = !desc.textContent.trim(); });
     desc.addEventListener('blur', () => { item.description = desc.textContent.trim(); desc.dataset.empty = !item.description; });
     const sub = row.querySelector('.item-sub');
     if (sub) {
-      sub.addEventListener('input', () => { sub.dataset.empty = !sub.textContent.trim(); });
+      sub.addEventListener('input', () => { item.subtitle = sub.textContent; sub.dataset.empty = !sub.textContent.trim(); });
       sub.addEventListener('blur', () => { item.subtitle = sub.textContent.trim(); sub.dataset.empty = !item.subtitle; });
     }
     const rmSub = row.querySelector('[data-rm-sub]');
@@ -6302,7 +6312,43 @@ document.getElementById('new-quotation-btn').addEventListener('click', () => {
 document.getElementById('new-library-btn').addEventListener('click', () => promptLibraryEdit(null));
 
 // REGION: master render ─────────────────────────────────────────────
+// REGION: background-render guard ───────────────────────────────────
+// Firestore snapshots land asynchronously: several arrive seconds after the app
+// opens, and the invoice listener fires again after every auto-renumber. Each
+// one used to call render() straight away, which rebuilds the Create editor
+// from scratch — yanking the caret out of whatever the user was typing and
+// resetting the draft mid-sentence. Snapshot-driven repaints are now deferred
+// while the editor has focus and flushed the moment the user moves on.
+// Only the async listeners route through this; user-initiated renders (adding a
+// line item, toggling a field) still repaint instantly via render().
+let pendingBackgroundRender = false;
+
+function isEditingCreation() {
+  if (state.route !== 'creation') return false;
+  const host = document.getElementById('creation-wrap');
+  const active = document.activeElement;
+  return !!(host && active && active !== document.body && host.contains(active));
+}
+
+function renderBackground() {
+  if (isEditingCreation()) { pendingBackgroundRender = true; return; }
+  render();
+}
+
+// Flush on the next tick so that tabbing between two fields INSIDE the editor
+// (focusout fires before the new field takes focus) doesn't count as leaving.
+document.addEventListener('focusout', () => {
+  setTimeout(() => {
+    if (pendingBackgroundRender && !isEditingCreation()) {
+      pendingBackgroundRender = false;
+      render();
+    }
+  }, 0);
+});
+
 function render() {
+  // A repaint supersedes any deferred one.
+  pendingBackgroundRender = false;
   // Render whichever view is active
   if (state.route === 'creation') {
     renderCreationTab();
@@ -6505,6 +6551,10 @@ window.__reputifly = {
   openDownloadModal,
   _test_summaryRows: (ym) => buildMonthSummaryRows(ym),
   _test_downloadSummary: (ym) => downloadSummaryXlsx(ym),
+  // Probes for the background-render guard.
+  _test_renderBackground: () => renderBackground(),
+  _test_isEditingCreation: () => isEditingCreation(),
+  _test_pendingBgRender: () => pendingBackgroundRender,
   // Read-only terms probes for the headless audits.
   _test_resolveTerms: (d) => resolveTerms(d),
   _test_variantFor: (d) => variantFor(d),
