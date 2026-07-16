@@ -2469,17 +2469,100 @@ function detachListeners() {
 }
 
 // REGION: settings-cache ────────────────────────────────────────────
+// Every section carries a STABLE id. The id — not the array position — is what
+// a draft stores when the user ticks "Include <heading>" on an invoice, so
+// renaming or reordering a section in Advanced never re-points a draft at the
+// wrong terms. Ids here are hardcoded (never derived at runtime) so they stay
+// identical across devices and reloads.
 const DEFAULT_TERMS = {
   title: 'Additional Information',
   subtitle: 'Terms, conditions, and supporting notes for this invoice. Edit the headings and content below to suit each engagement.',
   sections: [
-    { heading: 'Payment Terms', body: 'Payment is due upon receipt unless a separate due date has been agreed in writing.\n\nReference the invoice number on every transfer so funds can be matched correctly.' },
-    { heading: 'Scope of Work', body: 'This invoice covers the deliverables agreed at project kickoff. Anything outside that scope — new pages, additional revision rounds, integrations not previously discussed — is billed separately and confirmed in writing before commencing.' },
-    { heading: 'Revisions', body: 'Two rounds of revisions are included per deliverable. Further rounds are billed at a flat hourly rate, quoted in advance.' },
-    { heading: 'Cancellation & Refunds', body: 'Once work has commenced, deposits are non-refundable. Final payment is due on completion; unfinished projects paused by the client beyond 30 days are considered closed at the current stage of work.' },
-    { heading: 'Notes', body: 'Replace this section with anything specific to this client — handover instructions, hosting credentials, warranty terms, or bespoke arrangements agreed during the engagement.' }
+    { id: 'sec-payment-terms', heading: 'Payment Terms', body: 'Payment is due upon receipt unless a separate due date has been agreed in writing.\n\nReference the invoice number on every transfer so funds can be matched correctly.' },
+    { id: 'sec-scope-of-work', heading: 'Scope of Work', body: 'This invoice covers the deliverables agreed at project kickoff. Anything outside that scope — new pages, additional revision rounds, integrations not previously discussed — is billed separately and confirmed in writing before commencing.' },
+    { id: 'sec-revisions', heading: 'Revisions', body: 'Two rounds of revisions are included per deliverable. Further rounds are billed at a flat hourly rate, quoted in advance.' },
+    { id: 'sec-cancellation-refunds', heading: 'Cancellation & Refunds', body: 'Once work has commenced, deposits are non-refundable. Final payment is due on completion; unfinished projects paused by the client beyond 30 days are considered closed at the current stage of work.' },
+    { id: 'sec-notes', heading: 'Notes', body: 'Replace this section with anything specific to this client — handover instructions, hosting credentials, warranty terms, or bespoke arrangements agreed during the engagement.' }
   ]
 };
+
+// REGION: terms-selection ───────────────────────────────────────────
+// An invoice picks which terms sections appear on its page 2. The draft stores
+// the chosen section ids; the content itself is always read from the LIVE
+// defaultTerms (so editing Advanced flows into open drafts) and is frozen onto
+// the invoice only at the moment it is marked paid.
+function slugifyHeading(h) {
+  return String(h || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'section';
+}
+function newSectionId() {
+  return 'sec-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+// Deep-clone + back-fill ids. NEVER mutates its argument: DEFAULT_SETTINGS
+// .defaultTerms IS the DEFAULT_TERMS constant, so an in-place backfill would
+// corrupt the global fallback that convert/render/share all rely on.
+// The backfill is deterministic (index + heading slug) so a settings doc that
+// predates ids resolves to identical ids on every device until the next
+// Advanced save persists them. Existing ids are opaque and never recomputed.
+function normalizeTerms(t) {
+  const src = t || DEFAULT_TERMS;
+  const out = JSON.parse(JSON.stringify(src));
+  if (!Array.isArray(out.sections)) out.sections = [];
+  const taken = new Set(out.sections.map(s => s && s.id).filter(Boolean));
+  out.sections.forEach((s, i) => {
+    if (s.id) return;
+    let id = `sec-${i + 1}-${slugifyHeading(s.heading)}`;
+    while (taken.has(id)) id = `${id}-x`;
+    taken.add(id);
+    s.id = id;
+  });
+  return out;
+}
+// THE legacy rule. A doc saved before this feature has NO termsSections field
+// at all — that means "all sections", exactly as it behaved before. An empty
+// ARRAY is different: it means the user deliberately ticked nothing. Never
+// collapse those two cases (`!ids.length` would blank terms on every pre-
+// existing quotation, and permanently strip them from an invoice at convert).
+// Returns sections in LIVE Advanced order, not tick order.
+function pickSections(live, d) {
+  const ids = d && d.termsSections;
+  const all = (live && live.sections) || [];
+  if (!Array.isArray(ids)) return all.map(s => ({ ...s }));
+  return all.filter(s => ids.includes(s.id)).map(s => ({ ...s }));
+}
+
+// One "Include <heading>" checkbox per section in the live Default Terms — the
+// list grows on its own as sections are added in Advanced. Returns an array of
+// <label> elements; the caller supplies the wrapper so desktop and mobile keep
+// their own chrome. Shared so the two editors can never drift apart.
+function buildTermsPickerRows(d) {
+  const live = (state.settings && state.settings.defaultTerms) || DEFAULT_TERMS;
+  const sections = live.sections || [];
+  // A legacy draft (no termsSections) means "all sections" — reflect that in
+  // the ticks so opening an old draft shows what it will actually print.
+  if (!Array.isArray(d.termsSections)) {
+    d.termsSections = d.terms ? sections.map(s => s.id) : [];
+  }
+  return sections.map(sec => {
+    const label = document.createElement('label');
+    label.style.cssText = 'display: flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor: pointer;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = d.termsSections.includes(sec.id);
+    cb.addEventListener('change', () => {
+      // Deliberately no render() — this row follows the same no-rerender
+      // contract the old single checkbox had, so typing isn't interrupted.
+      const set = new Set(d.termsSections);
+      if (cb.checked) set.add(sec.id); else set.delete(sec.id);
+      d.termsSections = Array.from(set);
+    });
+    const text = document.createElement('span');
+    // textContent, never innerHTML — headings are free text the user types.
+    text.textContent = 'Include ' + (sec.heading || 'Untitled section');
+    label.appendChild(cb);
+    label.appendChild(text);
+    return label;
+  });
+}
 
 const DEFAULT_OPTIONAL = {
   'invoice.dueDate': false,
@@ -2543,11 +2626,17 @@ async function bootstrapData(uid) {
     const seed = { ...DEFAULT_SETTINGS };
     seed.logoBase64 = await fetchAssetAsDataUrl('assets/reputifly-logo-light.png');
     seed.paynowQrBase64 = await fetchAssetAsDataUrl('assets/paynow-qr.jpeg');
+    // Shallow spread ⇒ seed.defaultTerms is still the DEFAULT_TERMS constant.
+    // Clone it so a fresh account persists section ids from day one and nothing
+    // downstream can mutate the shared constant.
+    seed.defaultTerms = normalizeTerms(seed.defaultTerms);
     await setDoc(settingsRef, seed);
     state.settings = seed;
   } else {
     state.settings = { ...DEFAULT_SETTINGS, ...settingsSnap.data() };
-    if (!state.settings.defaultTerms) state.settings.defaultTerms = DEFAULT_TERMS;
+    // Unconditional: back-fills ids on a pre-ids settings doc AND severs the
+    // shared reference to the DEFAULT_TERMS constant. Idempotent.
+    state.settings.defaultTerms = normalizeTerms(state.settings.defaultTerms);
     if (!state.settings.optionalFieldDefaults) state.settings.optionalFieldDefaults = DEFAULT_OPTIONAL;
   }
 
@@ -2565,7 +2654,7 @@ async function bootstrapData(uid) {
   listeners.push(onSnapshot(settingsRef, (s) => {
     if (s.exists()) {
       state.settings = { ...DEFAULT_SETTINGS, ...s.data() };
-      if (!state.settings.defaultTerms) state.settings.defaultTerms = DEFAULT_TERMS;
+      state.settings.defaultTerms = normalizeTerms(state.settings.defaultTerms);
       if (!state.settings.optionalFieldDefaults) state.settings.optionalFieldDefaults = DEFAULT_OPTIONAL;
       render();
     }
@@ -2711,6 +2800,20 @@ async function bootstrapDev() {
 }
 
 // REGION: counters / atomic numbering ───────────────────────────────
+// Freeze the terms onto an invoice at the moment it's marked paid: the
+// THEN-CURRENT content of the sections the draft ticked. Used by BOTH the
+// DEV_MODE and production branches below — they must never diverge, or a
+// ?dev=1 test passes green while production writes the wrong terms onto a
+// permanently undeletable invoice (firestore.rules: `allow delete: if false`).
+function computeLockedTerms(quote, settings) {
+  const live = (settings && settings.defaultTerms) || DEFAULT_TERMS;
+  if (!quote || !quote.terms) return null;   // never opted into a terms page
+  const picked = pickSections(live, quote);  // legacy draft ⇒ ALL sections, exactly as before
+  return picked.length
+    ? JSON.parse(JSON.stringify({ title: live.title, subtitle: live.subtitle, sections: picked }))
+    : null;
+}
+
 async function convertQuotationToInvoice(quotationId, paymentDate) {
   const uid = state.user.uid;
   if (DEV_MODE) {
@@ -2723,14 +2826,11 @@ async function convertQuotationToInvoice(quotationId, paymentDate) {
     const newId = 'i' + Math.random().toString(36).slice(2, 9);
     // Transfer the share token so old QINV- links keep working.
     const shareToken = quote.shareToken || generateShareToken();
-    // Lock the THEN-CURRENT defaultTerms into the paid invoice, not
-    // whatever stale snapshot the draft happened to carry. From this
-    // point on the invoice's terms are frozen — even if the user edits
-    // Default Terms later, this invoice keeps the version the client
-    // received at payment time.
-    const lockedTerms = quote.terms
-      ? JSON.parse(JSON.stringify(state.settings?.defaultTerms || DEFAULT_TERMS))
-      : null;
+    // Lock the THEN-CURRENT content of the ticked sections into the paid
+    // invoice. From this point the invoice's terms are frozen — even if the
+    // user edits Default Terms later, this invoice keeps the version the
+    // client received at payment time.
+    const lockedTerms = computeLockedTerms(quote, state.settings);
     state.invoices.set(newId, {
       id: newId, version: 1, number: next, displayNumber,
       issueDate: paymentDate,
@@ -2775,13 +2875,8 @@ async function convertQuotationToInvoice(quotationId, paymentDate) {
     const invoiceRef = doc(collection(db, `users/${uid}/invoices`));
     const auditRef = doc(collection(invoiceRef, 'audit'));
 
-    // Lock the THEN-CURRENT defaultTerms into the paid invoice (see
-    // note in the DEV_MODE branch above). The draft's stale snapshot
-    // is intentionally ignored — only its presence/absence matters as
-    // the "include terms" signal.
-    const lockedTerms = quote.terms
-      ? JSON.parse(JSON.stringify(state.settings?.defaultTerms || DEFAULT_TERMS))
-      : null;
+    // Same helper as the DEV_MODE branch above — see computeLockedTerms.
+    const lockedTerms = computeLockedTerms(quote, state.settings);
     const invoiceData = {
       version: 1, number: next, displayNumber,
       issueDate: paymentDate,
@@ -3189,11 +3284,19 @@ function buildSharePayload(d, type) {
   //   • type === 'invoice' (paid / void) → use the locked d.terms
   //     captured at conversion time. The client received that
   //     version, it must not silently change underneath them.
+  // The public viewer decides "is there a page 2" from the presence of `terms`,
+  // so this must stay either null or non-empty — never a terms block with zero
+  // sections (that would show a client a blank page 2).
   let termsForShare = null;
   if (type === 'quotation') {
-    termsForShare = d.terms ? (settings.defaultTerms || DEFAULT_TERMS) : null;
+    const live = settings.defaultTerms || DEFAULT_TERMS;
+    const picked = d.terms ? pickSections(live, d) : [];
+    termsForShare = picked.length ? { title: live.title, subtitle: live.subtitle, sections: picked } : null;
   } else {
-    termsForShare = d.terms || null;
+    // Paid/void: the locked snapshot, NEVER re-filtered. renumberInvoicesByPay-
+    // mentDate rewrites up to 50 live client-facing share docs in one loop, so
+    // a filter bug here would silently rewrite settled invoices at scale.
+    termsForShare = (d.terms && d.terms.sections && d.terms.sections.length) ? d.terms : null;
   }
   return {
     type,                                // 'quotation' | 'invoice'
@@ -3512,7 +3615,9 @@ function createBlankDraft(mode = 'quotation') {
     items: [{ description: '', subtitle: '', qty: 1, rate: 0, amount: 0 }],
     notes: '',
     optional: { ...(s.optionalFieldDefaults || DEFAULT_OPTIONAL) },
-    includeTerms: false,
+    // Ids of the terms sections ticked for this invoice. Empty = no terms page,
+    // matching the old unchecked-by-default behaviour.
+    termsSections: [],
     // Don't snapshot defaultTerms into the draft. The renderer and the
     // save path both pull state.settings.defaultTerms live, so changes
     // made in Advanced → Default Terms always propagate to the current
@@ -3618,19 +3723,14 @@ function renderCreationTab() {
 
   host.appendChild(page);
 
-  // Terms toggle
+  // Terms picker — one checkbox per section
   const termsRow = document.createElement('div');
-  termsRow.style.cssText = 'margin-top: 18px; display: flex; gap: 12px; align-items: center; padding: 0 4px;';
-  termsRow.innerHTML = `
-    <label style="display: flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor: pointer;">
-      <input type="checkbox" id="incl-terms" ${d.includeTerms ? 'checked' : ''}>
-      Include terms page (2-page output)
-    </label>
-  `;
-  termsRow.querySelector('#incl-terms').addEventListener('change', (e) => {
-    d.includeTerms = e.target.checked;
-  });
-  host.appendChild(termsRow);
+  termsRow.style.cssText = 'margin-top: 18px; display: flex; flex-direction: column; gap: 10px; padding: 0 4px;';
+  const termsRows = buildTermsPickerRows(d);
+  if (termsRows.length) {
+    termsRows.forEach(r => termsRow.appendChild(r));
+    host.appendChild(termsRow);
+  }
 
   // Sticky bar
   const bar = document.createElement('div');
@@ -3819,17 +3919,19 @@ function renderCreationTabMobile(d, s, displayNumber /*, _isInvoiceMode */) {
   `;
   host.appendChild(totalsCard);
 
-  // Terms toggle
+  // Terms picker — one checkbox per section
   const termsRow = document.createElement('div');
   termsRow.className = 'm-card';
-  termsRow.innerHTML = `
-    <label style="display: flex; gap: 10px; align-items: center; font-size: 14px; font-weight: 500; color: var(--ink); cursor: pointer;">
-      <input type="checkbox" id="m-incl-terms" ${d.includeTerms ? 'checked' : ''}>
-      Include terms page (2-page output)
-    </label>
-  `;
-  termsRow.querySelector('#m-incl-terms').addEventListener('change', e => { d.includeTerms = e.target.checked; });
-  host.appendChild(termsRow);
+  termsRow.style.cssText = 'display: flex; flex-direction: column; gap: 12px;';
+  const mTermsRows = buildTermsPickerRows(d);
+  if (mTermsRows.length) {
+    mTermsRows.forEach(r => {
+      // Mobile taps need a bigger target than the desktop row.
+      r.style.cssText = 'display: flex; gap: 10px; align-items: center; font-size: 14px; font-weight: 500; color: var(--ink); cursor: pointer;';
+      termsRow.appendChild(r);
+    });
+    host.appendChild(termsRow);
+  }
 
   // Sticky save bar
   const bar = document.createElement('div');
@@ -4209,6 +4311,11 @@ async function handleSave(downloadAfter, shareAfter = false) {
   // most recently saved in Advanced → Default Terms. Deep-cloned so the
   // saved doc has no shared reference to the live settings object.
   const liveTerms = state.settings?.defaultTerms || DEFAULT_TERMS;
+  // Store ONLY the ticked sections. Because the snapshot is already filtered,
+  // the renderer's index-based numbering prints them 01, 02… with no template
+  // change — tick just the second section and it prints as 01.
+  const selectedIds = Array.isArray(d.termsSections) ? [...d.termsSections] : [];
+  const pickedSections = (liveTerms.sections || []).filter(s => selectedIds.includes(s.id));
   const baseDoc = {
     issueDate: d.issueDate,
     status: 'draft',
@@ -4217,7 +4324,11 @@ async function handleSave(downloadAfter, shareAfter = false) {
     subtotal: d.subtotal,
     total: d.total,
     notes: d.notes || '',
-    terms: d.includeTerms ? JSON.parse(JSON.stringify(liveTerms)) : null,
+    // ALWAYS an array — setDoc rejects `undefined` and the save would fail.
+    termsSections: selectedIds,
+    terms: pickedSections.length
+      ? JSON.parse(JSON.stringify({ title: liveTerms.title, subtitle: liveTerms.subtitle, sections: pickedSections }))
+      : null,
     optional: { ...d.optional }
   };
 
@@ -4234,7 +4345,8 @@ async function handleSave(downloadAfter, shareAfter = false) {
       || Array.from(state.quotations.values()).find(q => q.id === id);
     showToast(`${saved?.displayNumber || 'Draft'} saved`);
     if (downloadAfter && saved) {
-      await downloadPdf(saved, d.includeTerms ? 'invoice-with-terms' : 'invoice');
+      // Variant off the SAVED doc so it agrees with what was actually stored.
+      await downloadPdf(saved, variantFor(saved));
     }
     if (shareAfter && saved && saved.shareToken) {
       try {
@@ -4631,7 +4743,7 @@ function buildListRow(kind, d, search) {
 function openRowMenu(anchor, kind, d) {
   const items = [];
   items.push({ label: 'Open', fn: () => openDrawer(kind === 'quotations' ? 'quotation' : 'invoice', d.id) });
-  items.push({ label: 'Download PDF', fn: () => downloadPdf(d, d.terms ? 'invoice-with-terms' : 'invoice') });
+  items.push({ label: 'Download PDF', fn: () => downloadPdf(d, variantFor(d)) });
   items.push({ label: 'Copy share link', fn: () => handleCopyShareLink(d, kind) });
   if (kind === 'quotations') {
     if (d.status !== 'converted') {
@@ -5017,7 +5129,7 @@ function renderDrawer() {
   const shareBtn = document.createElement('button'); shareBtn.className = 'btn'; shareBtn.textContent = 'Copy share link';
   shareBtn.addEventListener('click', () => handleCopyShareLink(d, kind));
   const pdfBtn = document.createElement('button'); pdfBtn.className = 'btn'; pdfBtn.textContent = 'Download PDF';
-  pdfBtn.addEventListener('click', () => downloadPdf(d, d.terms ? 'invoice-with-terms' : 'invoice'));
+  pdfBtn.addEventListener('click', () => downloadPdf(d, variantFor(d)));
   const saveBtn = document.createElement('button'); saveBtn.className = 'btn primary'; saveBtn.textContent = 'Save changes';
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled = true;
@@ -5559,7 +5671,7 @@ async function downloadAllInvoicesForMonth(ym) {
     const inv = invs[i];
     showToast(`Generating PDF ${i + 1} of ${invs.length}…`);
     try {
-      const variant = inv.terms ? 'invoice-with-terms' : 'invoice';
+      const variant = variantFor(inv);
       // Bulk path renders at 2× (vs 3× for a single download): still crisp
       // for an accountant's records, roughly halves per-invoice render time.
       const { pdf, filename } = await buildPdfDocument(inv, variant, { scale: 2 });
@@ -5602,16 +5714,52 @@ async function downloadAllInvoicesForMonth(ym) {
   }
 }
 
-// Drafts always read terms from the live settings; paid invoices keep
-// their frozen snapshot (the version the client received). Voided
-// invoices behave like paid (still frozen).
-function termsForRender(d) {
+// Single source of truth for BOTH "is there a page 2" and "what's on it".
+// Returns null (⇒ 1-page invoice) or {title, subtitle, sections} where
+// sections.length > 0 — never an empty terms page.
+//
+// Drafts read their CONTENT from live settings (so editing Advanced flows into
+// open drafts) but only the sections they ticked. Paid/void invoices keep their
+// frozen snapshot — the exact version the client received — and are never
+// re-filtered, or a later Advanced edit would rewrite a settled record.
+function resolveTerms(d) {
   const settings = state.settings || DEFAULT_SETTINGS;
+  const live = settings.defaultTerms || DEFAULT_TERMS;
+
+  // Advanced → "Preview page 2" renders unsaved edits through this hatch.
+  if (d && d.termsOverride) {
+    const o = d.termsOverride;
+    return (o.sections && o.sections.length) ? o : null;
+  }
+
+  // Paid/void: the frozen snapshot decides everything. Deliberately NO fallback
+  // to live terms — an invoice that was issued without a terms page must never
+  // grow one later just because Default Terms exist. (The old code had a
+  // `d.terms || defaultTerms` fallback here, but it was unreachable: the
+  // variant was picked from `d.terms` separately. Now that one resolver drives
+  // both, that fallback would print a page 2 on every no-terms invoice.)
   const isPaidOrVoid = d && (d.status === 'paid' || d.status === 'void');
-  return isPaidOrVoid
-    ? (d.terms || settings.defaultTerms || DEFAULT_TERMS)
-    : (settings.defaultTerms || DEFAULT_TERMS);
+  if (isPaidOrVoid) {
+    const frozen = d.terms;
+    return (frozen && frozen.sections && frozen.sections.length) ? frozen : null;
+  }
+
+  // PRESENCE GATE — do not remove. `terms` is what records that the user opted
+  // into a terms page at all. Without this, every draft that never opted in
+  // (terms: null) would fall through to pickSections, hit the legacy rule, and
+  // silently grow a 2-page PDF.
+  if (!d || !d.terms) return null;
+
+  const picked = pickSections(live, d);
+  return picked.length ? { title: live.title, subtitle: live.subtitle, sections: picked } : null;
 }
+
+function hasTermsPage(d) { return !!resolveTerms(d); }
+
+// Variant must derive from the SAME resolver as the content. Choosing it from
+// `d.terms` alone lets a draft whose ticked sections were later deleted in
+// Advanced still render 'invoice-with-terms' — i.e. a blank page 2 to a client.
+function variantFor(d) { return hasTermsPage(d) ? 'invoice-with-terms' : 'invoice'; }
 
 function bindPdfData(root, d, variant) {
   const settings = state.settings || DEFAULT_SETTINGS;
@@ -5652,8 +5800,8 @@ function bindPdfData(root, d, variant) {
     'footerContact': variant === 'invoice-with-terms' ? 'Continued on next page →' : `Questions? ${s.email || ''}`,
     'footerWordmark': variant === 'invoice-with-terms' ? 'REPUTIFLY · 1 / 2' : (s.name || 'REPUTIFLY').split(' ')[0].toUpperCase(),
     'termsRef': `${d.displayNumber} · ${fmtDate(d.issueDate)}`,
-    'termsTitle': (termsForRender(d).title) || DEFAULT_TERMS.title,
-    'termsSubtitle': (termsForRender(d).subtitle) || DEFAULT_TERMS.subtitle,
+    'termsTitle': (resolveTerms(d)?.title) || DEFAULT_TERMS.title,
+    'termsSubtitle': (resolveTerms(d)?.subtitle) || DEFAULT_TERMS.subtitle,
     'footerThanks2': 'Thank you for your business.',
     'footerContact2': `Questions? ${s.email || ''}`
   };
@@ -5686,7 +5834,9 @@ function bindPdfData(root, d, variant) {
     }
     if (key === 'termsSections') {
       el.innerHTML = '';
-      const sections = termsForRender(d).sections || DEFAULT_TERMS.sections;
+      // Already filtered to the ticked sections, so the `i + 1` numbering below
+      // renumbers them 01, 02… — tick only the second section and it prints 01.
+      const sections = resolveTerms(d)?.sections || [];
       sections.forEach((sec, i) => {
         const sd = document.createElement('div');
         sd.className = 'terms-section';
@@ -5960,7 +6110,7 @@ function renderAdvancedTab() {
   const t = s.defaultTerms || DEFAULT_TERMS;
   terms.innerHTML = `
     <h2>Default Terms</h2>
-    <div class="adv-card-sub">Used as the second-page terms when "Include terms" is enabled.</div>
+    <div class="adv-card-sub">Second-page terms. Tick the sections you want per invoice in the Create tab.</div>
     <div class="adv-row" style="margin-bottom: 14px;">
       <div class="form-row">
         <label class="field-label">Title</label>
@@ -5983,7 +6133,10 @@ function renderAdvancedTab() {
   host.appendChild(terms);
 
   const editor = terms.querySelector('#terms-editor');
-  const sections = JSON.parse(JSON.stringify(t.sections || []));
+  // normalizeTerms (not a bare clone) so a settings doc that predates section
+  // ids gets them back-filled into this working copy — the next Save persists
+  // them, and from then on renames/reorders keep each id stable.
+  const sections = normalizeTerms(t).sections;
 
   function renderTerms() {
     editor.innerHTML = '';
@@ -6043,7 +6196,9 @@ function renderAdvancedTab() {
   renderTerms();
 
   terms.querySelector('#add-section').addEventListener('click', () => {
-    sections.push({ heading: 'New Section', body: '' }); renderTerms();
+    // Mint the id HERE, once. Minting at save time would re-id every section
+    // on every save and orphan the ticks on every existing draft.
+    sections.push({ id: newSectionId(), heading: 'New Section', body: '' }); renderTerms();
   });
   terms.querySelector('#save-terms').addEventListener('click', async () => {
     const newTerms = {
@@ -6062,7 +6217,10 @@ function renderAdvancedTab() {
       client: { name: 'Preview Client', address: 'Preview Address', email: 'preview@example.com' },
       items: [{ description: 'Preview item', qty: 1, rate: 0, amount: 0 }],
       subtotal: 0, total: 0,
-      terms: {
+      // termsOverride, not terms: this preview must show the UNSAVED edits in
+      // the form. A plain `terms` field would fall through to the draft path,
+      // which reads the live saved settings and silently ignores them.
+      termsOverride: {
         title: terms.querySelector('#terms-title').value,
         subtitle: terms.querySelector('#terms-subtitle').value,
         sections
@@ -6346,7 +6504,23 @@ window.__reputifly = {
   _test_genToken: () => generateShareToken(),
   openDownloadModal,
   _test_summaryRows: (ym) => buildMonthSummaryRows(ym),
-  _test_downloadSummary: (ym) => downloadSummaryXlsx(ym)
+  _test_downloadSummary: (ym) => downloadSummaryXlsx(ym),
+  // Read-only terms probes for the headless audits.
+  _test_resolveTerms: (d) => resolveTerms(d),
+  _test_variantFor: (d) => variantFor(d),
+  // Renders the terms page for `d` and returns what page 2 would actually show,
+  // so a test can assert the 01/02 renumbering without generating a PDF.
+  _test_bindTerms: (d) => {
+    const tpl = document.querySelector('#tpl-invoice-with-terms');
+    if (!tpl) return null;
+    const root = document.createElement('div');
+    root.appendChild(tpl.content.cloneNode(true));
+    bindPdfData(root, d, 'invoice-with-terms');
+    return Array.from(root.querySelectorAll('.terms-section')).map(s => ({
+      num: s.querySelector('.num')?.textContent,
+      heading: s.querySelector('h3')?.textContent
+    }));
+  }
 };
 
 </script>
