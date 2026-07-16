@@ -109,6 +109,55 @@ const TARGET = 'https://reputifly.com/proposal/l1abc';
   check(plain.linkSubtypes === 0, `link-free invoice gets zero link annotations (found ${plain.linkSubtypes})`);
   check(plain.bytes > 10000, 'link-free invoice still generates normally');
 
+  // ---- 4. an unfilled placeholder must NEVER become a link ----
+  const placeholder = await page.evaluate(() => {
+    const f = window.__reputifly._test_renderInlineLinks;
+    const P = h => { const d = document.createElement('div'); d.innerHTML = h; return d; };
+    return {
+      empty: P(f('[Proposal]()')).querySelectorAll('a').length,
+      spaces: P(f('[Proposal](   )')).querySelectorAll('a').length,
+      notUrl: P(f('[Proposal](tbc)')).querySelectorAll('a').length,
+      halfTyped: P(f('[Proposal](https://')).querySelectorAll('a').length
+    };
+  });
+  check(placeholder.empty === 0, 'unfilled [Proposal]() is not a link');
+  check(placeholder.spaces === 0, '[Proposal](   ) is not a link');
+  check(placeholder.notUrl === 0, '[Proposal](tbc) is not a link');
+  check(placeholder.halfTyped === 0, 'half-typed [Proposal](https:// is not a link');
+
+  // ---- 5. links inside TERMS sections (page 2) are clickable too ----
+  // These bodies reference the Service Terms / Meta Ads ToS, which used to be
+  // dead text baked into the page-2 image.
+  const TOS = 'https://reputifly.com/terms';
+  const terms = await page.evaluate(async ({ tos, prop }) => {
+    const R = window.__reputifly, st = R.getState();
+    st.settings.defaultTerms = { title: 'Additional Information', subtitle: 'Terms', sections: [
+      { id: 'sec-accept', heading: 'Acceptance of Terms and Proposal',
+        body: `This Proposal sets out the scope. See [Reputifly's Service Terms](${tos}) and the [Proposal](${prop}).` },
+      { id: 'sec-ph', heading: 'Placeholder', body: 'Unfilled [Proposal]() stays literal.' }
+    ]};
+    const d = {
+      status: 'draft', displayNumber: 'QINV-777', issueDate: '2026-07-16',
+      client: { name: 'L1 Motorsports' },
+      items: [{ description: 'Website Design', subtitle: '', qty: 1, rate: 413, amount: 413 }],
+      subtotal: 413, total: 413, notes: '', optional: {},
+      termsSections: ['sec-accept', 'sec-ph'],
+      terms: { title: 'Additional Information', subtitle: 'Terms', sections: [{ id: 'sec-accept' }, { id: 'sec-ph' }] }
+    };
+    const uri = await R._test_pdfDataUri(d, 'invoice-with-terms');
+    const bin = atob(uri.split(',')[1]);
+    return {
+      variant: R._test_variantFor(d),
+      linkAnnots: (bin.match(/\/Subtype\s*\/Link/g) || []).length,
+      hasTos: bin.includes(tos),
+      hasProp: bin.includes(prop)
+    };
+  }, { tos: TOS, prop: TARGET });
+  check(terms.variant === 'invoice-with-terms', 'terms invoice is 2-page');
+  check(terms.linkAnnots === 2, `page-2 terms links get clickable annotations (found ${terms.linkAnnots}, expected 2 — the unfilled one must not count)`);
+  check(terms.hasTos, 'ToS URL embedded from a terms body');
+  check(terms.hasProp, 'Proposal URL embedded from a terms body');
+
   await browser.close();
   server.close();
   console.log(failed ? `\nX ${failed} failure(s)` : '\nOK all inline-link checks passed');
