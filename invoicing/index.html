@@ -2156,6 +2156,46 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
+// REGION: inline links ──────────────────────────────────────────────
+// Markdown-style [label](url) typed straight into a line item. Kept as a
+// strict, parseable pattern in PLAIN TEXT rather than making the editor
+// rich-text: descriptions stay strings, so there's no HTML in the database,
+// no migration of existing invoices, and no injection surface on the public
+// share viewer. The label is what the client sees; the URL stays hidden.
+const INLINE_LINK_RE = /\[([^\]\n]+)\]\((\S+?)\)/g;
+
+// Only ever emit http/https. Anything else (javascript:, data:, vbscript:)
+// is refused — this href is rendered on a page anyone with a share link can
+// open, so the scheme is validated rather than escaped-and-hoped.
+function safeLinkUrl(raw) {
+  const url = String(raw || '').trim();
+  if (!/^https?:\/\/[^\s]+$/i.test(url)) return null;
+  return url;
+}
+
+// Escape first, then swap the link pattern for an anchor — so a label can
+// never smuggle markup through. Returns HTML.
+function renderInlineLinks(text) {
+  const escaped = escapeHtml(String(text || ''));
+  // escapeHtml turns nothing in [ ] ( ) into entities, so the pattern still
+  // matches; the label/url are already escaped by the time we read them.
+  return escaped.replace(INLINE_LINK_RE, (whole, label, url) => {
+    const safe = safeLinkUrl(url.replace(/&amp;/g, '&'));
+    if (!safe) return whole;   // not a real link — leave the text as typed
+    return `<a class="doc-link" href="${escapeHtml(safe)}">${label}</a>`;
+  });
+}
+
+// True if the text contains at least one usable link — lets callers skip work.
+function hasInlineLink(text) {
+  INLINE_LINK_RE.lastIndex = 0;
+  let m;
+  while ((m = INLINE_LINK_RE.exec(String(text || '')))) {
+    if (safeLinkUrl(m[2])) { INLINE_LINK_RE.lastIndex = 0; return true; }
+  }
+  return false;
+}
+
 function fmtMoney(n) {
   const v = Number(n) || 0;
   return 'S$' + v.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -5260,6 +5300,34 @@ async function loadH2CIntoFrame(iframe) {
 // a download (`downloadPdf`) or grab the bytes for a ZIP archive
 // (`downloadAllInvoicesForMonth`). The heavy work — iframe rendering,
 // font + image readiness, per-page html2canvas capture — happens here.
+// Map every <a> inside a rendered .page to PDF coordinates in mm.
+// addImage() stretches each page's canvas to exactly 210x297mm regardless of
+// its pixel size, so a link's position is a straight proportion of the page
+// box — no dependence on captureScale or the page's actual pixel height.
+// getClientRects() (not getBoundingClientRect) so a link wrapping onto a
+// second line gets one hotspot per line instead of one giant box swallowing
+// the text between them.
+function collectPageLinkRects(pageEl) {
+  const out = [];
+  const p = pageEl.getBoundingClientRect();
+  if (!p.width || !p.height) return out;
+  pageEl.querySelectorAll('a[href]').forEach(a => {
+    const url = a.getAttribute('href');
+    if (!url || !/^https?:\/\//i.test(url)) return;
+    Array.from(a.getClientRects()).forEach(r => {
+      if (!r.width || !r.height) return;
+      out.push({
+        x: ((r.left - p.left) / p.width) * 210,
+        y: ((r.top - p.top) / p.height) * 297,
+        w: (r.width / p.width) * 210,
+        h: (r.height / p.height) * 297,
+        url
+      });
+    });
+  });
+  return out;
+}
+
 async function buildPdfDocument(docData, variant /* 'invoice' | 'invoice-with-terms' */, opts = {}) {
   const captureScale = opts.scale || 3;   // 3× single download · 2× bulk
   try { await document.fonts.ready; } catch {}
@@ -5308,6 +5376,7 @@ async function buildPdfDocument(docData, variant /* 'invoice' | 'invoice-with-te
 
   // Capture each .page to a canvas via the iframe's html2canvas.
   const canvases = [];
+  const pageLinks = [];   // parallel to `canvases`: clickable rects per page
   for (const pageEl of pages) {
     const canvas = await h2c(pageEl, {
       scale: captureScale,       // 3× single (crisp) · 2× bulk (faster)
@@ -5319,6 +5388,7 @@ async function buildPdfDocument(docData, variant /* 'invoice' | 'invoice-with-te
       windowHeight: pageEl.scrollHeight
     });
     canvases.push(canvas);
+    pageLinks.push(collectPageLinkRects(pageEl));
   }
 
   // Build the PDF from the canvases. We use html2pdf's chained API
@@ -5333,11 +5403,18 @@ async function buildPdfDocument(docData, variant /* 'invoice' | 'invoice-with-te
   const pdf = await worker.get('pdf');
   // Clear the dummy first page
   pdf.deletePage(1);
-  canvases.forEach((canvas) => {
+  canvases.forEach((canvas, i) => {
     pdf.addPage('a4', 'portrait');
     // PNG keeps text crisp (no JPEG ringing around dark glyphs); the
     // larger file is the right trade-off for an invoice PDF.
     pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297, undefined, 'SLOW');
+    // Lay the clickable hotspots over the image. The page is a flat raster —
+    // a URL baked into it is just pixels — so each link is added as a real PDF
+    // link annotation positioned on top. Must run AFTER addPage/addImage:
+    // pdf.link() applies to the CURRENT page.
+    (pageLinks[i] || []).forEach(L => {
+      pdf.link(L.x, L.y, L.w, L.h, { url: L.url });
+    });
   });
 
   return { pdf, filename };
@@ -5831,8 +5908,8 @@ function bindPdfData(root, d, variant) {
         row.className = 'item-row';
         row.innerHTML = `
           <div class="item-desc">
-            ${escapeHtml(item.description || '')}
-            ${item.subtitle ? `<small>${escapeHtml(item.subtitle)}</small>` : ''}
+            ${renderInlineLinks(item.description || '')}
+            ${item.subtitle ? `<small>${renderInlineLinks(item.subtitle)}</small>` : ''}
           </div>
           <div class="item-num muted">${item.qty}</div>
           <div class="item-num">${escapeHtml(fmtMoney(item.rate))}</div>
@@ -5973,6 +6050,13 @@ body { padding: 56px 24px; display: flex; flex-direction: column; align-items: c
 .item-row > .item-num:not(:last-child) { padding-right: 14px; }
 .item-desc { font-size: 14.5px; font-weight: 600; color: var(--ink); letter-spacing: -0.005em; }
 .item-desc small { display: block; margin-top: 3px; font-size: 12px; font-weight: 500; color: var(--ink-muted); letter-spacing: 0; }
+/* [label](url) typed into a line item. The client sees the label, never the
+   URL. Underlined as well as coloured — the PDF is a flat image, so colour
+   alone would be the only affordance, and it must read as a link in print
+   and to anyone colour-blind. The clickable hotspot is layered on separately
+   as a real PDF annotation (see buildPdfDocument). */
+.doc-link { color: #1D4ED8; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.item-desc small .doc-link { font-weight: 600; }
 .item-num { font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; color: var(--ink); font-weight: 500; }
 .item-num.muted { color: var(--ink-muted); font-weight: 500; }
 .totals { display: flex; justify-content: flex-end; margin-top: 18px; }
@@ -6551,6 +6635,13 @@ window.__reputifly = {
   openDownloadModal,
   _test_summaryRows: (ym) => buildMonthSummaryRows(ym),
   _test_downloadSummary: (ym) => downloadSummaryXlsx(ym),
+  // Inline-link probes: the parser, and the real PDF bytes so a test can prove
+  // the link annotation actually lands in the file rather than trusting a viewer.
+  _test_renderInlineLinks: (t) => renderInlineLinks(t),
+  _test_pdfDataUri: async (d, variant) => {
+    const { pdf } = await buildPdfDocument(d, variant || 'invoice');
+    return pdf.output('datauristring');
+  },
   // Probes for the background-render guard.
   _test_renderBackground: () => renderBackground(),
   _test_isEditingCreation: () => isEditingCreation(),

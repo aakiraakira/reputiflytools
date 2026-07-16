@@ -88,6 +88,9 @@ body { padding: 56px 24px 96px; display: flex; flex-direction: column; align-ite
 .item-row > .item-num:not(:last-child) { padding-right: 14px; }
 .item-desc { font-size: 14.5px; font-weight: 600; color: var(--ink); letter-spacing: -0.005em; }
 .item-desc small { display: block; margin-top: 3px; font-size: 12px; font-weight: 500; color: var(--ink-muted); letter-spacing: 0; }
+/* [label](url) links — matches the PDF styling in index.html's INVOICE_CSS. */
+.doc-link { color: #1D4ED8; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.item-desc small .doc-link { font-weight: 600; }
 .item-num { font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; color: var(--ink); font-weight: 500; }
 .item-num.muted { color: var(--ink-muted); font-weight: 500; }
 .totals { display: flex; justify-content: flex-end; margin-top: 18px; }
@@ -850,6 +853,24 @@ const FIREBASE_CONFIG = {
 const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, c => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
+// Mirror of renderInlineLinks in index.html — keep the two in step. Turns the
+// [label](url) a line item was typed with into a real anchor so a share-link
+// viewer sees "View Proposal", not the raw syntax. This page is public, so the
+// scheme is validated (http/https only) and the label is escaped BEFORE the
+// pattern is swapped in — a label can never smuggle markup through.
+const INLINE_LINK_RE = /\[([^\]\n]+)\]\((\S+?)\)/g;
+const safeLinkUrl = (raw) => {
+  const url = String(raw || '').trim();
+  return /^https?:\/\/[^\s]+$/i.test(url) ? url : null;
+};
+const renderInlineLinks = (text) => escapeHtml(String(text || '')).replace(
+  INLINE_LINK_RE,
+  (whole, label, url) => {
+    const safe = safeLinkUrl(url.replace(/&amp;/g, '&'));
+    if (!safe) return whole;
+    return `<a class="doc-link" href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  }
+);
 const fmtMoney = (n) => 'S$' + (Number(n) || 0).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (iso) => {
   if (!iso) return '';
@@ -925,8 +946,8 @@ function bindData(root, d) {
         row.className = 'item-row';
         row.innerHTML = `
           <div class="item-desc">
-            ${escapeHtml(item.description || '')}
-            ${item.subtitle ? `<small>${escapeHtml(item.subtitle)}</small>` : ''}
+            ${renderInlineLinks(item.description || '')}
+            ${item.subtitle ? `<small>${renderInlineLinks(item.subtitle)}</small>` : ''}
           </div>
           <div class="item-num muted">${Number(item.qty) || 0}</div>
           <div class="item-num">${escapeHtml(fmtMoney(item.rate))}</div>
