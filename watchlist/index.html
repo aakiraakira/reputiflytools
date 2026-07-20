@@ -660,6 +660,26 @@ input[type="date"].input::-webkit-calendar-picker-indicator{
 .gatecard{ animation:rf-pop-in .3s var(--ease); }
 .gate-err{ animation:rf-pop-in .2s var(--ease); }
 
+/* ---- loading skeleton ----
+   Shown only before the first load resolves. Without it the page briefly
+   rendered the empty state, which after a real scare reads as "my data is
+   gone" rather than "still loading". */
+.wcard.sk{ padding:15px 18px 16px; pointer-events:none; }
+.skline, .skpill, .skbtn{
+  background:linear-gradient(90deg,#eef0f3 25%,#e4e7eb 37%,#eef0f3 63%);
+  background-size:400% 100%; animation:skShimmer 1.3s ease-in-out infinite;
+  border-radius:7px; display:block;
+}
+.skline{ height:12px; margin-bottom:9px; }
+.skline.w40{ width:40%; height:15px; }
+.skline.w90{ width:90%; }
+.skline.w70{ width:70%; }
+.skrow{ display:flex; align-items:center; gap:10px; margin-top:13px; }
+.skpill{ width:96px; height:25px; border-radius:999px; }
+.skbtn{ flex:1; height:44px; border-radius:999px; }
+@keyframes skShimmer{ 0%{background-position:100% 50%} 100%{background-position:0 50%} }
+@media (prefers-reduced-motion:reduce){ .skline,.skpill,.skbtn{ animation:none } }
+
 #boot{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;background:#fff;transition:opacity .45s cubic-bezier(0.25,0.8,0.25,1)}
 #boot.is-fading{opacity:0;pointer-events:none}
 .boot-logo{height:32px;width:auto;user-select:none;-webkit-user-drag:none}
@@ -878,7 +898,7 @@ if (!AUTH_ON) {
     }
     window.__me = who;
     gate.hidden = true;
-    if (!booted) { booted = true; window.__boot(); }
+    if (!booted) { booted = true; window.__boot(who.rows); }
     if (window.__fadeBoot) window.__fadeBoot();
     const w = document.getElementById("whoami");
     if (w) {
@@ -927,6 +947,8 @@ var PV_KEY="rfly_watchlist_preview_v2";
 var AUTH_ON=true;
 
 var rows=[], sheetDraft=null, sheetIsNew=false;
+var CACHE_KEY="rfly_watchlist_cache_v1";
+var loaded=false;   /* until true we must NOT claim the list is empty */
 
 function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 function todayISO(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
@@ -1008,25 +1030,32 @@ function pvSave(){try{localStorage.setItem(PV_KEY,JSON.stringify(rows))}catch(e)
 /* A refusal is NOT an empty list. Treating {ok:false} as zero rows is what
    made the whole watchlist appear to vanish after one tap. Throw instead, so
    the caller can roll back and the screen never invents an empty list. */
-function load(){
-  if(PREVIEW){rows=pvLoad();render();return Promise.resolve()}
+function load(prefetched){
+  if(PREVIEW){rows=pvLoad();loaded=true;render();return Promise.resolve()}
+  if(prefetched){ rows=prefetched; loaded=true; cacheSave(); render(); return Promise.resolve(); }
   return jsonp({action:"list"}).then(function(res){
     if(!res||!res.ok){
       if(res&&res.error==="not_authorised"){ location.reload(); }
       throw new Error((res&&res.error)||"load_failed");
     }
-    rows=res.rows||[]; render();
+    rows=res.rows||[]; loaded=true; cacheSave(); render();
   });
 }
-/* Optimistic writes: the screen updates on the tap, the sheet catches up in
-   the background. A round trip is ~4s — far too long to stare at a spinner
-   for something that essentially always succeeds. If it does fail we put the
-   old state back and say so, so the UI never lies about what was saved. */
+/* Last known list, so a reopen paints instantly instead of staring at a
+   spinner while two network round trips finish. Revalidated straight after. */
+function cacheSave(){ try{ localStorage.setItem(CACHE_KEY,JSON.stringify(rows)) }catch(e){} }
+function cacheLoad(){
+  try{ var r=localStorage.getItem(CACHE_KEY); return r?JSON.parse(r):null }catch(e){ return null }
+}
+
+/* Apply a row to the in-memory list: replace it if we already know that id,
+   otherwise append. This is what makes a save appear on the tap. */
 function applyLocal(row){
   var i=rows.findIndex(function(r){return r.id===row.id});
   row.updatedAt=new Date().toISOString();
   if(i<0) rows.push(row); else rows[i]=row;
 }
+
 /* mode:'no-cors' makes fetch resolve even when the server REFUSED the write,
    so the promise proves nothing. The only honest confirmation is reading the
    row back. Without this the screen kept an edit the sheet never accepted. */
@@ -1036,7 +1065,7 @@ function saveRow(row,msg){
   if(PREVIEW){ pvSave(); toast(msg||"Saved"); return Promise.resolve(); }
   toast(msg||"Saved");
   return post({action:"save",row:row})
-    .then(load)
+    .then(function(){ return load(); })
     .then(function(){
       var after=rows.filter(function(r){return r.id===row.id})[0];
       if(!after
@@ -1056,7 +1085,7 @@ function archiveRow(id){
   if(PREVIEW){ pvSave(); toast("Archived"); return Promise.resolve(); }
   toast("Archived");
   return post({action:"remove",id:id})
-    .then(load)
+    .then(function(){ return load(); })
     .then(function(){
       if(rows.some(function(r){return r.id===id})) throw new Error("not_archived");
     })
@@ -1080,7 +1109,9 @@ function render(){
   var none =rows.filter(function(r){return !r.followUp}).sort(sortByDate);
 
   var h="";
-  if(!rows.length){
+  if(!loaded && !rows.length){
+    h=SKELETON;
+  } else if(!rows.length){
     h='<div class="emptybox"><div class="ic">'
       +'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
       +'</div><h3>Nobody on the watchlist</h3>'
@@ -1093,6 +1124,13 @@ function render(){
   document.getElementById("list").innerHTML=h;
   wireCards();
 }
+var SKELETON=(function(){
+  var one='<div class="wcard sk"><div class="skline w40"></div>'
+        +'<div class="skline w90"></div><div class="skline w70"></div>'
+        +'<div class="skrow"><span class="skpill"></span><span class="skbtn"></span></div></div>';
+  return '<div class="grouphead">Loading</div>'+one+one+one;
+})();
+
 function card(r){
   var d=dateInfo(r.followUp);
   var tone=d.cls==="late"?" urgent":(d.cls==="today"?" soon":"");
@@ -1209,9 +1247,14 @@ document.getElementById("sheetSave").onclick=function(){
 window.__ENDPOINT=ENDPOINT;
 /* localhost stays ungated so the preview loop needs no password */
 window.__AUTH_ON=AUTH_ON && !PREVIEW;
-window.__boot=function(){
+window.__boot=function(prefetched){
   if(PREVIEW) document.getElementById("pvBanner").style.display="";
-  load();
+  if(!PREVIEW){
+    var c=cacheLoad();
+    if(c&&c.length){ rows=c; loaded=true; render(); }   /* instant paint */
+    else render();                                      /* skeleton */
+  }
+  load(prefetched);
 };
 window.__fadeBoot=function(){
   var b=document.getElementById("boot");
