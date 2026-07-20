@@ -14,6 +14,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<link rel="preconnect" href="https://script.google.com" crossorigin />
+<link rel="dns-prefetch" href="https://script.google.com" />
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin />
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js" />
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js" />
 <style>
 /* ===== Reputifly Professional (verbatim design system) ===== */
 /* =========================================================================
@@ -624,6 +629,28 @@ input, textarea, select, button, optgroup { font-family: inherit; }
 }
 .whoami button:hover{ text-decoration:underline; }
 
+/* ===================================================================
+   iOS date input. Desktop engines lay this out fine, but Mobile Safari
+   gives input[type=date] an intrinsic min-width and its own inner
+   margins, so the value can push wider than the field. Force it to
+   behave like every other input, and stop the sheet scrolling
+   sideways no matter what a native control decides to do.
+   =================================================================== */
+input[type="date"].input{
+  -webkit-appearance:none; appearance:none;
+  display:block; min-width:0; max-width:100%; width:100%;
+  text-align:left;
+}
+input[type="date"].input::-webkit-date-and-time-value{
+  text-align:left; margin:0; min-width:0;
+}
+input[type="date"].input::-webkit-datetime-edit{ padding:0; line-height:normal; }
+input[type="date"].input::-webkit-datetime-edit-fields-wrapper{ padding:0; }
+input[type="date"].input::-webkit-calendar-picker-indicator{
+  margin-left:auto; margin-right:0; opacity:.5; cursor:pointer;
+}
+.sheet-body{ overflow-x:hidden; }
+
 #boot{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;background:#fff;transition:opacity .45s cubic-bezier(0.25,0.8,0.25,1)}
 #boot.is-fading{opacity:0;pointer-events:none}
 .boot-logo{height:26px;width:auto;user-select:none;-webkit-user-drag:none}
@@ -801,7 +828,9 @@ if (!AUTH_ON) {
   window.__rflyToken = () => Promise.resolve("");
   window.__boot();
 } else {
-  gate.hidden = false;
+  /* The gate stays hidden and the boot splash stays up until Firebase has
+     resolved the stored session. Revealing the login first would flash it at
+     someone who is already signed in — the session survives closing the app. */
   const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js");
   const { getAuth, signInWithEmailAndPassword, onAuthStateChanged, setPersistence,
           browserLocalPersistence, signOut } =
@@ -838,21 +867,33 @@ if (!AUTH_ON) {
     });
   }
 
+  /* Drop the boot splash and show the login. Only ever called once we know
+     for certain there is no usable session. */
+  function revealGate(msg){
+    if (window.__fadeBoot) window.__fadeBoot();
+    gate.hidden = false;
+    if (msg) showErr(msg);
+  }
+
   onAuthStateChanged(auth, async (user) => {
-    if (!user) { gate.hidden = false; return; }
+    if (!user) { revealGate(); return; }
     const token = await user.getIdToken();
     const who = await whoami(token);
     if (!who || !who.ok || !who.allowed) {
+      /* A network blip must NOT sign someone out — that would strand them
+         offline with a login they cannot complete. Only a real refusal does. */
+      if (who && (who.error === "network" || who.error === "timeout")) {
+        revealGate("Could not reach the server. Check your connection and reload.");
+        return;
+      }
       await signOut(auth);
-      gate.hidden = false;
-      showErr(who && who.error === "network"
-        ? "Could not reach the server. Check your connection and try again."
-        : "That account does not have access. Ask Julian to add it.");
+      revealGate("That account does not have access to this app.");
       return;
     }
     window.__me = who;
     gate.hidden = true;
     if (!booted) { booted = true; window.__boot(); }
+    if (window.__fadeBoot) window.__fadeBoot();
     const w = document.getElementById("whoami");
     if (w) {
       w.hidden = false;
@@ -894,9 +935,8 @@ if (!AUTH_ON) {
 <script>
 var ENDPOINT="https://script.google.com/macros/s/AKfycbzv9qV2UHNvCRW5lWyrwEC2E3TNaNOu6z-dtPJwJ_XFZscS5GUVZ5OZ_q9Ad6HlvjDa2Q/exec";
 var DRAFT_KEY="rfly_digest_draft_v4";
-/* Flip to true ONLY after every account exists in Firebase and is in
-   ALLOWED_EMAILS in Code.gs — otherwise Farhan cannot file the digest. */
-var AUTH_ON=false;
+/* Locked to two Firebase UIDs in Code.gs: Julian + Farhan. */
+var AUTH_ON=true;
 /* localhost never posts to the live endpoint — tap freely, nothing reaches Julian */
 var PREVIEW=location.protocol==="file:"||/^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(location.hostname);
 
@@ -1170,17 +1210,27 @@ document.getElementById("submitBtn").onclick=function(){
    __boot() is called by the auth gate: immediately when auth is off, or
    once a known account has signed in. Nothing loads before that. */
 window.__ENDPOINT=ENDPOINT;
-window.__AUTH_ON=AUTH_ON;
+/* localhost stays ungated so the preview loop needs no password */
+window.__AUTH_ON=AUTH_ON && !PREVIEW;
 window.__boot=function(){
   if(PREVIEW) document.getElementById("pvBanner").style.display="";
   restore(); renderRows(); renderSummary();
 };
+window.__fadeBoot=function(){
+  var b=document.getElementById("boot");
+  if(!b||b.getAttribute("data-gone")) return;
+  b.setAttribute("data-gone","1");
+  b.classList.add("is-fading");
+  setTimeout(function(){b.style.display="none"},500);
+};
 window.addEventListener("load",function(){
-  setTimeout(function(){
-    var b=document.getElementById("boot");
-    b.classList.add("is-fading");
-    setTimeout(function(){b.style.display="none"},500);
-  },180);
+  /* Use the EFFECTIVE flag, not the raw one - they differ on localhost, and
+     disagreeing left the splash up forever. When auth is on it owns the
+     splash (it must stay up until the stored session resolves, so a
+     signed-in user never sees a flash). The 8s timer is a failsafe: a CDN
+     hiccup loading the Firebase SDK must never strand a white screen. */
+  if(!window.__AUTH_ON) setTimeout(window.__fadeBoot,180);
+  setTimeout(window.__fadeBoot,8000);
 });
 </script>
 </body>
