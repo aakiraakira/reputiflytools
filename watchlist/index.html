@@ -680,6 +680,9 @@ input[type="date"].input::-webkit-calendar-picker-indicator{
 @keyframes skShimmer{ 0%{background-position:100% 50%} 100%{background-position:0 50%} }
 @media (prefers-reduced-motion:reduce){ .skline,.skpill,.skbtn{ animation:none } }
 
+/* in-sheet confirmation copy */
+.confirm-copy{ margin:0; font-size:14.5px; line-height:1.55; color:var(--color-ink-2); }
+
 #boot{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;background:#fff;transition:opacity .45s cubic-bezier(0.25,0.8,0.25,1)}
 #boot.is-fading{opacity:0;pointer-events:none}
 .boot-logo{height:32px;width:auto;user-select:none;-webkit-user-drag:none}
@@ -1168,6 +1171,24 @@ function wireCards(){
   });
 }
 
+/* An in-sheet confirmation. The native confirm() is a system dialog that
+   looks nothing like the app and cannot be styled, so a destructive step
+   used to break out of the sheet entirely. This keeps it in place. */
+function sheetConfirm(o){
+  document.getElementById("sheetSave").hidden=true;
+  document.getElementById("sheetTitle").textContent=o.title;
+  document.getElementById("sheetBody").innerHTML='<div class="stack">'
+    +'<p class="confirm-copy">'+esc(o.body)+'</p>'
+    +'<button type="button" class="btn btn--danger" id="cfmYes" style="width:100%">'+esc(o.yes)+'</button>'
+    +'<button type="button" class="btn btn--ghost" id="cfmNo" style="width:100%">'+esc(o.no||"Keep Them")+'</button>'
+    +'</div>';
+  document.getElementById("cfmYes").onclick=function(){ o.onYes() };
+  document.getElementById("cfmNo").onclick=function(){ o.onNo ? o.onNo() : closeSheet() };
+  document.getElementById("backdrop").classList.add("on");
+  document.getElementById("sheet").classList.add("on");
+  document.body.style.overflow="hidden";
+}
+
 /* ---------- "chased them, what now?" ---------- */
 function openDoneSheet(id){
   var r=rows.filter(function(x){return x.id===id})[0];
@@ -1204,8 +1225,13 @@ function openDoneSheet(id){
   };
   document.getElementById("dArchive").onclick=function(){
     var aid=sheetDraft.id, label=who(sheetDraft);
-    if(!confirm("Archive "+label+"?\n\nThey come off the list for good - dead lead, or job finished.")) return;
-    closeSheet(); archiveRow(aid);
+    sheetConfirm({
+      title:"Archive "+label+"?",
+      body:"They come off the list for good - the lead is dead, or the job is finished.",
+      yes:"Archive "+label,
+      onYes:function(){ closeSheet(); archiveRow(aid); },
+      onNo:function(){ openDoneSheet(aid); }
+    });
   };
   /* This step has no "Save" - the chips ARE the actions. Leaving the header
      Save visible pointed the obvious blue button at the edit form's handler,
@@ -1250,8 +1276,13 @@ function openSheet(id){
   if(del) del.onclick=function(){
     /* closeSheet() nulls sheetDraft, so snapshot what we need FIRST. */
     var id=sheetDraft.id, label=who(sheetDraft);
-    if(!confirm("Archive "+label+"?\n\nUse this when you are done with them for good - the lead is dead, or the job is finished.\nTo just tick off a chase and keep them, use Follow-Up Done.")) return;
-    closeSheet(); archiveRow(id);
+    sheetConfirm({
+      title:"Archive "+label+"?",
+      body:"They come off the list for good - the lead is dead, or the job is finished. To just tick off a chase and keep them, use Follow-Up Done instead.",
+      yes:"Archive "+label,
+      onYes:function(){ closeSheet(); archiveRow(id); },
+      onNo:function(){ openSheet(id); }
+    });
   };
   var dn=document.getElementById("sheetDone");
   if(dn) dn.onclick=function(){
