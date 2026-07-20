@@ -991,10 +991,18 @@ function pvLoad(){
 function pvSave(){try{localStorage.setItem(PV_KEY,JSON.stringify(rows))}catch(e){}}
 
 /* ---------- data ---------- */
+/* A refusal is NOT an empty list. Treating {ok:false} as zero rows is what
+   made the whole watchlist appear to vanish after one tap. Throw instead, so
+   the caller can roll back and the screen never invents an empty list. */
 function load(){
   if(PREVIEW){rows=pvLoad();render();return Promise.resolve()}
-  return jsonp({action:"list"}).then(function(res){rows=(res&&res.rows)||[];render()})
-    .catch(function(){toast("Could not load — check your connection","err");render()});
+  return jsonp({action:"list"}).then(function(res){
+    if(!res||!res.ok){
+      if(res&&res.error==="not_authorised"){ location.reload(); }
+      throw new Error((res&&res.error)||"load_failed");
+    }
+    rows=res.rows||[]; render();
+  });
 }
 /* Optimistic writes: the screen updates on the tap, the sheet catches up in
    the background. A round trip is ~4s — far too long to stare at a spinner
@@ -1005,6 +1013,9 @@ function applyLocal(row){
   row.updatedAt=new Date().toISOString();
   if(i<0) rows.push(row); else rows[i]=row;
 }
+/* mode:'no-cors' makes fetch resolve even when the server REFUSED the write,
+   so the promise proves nothing. The only honest confirmation is reading the
+   row back. Without this the screen kept an edit the sheet never accepted. */
 function saveRow(row,msg){
   var snapshot=JSON.parse(JSON.stringify(rows));
   applyLocal(row); render();
@@ -1012,7 +1023,18 @@ function saveRow(row,msg){
   toast(msg||"Saved");
   return post({action:"save",row:row})
     .then(load)
-    .catch(function(){ rows=snapshot; render(); toast("Could not save - check your connection","err") });
+    .then(function(){
+      var after=rows.filter(function(r){return r.id===row.id})[0];
+      if(!after
+         || (after.followUp||"")!==(row.followUp||"")
+         || (after.note||"")!==(row.note||"")
+         || (after.name||"")!==(row.name||"")
+         || (after.phone||"")!==(row.phone||"")) throw new Error("not_saved");
+    })
+    .catch(function(){
+      rows=snapshot; render();
+      toast("Could not save - nothing was changed","err");
+    });
 }
 function archiveRow(id){
   var snapshot=JSON.parse(JSON.stringify(rows));
@@ -1021,7 +1043,13 @@ function archiveRow(id){
   toast("Archived");
   return post({action:"remove",id:id})
     .then(load)
-    .catch(function(){ rows=snapshot; render(); toast("Could not archive - check your connection","err") });
+    .then(function(){
+      if(rows.some(function(r){return r.id===id})) throw new Error("not_archived");
+    })
+    .catch(function(){
+      rows=snapshot; render();
+      toast("Could not archive - nothing was changed","err");
+    });
 }
 
 /* ---------- render ---------- */
