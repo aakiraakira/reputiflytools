@@ -82,6 +82,27 @@ input[type=date].fld::-webkit-calendar-picker-indicator{filter:invert(.6);cursor
 .datechip.due{background:rgba(255,138,0,0.16);color:#FFB65C;border-color:rgba(255,138,0,0.36)}
 .stamp{font-size:11.5px;color:#5f6675;margin-top:12px}
 
+/* one-tap actions on a due card */
+.cardfoot{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:10px}
+.cardacts{display:flex;gap:8px;flex-shrink:0}
+.minibtn{display:inline-flex;align-items:center;gap:6px;height:38px;padding:0 14px;border-radius:999px;
+  font-size:13px;font-weight:800;letter-spacing:-0.01em;border:1px solid rgba(255,255,255,0.12);
+  background:rgba(255,255,255,0.05);color:#9aa0ad;transition:all .18s ease;text-decoration:none;white-space:nowrap}
+.minibtn:active{transform:scale(.95)}
+.minibtn.done{border-color:rgba(37,211,102,0.4);background:rgba(37,211,102,0.12);color:#4ade80}
+.minibtn.done:active{background:rgba(37,211,102,0.26)}
+.minibtn.wa{border-color:rgba(37,211,102,0.28);color:#8fe0ad}
+
+.donewide{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;height:50px;border-radius:14px;
+  font-size:14.5px;font-weight:800;letter-spacing:-0.01em;
+  border:1px solid rgba(37,211,102,0.38);background:rgba(37,211,102,0.11);color:#4ade80;transition:all .2s}
+.donewide:active{background:rgba(37,211,102,0.24)}
+
+.topnav{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:#8b93a3;
+  background:rgba(255,255,255,0.045);border:1px solid rgba(255,255,255,0.09);border-radius:999px;
+  padding:9px 15px;text-decoration:none;transition:all .2s}
+.topnav:active{background:rgba(255,255,255,0.09);color:#fff}
+
 .addbtn{width:100%;border:1px dashed rgba(255,255,255,0.17);border-radius:16px;padding:15px;
   color:#8b93a3;font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;
   transition:all .22s ease;background:transparent}
@@ -126,7 +147,8 @@ input[type=date].fld::-webkit-calendar-picker-indicator{filter:invert(.6);cursor
   <div class="mb-7">
     <p class="sec-num">WHO WE'RE CHASING</p>
     <h1 class="text-4xl md:text-6xl leading-none mb-4"><span class="hword">The</span> <span class="hword dynamic-gradient-text">Watchlist</span></h1>
-    <p class="hint max-w-md">Anyone worth chasing, what they actually want, and when to chase them next. Tap a card to edit it.</p>
+    <p class="hint max-w-md mb-5">Anyone worth chasing, what they actually want, and when to chase them next. Tap a card to edit it.</p>
+    <a class="topnav" href="https://reputifly.org/daily-digest/"><i data-feather="edit-3" class="w-3.5 h-3.5"></i> Tonight's digest</a>
   </div>
 
   <div class="flex flex-wrap gap-2 mb-6" id="stats"></div>
@@ -273,16 +295,33 @@ function render(){
   wire();
 }
 
+/* the message Julian forwards to whoever is chasing — he taps it, picks the contact, sends */
+function waLink(r){
+  var t='Please follow up with '+(r.name||'')+'.\n\n'+(r.note||'')+'\n\nLet me know how it goes.';
+  return 'https://api.whatsapp.com/send?text='+encodeURIComponent(t);
+}
+
 function cardHTML(r,open){
   var dl=dateLabel(r.followUp);
   var cls='wcard'+(dl.due&&!open?' due':'')+(open?' open':'');
   if(!open){
+    var acts = r.followUp
+      ? '<div class="cardacts">'
+          +'<button type="button" class="minibtn done" data-done="'+esc(r.id)+'">'
+            +'<i data-feather="check" class="w-3.5 h-3.5"></i> Done</button>'
+          +'<a class="minibtn wa" data-stop="1" target="_blank" rel="noopener" href="'+esc(waLink(r))+'">'
+            +'<i data-feather="message-circle" class="w-3.5 h-3.5"></i> Message</a>'
+        +'</div>'
+      : '';
     return '<div class="'+cls+'" data-id="'+esc(r.id)+'" data-openable="1">'
       +'<div class="wname">'+esc(r.name)+'</div>'
       +'<div class="wnote clamp">'+esc(r.note)+'</div>'
-      +'<span class="datechip'+(dl.due?' due':'')+'">'
-        +(dl.due?'<i data-feather="alert-triangle" class="w-3 h-3"></i>':'<i data-feather="calendar" class="w-3 h-3"></i>')
-        +esc(dl.txt)+'</span>'
+      +'<div class="cardfoot">'
+        +'<span class="datechip'+(dl.due?' due':'')+'">'
+          +(dl.due?'<i data-feather="alert-triangle" class="w-3 h-3"></i>':'<i data-feather="calendar" class="w-3 h-3"></i>')
+          +esc(dl.txt)+'</span>'
+        +acts
+      +'</div>'
       +'</div>';
   }
   return '<div class="'+cls+'" data-id="'+esc(r.id)+'">'
@@ -291,9 +330,14 @@ function cardHTML(r,open){
     +'<span class="rowlbl">What you need to remember</span>'
     +'<textarea class="fld mb-4" data-f="note" rows="4" placeholder="What they want, what they said, what is holding them back">'+esc(r.note)+'</textarea>'
     +'<span class="rowlbl">Chase them again on (optional)</span>'
-    +'<input type="date" class="fld mb-5" data-f="followUp" value="'+esc(r.followUp||'')+'">'
+    +'<input type="date" class="fld'+(r.followUp?' mb-4':' mb-5')+'" data-f="followUp" value="'+esc(r.followUp||'')+'">'
+    /* ticking this off is NOT deleting them — it clears the date and they stay on the list */
+    +(r.followUp
+        ? '<button type="button" class="donewide mb-5" data-done="'+esc(r.id)+'">'
+            +'<i data-feather="check-circle" class="w-4 h-4"></i> Follow-up done — keep them, clear the date</button>'
+        : '')
     +'<div class="flex items-center justify-between gap-3">'
-      +'<button type="button" class="dangerbtn" data-remove="'+esc(r.id)+'">Remove</button>'
+      +'<button type="button" class="dangerbtn" data-remove="'+esc(r.id)+'">Delete</button>'
       +'<div class="flex gap-2">'
         +'<button type="button" class="ghostbtn" data-cancel="1">Cancel</button>'
         +'<button type="button" class="liquid-glow px-6 py-3 text-sm" data-save="1">Save</button>'
@@ -311,8 +355,26 @@ function stampTxt(iso){
 /* ---------- interaction ---------- */
 function wire(){
   document.querySelectorAll('[data-openable]').forEach(function(el){
-    el.onclick=function(){ newDraft=null; openId=el.getAttribute('data-id'); render(); };
+    el.onclick=function(ev){
+      /* the Done / Message buttons live inside the card — they must not expand it */
+      if(ev.target.closest && ev.target.closest('[data-done],[data-stop]')) return;
+      newDraft=null; openId=el.getAttribute('data-id'); render();
+    };
   });
+
+  /* Done = the chase happened. Clears the date, KEEPS the person. Never deletes. */
+  document.querySelectorAll('[data-done]').forEach(function(b){
+    b.onclick=function(ev){
+      ev.stopPropagation();
+      var id=b.getAttribute('data-done');
+      var r=rows.filter(function(x){return x.id===id})[0];
+      if(!r) return;
+      openId=null; newDraft=null;
+      saveRow({id:r.id,name:r.name,note:r.note,followUp:'',createdAt:r.createdAt});
+      status('Follow-up ticked off',true);
+    };
+  });
+
   var card=document.querySelector('.wcard.open'); if(!card) return;
 
   var cancel=card.querySelector('[data-cancel]');
@@ -335,7 +397,7 @@ function wire(){
     var id=rm.getAttribute('data-remove');
     if(newDraft&&newDraft.id===id){ newDraft=null; openId=null; render(); return }
     var who=(rows.filter(function(r){return r.id===id})[0]||{}).name||'this person';
-    if(!confirm('Remove '+who+' from the watchlist?\n\nThey come off your list. The record is kept.')) return;
+    if(!confirm('Delete '+who+' from the watchlist?\n\nOnly do this if the lead is dead.\nIf you just finished chasing them, hit "Follow-up done" instead.')) return;
     openId=null; removeRow(id);
   };
 
