@@ -1160,15 +1160,56 @@ function wireCards(){
   document.querySelectorAll("[data-open]").forEach(function(b){
     b.onclick=function(){openSheet(b.getAttribute("data-open"))};
   });
-  /* Done = the chase happened. Clears the date, KEEPS the person. Never archives. */
+  /* "Follow-Up Done" is only half an interaction on its own - clearing a date
+     that was never set does nothing at all. It now asks the obvious next
+     question instead, so every tap produces a visible result. */
   document.querySelectorAll("[data-done]").forEach(function(b){
-    b.onclick=function(ev){
-      ev.stopPropagation();
-      var r=rows.filter(function(x){return x.id===b.getAttribute("data-done")})[0];
-      if(!r) return;
-      saveRow({id:r.id,name:r.name,phone:r.phone,note:r.note,followUp:"",createdAt:r.createdAt},"Ticked Off - Still On Your List");
+    b.onclick=function(ev){ ev.stopPropagation(); openDoneSheet(b.getAttribute("data-done")); };
+  });
+}
+
+/* ---------- "chased them, what now?" ---------- */
+function openDoneSheet(id){
+  var r=rows.filter(function(x){return x.id===id})[0];
+  if(!r) return;
+  sheetDraft=JSON.parse(JSON.stringify(r));
+  sheetIsNew=false;
+  document.getElementById("sheetTitle").textContent="Chased "+who(r);
+  document.getElementById("sheetBody").innerHTML='<div class="stack">'
+    +'<div><span class="label">Chase Them Again</span>'
+      +'<div class="pillrow n2">'
+        +'<button type="button" class="optpill" data-in="1">Tomorrow</button>'
+        +'<button type="button" class="optpill" data-in="3">In 3 Days</button>'
+        +'<button type="button" class="optpill" data-in="7">Next Week</button>'
+        +'<button type="button" class="optpill" data-in="14">In 2 Weeks</button>'
+      +'</div></div>'
+    +'<div><label class="label" for="dPick">Or Pick A Date</label>'
+      +'<input class="input" id="dPick" type="date" value="'+esc(r.followUp||"")+'"></div>'
+    +'<button type="button" class="btn btn--quietdanger btn--sm" id="dArchive" style="width:100%">'
+      +'Done With Them - Archive</button>'
+    +'</div>';
+
+  function commit(iso,msg){
+    var d=sheetDraft; closeSheet();
+    saveRow({id:d.id,name:d.name,phone:d.phone,note:d.note,followUp:iso,createdAt:d.createdAt},msg);
+  }
+  document.querySelectorAll("#sheetBody [data-in]").forEach(function(b){
+    b.onclick=function(){
+      var n=+b.getAttribute("data-in");
+      commit(shiftISO(n), "Chasing again "+(n===1?"tomorrow":"in "+n+" days"));
     };
   });
+  document.getElementById("dPick").onchange=function(){
+    if(this.value) commit(this.value,"Chasing again "+pretty(this.value));
+  };
+  document.getElementById("dArchive").onclick=function(){
+    var aid=sheetDraft.id, label=who(sheetDraft);
+    if(!confirm("Archive "+label+"?\n\nThey come off the list for good - dead lead, or job finished.")) return;
+    closeSheet(); archiveRow(aid);
+  };
+  document.getElementById("backdrop").classList.add("on");
+  document.getElementById("sheet").classList.add("on");
+  document.body.style.overflow="hidden";
 }
 
 /* ---------- sheet ---------- */
@@ -1209,10 +1250,9 @@ function openSheet(id){
   };
   var dn=document.getElementById("sheetDone");
   if(dn) dn.onclick=function(){
-    var d=sheetDraft;                       /* snapshot before closeSheet() */
+    var id=sheetDraft.id;                   /* snapshot before closeSheet() */
     closeSheet();
-    saveRow({id:d.id,name:d.name,phone:d.phone,note:d.note,followUp:"",createdAt:d.createdAt},
-            "Ticked Off - Still On Your List");
+    setTimeout(function(){ openDoneSheet(id) },220);
   };
 
   document.getElementById("backdrop").classList.add("on");
