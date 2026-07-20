@@ -594,6 +594,36 @@ input, textarea, select, button, optgroup { font-family: inherit; }
   color:#fff;
 }
 
+/* ===================================================================
+   AUTH GATE — covers the app until a known Reputifly account signs in
+   =================================================================== */
+.gate{
+  position:fixed; inset:0; z-index:200; background:var(--color-canvas);
+  display:flex; align-items:center; justify-content:center; padding:24px 18px;
+  overflow-y:auto;
+}
+.gate[hidden]{ display:none; }
+.gatecard{ width:100%; max-width:370px; }
+.gatecard .logo{ height:24px; width:auto; display:block; margin:0 auto 26px; }
+.gatecard h1{ font-size:24px; letter-spacing:-.028em; text-align:center; margin:0 0 6px; }
+.gatecard .sub{ text-align:center; font-size:13.5px; color:var(--color-muted); margin:0 0 26px; line-height:1.5; }
+.gatecard .fieldwrap + .fieldwrap{ margin-top:14px; }
+.gate-err{
+  background:#fff1f0; border:1px solid #ffd4d1; border-radius:var(--radius-md);
+  padding:11px 13px; font-size:13px; color:#c22a1f; line-height:1.45; margin-top:14px;
+}
+.gate-note{ margin-top:22px; text-align:center; font-size:12px; color:var(--color-faint); line-height:1.5; }
+
+.whoami{
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  padding:18px 20px 26px; font-size:12.5px; color:var(--color-faint);
+}
+.whoami button{
+  background:none; border:none; padding:0; font:inherit; cursor:pointer;
+  color:var(--color-primary); font-weight:600;
+}
+.whoami button:hover{ text-decoration:underline; }
+
 #boot{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;background:#fff;transition:opacity .45s cubic-bezier(0.25,0.8,0.25,1)}
 #boot.is-fading{opacity:0;pointer-events:none}
 .boot-logo{height:26px;width:auto;user-select:none;-webkit-user-drag:none}
@@ -702,6 +732,8 @@ input, textarea, select, button, optgroup { font-family: inherit; }
     </div>
   </section>
 
+  <div class="whoami" id="whoami" hidden><span></span>·<button type="button">Sign out</button></div>
+
 </main>
 
 <nav class="tabbar">
@@ -728,9 +760,143 @@ input, textarea, select, button, optgroup { font-family: inherit; }
 
 <div class="toast" id="toast"><span class="ic"></span><span id="toastTxt"></span></div>
 
+<div class="gate" id="gate" hidden>
+  <div class="gatecard">
+    <img class="logo" src="https://reputifly.org/assets/reputifly-logo-black.png" alt="Reputifly" />
+    <h1>Sign in</h1>
+    <p class="sub">Use your Reputifly account — the same one as the control panel.</p>
+    <form id="gateForm" novalidate>
+      <div class="fieldwrap">
+        <label class="label" for="gateEmail">Email</label>
+        <input class="input" id="gateEmail" type="email" autocomplete="username" inputmode="email" placeholder="you@reputifly.com" required />
+      </div>
+      <div class="fieldwrap">
+        <label class="label" for="gatePass">Password</label>
+        <input class="input" id="gatePass" type="password" autocomplete="current-password" placeholder="••••••••" required />
+      </div>
+      <div class="gate-err" id="gateErr" hidden></div>
+      <button class="btn btn--primary" id="gateBtn" type="submit" style="width:100%;margin-top:18px">Sign in</button>
+    </form>
+    <p class="gate-note">Only Reputifly accounts can open this.</p>
+  </div>
+</div>
+
+<script type="module">
+/* ===================================================================
+   Auth — reuses the SAME Firebase project as the Reputifly control
+   panel (reputifly-automation), so there is one set of logins, not two.
+   The backend re-verifies every token, so this gate is not the security
+   boundary — it is the UX. See verifyToken_() in Code.gs.
+   =================================================================== */
+const AUTH_ON = window.__AUTH_ON === true;
+
+const gate = document.getElementById("gate");
+const errBox = document.getElementById("gateErr");
+
+function showErr(msg){ errBox.textContent = msg; errBox.hidden = false; }
+function hideErr(){ errBox.hidden = true; }
+
+/* Auth off → run the app exactly as before, with no token. */
+if (!AUTH_ON) {
+  window.__rflyToken = () => Promise.resolve("");
+  window.__boot();
+} else {
+  gate.hidden = false;
+  const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js");
+  const { getAuth, signInWithEmailAndPassword, onAuthStateChanged, setPersistence,
+          browserLocalPersistence, signOut } =
+    await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js");
+
+  const app = initializeApp({
+    apiKey: "AIzaSyB4_6wJOcQddUFz8BemeG9HQgbuZtoHp20",
+    authDomain: "reputifly-automation.firebaseapp.com",
+    projectId: "reputifly-automation",
+    storageBucket: "reputifly-automation.firebasestorage.app",
+    messagingSenderId: "1095726999398",
+    appId: "1:1095726999398:web:4e26ec90770da0244c0aa7",
+  });
+  const auth = getAuth(app);
+  await setPersistence(auth, browserLocalPersistence);
+
+  let booted = false;
+  window.__rflyToken = () =>
+    auth.currentUser ? auth.currentUser.getIdToken() : Promise.resolve("");
+
+  /* Ask the backend whether this account is actually allowed in.
+     The email allowlist lives in ONE place — Code.gs — so adding a
+     teammate never means editing and redeploying these pages. */
+  function whoami(token){
+    return new Promise((resolve) => {
+      const cb = "wa_" + Math.floor(performance.now() * 1000);
+      const s = document.createElement("script");
+      const to = setTimeout(() => { cleanup(); resolve({ ok:false, error:"timeout" }); }, 15000);
+      function cleanup(){ clearTimeout(to); delete window[cb]; if (s.parentNode) s.remove(); }
+      window[cb] = (d) => { cleanup(); resolve(d); };
+      s.onerror = () => { cleanup(); resolve({ ok:false, error:"network" }); };
+      s.src = window.__ENDPOINT + "?action=whoami&callback=" + cb + "&t=" + encodeURIComponent(token);
+      document.body.appendChild(s);
+    });
+  }
+
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) { gate.hidden = false; return; }
+    const token = await user.getIdToken();
+    const who = await whoami(token);
+    if (!who || !who.ok || !who.allowed) {
+      await signOut(auth);
+      gate.hidden = false;
+      showErr(who && who.error === "network"
+        ? "Could not reach the server. Check your connection and try again."
+        : "That account does not have access. Ask Julian to add it.");
+      return;
+    }
+    window.__me = who;
+    gate.hidden = true;
+    if (!booted) { booted = true; window.__boot(); }
+    const w = document.getElementById("whoami");
+    if (w) {
+      w.hidden = false;
+      w.querySelector("span").textContent = who.email;
+      w.querySelector("button").onclick = () => signOut(auth).then(() => location.reload());
+    }
+  });
+
+  document.getElementById("gateForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    hideErr();
+    const btn = document.getElementById("gateBtn");
+    const email = document.getElementById("gateEmail").value.trim();
+    const pass = document.getElementById("gatePass").value;
+    if (!email || !pass) { showErr("Enter your email and password."); return; }
+    btn.disabled = true; btn.textContent = "Signing in…";
+    try {
+      await signInWithEmailAndPassword(auth, email, pass);
+      /* onAuthStateChanged takes it from here */
+    } catch (err) {
+      const map = {
+        "auth/invalid-credential": "Wrong email or password.",
+        "auth/wrong-password": "Wrong email or password.",
+        "auth/user-not-found": "No account for that email.",
+        "auth/invalid-email": "That email does not look right.",
+        "auth/too-many-requests": "Too many tries. Wait a minute and try again.",
+        "auth/network-request-failed": "No connection. Try again.",
+        "auth/unauthorized-domain": "This domain is not authorised in Firebase yet.",
+      };
+      showErr(map[err.code] || ("Could not sign in (" + (err.code || "unknown") + ")."));
+    } finally {
+      btn.disabled = false; btn.textContent = "Sign in";
+    }
+  });
+}
+</script>
+
+
 <script>
 var ENDPOINT="https://script.google.com/macros/s/AKfycbzv9qV2UHNvCRW5lWyrwEC2E3TNaNOu6z-dtPJwJ_XFZscS5GUVZ5OZ_q9Ad6HlvjDa2Q/exec";
 var DRAFT_KEY="rfly_digest_draft_v4";
+/* Flip to true ONLY after every account exists in Firebase and is in
+   ALLOWED_EMAILS in Code.gs — otherwise Farhan cannot file the digest. */
+var AUTH_ON=false;
 /* localhost never posts to the live endpoint — tap freely, nothing reaches Julian */
 var PREVIEW=location.protocol==="file:"||/^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(location.hostname);
 
@@ -981,8 +1147,12 @@ document.getElementById("submitBtn").onclick=function(){
     return;
   }
   toast("Sending…","busy");
-  fetch(ENDPOINT,{method:"POST",mode:"no-cors",
-    headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload())})
+  window.__rflyToken().then(function(tok){
+    var body=payload();
+    if(tok) body.idToken=tok;
+    return fetch(ENDPOINT,{method:"POST",mode:"no-cors",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(body)});
+  })
   .then(function(){
     localStorage.removeItem(DRAFT_KEY);
     toastOff();
@@ -996,9 +1166,15 @@ document.getElementById("submitBtn").onclick=function(){
   .catch(function(){toast("Failed — check your connection","err");btn.disabled=false});
 };
 
-/* ---------- go ---------- */
-if(PREVIEW) document.getElementById("pvBanner").style.display="";
-restore(); renderRows(); renderSummary();
+/* ---------- go ----------
+   __boot() is called by the auth gate: immediately when auth is off, or
+   once a known account has signed in. Nothing loads before that. */
+window.__ENDPOINT=ENDPOINT;
+window.__AUTH_ON=AUTH_ON;
+window.__boot=function(){
+  if(PREVIEW) document.getElementById("pvBanner").style.display="";
+  restore(); renderRows(); renderSummary();
+};
 window.addEventListener("load",function(){
   setTimeout(function(){
     var b=document.getElementById("boot");
