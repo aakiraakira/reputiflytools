@@ -2743,8 +2743,14 @@ async function bootstrapData(uid) {
   ));
 
   state.loading.initial = false;
-  initDraft();
-  render();
+  // The app is already interactive by the time this runs — showApp() paints the
+  // Create tab, then this function awaits settings + counters over the network.
+  // An unconditional initDraft() here REPLACED state.draft, throwing away
+  // anything typed during that window (the "my text disappears when the invoice
+  // number loads" bug — no amount of repaint-guarding survives the draft object
+  // itself being swapped). Only seed a draft if there genuinely isn't one.
+  if (!state.draft) initDraft();
+  renderBackground();
 }
 
 async function ensureCounter(uid, name, prefix, padding) {
@@ -6412,23 +6418,33 @@ document.getElementById('new-library-btn').addEventListener('click', () => promp
 // line item, toggling a field) still repaint instantly via render().
 let pendingBackgroundRender = false;
 
-function isEditingCreation() {
-  if (state.route !== 'creation') return false;
-  const host = document.getElementById('creation-wrap');
+// True while the user has focus in ANY editable field in the app.
+//
+// This deliberately is NOT scoped to the Create tab. render() also rebuilds the
+// DRAWER (it's route-independent), and the drawer's line-item editor keeps its
+// own working copy of the items — so a snapshot landing while someone edits a
+// description there discarded the edit and replaced the input node under the
+// cursor. That was the "editing a line item description just fails" bug.
+// Anything the user can type into gets the same protection.
+function isUserEditing() {
   const active = document.activeElement;
-  return !!(host && active && active !== document.body && host.contains(active));
+  if (!active || active === document.body) return false;
+  if (active.isContentEditable) return true;
+  const tag = active.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  return false;
 }
 
 function renderBackground() {
-  if (isEditingCreation()) { pendingBackgroundRender = true; return; }
+  if (isUserEditing()) { pendingBackgroundRender = true; return; }
   render();
 }
 
-// Flush on the next tick so that tabbing between two fields INSIDE the editor
-// (focusout fires before the new field takes focus) doesn't count as leaving.
+// Flush on the next tick so that tabbing between two fields (focusout fires
+// before the next field takes focus) doesn't count as leaving.
 document.addEventListener('focusout', () => {
   setTimeout(() => {
-    if (pendingBackgroundRender && !isEditingCreation()) {
+    if (pendingBackgroundRender && !isUserEditing()) {
       pendingBackgroundRender = false;
       render();
     }
@@ -6648,8 +6664,9 @@ window.__reputifly = {
     return pdf.output('datauristring');
   },
   // Probes for the background-render guard.
+  _test_initDraft: () => { if (!state.draft) initDraft(); },
   _test_renderBackground: () => renderBackground(),
-  _test_isEditingCreation: () => isEditingCreation(),
+  _test_isUserEditing: () => isUserEditing(),
   _test_pendingBgRender: () => pendingBackgroundRender,
   // Read-only terms probes for the headless audits.
   _test_resolveTerms: (d) => resolveTerms(d),
