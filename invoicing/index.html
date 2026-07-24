@@ -1145,11 +1145,18 @@ input[type="date"]::-webkit-datetime-edit { text-align: left; }
   border-radius: var(--r-md);
   padding: 12px;
   display: grid;
-  grid-template-columns: 1fr 60px 100px 100px 28px;
+  /* bottom row: Qty | Rate | Amount | remove. Description and subtitle each
+     span the full width above it. */
+  grid-template-columns: 72px 1fr 1fr 40px;
   gap: 8px;
-  align-items: start;
+  align-items: center;
 }
 .drawer-item .input { font-size: 13px; padding: 8px 10px; background: white; }
+.drawer-item > .item-desc-input,
+.drawer-item > .item-sub-input { grid-column: 1 / -1; }
+.drawer-item > .item-sub-input { font-size: 12px; color: var(--ink-muted); }
+.drawer-item > .item-amt-input { color: var(--ink-muted); }
+.drawer-item > .item-rm { width: 40px; height: 40px; justify-self: end; }
 
 /* ═══════════════════════════════════════════════════════════════════
    ADVANCED TAB
@@ -1671,10 +1678,10 @@ input[type="date"]::-webkit-datetime-edit { text-align: left; }
   .form-grid { grid-template-columns: 1fr; }
 
   .drawer-item {
-    grid-template-columns: 1fr 1fr 1fr 28px;
+    grid-template-columns: 64px 1fr 1fr 40px;
     gap: 8px;
   }
-  .drawer-item > .item-desc-input { grid-column: 1 / -1; }
+  /* desc + sub already span 1 / -1 from the base rule */
 
   .drawer-foot { padding: 12px 14px; gap: 8px; }
   .drawer-foot .actions .btn { font-size: 12px; padding: 8px 12px; }
@@ -5151,12 +5158,16 @@ function renderDrawer() {
     itemsHost.innerHTML = '';
     editableItems.forEach((it, idx) => {
       const r = document.createElement('div'); r.className = 'drawer-item';
+      // Description AND subtitle are both editable here now — the subtitle
+      // ("the subtext thing") had no input at all before, so an item's detail
+      // line was invisible and impossible to change from a draft.
       r.innerHTML = `
         <input class="input item-desc-input" placeholder="Description" data-k="description" value="${escapeHtml(it.description || '')}">
-        <input class="input" type="number" min="0" step="0.01" data-k="qty" value="${it.qty}">
-        <input class="input" type="number" min="0" step="0.01" data-k="rate" value="${it.rate}">
-        <input class="input" disabled value="${escapeHtml(fmtMoney((Number(it.qty)||0)*(Number(it.rate)||0)))}">
-        <button class="icon-btn" title="Remove">
+        <input class="input item-sub-input" placeholder="Subtitle / extra detail (optional)" data-k="subtitle" value="${escapeHtml(it.subtitle || '')}">
+        <input class="input item-qty-input" type="number" min="0" step="0.01" data-k="qty" value="${it.qty}">
+        <input class="input item-rate-input" type="number" min="0" step="0.01" data-k="rate" value="${it.rate}">
+        <input class="input item-amt-input" disabled value="${escapeHtml(fmtMoney((Number(it.qty)||0)*(Number(it.rate)||0)))}">
+        <button class="icon-btn item-rm" title="Remove item" aria-label="Remove item">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       `;
@@ -5165,12 +5176,15 @@ function renderDrawer() {
           const k = inp.dataset.k;
           if (!k) return;
           if (k === 'qty' || k === 'rate') it[k] = Number(inp.value) || 0;
-          else it[k] = inp.value;
-          // recompute amount only
-          r.children[3].value = fmtMoney((Number(it.qty)||0) * (Number(it.rate)||0));
+          else it[k] = inp.value;   // description + subtitle
+          // Recompute the amount by CLASS, not child index — inserting the
+          // subtitle input shifted the positions, and r.children[3] used to
+          // point at the amount field.
+          const amtEl = r.querySelector('.item-amt-input');
+          if (amtEl) amtEl.value = fmtMoney((Number(it.qty)||0) * (Number(it.rate)||0));
         });
       });
-      r.querySelector('button.icon-btn').addEventListener('click', () => {
+      r.querySelector('button.item-rm').addEventListener('click', () => {
         if (editableItems.length === 1) { showToast('Need at least one item', 'warn'); return; }
         editableItems.splice(idx, 1); renderItems();
       });
@@ -5182,7 +5196,7 @@ function renderDrawer() {
   addBtn.className = 'btn dashed sm'; addBtn.textContent = '+ Add line item';
   addBtn.style.alignSelf = 'flex-start'; addBtn.style.marginTop = '6px';
   addBtn.addEventListener('click', () => {
-    editableItems.push({ description: '', qty: 1, rate: 0, amount: 0 }); renderItems();
+    editableItems.push({ description: '', subtitle: '', qty: 1, rate: 0, amount: 0 }); renderItems();
   });
   body.appendChild(addBtn);
 
