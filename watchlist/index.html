@@ -844,6 +844,10 @@ if (!AUTH_ON) {
   const { getAuth, signInWithEmailAndPassword, onAuthStateChanged, setPersistence,
           browserLocalPersistence, signOut } =
     await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js");
+  /* The whole trick to never flashing the login at someone already signed in:
+     onAuthStateChanged can fire ONCE with null before the stored session has
+     finished loading, and acting on that first null is what shows the gate for
+     a second. authStateReady() resolves only when the real state is settled. */
 
   const app = initializeApp({
     apiKey: "AIzaSyB4_6wJOcQddUFz8BemeG9HQgbuZtoHp20",
@@ -884,7 +888,11 @@ if (!AUTH_ON) {
     if (msg) showErr(msg);
   }
 
-  onAuthStateChanged(auth, async (user) => {
+  /* Settle the stored session BEFORE deciding anything. Everything below this
+     line is acting on the real answer, never on a not-loaded-yet null. */
+  await auth.authStateReady();
+
+  async function decide(user){
     if (!user) { revealGate(); return; }
     const token = await user.getIdToken();
     const who = await whoami(token);
@@ -909,7 +917,11 @@ if (!AUTH_ON) {
       w.querySelector("span").textContent = who.email;
       w.querySelector("button").onclick = () => signOut(auth).then(() => location.reload());
     }
-  });
+  }
+
+  await decide(auth.currentUser);
+  /* Keep watching so a sign-out in another tab still locks this one. */
+  onAuthStateChanged(auth, (u) => { if (!u && booted) location.reload(); });
 
   document.getElementById("gateForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -920,8 +932,9 @@ if (!AUTH_ON) {
     if (!email || !pass) { showErr("Enter your email and password."); return; }
     btn.disabled = true; btn.textContent = "Signing in…";
     try {
-      await signInWithEmailAndPassword(auth, email, pass);
-      /* onAuthStateChanged takes it from here */
+      const cred = await signInWithEmailAndPassword(auth, email, pass);
+      hideErr();
+      await decide(cred.user);
     } catch (err) {
       const map = {
         "auth/invalid-credential": "Wrong email or password.",
