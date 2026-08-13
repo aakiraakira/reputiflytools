@@ -1,0 +1,117 @@
+name: Leads resilience
+
+on:
+  pull_request:
+    paths:
+      - "watchlist/**"
+      - "daily-digest/**"
+      - "firebase-leads/**"
+      - "tests/frontend/**"
+      - "scripts/leads/**"
+      - "docs/leads-recovery.md"
+      - ".github/workflows/leads.yml"
+      - ".gitignore"
+  push:
+    branches: [main]
+    paths:
+      - "watchlist/**"
+      - "daily-digest/**"
+      - "firebase-leads/**"
+      - "tests/frontend/**"
+      - "scripts/leads/**"
+      - "docs/leads-recovery.md"
+      - ".github/workflows/leads.yml"
+      - ".gitignore"
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leads-resilience-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+jobs:
+  verify-source-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Test operational tooling
+        run: node --test scripts/leads/test/*.test.mjs
+
+      - name: Generate and validate Firebase Hosting artifacts
+        run: |
+          node scripts/leads/generate-hosting.mjs
+          node scripts/leads/generate-hosting.mjs --check
+          node scripts/leads/validate-hosting.mjs
+          node scripts/leads/static-frontend-test.mjs
+
+      - name: Run discovered frontend package tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in watchlist daily-digest tests/frontend; do
+            if [[ ! -f "$app/package.json" ]]; then
+              echo "No package tests discovered in $app"
+              continue
+            fi
+            if [[ ! -f "$app/package-lock.json" ]]; then
+              echo "$app/package.json exists without a lockfile" >&2
+              exit 1
+            fi
+            if node -e "const p=require('./$app/package.json'); process.exit(p.scripts?.test ? 0 : 1)"; then
+              npm ci --prefix "$app" --ignore-scripts
+              npm test --prefix "$app"
+            else
+              echo "No test script discovered in $app/package.json"
+            fi
+          done
+
+      - name: Build and test discovered Firebase backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f firebase-leads/functions/package.json ]]; then
+            echo "No Firebase backend package discovered"
+            exit 0
+          fi
+          if [[ ! -f firebase-leads/functions/package-lock.json ]]; then
+            echo "Backend package-lock.json is required for reproducible CI" >&2
+            exit 1
+          fi
+          npm ci --prefix firebase-leads/functions --ignore-scripts
+          npm run typecheck --prefix firebase-leads/functions --if-present
+          npm test --prefix firebase-leads/functions --if-present
+          npm run build --prefix firebase-leads/functions --if-present
+          npm audit --prefix firebase-leads/functions --omit=dev --audit-level=high
+          node scripts/leads/backend-contract-gate.mjs
+
+  production-read-only-monitor:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: verify-source-and-build
+    env:
+      LEADS_CANARY_EMAIL: ${{ secrets.LEADS_CANARY_EMAIL }}
+      LEADS_CANARY_PASSWORD: ${{ secrets.LEADS_CANARY_PASSWORD }}
+      LEGACY_FIREBASE_API_KEY: ${{ secrets.LEGACY_FIREBASE_API_KEY }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Generate expected hosting bytes
+        run: node scripts/leads/generate-hosting.mjs
+      - name: Verify unauthenticated boundaries
+        run: node scripts/leads/security-smoke.mjs
+      - name: Verify exact deployed hosting bytes
+        run: node scripts/leads/verify-deployment.mjs
+      - name: Mint fresh viewer token and verify authenticated read contract
+        run: node scripts/leads/canary-smoke.mjs
