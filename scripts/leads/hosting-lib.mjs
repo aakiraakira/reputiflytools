@@ -53,8 +53,8 @@ export function validateFirebaseHostingConfig(config) {
     const site = sites.find((entry) => entry?.target === target);
     if (!site) throw new Error(`firebase.json: missing Hosting target '${target}'`);
     if (site.public !== publicDir) throw new Error(`firebase.json: '${target}' public directory must be '${publicDir}'`);
-    const rule = site.headers?.find((entry) => entry?.source === "**/*.@(html|js|css)");
-    if (!rule || !Array.isArray(rule.headers)) throw new Error(`firebase.json: '${target}' lacks the HTML/JS/CSS header rule`);
+    const rule = site.headers?.find((entry) => entry?.source === "**");
+    if (!rule || !Array.isArray(rule.headers)) throw new Error(`firebase.json: '${target}' lacks the all-path security header rule`);
     const values = new Map(rule.headers.map((entry) => [String(entry?.key || "").toLowerCase(), entry?.value]));
     validateHostingHeaders((name) => values.get(name), `firebase.json ${target}`);
   }

@@ -164,8 +164,8 @@ test("both Hosting targets require exact no-cache and anti-framing headers", () 
   const headers = Object.entries(REQUIRED_HOSTING_HEADERS).map(([key, value]) => ({ key, value }));
   const config = {
     hosting: [
-      { target: "watchlist", public: "hosting/watchlist", headers: [{ source: "**/*.@(html|js|css)", headers }] },
-      { target: "digest", public: "hosting/daily-digest", headers: [{ source: "**/*.@(html|js|css)", headers }] },
+      { target: "watchlist", public: "hosting/watchlist", headers: [{ source: "**", headers }] },
+      { target: "digest", public: "hosting/daily-digest", headers: [{ source: "**", headers }] },
     ],
   };
   assert.equal(validateFirebaseHostingConfig(config), true);
