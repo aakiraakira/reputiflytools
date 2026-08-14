@@ -48,7 +48,12 @@ export function validateHostingHeaders(getHeader, label = "hosting") {
 
 export function validateFirebaseHostingConfig(config) {
   const sites = Array.isArray(config?.hosting) ? config.hosting : [];
-  const expectedTargets = { watchlist: "hosting/watchlist", digest: "hosting/daily-digest" };
+  const expectedTargets = {
+    watchlist: "hosting/watchlist",
+    "watchlist-legacy": "hosting/watchlist",
+    digest: "hosting/daily-digest",
+    "digest-legacy": "hosting/daily-digest",
+  };
   for (const [target, publicDir] of Object.entries(expectedTargets)) {
     const site = sites.find((entry) => entry?.target === target);
     if (!site) throw new Error(`firebase.json: missing Hosting target '${target}'`);

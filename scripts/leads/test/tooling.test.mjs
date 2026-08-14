@@ -160,12 +160,14 @@ test("hosting transform changes only legacy cross-links", () => {
   assert.equal(result, `<a href="${WATCHLIST_URL}">W</a><a href="${DIGEST_URL}">D</a><script>const API="${API_BASE}"</script>`);
 });
 
-test("both Hosting targets require exact no-cache and anti-framing headers", () => {
+test("all primary and compatibility Hosting targets require exact security headers", () => {
   const headers = Object.entries(REQUIRED_HOSTING_HEADERS).map(([key, value]) => ({ key, value }));
   const config = {
     hosting: [
       { target: "watchlist", public: "hosting/watchlist", headers: [{ source: "**", headers }] },
+      { target: "watchlist-legacy", public: "hosting/watchlist", headers: [{ source: "**", headers }] },
       { target: "digest", public: "hosting/daily-digest", headers: [{ source: "**", headers }] },
+      { target: "digest-legacy", public: "hosting/daily-digest", headers: [{ source: "**", headers }] },
     ],
   };
   assert.equal(validateFirebaseHostingConfig(config), true);
