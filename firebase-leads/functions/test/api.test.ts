@@ -107,7 +107,7 @@ describe("HTTP API", () => {
 
     await request(app)
       .get("/healthz")
-      .set("origin", "https://daily-digest-2.web.app")
+      .set("origin", "https://daily-digest-v2.web.app")
       .expect(200);
   });
 

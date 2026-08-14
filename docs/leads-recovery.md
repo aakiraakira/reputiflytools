@@ -2,9 +2,11 @@
 
 Last reviewed: 2026-08-14 (Asia/Singapore)
 
-This runbook covers the new `reputifly-leads-2` Firebase backend, the
-`reputifly-leads-2.web.app` Watchlist, and the `daily-digest-2.web.app` Daily
-Digest. “Never breaks” cannot be guaranteed. The operating target is instead:
+This runbook covers the new `reputifly-leads-2` Firebase backend, the primary
+`watchlist-v2.web.app` Watchlist, and the primary `daily-digest-v2.web.app`
+Daily Digest. The earlier `reputifly-leads-2.web.app` and
+`daily-digest-2.web.app` sites remain compatible aliases. “Never breaks”
+cannot be guaranteed. The operating target is instead:
 fail closed on authorization, never turn a failed read into an empty list,
 never claim an unconfirmed write succeeded, preserve a recoverable copy of the
 data, and detect drift before a user does.

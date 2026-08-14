@@ -129,6 +129,10 @@ Allowed browser origins:
 - `https://reputifly-leads-2.firebaseapp.com`
 - `https://daily-digest-2.web.app`
 - `https://daily-digest-2.firebaseapp.com`
+- `https://watchlist-v2.web.app`
+- `https://watchlist-v2.firebaseapp.com`
+- `https://daily-digest-v2.web.app`
+- `https://daily-digest-v2.firebaseapp.com`
 - HTTP/HTTPS localhost, `127.0.0.1`, and `[::1]`, with any development port
 
 ### Session and leads

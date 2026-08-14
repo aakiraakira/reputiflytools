@@ -38,6 +38,10 @@ const EXACT_ORIGINS = new Set([
   "https://reputifly-leads-2.firebaseapp.com",
   "https://daily-digest-2.web.app",
   "https://daily-digest-2.firebaseapp.com",
+  "https://watchlist-v2.web.app",
+  "https://watchlist-v2.firebaseapp.com",
+  "https://daily-digest-v2.web.app",
+  "https://daily-digest-v2.firebaseapp.com",
 ]);
 
 type AuthenticatedRequest = Request & { actor: Actor; requestId: string };

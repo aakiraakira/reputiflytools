@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const PROJECT_ID = "reputifly-leads-2";
 export const API_BASE = `https://asia-southeast1-${PROJECT_ID}.cloudfunctions.net/api`;
-export const WATCHLIST_URL = `https://${PROJECT_ID}.web.app/`;
-export const DIGEST_URL = "https://daily-digest-2.web.app/";
+export const WATCHLIST_URL = "https://watchlist-v2.web.app/";
+export const DIGEST_URL = "https://daily-digest-v2.web.app/";
 export const DEFAULT_TIMEOUT_MS = 15_000;
 
 export function sha256(value) {
