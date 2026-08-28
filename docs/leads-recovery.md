@@ -469,6 +469,16 @@ the normal credential-rotation schedule. Disable the account/member while
 investigating unexplained sign-ins, then provision a replacement and confirm one
 green manual monitor before restoring the schedule.
 
+For an intentional release E2E, temporarily change only the dedicated canary
+member document from `viewer` to `member`, dispatch `Leads resilience` with
+`production_e2e=true`, and restore `viewer` in a `finally`/operator cleanup even
+if the workflow fails. The write job is separately guarded by
+`ALLOW_PRODUCTION_E2E=watchlist-v2-controlled-write`; it creates one non-PII
+lead, proves create/update/follow-up/archive, submits one stable daily Digest,
+and requires persisted Telegram delivery proof. Use its `E2E_MANIFEST` to
+delete only the exact synthetic lead, follow-up/audit/outbox/digest documents
+and Telegram message. Never leave the canary with write authority.
+
 Configure independent alerts outside Telegram (email/pager) so a Telegram
 failure can still alert someone:
 

@@ -25,6 +25,12 @@ on:
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
+    inputs:
+      production_e2e:
+        description: "Run controlled production write and Telegram delivery proof"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -94,7 +100,7 @@ jobs:
           node scripts/leads/backend-contract-gate.mjs
 
   production-read-only-monitor:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.production_e2e != true)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: verify-source-and-build
@@ -115,3 +121,21 @@ jobs:
         run: node scripts/leads/verify-deployment.mjs
       - name: Mint fresh viewer token and verify authenticated read contract
         run: node scripts/leads/canary-smoke.mjs
+
+  production-write-e2e:
+    if: github.event_name == 'workflow_dispatch' && inputs.production_e2e == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: verify-source-and-build
+    env:
+      LEADS_CANARY_EMAIL: ${{ secrets.LEADS_CANARY_EMAIL }}
+      LEADS_CANARY_PASSWORD: ${{ secrets.LEADS_CANARY_PASSWORD }}
+      LEGACY_FIREBASE_API_KEY: ${{ secrets.LEGACY_FIREBASE_API_KEY }}
+      ALLOW_PRODUCTION_E2E: watchlist-v2-controlled-write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Prove Watchlist transactions and Telegram delivery
+        run: node scripts/leads/production-e2e.mjs
