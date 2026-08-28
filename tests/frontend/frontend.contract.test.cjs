@@ -480,7 +480,9 @@ test("digest cannot submit with either required count missing", async () => {
 });
 
 test("digest payload date is derived from the canonical Singapore business day", () => {
-  const dom = makeDom(DIGEST_PATH);
+  // Use a production origin: localhost intentionally runs in preview mode and
+  // owns its date locally, so it cannot prove the authenticated server-day path.
+  const dom = makeDom(DIGEST_PATH, "https://daily-digest-v2.web.app/");
   try {
     executeClassic(dom, DIGEST_PATH);
     dom.window.__boot(session());
