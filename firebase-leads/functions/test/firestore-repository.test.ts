@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FieldValue } from "firebase-admin/firestore";
 import { FirestoreRepository } from "../src/firestore-repository";
 
 describe("FirestoreRepository corrupt outbox isolation", () => {
@@ -90,5 +91,75 @@ describe("FirestoreRepository corrupt outbox isolation", () => {
       },
     });
     expect(JSON.stringify(documents.get("bad"))).not.toContain("PersistedDataError");
+  });
+
+  it("deletes transient lease and error fields instead of persisting null", async () => {
+    const at = "2026-08-14T00:00:00.000Z";
+    const outbox = {
+      type: "digest",
+      digestId: "digest-1",
+      status: "processing",
+      text: "Send",
+      attempts: 1,
+      availableAt: at,
+      createdAt: at,
+      updatedAt: at,
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-08-14T00:01:05.000Z",
+    };
+    type Ref = { id: string; path: string };
+    const updates: Array<{ ref: Ref; patch: Record<string, unknown> }> = [];
+    const fakeDb = {
+      collection(name: string) {
+        return {
+          doc(id: string): Ref {
+            return { id, path: `${name}/${id}` };
+          },
+        };
+      },
+      async runTransaction<T>(callback: (transaction: {
+        get(ref: Ref): Promise<{ exists: boolean; id: string; data(): Record<string, unknown> }>;
+        update(ref: Ref, patch: Record<string, unknown>): void;
+      }) => Promise<T>): Promise<T> {
+        return callback({
+          async get(ref) {
+            return { exists: true, id: ref.id, data: () => structuredClone(outbox) };
+          },
+          update(ref, patch) {
+            updates.push({ ref, patch });
+          },
+        });
+      },
+    };
+    const repository = new FirestoreRepository(fakeDb as never);
+
+    await repository.markOutboxDelivered({
+      id: "outbox-1",
+      leaseOwner: "worker-1",
+      now: at,
+      telegramMessageId: 112,
+      responseStatus: 200,
+    });
+
+    expect(updates).toHaveLength(2);
+    expect(updates[0]?.ref.path).toBe("notificationOutbox/outbox-1");
+    expect(updates[0]?.patch.leaseOwner).toEqual(FieldValue.delete());
+    expect(updates[0]?.patch.leaseExpiresAt).toEqual(FieldValue.delete());
+    expect(updates[1]?.ref.path).toBe("digests/digest-1");
+    expect(updates[1]?.patch.lastDeliveryError).toEqual(FieldValue.delete());
+    expect(updates.flatMap(({ patch }) => Object.values(patch)).includes(null)).toBe(false);
+
+    updates.length = 0;
+    await expect(repository.markOutboxFailed({
+      id: "outbox-1",
+      leaseOwner: "worker-1",
+      now: at,
+      message: "Temporary Telegram error",
+      maxAttempts: 8,
+      nextAvailableAt: "2026-08-14T00:01:00.000Z",
+    })).resolves.toBe("retry");
+    expect(updates[0]?.patch.leaseOwner).toEqual(FieldValue.delete());
+    expect(updates[0]?.patch.leaseExpiresAt).toEqual(FieldValue.delete());
+    expect(updates.flatMap(({ patch }) => Object.values(patch)).includes(null)).toBe(false);
   });
 });

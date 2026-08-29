@@ -6,6 +6,7 @@ import type {
   QueryDocumentSnapshot,
   Transaction,
 } from "firebase-admin/firestore";
+import { FieldValue } from "firebase-admin/firestore";
 import type {
   Actor,
   AuditEvent,
@@ -570,8 +571,8 @@ export class FirestoreRepository implements Repository {
           transaction.update(ref, {
             status: "dead",
             updatedAt: input.now,
-            leaseOwner: null,
-            leaseExpiresAt: null,
+            leaseOwner: FieldValue.delete(),
+            leaseExpiresAt: FieldValue.delete(),
             lastFailure: {
               at: input.now,
               message: "Stored notification was invalid and was quarantined.",
@@ -615,15 +616,15 @@ export class FirestoreRepository implements Repository {
         updatedAt: input.now,
         telegramMessageId: input.telegramMessageId,
         telegramResponseStatus: input.responseStatus,
-        leaseOwner: null,
-        leaseExpiresAt: null,
+        leaseOwner: FieldValue.delete(),
+        leaseExpiresAt: FieldValue.delete(),
       });
       if (current.digestId) {
         transaction.update(this.db.collection("digests").doc(current.digestId), {
           deliveryStatus: "delivered",
           deliveredAt: input.now,
           telegramMessageId: input.telegramMessageId,
-          lastDeliveryError: null,
+          lastDeliveryError: FieldValue.delete(),
         });
       }
     });
@@ -650,8 +651,8 @@ export class FirestoreRepository implements Repository {
         status: state,
         availableAt: state === "retry" ? input.nextAvailableAt : current.availableAt,
         updatedAt: input.now,
-        leaseOwner: null,
-        leaseExpiresAt: null,
+        leaseOwner: FieldValue.delete(),
+        leaseExpiresAt: FieldValue.delete(),
         lastFailure: {
           at: input.now,
           message: input.message.slice(0, 500),
