@@ -135,11 +135,12 @@ Do not put the legacy server API key or either Telegram value in source,
    when their source or configuration changed.
 
    The scheduled provider ignores a source-level `invoker` option and replaces
-   service-level IAM on deploy. Run
-   `scripts/leads/configure-scheduler-invoker.mjs` immediately after every
-   scheduled deploy; it restores and verifies `run.invoker` on only the three
+   service-level IAM on deploy. The Functions `postdeploy` hook runs
+   `scripts/leads/configure-scheduler-invoker.mjs` automatically after every
+   Functions deploy; it restores and verifies `run.invoker` on only the three
    scheduled services and confirms the Scheduler identity has no Telegram
-   secret access. Always prove a normal HTTP 200 Scheduler completion afterward.
+   secret access. Treat a failed hook as a failed release. Always prove a normal
+   HTTP 200 Scheduler completion afterward.
 
 The API base URL is the deployed `api` Function URL. Do not guess or hardcode a
 URL until Firebase prints the actual deployment result.
