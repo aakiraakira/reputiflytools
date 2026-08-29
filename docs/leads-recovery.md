@@ -95,6 +95,14 @@ synthetic in-memory repository. It verifies response allowlists, server
 metadata, role boundaries, and follow-up idempotency without touching
 Firestore or production.
 
+After deploying scheduled Functions, verify the Firebase-created Scheduler
+OIDC identity has `roles/run.invoker` on only the three private scheduled Cloud
+Run services and no project-level Editor/Owner role. Force-run `outboxWorker`,
+`operationalHealth`, and `morningReminder`; require empty Scheduler status and
+fresh corresponding `system/*` heartbeats before closing the release. The
+reminder outbox ID is deterministic per Singapore day, so a same-day forced
+run cannot enqueue a duplicate.
+
 After an authorized deployment, compare the actual decoded bytes with the local
 artifacts. The verifier also rejects missing or changed cache, content-type,
 referrer, and anti-framing response headers:

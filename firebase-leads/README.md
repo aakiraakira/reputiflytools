@@ -69,8 +69,17 @@ Do not put the legacy server API key or either Telegram value in source,
      roles/logging.logWriter
    ```
 
-   The source binds the API to the first identity and all three schedulers to
-   the second. Do not grant either identity project Editor/Owner.
+   The source binds the API runtime to the first identity and all three
+   scheduled runtimes to the second. Do not grant either identity project
+   Editor/Owner.
+
+   Firebase-created Cloud Scheduler jobs use the project's default Compute
+   service account only as their OIDC caller. It must have **no project-level
+   Editor/Owner role**. Grant it `roles/run.invoker` on exactly
+   `outboxworker`, `operationalhealth`, and `morningreminder`, then force-run
+   all three jobs and verify fresh `system/*` heartbeats. A Functions deploy
+   can recreate scheduler plumbing, so repeat this IAM check after every
+   scheduled-Function deployment.
 4. Create all three Secret Manager values through non-echoing prompts:
 
    ```sh
