@@ -91,7 +91,12 @@ test("follow-up workflow requires one server receipt before local accounting", (
   assert.equal(count(watchlist, /id=["']followUpCommit["']/g), 1, "Follow-up commit control is one sheet-template ID");
   assert.match(watchlist, /\/v1\/leads\/[^\n]*\/follow-ups/);
   assert.match(watchlist, /headers\s*:\s*\{["']Idempotency-Key["']\s*:\s*item\.key\}/);
-  assert.match(watchlist, /var\s+receipt\s*=\s*followUpReceipt\(data,item\)[\s\S]{0,500}applyReceipt\(receipt\.lead\)/);
+  assert.match(watchlist, /if\(!data\.replayed&&!receiptIsStale\)[\s\S]{0,220}applyReceipt\(receipt\.lead\)/,
+    "only a current, non-replayed receipt may update the visible lead");
+  assert.match(watchlist, /if\(i>=0&&Number\(rows\[i\]\.revision\)>Number\(lead\.revision\)\)return false/,
+    "a canonical receipt cannot regress a higher local revision");
+  assert.match(watchlist, /if\(data\.replayed\)\{[\s\S]{0,120}await refreshLeads\(\)/,
+    "historical replay receipts require a canonical list refresh");
   assert.match(watchlist, /Follow-up not confirmed[^\n]*no outcome is counted/);
 });
 

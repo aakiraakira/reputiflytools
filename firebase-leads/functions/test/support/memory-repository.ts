@@ -15,7 +15,7 @@ import type {
 } from "../../src/domain";
 import { AppError } from "../../src/errors";
 import type { Repository } from "../../src/repository";
-import { outboxReady, publicDeliveryStatus } from "../../src/services";
+import { leadCreatedOutboxId, outboxReady, publicDeliveryStatus } from "../../src/services";
 
 export class MemoryRepository implements Repository {
   readonly members = new Map<string, Member>();
@@ -72,6 +72,10 @@ export class MemoryRepository implements Repository {
     ).length;
   }
 
+  async getLeadNotification(leadId: string): Promise<NotificationOutbox | null> {
+    return clone(this.outbox.get(leadCreatedOutboxId(leadId)) ?? null);
+  }
+
   async createLead(input: {
     actor: Actor;
     lead: LeadInput;
@@ -80,6 +84,7 @@ export class MemoryRepository implements Repository {
     idempotencyKey?: string;
     payloadHash: string;
     businessDate: string;
+    notificationText?: string;
   }): Promise<LeadCreation> {
     const existing = this.leads.get(input.id);
     if (existing) {
@@ -105,8 +110,25 @@ export class MemoryRepository implements Repository {
       ...(input.idempotencyKey ? { createIdempotencyKey: input.idempotencyKey } : {}),
       createPayloadHash: input.payloadHash,
     };
+    const outboxId = leadCreatedOutboxId(lead.id);
+    if (input.notificationText && this.outbox.has(outboxId)) {
+      throw new AppError(409, "conflict", "Lead notification already exists.");
+    }
     this.leads.set(lead.id, clone(lead));
     this.audits.push({ actorUid: input.actor.uid, action: "lead.created", at: input.now, businessDate: input.businessDate });
+    if (input.notificationText) {
+      this.outbox.set(outboxId, {
+        id: outboxId,
+        type: "lead_created",
+        leadId: lead.id,
+        status: "pending",
+        text: input.notificationText,
+        attempts: 0,
+        availableAt: input.now,
+        createdAt: input.now,
+        updatedAt: input.now,
+      });
+    }
     return { lead: clone(lead), replayed: false };
   }
 
@@ -117,6 +139,7 @@ export class MemoryRepository implements Repository {
     expectedRevision: number;
     now: string;
     businessDate: string;
+    notificationText?: string;
   }): Promise<{ lead: Lead; created: boolean }> {
     const current = this.leads.get(input.id);
     if (!current) {
@@ -131,8 +154,25 @@ export class MemoryRepository implements Repository {
         updatedAt: input.now,
         updatedBy: input.actor.uid,
       };
+      const outboxId = leadCreatedOutboxId(lead.id);
+      if (input.notificationText && this.outbox.has(outboxId)) {
+        throw new AppError(409, "conflict", "Lead notification already exists.");
+      }
       this.leads.set(input.id, clone(lead));
       this.audits.push({ actorUid: input.actor.uid, action: "lead.upserted", at: input.now, businessDate: input.businessDate });
+      if (input.notificationText) {
+        this.outbox.set(outboxId, {
+          id: outboxId,
+          type: "lead_created",
+          leadId: lead.id,
+          status: "pending",
+          text: input.notificationText,
+          attempts: 0,
+          availableAt: input.now,
+          createdAt: input.now,
+          updatedAt: input.now,
+        });
+      }
       return { lead: clone(lead), created: true };
     }
     if (current.revision !== input.expectedRevision) {
@@ -500,17 +540,19 @@ export class MemoryRepository implements Repository {
     oldestOutstandingAt?: string;
   }> {
     const outstanding = [...this.outbox.values()].filter(
-      (item) => item.status === "pending" || item.status === "retry",
+      (item) => item.status === "pending" || item.status === "retry" || item.status === "processing",
     );
-    const staleAvailable = outstanding.filter((item) => item.availableAt <= input.staleBefore).length;
-    const staleLeases = [...this.outbox.values()].filter(
+    const staleIds = new Set(outstanding
+      .filter((item) => item.createdAt <= input.staleBefore)
+      .map((item) => item.id));
+    [...this.outbox.values()].filter(
       (item) => item.status === "processing" && !!item.leaseExpiresAt && item.leaseExpiresAt <= input.now,
-    ).length;
+    ).forEach((item) => staleIds.add(item.id));
     const oldestOutstandingAt = outstanding
-      .map((item) => item.availableAt)
+      .map((item) => item.createdAt)
       .sort()[0];
     return {
-      staleOutboxCount: staleAvailable + staleLeases,
+      staleOutboxCount: staleIds.size,
       deadOutboxCount: [...this.outbox.values()].filter((item) => item.status === "dead").length,
       ...(oldestOutstandingAt ? { oldestOutstandingAt } : {}),
     };

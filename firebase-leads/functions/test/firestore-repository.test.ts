@@ -3,6 +3,52 @@ import { FieldValue } from "firebase-admin/firestore";
 import { FirestoreRepository } from "../src/firestore-repository";
 
 describe("FirestoreRepository corrupt outbox isolation", () => {
+  it("paginates the active Watchlist instead of silently dropping lead 501", async () => {
+    const at = "2026-08-14T00:00:00.000Z";
+    let readCount = 0;
+    const documents = Array.from({ length: 501 }, (_, index) => ({
+      id: `lead-${String(index).padStart(4, "0")}`,
+      data: () => ({
+        id: `lead-${String(index).padStart(4, "0")}`,
+        name: `Lead ${index}`,
+        phone: "",
+        note: "Safe pagination fixture",
+        followUp: "",
+        status: "active",
+        revision: 1,
+        createdAt: at,
+        createdBy: "migration",
+        updatedAt: at,
+        updatedBy: "migration",
+      }),
+    }));
+    const makeQuery = (start: number) => ({
+      where() { return this; },
+      orderBy() { return this; },
+      startAfter(snapshot: { id: string }) {
+        const next = documents.findIndex((doc) => doc.id === snapshot.id) + 1;
+        return makeQuery(next);
+      },
+      limit(size: number) {
+        return {
+          async get() {
+            readCount += 1;
+            const docs = documents.slice(start, start + size);
+            return { docs, size: docs.length };
+          },
+        };
+      },
+    });
+    const fakeDb = { collection: () => makeQuery(0) };
+    const repository = new FirestoreRepository(fakeDb as never);
+
+    const leads = await repository.listActiveLeads();
+
+    expect(leads).toHaveLength(501);
+    expect(leads.at(-1)?.id).toBe("lead-0500");
+    expect(readCount).toBe(2);
+  });
+
   it("quarantines a malformed candidate and still claims the healthy row behind it", async () => {
     const at = "2026-08-14T00:00:00.000Z";
     const documents = new Map<string, Record<string, unknown>>([

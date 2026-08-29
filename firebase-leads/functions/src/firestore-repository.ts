@@ -33,7 +33,21 @@ import {
   outboxFromPersisted,
 } from "./persistence";
 import type { Repository } from "./repository";
-import { outboxReady, publicDeliveryStatus } from "./services";
+import { leadCreatedOutboxId, outboxReady, publicDeliveryStatus } from "./services";
+
+function leadCreatedOutbox(id: string, leadId: string, text: string, now: string): NotificationOutbox {
+  return {
+    id,
+    type: "lead_created",
+    leadId,
+    status: "pending",
+    text,
+    attempts: 0,
+    availableAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 export class FirestoreRepository implements Repository {
   constructor(private readonly db: Firestore) {}
@@ -101,13 +115,29 @@ export class FirestoreRepository implements Repository {
   }
 
   async listActiveLeads(): Promise<Lead[]> {
-    const snapshot = await this.db
-      .collection("leads")
-      .where("status", "==", "active")
-      .orderBy("updatedAt", "desc")
-      .limit(500)
-      .get();
-    return snapshot.docs.map((doc) => leadFromSnapshot(doc));
+    const pageSize = 500;
+    const safeResponseLimit = 5_000;
+    const leads: Lead[] = [];
+    let lastDocument: QueryDocumentSnapshot<DocumentData> | undefined;
+
+    for (;;) {
+      let query = this.db
+        .collection("leads")
+        .where("status", "==", "active")
+        .orderBy("updatedAt", "desc");
+      if (lastDocument) query = query.startAfter(lastDocument);
+      const snapshot = await query.limit(pageSize).get();
+      leads.push(...snapshot.docs.map((doc) => leadFromSnapshot(doc)));
+      if (leads.length > safeResponseLimit) {
+        throw new AppError(
+          503,
+          "internal_error",
+          "The Watchlist is above its safe response capacity. Support has been alerted.",
+        );
+      }
+      if (snapshot.size < pageSize) return leads;
+      lastDocument = snapshot.docs[snapshot.docs.length - 1];
+    }
   }
 
   async countDueLeads(localDate: string): Promise<number> {
@@ -121,6 +151,17 @@ export class FirestoreRepository implements Repository {
     return snapshot.data().count;
   }
 
+  async getLeadNotification(leadId: string): Promise<NotificationOutbox | null> {
+    const outboxId = leadCreatedOutboxId(leadId);
+    const snapshot = await this.db.collection("notificationOutbox").doc(outboxId).get();
+    if (!snapshot.exists) return null;
+    const outbox = outboxFromPersisted(snapshot.id, snapshot.data() ?? {});
+    if (outbox.type !== "lead_created" || outbox.leadId !== leadId) {
+      throw new PersistedDataError();
+    }
+    return outbox;
+  }
+
   async createLead(input: {
     actor: Actor;
     lead: LeadInput;
@@ -129,9 +170,12 @@ export class FirestoreRepository implements Repository {
     idempotencyKey?: string;
     payloadHash: string;
     businessDate: string;
+    notificationText?: string;
   }): Promise<LeadCreation> {
     const leadRef = this.db.collection("leads").doc(input.id);
     const auditRef = this.db.collection("auditEvents").doc(randomUUID());
+    const outboxId = leadCreatedOutboxId(input.id);
+    const outboxRef = this.db.collection("notificationOutbox").doc(outboxId);
 
     return this.db.runTransaction(async (transaction) => {
       const existing = await transaction.get(leadRef);
@@ -173,6 +217,9 @@ export class FirestoreRepository implements Repository {
           { revision: 1 },
         ),
       );
+      if (input.notificationText) {
+        transaction.create(outboxRef, leadCreatedOutbox(outboxId, input.id, input.notificationText, input.now));
+      }
       return { lead, replayed: false };
     });
   }
@@ -184,9 +231,12 @@ export class FirestoreRepository implements Repository {
     expectedRevision: number;
     now: string;
     businessDate: string;
+    notificationText?: string;
   }): Promise<{ lead: Lead; created: boolean }> {
     const leadRef = this.db.collection("leads").doc(input.id);
     const auditRef = this.db.collection("auditEvents").doc(randomUUID());
+    const outboxId = leadCreatedOutboxId(input.id);
+    const outboxRef = this.db.collection("notificationOutbox").doc(outboxId);
 
     return this.db.runTransaction(async (transaction) => {
       const existing = await transaction.get(leadRef);
@@ -217,6 +267,9 @@ export class FirestoreRepository implements Repository {
             { revision: 1 },
           ),
         );
+        if (input.notificationText) {
+          transaction.create(outboxRef, leadCreatedOutbox(outboxId, input.id, input.notificationText, input.now));
+        }
         return { lead, created: true };
       }
 
@@ -703,27 +756,29 @@ export class FirestoreRepository implements Repository {
     oldestOutstandingAt?: string;
   }> {
     const collection = this.db.collection("notificationOutbox");
-    const [staleAvailable, staleLeases, dead, oldest] = await Promise.all([
+    const [staleByAge, staleLeases, dead, oldest] = await Promise.all([
       collection
-        .where("status", "in", ["pending", "retry"])
-        .where("availableAt", "<=", input.staleBefore)
-        .count()
+        .where("status", "in", ["pending", "retry", "processing"])
+        .where("createdAt", "<=", input.staleBefore)
         .get(),
       collection
         .where("status", "==", "processing")
         .where("leaseExpiresAt", "<=", input.now)
-        .count()
         .get(),
       collection.where("status", "==", "dead").count().get(),
       collection
-        .where("status", "in", ["pending", "retry"])
-        .orderBy("availableAt", "asc")
+        .where("status", "in", ["pending", "retry", "processing"])
+        .orderBy("createdAt", "asc")
         .limit(1)
         .get(),
     ]);
-    const oldestOutstandingAt = oldest.docs[0]?.data().availableAt;
+    const staleIds = new Set([
+      ...staleByAge.docs.map((doc) => doc.id),
+      ...staleLeases.docs.map((doc) => doc.id),
+    ]);
+    const oldestOutstandingAt = oldest.docs[0]?.data().createdAt;
     return {
-      staleOutboxCount: staleAvailable.data().count + staleLeases.data().count,
+      staleOutboxCount: staleIds.size,
       deadOutboxCount: dead.data().count,
       ...(typeof oldestOutstandingAt === "string" ? { oldestOutstandingAt } : {}),
     };

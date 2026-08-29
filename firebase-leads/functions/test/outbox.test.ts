@@ -3,7 +3,11 @@ import type { Actor, DigestPayload, NotificationOutbox } from "../src/domain";
 import {
   DigestService,
   TelegramHttpClient,
+  buildMorningReminder,
   enqueueMorningReminder,
+  formatDigest,
+  formatLeadCreated,
+  leadCreatedOutboxId,
   processOutboxBatch,
 } from "../src/services";
 import { MemoryRepository } from "./support/memory-repository";
@@ -25,6 +29,44 @@ const payload: DigestPayload = {
 };
 
 describe("notification outbox", () => {
+  it("formats complete, concise Telegram messages without hidden truncation", () => {
+    const digest = formatDigest({
+      ...payload,
+      date: "2026-08-13",
+      followUps: [{ phone: "9123 4567", round: "2nd", sample: "Sent" }],
+      dumped: [{ reason: "No budget" }],
+      notes: "Confirm the revised quote tomorrow.",
+    }, "Farhan");
+    expect(digest).toContain("📋 Reputifly Daily Digest");
+    expect(digest).toContain("📅 2026-08-13 · Singapore");
+    expect(digest).toContain("👤 Submitted by Farhan");
+    expect(digest).toContain("FOLLOW-UPS");
+    expect(digest).toContain("DUMPED LEADS");
+    expect(digest).toContain("QUESTIONS / NOTES");
+    expect(digest.length).toBeLessThanOrEqual(4_096);
+
+    const lead = formatLeadCreated({
+      name: "Acme Movers",
+      phone: "9123 4567",
+      note: "x".repeat(1_000),
+      followUp: "2026-08-15",
+    }, "Farhan");
+    expect(lead).toContain("🆕 New Watchlist lead");
+    expect(lead).toContain("Added by Farhan");
+    expect(lead).toContain("Open Watchlist for the full note");
+    expect(lead).toContain("https://watchlist-v2.web.app/");
+    expect(lead.length).toBeLessThanOrEqual(4_096);
+
+    const reminder = buildMorningReminder("2026-08-13", 2);
+    expect(reminder).toContain("⚠️ 2 leads are due or overdue");
+    expect(reminder).toContain("https://watchlist-v2.web.app/");
+    expect(reminder).not.toMatch(/digest|deadline|late|missed/i);
+
+    const longestLegalLeadId = "x".repeat(128);
+    expect(leadCreatedOutboxId(longestLegalLeadId)).toHaveLength(75);
+    expect(leadCreatedOutboxId(longestLegalLeadId)).toBe(leadCreatedOutboxId(longestLegalLeadId));
+  });
+
   it("persists Telegram failure, retries later, and stores message_id on success", async () => {
     const repository = new MemoryRepository();
     let clock = new Date("2026-08-13T01:00:00.000Z");
@@ -97,7 +139,11 @@ describe("notification outbox", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const [url, init] = fetchMock.mock.calls[1] ?? [];
     expect(url).toContain("/botbot-token/sendMessage");
-    expect(JSON.parse(String(init?.body))).toMatchObject({ chat_id: "chat-id" });
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      chat_id: "chat-id",
+      link_preview_options: { is_disabled: true },
+    });
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("disable_web_page_preview");
   });
 
   it("recovers an expired lease and dead-letters after the attempt ceiling", async () => {
@@ -157,7 +203,7 @@ describe("notification outbox", () => {
     expect(replay).toMatchObject({ created: false, outboxId: "reminder_2026-08-13", dueCount: 1 });
     expect(repository.outbox.size).toBe(1);
     expect(repository.outbox.get(first.outboxId)?.text).toContain("1 lead is due or overdue");
-    expect(repository.outbox.get(first.outboxId)?.text).toContain("Review the Watchlist");
+    expect(repository.outbox.get(first.outboxId)?.text).toContain("https://watchlist-v2.web.app/");
     expect(repository.outbox.get(first.outboxId)?.text).not.toMatch(/digest|deadline|late|missed/i);
   });
 
@@ -286,7 +332,9 @@ describe("notification outbox", () => {
       status: "retry",
       text: "stale",
       attempts: 1,
-      availableAt: "2026-08-13T00:00:00.000Z",
+      /* A long retry backoff must not hide that delivery has been outstanding
+         for more than 15 minutes. */
+      availableAt: "2026-08-13T02:00:00.000Z",
       createdAt: "2026-08-13T00:00:00.000Z",
       updatedAt: "2026-08-13T00:00:00.000Z",
     });

@@ -5,7 +5,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { REPO_ROOT } from "../ops-lib.mjs";
+import { decodeFirestoreFields, encodeFirestoreFields, REPO_ROOT } from "../ops-lib.mjs";
 
 function runNode(arguments_, environment) {
   return new Promise((resolve, reject) => {
@@ -25,6 +25,7 @@ function runNode(arguments_, environment) {
 
 async function startFirestoreStub() {
   const collections = new Map();
+  const commits = [];
   let updateSequence = 0;
   const nextUpdateTime = () => new Date(Date.UTC(2030, 0, 1, 0, 0, 0, updateSequence++)).toISOString();
   const server = http.createServer(async (request, response) => {
@@ -77,6 +78,49 @@ async function startFirestoreStub() {
       response.end(JSON.stringify({ status: statuses, writeResults: statuses.map(() => ({})) }));
       return;
     }
+    if (request.method === "POST" && decodeURIComponent(url.pathname).endsWith("/documents:commit")) {
+      let body = "";
+      for await (const chunk of request) body += chunk;
+      const parsed = JSON.parse(body);
+      const pending = [];
+      for (const write of parsed.writes ?? []) {
+        const match = String(write.update?.name ?? "").match(/\/documents\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_-]+)$/);
+        if (!match) {
+          response.writeHead(400, { "content-type": "application/json" });
+          response.end(JSON.stringify({ error: { code: 400 } }));
+          return;
+        }
+        const [, collectionName, id] = match;
+        const collection = collections.get(collectionName) ?? new Map();
+        const previous = collection.get(id);
+        if ((write.currentDocument?.exists === false && previous)
+          || (write.currentDocument?.updateTime && previous?.updateTime !== write.currentDocument.updateTime)) {
+          response.writeHead(409, { "content-type": "application/json" });
+          response.end(JSON.stringify({ error: { code: 409 } }));
+          return;
+        }
+        pending.push({ write, collectionName, id, previous });
+      }
+      for (const { write, collectionName, id, previous } of pending) {
+        if (!collections.has(collectionName)) collections.set(collectionName, new Map());
+        const fieldPaths = write.updateMask?.fieldPaths;
+        const fields = Array.isArray(fieldPaths)
+          ? {
+              ...(previous?.fields ?? {}),
+              ...Object.fromEntries(fieldPaths.map((field) => [field, write.update.fields[field]])),
+            }
+          : write.update.fields;
+        collections.get(collectionName).set(id, {
+          name: `projects/reputifly-leads-2/databases/(default)/documents/${collectionName}/${id}`,
+          fields,
+          updateTime: nextUpdateTime(),
+        });
+      }
+      commits.push(parsed.writes ?? []);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ commitTime: nextUpdateTime(), writeResults: pending.map(() => ({})) }));
+      return;
+    }
     response.writeHead(404, { "content-type": "application/json" });
     response.end(JSON.stringify({ error: { code: 404 } }));
   });
@@ -84,6 +128,7 @@ async function startFirestoreStub() {
   const address = server.address();
   return {
     collections,
+    commits,
     host: `127.0.0.1:${address.port}`,
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
@@ -216,6 +261,195 @@ test("lead and digest importers apply, re-read, and reconcile without an outbox"
       assert.doesNotMatch(manifest, /Alex|91234567|Legacy User|Review quote/);
       assert.equal(JSON.parse(manifest).result.reconciled, true);
     }
+  } finally {
+    await firestore.close();
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+function firestoreDocument(collection, id, fields, updateTime) {
+  return {
+    name: `projects/reputifly-leads-2/databases/(default)/documents/${collection}/${id}`,
+    fields: encodeFirestoreFields(fields),
+    updateTime,
+  };
+}
+
+function migrationLead(id, overrides = {}) {
+  return {
+    id,
+    name: "Synthetic lead",
+    phone: "90000000",
+    note: "Current note",
+    followUp: "2026-08-01",
+    status: "active",
+    revision: 1,
+    createdAt: "2026-07-20T01:00:00.000Z",
+    createdBy: "migration",
+    updatedAt: "2026-07-21T01:00:00.000Z",
+    updatedBy: "migration",
+    ...overrides,
+  };
+}
+
+test("guarded active-set sync is atomic, archives only untouched migration rows, and leaves audit/outbox unchanged", async () => {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "rfly-active-set-sync-"));
+  const firestore = await startFirestoreStub();
+  try {
+    const input = path.join(temporaryDirectory, "current.csv");
+    const dryManifest = path.join(temporaryDirectory, "dry.json");
+    const applyManifest = path.join(temporaryDirectory, "apply.json");
+    await writeFile(input, [
+      "id,name,phone,note,followUp,createdAt,updatedAt",
+      "legacy_match,Synthetic lead,90000000,Current note,8/1/2026,2026-07-20T01:00:00.000Z,2026-07-21T01:00:00.000Z",
+      "legacy_refresh,Synthetic lead,90000000,Current note,8/1/2026,2026-07-20T01:00:00.000Z,2026-07-21T01:00:00.000Z",
+      "legacy_new,Synthetic lead,90000000,Current note,8/1/2026,2026-07-20T01:00:00.000Z,2026-07-21T01:00:00.000Z",
+      "",
+    ].join("\n"));
+    const leads = new Map([
+      ["legacy_match", firestoreDocument("leads", "legacy_match", migrationLead("legacy_match"), "2029-01-01T00:00:00.000Z")],
+      ["legacy_refresh", firestoreDocument("leads", "legacy_refresh", migrationLead("legacy_refresh", { note: "Outdated note" }), "2029-01-02T00:00:00.000Z")],
+      ["legacy_stale", firestoreDocument("leads", "legacy_stale", migrationLead("legacy_stale", {
+        createdAt: "2026-07-20T01:00:00Z",
+        updatedAt: "2026-07-21T09:00:00+08:00",
+      }), "2029-01-03T00:00:00.000Z")],
+      ["legacy_old_archive", firestoreDocument("leads", "legacy_old_archive", migrationLead("legacy_old_archive", {
+        status: "archived",
+        archivedAt: "2026-07-22T01:00:00.000Z",
+        archivedBy: "migration",
+      }), "2029-01-04T00:00:00.000Z")],
+    ]);
+    firestore.collections.set("leads", leads);
+    firestore.collections.set("auditEvents", new Map([
+      ["sentinel", firestoreDocument("auditEvents", "sentinel", { kind: "sentinel" }, "2029-01-05T00:00:00.000Z")],
+    ]));
+    firestore.collections.set("notificationOutbox", new Map([
+      ["sentinel", firestoreDocument("notificationOutbox", "sentinel", { status: "delivered" }, "2029-01-06T00:00:00.000Z")],
+    ]));
+    const environment = { FIRESTORE_EMULATOR_HOST: firestore.host };
+
+    const dry = await runNode([
+      "scripts/leads/import-legacy.mjs", "--input", input, "--sync-active-set", "--manifest", dryManifest,
+    ], environment);
+    assert.equal(dry.code, 0, dry.stderr);
+    assert.match(dry.stdout, /missing=1, conflicts=1, stale-active=1/);
+    assert.match(dry.stdout, /safeToApply=true/);
+    assert.equal(firestore.commits.length, 0, "dry run performs no writes");
+    const dryEvidence = JSON.parse(await readFile(dryManifest, "utf8"));
+    assert.equal(dryEvidence.result.writesAttempted, 0);
+    assert.equal(dryEvidence.result.safeToApply, true);
+
+    const apply = await runNode([
+      "scripts/leads/import-legacy.mjs", "--input", input, "--sync-active-set", "--apply", "--manifest", applyManifest,
+    ], environment);
+    assert.equal(apply.code, 0, apply.stderr);
+    assert.match(apply.stdout, /active=3, created=1, refreshed=1, archived=1/);
+    assert.match(apply.stdout, /audit\/outbox unchanged=true; reconciled=true/);
+    assert.equal(firestore.commits.length, 1, "all mutations use one atomic commit");
+    assert.equal(firestore.commits[0].length, 3);
+    assert.equal(firestore.commits[0].filter((write) => write.currentDocument?.exists === false).length, 1);
+    assert.equal(firestore.commits[0].filter((write) => write.currentDocument?.updateTime).length, 2);
+
+    const active = [...leads.values()]
+      .map((document) => decodeFirestoreFields(document.fields))
+      .filter((lead) => lead.status === "active")
+      .map((lead) => lead.id)
+      .sort();
+    assert.deepEqual(active, ["legacy_match", "legacy_new", "legacy_refresh"]);
+    const stale = decodeFirestoreFields(leads.get("legacy_stale").fields);
+    assert.equal(stale.status, "archived");
+    assert.equal(stale.revision, 2);
+    assert.equal(stale.archivedBy, "migration");
+    assert.equal(firestore.collections.get("auditEvents").size, 1);
+    assert.equal(firestore.collections.get("notificationOutbox").size, 1);
+
+    const evidence = JSON.parse(await readFile(applyManifest, "utf8"));
+    assert.deepEqual(evidence.result, {
+      archived: 1,
+      atomicCommit: true,
+      created: 1,
+      reconciled: true,
+      refreshed: 1,
+      safeToApply: true,
+      writesAttempted: 3,
+    });
+    assert.equal(evidence.sideEffects.unchanged, true);
+    assert.doesNotMatch(JSON.stringify(evidence), /Synthetic lead|90000000|Current note|Outdated note/);
+
+    const reconcile = await runNode([
+      "scripts/leads/import-legacy.mjs", "--input", input, "--sync-active-set", "--reconcile-only",
+      "--manifest", path.join(temporaryDirectory, "reconcile.json"),
+    ], environment);
+    assert.equal(reconcile.code, 0, reconcile.stderr);
+    assert.match(reconcile.stdout, /reconciled=true; zero writes attempted/);
+    assert.equal(firestore.commits.length, 1);
+  } finally {
+    await firestore.close();
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("guarded active-set sync blocks every write when a real or modified V2 row would be replaced", async () => {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "rfly-active-set-block-"));
+  const firestore = await startFirestoreStub();
+  try {
+    const input = path.join(temporaryDirectory, "current.csv");
+    const manifest = path.join(temporaryDirectory, "blocked.json");
+    await writeFile(input, [
+      "id,name,phone,note,followUp,createdAt,updatedAt",
+      "legacy_changed,Synthetic lead,90000000,Current note,8/1/2026,2026-07-20T01:00:00.000Z,2026-07-21T01:00:00.000Z",
+      "legacy_missing,Synthetic lead,90000000,Current note,8/1/2026,2026-07-20T01:00:00.000Z,2026-07-21T01:00:00.000Z",
+      "",
+    ].join("\n"));
+    firestore.collections.set("leads", new Map([
+      ["legacy_changed", firestoreDocument("leads", "legacy_changed", migrationLead("legacy_changed", {
+        note: "User edit",
+        revision: 2,
+        updatedBy: "real-user-uid",
+      }), "2029-01-01T00:00:00.000Z")],
+      ["legacy_stale", firestoreDocument("leads", "legacy_stale", migrationLead("legacy_stale", {
+        revision: 3,
+        updatedBy: "real-user-uid",
+      }), "2029-01-02T00:00:00.000Z")],
+    ]));
+    const blocked = await runNode([
+      "scripts/leads/import-legacy.mjs", "--input", input, "--sync-active-set", "--apply", "--manifest", manifest,
+    ], { FIRESTORE_EMULATOR_HOST: firestore.host });
+    assert.equal(blocked.code, 1);
+    assert.match(blocked.stderr, /blocked by 1 unsafe conflict\(s\), 1 unsafe stale active document\(s\), and 0 malformed target document\(s\); zero writes attempted/);
+    assert.equal(firestore.commits.length, 0);
+    assert.equal(firestore.collections.get("leads").size, 2, "missing source row was not partially created");
+    const evidence = JSON.parse(await readFile(manifest, "utf8"));
+    assert.equal(evidence.result.writesAttempted, 0);
+    assert.equal(evidence.result.safeToApply, false);
+    assert.equal(evidence.result.blockedReason, "non-migration-or-modified-target");
+    assert.doesNotMatch(JSON.stringify(evidence), /Synthetic lead|90000000|Current note|User edit/);
+
+    const archivedInput = path.join(temporaryDirectory, "archived.csv");
+    await writeFile(archivedInput, [
+      "id,name,phone,note,followUp,status,removedAt,createdAt,updatedAt",
+      "legacy_archived,Synthetic lead,90000000,Current note,8/1/2026,archived,2026-07-22T01:00:00.000Z,2026-07-20T01:00:00.000Z,2026-07-21T01:00:00.000Z",
+      "",
+    ].join("\n"));
+    const archivedSource = await runNode([
+      "scripts/leads/import-legacy.mjs", "--input", archivedInput, "--sync-active-set", "--apply",
+      "--manifest", path.join(temporaryDirectory, "archived-source.json"),
+    ], { FIRESTORE_EMULATOR_HOST: firestore.host });
+    assert.equal(archivedSource.code, 1);
+    assert.match(archivedSource.stderr, /requires an active-only source; found 1 non-active record\(s\); zero writes attempted/);
+    assert.equal(firestore.commits.length, 0);
+
+    firestore.collections.get("leads").get("legacy_changed").fields.id = { stringValue: "wrong_embedded_id" };
+    const malformedManifest = path.join(temporaryDirectory, "malformed-target.json");
+    const malformed = await runNode([
+      "scripts/leads/import-legacy.mjs", "--input", input, "--sync-active-set", "--apply", "--manifest", malformedManifest,
+    ], { FIRESTORE_EMULATOR_HOST: firestore.host });
+    assert.equal(malformed.code, 1);
+    assert.match(malformed.stderr, /and 1 malformed target document\(s\); zero writes attempted/);
+    assert.equal(firestore.commits.length, 0);
+    const malformedEvidence = JSON.parse(await readFile(malformedManifest, "utf8"));
+    assert.equal(malformedEvidence.target.before.unsafeTargetShapeCount, 1);
+    assert.equal(malformedEvidence.target.before.unsafeTargetShapeIdHashes.length, 1);
   } finally {
     await firestore.close();
     await rm(temporaryDirectory, { recursive: true, force: true });

@@ -880,11 +880,11 @@ input[type="date"].input::-webkit-calendar-picker-indicator{
 </main>
 
 <nav class="tabbar">
-  <a class="tab on" href="https://reputifly.org/daily-digest/">
+  <a class="tab on" href="https://daily-digest-v2.web.app/">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
     Digest
   </a>
-  <a class="tab" href="https://reputifly.org/watchlist/">
+  <a class="tab" href="https://watchlist-v2.web.app/">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
     Watchlist
   </a>
@@ -973,7 +973,7 @@ if (!AUTH_ON) {
   googleProvider.setCustomParameters({ prompt:"select_account" });
   await setPersistence(auth, browserLocalPersistence);
 
-  let booted = false;
+  let booted = false, bootedUid = "";
   window.__rflyToken = () =>
     auth.currentUser ? auth.currentUser.getIdToken() : Promise.resolve("");
 
@@ -1011,9 +1011,15 @@ if (!AUTH_ON) {
 
   async function decide(user){
     if (!user) { revealLogin(); return; }
+    if (bootedUid && bootedUid !== user.uid) { location.reload(); return; }
+    if (window.__setStorageScope) window.__setStorageScope(user.uid);
     try {
       const token = await user.getIdToken();
       const session = await window.__api("/v1/session", { token, attempts:3 });
+      if (!session || !session.identity || session.identity.uid !== user.uid) {
+        const mismatch = new Error("The verified session did not match the Firebase account.");
+        mismatch.status = 403; throw mismatch;
+      }
       window.__me = session.identity || session.user || {};
       gate.hidden = true;
       gateLogin.hidden = false;
@@ -1021,6 +1027,7 @@ if (!AUTH_ON) {
       hideErr();
       if (!booted) {
         booted = true;
+        bootedUid = user.uid;
         window.__boot(session);
       } else if (window.__acceptSession) {
         window.__acceptSession(session);
@@ -1036,6 +1043,7 @@ if (!AUTH_ON) {
       if (transientSessionError(err)) {
         if (!booted) {
           booted = true;
+          bootedUid = user.uid;
           window.__boot(null, { offline:true });
         }
         gate.hidden = true;
@@ -1054,7 +1062,7 @@ if (!AUTH_ON) {
 
   window.__retrySession = () => decide(auth.currentUser);
   await decide(auth.currentUser);
-  onAuthStateChanged(auth, (u) => { if (!u && booted) location.reload(); });
+  onAuthStateChanged(auth, (u) => { if (booted && (!u || (bootedUid && u.uid !== bootedUid))) location.reload(); });
 
   document.getElementById("gateRetry").onclick = () => decide(auth.currentUser);
   document.getElementById("gateSignOut").onclick = () => signOut(auth).then(() => location.reload());
@@ -1120,12 +1128,15 @@ if (!AUTH_ON) {
 if(window.__RFLY_TOP_LEVEL__!==true)throw new Error("Framed execution blocked.");
 var API_BASE="https://asia-southeast1-reputifly-leads-2.cloudfunctions.net/api";
 var REQUEST_TIMEOUT_MS=35000;
-var DRAFT_PREFIX="rfly_digest_draft_v6:";
-var LEGACY_DRAFT_KEY="rfly_digest_draft_v4";
-var LEGACY_DRAFT_KEY_V5="rfly_digest_draft_v5";
-var RECEIPT_PREFIX="rfly_digest_receipt_v2:";
-var LEGACY_RECEIPT_KEY="rfly_digest_receipt_v1";
-var DRAFT_KEY="", RECEIPT_KEY="";
+var DRAFT_PREFIX="",RECEIPT_PREFIX="",DRAFT_KEY="",RECEIPT_KEY="",STORAGE_UID="";
+function setStorageScope(uid){
+  STORAGE_UID=String(uid||"");
+  var scope=encodeURIComponent(STORAGE_UID);
+  DRAFT_PREFIX=scope?"rfly_digest_draft_v7:"+scope+":" : "";
+  RECEIPT_PREFIX=scope?"rfly_digest_receipt_v3:"+scope+":" : "";
+  DRAFT_KEY="";RECEIPT_KEY="";
+}
+window.__setStorageScope=setStorageScope;
 /* API membership decides access after Firebase restores the signed-in user. */
 var AUTH_ON=true;
 /* localhost never posts to the live endpoint — tap freely, nothing reaches Julian */
@@ -1189,7 +1200,8 @@ async function apiRequest(path,opts){
         throw apiError(shape.message||("Request failed ("+response.status+")."),{
           code:shape.code||"request_failed",status:response.status,
           retryable:shape.retryable===true||response.status===408||response.status===429||response.status>=500,
-          requestId:shape.requestId||response.headers.get("x-request-id")||""
+          requestId:shape.requestId||response.headers.get("x-request-id")||"",
+          details:shape.details||null
         });
       }
       return data;
@@ -1308,6 +1320,9 @@ function actorLabel(uid){
   return actors[uid]&&actors[uid].label||"Reputifly member";
 }
 function setStorageKeys(day){
+  if(!DRAFT_PREFIX&&(currentIdentity&&currentIdentity.uid))setStorageScope(currentIdentity.uid);
+  if(!DRAFT_PREFIX&&PREVIEW)setStorageScope("preview");
+  if(!DRAFT_PREFIX){DRAFT_KEY="";RECEIPT_KEY="";return}
   DRAFT_KEY=DRAFT_PREFIX+day;RECEIPT_KEY=RECEIPT_PREFIX+day;
 }
 function updateDayLabels(){
@@ -1603,11 +1618,6 @@ function save(){
     if(!saveNow())setSyncState("error","This browser could not save the current draft. Keep this page open and free browser storage.",false);
   },300);
 }
-function legacyMatchesDay(s){
-  if(!s)return false;
-  if(s.businessDate)return s.businessDate===activeBusinessDate;
-  return !!(s.data&&s.data.date===payloadDate(activeBusinessDate));
-}
 function restoreRecord(s){
   if(!s||!s.data)return false;
   if(s.idempotencyKey)digestKey=s.idempotencyKey;
@@ -1626,11 +1636,9 @@ function restoreRecord(s){
 }
 function restore(){
   try{
+    if(!DRAFT_KEY)return false;
     var raw=localStorage.getItem(DRAFT_KEY),s=raw?JSON.parse(raw):null;
     if(s&&s.businessDate===activeBusinessDate)return restoreRecord(s);
-    var legacyRaw=localStorage.getItem(LEGACY_DRAFT_KEY_V5)||localStorage.getItem(LEGACY_DRAFT_KEY);
-    var legacy=legacyRaw?JSON.parse(legacyRaw):null;
-    if(legacyMatchesDay(legacy)&&restoreRecord(legacy))saveNow();
   }catch(e){}
   return false;
 }
@@ -1676,6 +1684,7 @@ function provenDelivery(receipt){
 function receiptSave(receipt){
   activeReceipt=receipt;
   try{
+    if(!RECEIPT_KEY)return false;
     localStorage.setItem(RECEIPT_KEY,JSON.stringify(receipt));
     var check=JSON.parse(localStorage.getItem(RECEIPT_KEY)||"null");
     return !!(check&&check.digestId===receipt.digestId&&check.idempotencyKey===receipt.idempotencyKey);
@@ -1683,6 +1692,7 @@ function receiptSave(receipt){
 }
 function receiptLoad(){
   try{
+    if(!RECEIPT_KEY)return null;
     var r=JSON.parse(localStorage.getItem(RECEIPT_KEY)||"null");
     return r&&r.businessDate===activeBusinessDate&&r.digestId?r:null;
   }catch(e){return null}
@@ -1759,6 +1769,7 @@ async function refreshReceipt(announce){
   }catch(err){
     setSyncState("error","Could not refresh Telegram status. Your acceptance receipt is still safe.",true,function(){return refreshReceipt(true)});
     if(announce)toast("Could not refresh — receipt kept","err");
+    else startReceiptPolling();
   }finally{
     button=document.getElementById("receiptRefresh");
     if(button){button.disabled=false;button.textContent="Refresh Telegram status"}
@@ -1779,6 +1790,46 @@ document.addEventListener("visibilitychange",function(){
   if(document.hidden){clearTimeout(deliveryPollTimer);deliveryPollTimer=null}
   else if(activeReceipt&&!provenDelivery(activeReceipt)){deliveryPollAttempts=Math.min(deliveryPollAttempts,3);startReceiptPolling()}
 });
+async function loadExistingDigestReceipt(existingDigestId,frozen){
+  var existingData=await apiRequest("/v1/digests/"+encodeURIComponent(existingDigestId),{attempts:3});
+  requireCanonicalSuccess(existingData,true);
+  var existing=existingData&&existingData.digest;
+  if(!existing||existing.id!==existingDigestId||!existing.acceptedAt||!existing.acceptedBy){
+    throw apiError("The existing digest receipt was incomplete.",{code:"invalid_response",retryable:true});
+  }
+  acceptCanonicalContext(existingData);acceptActors(existingData.actors);
+  if(existing.businessDate&&existing.businessDate!==activeBusinessDate){
+    activeBusinessDate=existing.businessDate;setStorageKeys(activeBusinessDate);updateDayLabels();
+  }
+  var existingReceipt={
+    version:2,accepted:true,digestId:existing.id,businessDate:existing.businessDate||activeBusinessDate,
+    idempotencyKey:frozen.idempotencyKey,deliveryStatus:existing.deliveryStatus||"pending",
+    acceptedAt:existing.acceptedAt,acceptedBy:existing.acceptedBy,
+    deliveredAt:existing.deliveredAt||"",telegramMessageId:existing.telegramMessageId||"",
+    serverTime:existingData.meta.serverTime,requestId:existingData.meta.requestId||""
+  };
+  var persisted=receiptSave(existingReceipt);
+  if(persisted){submitSnapshot=null;saveNow()}else submitSnapshot=frozen;
+  showReceipt(existingReceipt);setVerifiedProof(existingData,"Existing digest receipt loaded",true);
+  loadDailyStatus();startReceiptPolling();
+  if(!persisted)setSyncState("error","Today's digest is accepted, but this browser could not save its receipt. Keep this page open and copy the receipt ID.",false);
+  return existingReceipt;
+}
+function waitForExistingDigestReceipt(existingDigestId,frozen){
+  submitSnapshot=frozen;saveNow();setDraftLocked(true);
+  var button=document.getElementById("submitBtn");
+  if(button){button.hidden=true;button.disabled=false;button.removeAttribute("aria-busy")}
+  var retry=async function(){
+    try{
+      await loadExistingDigestReceipt(existingDigestId,frozen);
+      toast("Today's accepted receipt was loaded");
+    }catch(recoveryErr){
+      waitForExistingDigestReceipt(existingDigestId,frozen);
+      toast("Receipt still unavailable — digest remains accepted","err");
+    }
+  };
+  setSyncState("error","Today's digest is already accepted on the server, but its receipt could not be loaded yet. Retry loads the receipt; it will not submit again.",true,retry);
+}
 async function submitDigest(){
   if(submitting)return;
   var btn=document.getElementById("submitBtn");
@@ -1853,10 +1904,35 @@ async function submitDigest(){
     startReceiptPolling();
   }catch(err){
     toastOff();
-    var retry=function(){return submitDigest()};
-    setSyncState("error","Digest not confirmed. Your draft and retry key are safe — Retry sends the exact same attempt.",true,retry);
-    toast("Not confirmed — draft kept","err");
-    if(btn){btn.disabled=false;btn.removeAttribute("aria-busy");document.getElementById("submitTxt").textContent="Retry Same Digest Safely"}
+    var existingDigestId=err&&err.status===409&&err.details&&err.details.existingDigestId;
+    if(typeof existingDigestId==="string"&&/^[A-Za-z0-9_-]{1,128}$/.test(existingDigestId)){
+      try{
+        await loadExistingDigestReceipt(existingDigestId,frozen);
+        toast("Today's digest was already accepted — receipt loaded");
+        return;
+      }catch(recoveryErr){
+        /* The 409 is authoritative: do not offer another submission merely
+           because the receipt read had a transient failure. */
+        waitForExistingDigestReceipt(existingDigestId,frozen);
+        toast("Already accepted — receipt temporarily unavailable","err");
+        return;
+      }
+    }
+    var definiteRejection=err&&err.status>=400&&err.status<500&&err.status!==408&&err.status!==429;
+    if(definiteRejection){
+      /* A definite 4xx proves the server did not accept this payload. Keep the
+         draft, but unlock it so validation errors (including Telegram's full-
+         message limit) can actually be corrected before another attempt. */
+      submitSnapshot=null;saveNow();setDraftLocked(false);
+      setSyncState("error",(err.message||"The server rejected this digest.")+" Nothing was submitted; your draft is editable.",false);
+      toast("Not submitted — fix the highlighted issue","err");
+      if(btn){btn.disabled=false;btn.removeAttribute("aria-busy");renderSummary()}
+    }else{
+      var retry=function(){return submitDigest()};
+      setSyncState("error","Digest not confirmed. Your draft and retry key are safe — Retry sends the exact same attempt.",true,retry);
+      toast("Not confirmed — draft kept","err");
+      if(btn){btn.disabled=false;btn.removeAttribute("aria-busy");document.getElementById("submitTxt").textContent="Retry Same Digest Safely"}
+    }
   }finally{submitting=false}
 }
 document.getElementById("submitBtn").onclick=submitDigest;
@@ -1916,21 +1992,26 @@ function loadDailyStatus(){
 window.__AUTH_ON=AUTH_ON && !PREVIEW;
 window.__acceptSession=function(session){
   currentIdentity=session&&session.identity||{};currentMember=session&&session.member||{};
+  if(!currentIdentity.uid)throw apiError("Session identity was missing.",{code:"invalid_response"});
+  setStorageScope(currentIdentity.uid);setStorageKeys(activeBusinessDate||session.meta&&session.meta.businessDate||sgTodayISO());
   requireCanonicalSuccess(session,true);acceptCanonicalContext(session);setVerifiedProof(session,"Live",true);loadDailyStatus();
   if(activeReceipt)refreshReceipt(false);
 };
 window.__boot=function(session){
   if(PREVIEW) document.getElementById("pvBanner").style.display="";
   if(PREVIEW){
+    setStorageScope("preview");
     activeBusinessDate=sgTodayISO();setStorageKeys(activeBusinessDate);updateDayLabels();loadBusinessDayState();return;
   }
   if(session&&session.meta){
     currentIdentity=session.identity||{};currentMember=session.member||{};
+    if(!currentIdentity.uid)throw apiError("Session identity was missing.",{code:"invalid_response"});
+    setStorageScope(currentIdentity.uid);
     requireCanonicalSuccess(session,true);acceptCanonicalContext(session);setVerifiedProof(session,"Live",true);loadBusinessDayState();loadDailyStatus();return;
   }
   /* Offline boot cannot manufacture a current server day. Restore the latest
      day-scoped draft without labelling it current or allowing submission. */
-  var keys=[];try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf(DRAFT_PREFIX)===0)keys.push(k)}}catch(e){}
+  var keys=[];try{if(DRAFT_PREFIX)for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf(DRAFT_PREFIX)===0)keys.push(k)}}catch(e){}
   keys.sort();var latest=keys.pop();
   activeBusinessDate=latest?latest.slice(DRAFT_PREFIX.length):sgTodayISO();setStorageKeys(activeBusinessDate);updateDayLabels();loadBusinessDayState();setDraftLocked(true);
 };

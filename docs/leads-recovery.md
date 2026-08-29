@@ -405,6 +405,11 @@ the failing state before changing anything.
 4. Run backend contract tests, unauthenticated security smoke, then authenticated
    read smoke before reopening writes.
 
+For schema-compatible notification rollout, deploy the consumer before the
+producer: update and prove `outboxWorker`, then update `api`. Reverse that order
+for rollback, and never downgrade the worker while a newer outbox type remains
+pending, retrying, processing, or dead without an explicit repair decision.
+
 ### Data corruption or bad migration
 
 1. Keep writes frozen. Export the current bad state so no post-backup legitimate
@@ -483,9 +488,12 @@ member document from `viewer` to `member`, dispatch `Leads resilience` with
 if the workflow fails. The write job is separately guarded by
 `ALLOW_PRODUCTION_E2E=watchlist-v2-controlled-write`; it creates one non-PII
 lead, proves create/update/follow-up/archive, submits one stable daily Digest,
-and requires persisted Telegram delivery proof. Use its `E2E_MANIFEST` to
-delete only the exact synthetic lead, follow-up/audit/outbox/digest documents
-and Telegram message. Never leave the canary with write authority.
+and requires persisted Telegram delivery proof for both the member-created lead
+alert and Digest. Its `E2E_MANIFEST` records `leadNotificationId`,
+`leadTelegramMessageId`, `digestId`, and `digestTelegramMessageId`; use those
+exact identifiers to delete only the synthetic lead, follow-up/audit/outbox/
+digest documents and both Telegram messages. Never leave the canary with write
+authority.
 
 Configure independent alerts outside Telegram (email/pager) so a Telegram
 failure can still alert someone:

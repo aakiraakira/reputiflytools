@@ -846,11 +846,11 @@ input[type="date"].input::-webkit-calendar-picker-indicator{
 </main>
 
 <nav class="tabbar">
-  <a class="tab" href="https://reputifly.org/daily-digest/">
+  <a class="tab" href="https://daily-digest-v2.web.app/">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
     Digest
   </a>
-  <a class="tab on" href="https://reputifly.org/watchlist/">
+  <a class="tab on" href="https://watchlist-v2.web.app/">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
     Watchlist
   </a>
@@ -939,7 +939,7 @@ if (!AUTH_ON) {
   googleProvider.setCustomParameters({ prompt:"select_account" });
   await setPersistence(auth, browserLocalPersistence);
 
-  let booted = false;
+  let booted = false, bootedUid = "";
   window.__rflyToken = () =>
     auth.currentUser ? auth.currentUser.getIdToken() : Promise.resolve("");
 
@@ -977,9 +977,15 @@ if (!AUTH_ON) {
 
   async function decide(user){
     if (!user) { revealLogin(); return; }
+    if (bootedUid && bootedUid !== user.uid) { location.reload(); return; }
+    if (window.__setStorageScope) window.__setStorageScope(user.uid);
     try {
       const token = await user.getIdToken();
       const session = await window.__api("/v1/session", { token, attempts:3 });
+      if (!session || !session.identity || session.identity.uid !== user.uid) {
+        const mismatch = new Error("The verified session did not match the Firebase account.");
+        mismatch.status = 403; throw mismatch;
+      }
       window.__me = session.identity || session.user || {};
       gate.hidden = true;
       gateLogin.hidden = false;
@@ -987,6 +993,7 @@ if (!AUTH_ON) {
       hideErr();
       if (!booted) {
         booted = true;
+        bootedUid = user.uid;
         window.__boot(session);
       } else if (window.__acceptSession) {
         window.__acceptSession(session);
@@ -1005,6 +1012,7 @@ if (!AUTH_ON) {
       if (transientSessionError(err)) {
         if (!booted) {
           booted = true;
+          bootedUid = user.uid;
           window.__boot(null, { offline:true });
         }
         gate.hidden = true;
@@ -1023,7 +1031,7 @@ if (!AUTH_ON) {
 
   window.__retrySession = () => decide(auth.currentUser);
   await decide(auth.currentUser);
-  onAuthStateChanged(auth, (u) => { if (!u && booted) location.reload(); });
+  onAuthStateChanged(auth, (u) => { if (booted && (!u || (bootedUid && u.uid !== bootedUid))) location.reload(); });
 
   document.getElementById("gateRetry").onclick = () => decide(auth.currentUser);
   document.getElementById("gateSignOut").onclick = () => signOut(auth).then(() => location.reload());
@@ -1096,10 +1104,15 @@ var PV_KEY="rfly_watchlist_preview_v2";
 var AUTH_ON=true;
 
 var rows=[], sheetDraft=null, sheetIsNew=false, sheetMode="edit";
-var CACHE_KEY="rfly_watchlist_cache_v2";
-var LEGACY_CACHE_KEY="rfly_watchlist_cache_v1";
-var PENDING_CREATE_KEY="rfly_watchlist_pending_create_v1";
-var PENDING_FOLLOWUP_KEY="rfly_watchlist_pending_followup_v1";
+var CACHE_KEY="",PENDING_CREATE_KEY="",PENDING_FOLLOWUP_KEY="",STORAGE_UID="";
+function setStorageScope(uid){
+  STORAGE_UID=String(uid||"");
+  var scope=encodeURIComponent(STORAGE_UID);
+  CACHE_KEY=scope?"rfly_watchlist_cache_v3:"+scope:"";
+  PENDING_CREATE_KEY=scope?"rfly_watchlist_pending_create_v2:"+scope:"";
+  PENDING_FOLLOWUP_KEY=scope?"rfly_watchlist_pending_followup_v2:"+scope:"";
+}
+window.__setStorageScope=setStorageScope;
 var loaded=false;   /* until true we must NOT claim the list is empty */
 var loadFailed=false, usingCache=false;
 var pendingWrites={};
@@ -1315,15 +1328,16 @@ function pvSave(){try{localStorage.setItem(PV_KEY,JSON.stringify(rows))}catch(e)
 
 /* ---------- data ---------- */
 function cacheSave(){
-  try{localStorage.setItem(CACHE_KEY,JSON.stringify({version:3,savedAt:new Date().toISOString(),rows:rows,actors:actors,businessDate:businessDate}))}catch(e){}
+  if(!CACHE_KEY)return;
+  try{localStorage.setItem(CACHE_KEY,JSON.stringify({version:4,ownerUid:STORAGE_UID,savedAt:new Date().toISOString(),rows:rows,actors:actors,businessDate:businessDate}))}catch(e){}
 }
 function cacheLoad(){
   try{
-    var raw=localStorage.getItem(CACHE_KEY)||localStorage.getItem(LEGACY_CACHE_KEY);
+    if(!CACHE_KEY)return null;
+    var raw=localStorage.getItem(CACHE_KEY);
     if(!raw) return null;
     var parsed=JSON.parse(raw);
-    if(Array.isArray(parsed)) return {rows:parsed,savedAt:""};
-    return parsed&&Array.isArray(parsed.rows)?parsed:null;
+    return parsed&&parsed.ownerUid===STORAGE_UID&&Array.isArray(parsed.rows)?parsed:null;
   }catch(e){return null}
 }
 function applyLocal(row){
@@ -1436,6 +1450,7 @@ function showWriteFailure(message,retry){
 }
 function pendingCreatesLoad(){
   try{
+    if(!PENDING_CREATE_KEY)return [];
     var parsed=JSON.parse(localStorage.getItem(PENDING_CREATE_KEY)||"[]");
     if(parsed&&parsed.key)parsed=[parsed]; /* migrate the single-item beta */
     return Array.isArray(parsed)?parsed.filter(function(x){return x&&x.key&&x.lead}):[];
@@ -1443,6 +1458,7 @@ function pendingCreatesLoad(){
 }
 function pendingCreateSave(item){
   try{
+    if(!PENDING_CREATE_KEY)return false;
     var all=pendingCreatesLoad().filter(function(x){return x.key!==item.key});
     all.push(item);localStorage.setItem(PENDING_CREATE_KEY,JSON.stringify(all));
     return pendingCreatesLoad().some(function(x){return x.key===item.key});
@@ -1450,6 +1466,7 @@ function pendingCreateSave(item){
 }
 function pendingCreateClear(key){
   try{
+    if(!PENDING_CREATE_KEY)return;
     var all=pendingCreatesLoad().filter(function(x){return x.key!==key});
     if(all.length)localStorage.setItem(PENDING_CREATE_KEY,JSON.stringify(all));
     else localStorage.removeItem(PENDING_CREATE_KEY);
@@ -1457,6 +1474,7 @@ function pendingCreateClear(key){
 }
 function pendingFollowUpsLoad(){
   try{
+    if(!PENDING_FOLLOWUP_KEY)return [];
     var parsed=JSON.parse(localStorage.getItem(PENDING_FOLLOWUP_KEY)||"[]");
     if(parsed&&parsed.key)parsed=[parsed];
     return Array.isArray(parsed)?parsed.filter(function(x){return x&&x.key&&x.leadId&&x.body}):[];
@@ -1464,6 +1482,7 @@ function pendingFollowUpsLoad(){
 }
 function pendingFollowUpSave(item){
   try{
+    if(!PENDING_FOLLOWUP_KEY)return false;
     var all=pendingFollowUpsLoad().filter(function(x){return x.key!==item.key});
     all.push(item);localStorage.setItem(PENDING_FOLLOWUP_KEY,JSON.stringify(all));
     return pendingFollowUpsLoad().some(function(x){return x.key===item.key});
@@ -1471,6 +1490,7 @@ function pendingFollowUpSave(item){
 }
 function pendingFollowUpClear(key){
   try{
+    if(!PENDING_FOLLOWUP_KEY)return;
     var all=pendingFollowUpsLoad().filter(function(x){return x.key!==key});
     if(all.length)localStorage.setItem(PENDING_FOLLOWUP_KEY,JSON.stringify(all));
     else localStorage.removeItem(PENDING_FOLLOWUP_KEY);
@@ -1511,12 +1531,28 @@ async function logFollowUp(item,resuming){
       });
       var receipt=followUpReceipt(data,item);
       acceptCanonicalContext(data);acceptActors(data.actors);
-      if(receipt.lead.status==="archived")rows=rows.filter(function(r){return r.id!==item.leadId});
-      else applyReceipt(receipt.lead);
+      var currentLead=rows.filter(function(r){return r.id===item.leadId})[0];
+      var receiptIsStale=!!(currentLead&&Number(currentLead.revision)>Number(receipt.lead.revision));
+      /* A replay's resultingLead is historical by definition. It may predate a
+         later edit or archive, so it is proof of the action—not current list
+         state. Never insert it; the canonical list refresh below decides. */
+      if(!data.replayed&&!receiptIsStale){
+        if(receipt.lead.status==="archived")rows=rows.filter(function(r){return r.id!==item.leadId});
+        else applyReceipt(receipt.lead);
+      }
       pendingFollowUpClear(item.key);cacheSave();render();setVerifiedProof(data,"Follow-up recorded");
       lastVerifiedProof.message="Follow-up recorded · "+actorLabel(receipt.event.actorUid)+" · "+formatSgTime(receipt.event.occurredAt);
       setSyncState("live",lastVerifiedProof.message,false);
       toastOff();toast((item.outcome==="won"?"Won":item.outcome==="lost"?"Lost":item.outcome==="spoke"?"Spoke":"No reply")+" recorded");
+      /* An idempotent replay proves the old action, but another writer may have
+         advanced the lead since that receipt. Re-read without ever replacing a
+         higher revision with the historical resultingLead snapshot. */
+      if(data.replayed){
+        try{await refreshLeads()}
+        catch(readErr){
+          setSyncState("stale","Follow-up receipt recovered, but the current Watchlist could not be refreshed. Existing confirmed rows were kept.",true,refreshLeads);
+        }
+      }
       loadDailyStatus();return receipt;
     }catch(err){
       toastOff();
@@ -1553,8 +1589,10 @@ function resumePendingFollowUps(){
 }
 function applyReceipt(lead){
   var i=rows.findIndex(function(r){return r.id===lead.id});
+  if(i>=0&&Number(rows[i].revision)>Number(lead.revision))return false;
   if(i<0) rows.push(lead); else rows[i]=lead;
   loaded=true; cacheSave(); render();
+  return true;
 }
 async function createRow(lead,key,msg,resuming){
   var lock="create:"+key;
@@ -1980,6 +2018,8 @@ window.__AUTH_ON=AUTH_ON && !PREVIEW;
 window.__acceptSession=function(session){
   currentIdentity=session&&session.identity||{};
   currentMember=session&&session.member||{};
+  if(!currentIdentity.uid)throw apiError("Session identity was missing.",{code:"invalid_response"});
+  setStorageScope(currentIdentity.uid);
   acceptRemoteRows(session);
   resumePendingCreate().then(resumePendingFollowUps);
   loadDailyStatus();
@@ -1990,6 +2030,8 @@ window.__boot=function(prefetched,options){
   if(prefetched&&Array.isArray(prefetched.leads)){
     currentIdentity=prefetched.identity||{};
     currentMember=prefetched.member||{};
+    if(!currentIdentity.uid)throw apiError("Session identity was missing.",{code:"invalid_response"});
+    setStorageScope(currentIdentity.uid);
     acceptRemoteRows(prefetched);
     resumePendingCreate().then(resumePendingFollowUps);
     loadDailyStatus();

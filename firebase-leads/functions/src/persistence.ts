@@ -97,8 +97,9 @@ const digestSchema: z.ZodType<Digest> = z
 const outboxSchema: z.ZodType<NotificationOutbox> = z
   .object({
     id: documentIdSchema,
-    type: z.enum(["digest", "morning_reminder"]),
+    type: z.enum(["digest", "morning_reminder", "lead_created"]),
     digestId: documentIdSchema.optional(),
+    leadId: documentIdSchema.optional(),
     status: z.enum(["pending", "retry", "processing", "delivered", "dead"]),
     text: z.string().min(1).max(4_096),
     attempts: z.number().int().min(0).max(1_000),
@@ -122,6 +123,9 @@ const outboxSchema: z.ZodType<NotificationOutbox> = z
   .superRefine((item, context) => {
     if (item.type === "digest" && !item.digestId) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["digestId"], message: "missing digest id" });
+    }
+    if (item.type === "lead_created" && !item.leadId) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["leadId"], message: "missing lead id" });
     }
     if (item.status === "processing" && (!item.leaseOwner || !item.leaseExpiresAt)) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["leaseOwner"], message: "missing processing lease" });

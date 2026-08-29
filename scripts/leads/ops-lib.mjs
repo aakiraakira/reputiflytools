@@ -393,6 +393,21 @@ export async function batchWriteFirestore(writes, { project = PROJECT_ID, token 
   if (failures.length) throw new Error(`Firestore rejected ${failures.length} write(s); no response bodies were logged`);
 }
 
+export async function commitFirestoreWrites(writes, { project = PROJECT_ID, token = firestoreToken() } = {}) {
+  if (!writes.length) return { writeResults: [] };
+  if (writes.length > 500) throw new Error("Firestore commit cannot exceed 500 writes");
+  const { response, json } = await requestJson(`${firestoreBase(project)}/documents:commit`, {
+    method: "POST",
+    token,
+    body: { writes },
+    timeoutMs: 60_000,
+  });
+  if (!response.ok || !json) {
+    throw new Error(`Firestore atomic commit failed with HTTP ${response.status}; no response body was logged`);
+  }
+  return json;
+}
+
 export function documentIdFromName(name) {
   return decodeURIComponent(String(name).split("/").at(-1));
 }

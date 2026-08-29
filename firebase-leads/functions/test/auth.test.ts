@@ -96,4 +96,24 @@ describe("authentication", () => {
       message: "The sign-in session is invalid or expired.",
     });
   });
+
+  it.each([
+    [400, "API_KEY_INVALID: leaked provider detail"],
+    [403, "PERMISSION_DENIED: leaked provider detail"],
+    [401, "PROJECT_DISABLED: leaked provider detail"],
+  ])("treats provider configuration failure %s as an alertable 503", async (status, providerMessage) => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: providerMessage } }), {
+        status,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = new IdentityToolkitClient("misconfigured-key", fetchMock);
+
+    await expect(client.lookup("otherwise-valid-token")).rejects.toMatchObject({
+      status: 503,
+      code: "identity_unavailable",
+      message: "Identity verification is temporarily unavailable.",
+    });
+  });
 });

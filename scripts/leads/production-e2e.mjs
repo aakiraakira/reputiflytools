@@ -59,7 +59,7 @@ async function main() {
     help: "boolean",
   });
   if (args.help) {
-    console.log(`Usage: ALLOW_PRODUCTION_E2E=${WRITE_GUARD} node scripts/leads/production-e2e.mjs [--api-base URL]\n\nCreates one non-PII lead, proves revision/follow-up/archive and Digest delivery, then prints a cleanup manifest. Requires the dedicated canary to be temporarily role=member.`);
+    console.log(`Usage: ALLOW_PRODUCTION_E2E=${WRITE_GUARD} node scripts/leads/production-e2e.mjs [--api-base URL]\n\nCreates one non-PII lead, proves its Telegram alert plus revision/follow-up/archive and Digest delivery, then prints a cleanup manifest. Requires the dedicated canary to be temporarily role=member.`);
     return;
   }
   if (args._.length) throw new Error("Unexpected positional arguments");
@@ -78,7 +78,9 @@ async function main() {
   let currentRevision = 0;
   let archived = false;
   let digestId = "";
-  let telegramMessageId = 0;
+  let leadNotificationId = "";
+  let leadTelegramMessageId = 0;
+  let digestTelegramMessageId = 0;
   let businessDate = "";
 
   try {
@@ -88,6 +90,12 @@ async function main() {
     }
     businessDate = session.meta.businessDate;
     console.log("[PASS] same-login session authenticated as temporary writer");
+
+    const dailyStatus = await checkedApi("/v1/daily-status", { apiBase, token, timeoutMs }, 200, "E2E daily status preflight");
+    if (dailyStatus.status?.businessDate !== businessDate || dailyStatus.status?.digest?.state !== "not_submitted") {
+      throw new Error("E2E canary already has a Digest in today's server slot; use a clean canary or reconcile the exact prior test first");
+    }
+    console.log("[PASS] canary Digest day slot is empty before production writes");
 
     const created = await checkedApi(`/v1/leads/${leadId}`, {
       apiBase,
@@ -101,6 +109,31 @@ async function main() {
     }
     currentRevision = 1;
     console.log("[PASS] lead create returned revision 1 canonical receipt");
+
+    const leadNotificationDeadline = Date.now() + 150_000;
+    while (Date.now() < leadNotificationDeadline) {
+      const proof = await checkedApi(`/v1/leads/${leadId}/notification`, {
+        apiBase,
+        token,
+        timeoutMs,
+      }, 200, "E2E lead notification receipt");
+      leadNotificationId = proof.notification?.id || leadNotificationId;
+      if (proof.notification?.deliveryStatus === "delivered") {
+        leadTelegramMessageId = proof.notification.telegramMessageId;
+        if (!proof.notification.deliveredAt || !Number.isInteger(leadTelegramMessageId) || leadTelegramMessageId < 1) {
+          throw new Error("Delivered lead notification lacked Telegram proof fields");
+        }
+        break;
+      }
+      if (["failed", "unknown"].includes(proof.notification?.deliveryStatus)) {
+        throw new Error(`Lead notification entered terminal delivery state ${proof.notification.deliveryStatus}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+    }
+    if (!leadTelegramMessageId || !leadNotificationId) {
+      throw new Error("New-lead notification was not Telegram-delivered within 150 seconds");
+    }
+    console.log("[PASS] new-lead Telegram delivery persisted server proof");
 
     const updated = await checkedApi(`/v1/leads/${leadId}`, {
       apiBase,
@@ -152,6 +185,7 @@ async function main() {
       dumped: [],
       notes: "Automated non-PII delivery canary. Safe to delete.",
     };
+    const digestStartedAt = Date.now();
     const accepted = await checkedApi("/v1/digests", {
       apiBase,
       token,
@@ -161,6 +195,9 @@ async function main() {
     }, [200, 202], "E2E digest acceptance");
     if (accepted.accepted !== true || typeof accepted.digestId !== "string" || !accepted.digestId) {
       throw new Error("E2E digest did not return an acceptance receipt");
+    }
+    if (accepted.replayed === true || !accepted.acceptedAt || Date.parse(accepted.acceptedAt) < digestStartedAt - 5_000) {
+      throw new Error("E2E Digest receipt was replayed or stale; the deployed enqueue path was not freshly exercised");
     }
     digestId = accepted.digestId;
     console.log("[PASS] Digest accepted exactly once with canonical receipt");
@@ -173,8 +210,8 @@ async function main() {
         timeoutMs,
       }, 200, "E2E digest receipt");
       if (receipt.digest?.deliveryStatus === "delivered") {
-        telegramMessageId = receipt.digest.telegramMessageId;
-        if (!receipt.digest.deliveredAt || !Number.isInteger(telegramMessageId) || telegramMessageId < 1) {
+        digestTelegramMessageId = receipt.digest.telegramMessageId;
+        if (!receipt.digest.deliveredAt || !Number.isInteger(digestTelegramMessageId) || digestTelegramMessageId < 1) {
           throw new Error("Delivered Digest lacked Telegram proof fields");
         }
         break;
@@ -184,9 +221,16 @@ async function main() {
       }
       await new Promise((resolve) => setTimeout(resolve, 3_000));
     }
-    if (!telegramMessageId) throw new Error("Digest was not Telegram-delivered within 150 seconds");
+    if (!digestTelegramMessageId) throw new Error("Digest was not Telegram-delivered within 150 seconds");
     console.log("[PASS] Telegram delivery persisted server timestamp and message ID");
-    console.log(`E2E_MANIFEST=${JSON.stringify({ leadId, digestId, telegramMessageId, businessDate })}`);
+    console.log(`E2E_MANIFEST=${JSON.stringify({
+      leadId,
+      leadNotificationId,
+      leadTelegramMessageId,
+      digestId,
+      digestTelegramMessageId,
+      businessDate,
+    })}`);
   } finally {
     if (currentRevision > 0 && !archived) {
       try {
