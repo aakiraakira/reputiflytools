@@ -585,7 +585,6 @@ test("a cross-tab digest conflict loads the already accepted server receipt inst
       throw new Error(`Unexpected URL ${url}`);
     };
     executeClassic(dom, DIGEST_PATH);
-    dom.window.loadDailyStatus = () => Promise.resolve();
     dom.window.currentIdentity = { uid: "member_self" };
     dom.window.currentMember = { role: "member" };
     dom.window.activeBusinessDate = META.businessDate;
@@ -636,7 +635,6 @@ test("a cross-tab conflict keeps submission locked while an accepted receipt rea
       throw new Error(`Unexpected URL ${url}`);
     };
     executeClassic(dom, DIGEST_PATH);
-    dom.window.loadDailyStatus = () => Promise.resolve();
     dom.window.__setStorageScope("member_self");
     dom.window.currentIdentity = { uid: "member_self" };
     dom.window.currentMember = { role: "member" };
@@ -792,7 +790,7 @@ test("server proof requires canonical meta and read dataAsOf equality", () => {
     assert.match(html, /meta\.requestId/);
     assert.match(html, /function setSyncState\(kind,message,showRetry,retryAction\)/);
     assert.match(html, /banner\.hidden=true/);
-    assert.match(html, /syncSupport/);
+    assert.doesNotMatch(html, /syncSupport|syncRequestId|Support details/i);
   }
 });
 
@@ -856,7 +854,7 @@ test("all follow-up outcomes use one idempotent transactional endpoint and no op
     const pending = dom.window.logFollowUp(item, false);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(dom.window.rows[0].revision, 4, "no optimistic lead revision");
-    assert.equal(dom.window.document.getElementById("dailyStatusPanel").hidden, true, "no optimistic accountability count");
+    assert.equal(dom.window.document.getElementById("dailyStatusPanel"), null, "accountability panel is absent from the workflow");
     resolveFetch(response(success({
       lead: { ...lead, followUp: "2026-08-15", revision: 5, updatedAt: META.serverTime },
       followUp: {
@@ -956,15 +954,11 @@ test("a replayed active follow-up cannot resurrect a lead that is no longer acti
   }
 });
 
-test("daily status is neutral, server-only, and owner team scope is one configured employee", () => {
+test("daily accountability reporting stays out of the employee-facing apps", () => {
   for (const file of [WATCHLIST_PATH, DIGEST_PATH]) {
     const html = read(file);
-    assert.match(html, /id="dailyStatusPanel"/);
-    assert.match(html, /\/v1\/daily-status/);
-    assert.match(html, /\/v1\/team\/daily-status/);
-    assert.match(html, /currentMember\.role==="owner"/);
-    assert.match(html, /status\.recordedToday/);
-    assert.doesNotMatch(html, /score|leaderboard|deadline reminder|idle|attendance/i);
+    assert.doesNotMatch(html, /id="dailyStatusPanel"|Recorded today|\/v1\/(?:team\/)?daily-status/);
+    assert.doesNotMatch(html, /score|leaderboard|deadline reminder|idle|attendance|server verified/i);
   }
 });
 

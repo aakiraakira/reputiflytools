@@ -70,16 +70,17 @@ test("server proof remains canonical while healthy diagnostics stay out of the m
   for (const [label, html] of [["Watchlist", watchlist], ["Digest", digest]]) {
     const markup = staticMarkup(html);
     assert.match(markup, /id=["']syncBanner["'][^>]*role=["']status["'][^>]*hidden/i, `${label} reserves sync UI for stale/error states`);
-    assert.match(markup, /id=["']syncSupport["'][^>]*hidden/i, `${label} hides support details by default`);
+    assert.doesNotMatch(markup, /syncSupport|syncRequestId|Support details/i, `${label} removes support diagnostics from the product UI`);
     assert.match(html, /envelope\.dataAsOf\s*!==\s*meta\.serverTime/, `${label} requires server as-of proof to match server time`);
-    assert.match(html, /meta\.requestId/, `${label} exposes the support request ID`);
+    assert.match(html, /meta\.requestId/, `${label} retains request correlation internally`);
     assert.match(html, /function\s+acceptActors\s*\(/, `${label} accepts referenced actor labels`);
     assert.match(html, /function\s+actorLabel\s*\(/, `${label} has neutral unresolved-actor fallback`);
   }
-  assert.match(watchlist, /id=["']dailyStatusPanel["']/);
-  assert.match(watchlist, /class=["']activity-title["']>Today</);
-  assert.match(watchlist, /["']\/v1\/daily-status["']/);
-  assert.match(watchlist, /["']\/v1\/team\/daily-status["']/);
+  for (const html of [watchlist, digest]) {
+    assert.doesNotMatch(html, /dailyStatusPanel|Recorded today|\/v1\/(?:team\/)?daily-status/,
+      "accountability reporting stays out of the employee workflow");
+    assert.doesNotMatch(html, /server verified/i, "normal verified state stays invisible");
+  }
   assert.doesNotMatch(watchlist, /keystroke|screen time|online time|productivity score/i);
 });
 
