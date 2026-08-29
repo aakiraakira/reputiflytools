@@ -609,9 +609,6 @@ input, textarea, select, button, optgroup { font-family: inherit; }
   font:inherit; cursor:pointer; flex-shrink:0;
 }
 .syncbanner button:disabled{ opacity:.55; cursor:wait; }
-.syncsupport{ margin:0; font-size:11px; font-weight:500; }
-.syncsupport summary{ cursor:pointer; min-height:44px; display:flex; align-items:center; text-decoration:underline; text-underline-offset:2px; }
-.syncsupport code{ display:block; margin-top:4px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }
 .emptybox.error .ic{ background:#fff1f0; color:var(--color-danger); }
 .done-screen{ padding:64px 24px; text-align:center; }
 .done-check{
@@ -765,27 +762,6 @@ input[type="date"].input::-webkit-calendar-picker-indicator{
 .wa:active{ transform:scale(.94); }
 .wa-label{ display:inline; }
 
-.activity-strip{
-  width:calc(100% - 24px); min-height:44px; margin:12px 12px 0; padding:0 13px;
-  display:flex; align-items:center; gap:9px; text-align:left;
-  background:var(--color-surface); border:1px solid var(--color-line-2); border-radius:12px;
-  color:var(--color-ink); box-shadow:var(--shadow-xs); cursor:pointer;
-}
-.activity-strip[hidden]{ display:none; }
-.activity-strip .activity-icon{ color:var(--color-primary); display:flex; flex:0 0 auto; }
-.activity-strip .activity-title{ font-weight:800; font-size:13px; }
-.activity-strip .activity-summary{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  color:var(--color-muted); font-size:12.5px; font-weight:600; }
-.activity-strip .activity-chevron{ color:var(--color-faint); flex:0 0 auto; }
-.activity-details{ display:grid; gap:10px; }
-.activity-detail{
-  padding:13px; border:1px solid var(--color-line); border-radius:12px; background:var(--color-surface-2);
-}
-.activity-detail-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.activity-detail-head strong{ font-size:14px; }
-.activity-detail-count{ color:var(--color-primary-active); font-weight:800; }
-.activity-detail-copy{ margin:5px 0 0; color:var(--color-muted); font-size:12.5px; line-height:1.45; }
-
 .outcome-grid{ display:grid; grid-template-columns:1fr; gap:8px; }
 .outcome-grid .optpill{
   min-height:54px; gap:10px; justify-content:flex-start; padding:7px 12px;
@@ -895,10 +871,6 @@ input[type="date"].input::-webkit-calendar-picker-indicator{
 <div class="pvbanner" id="pvBanner" style="display:none">Preview — sample data, nothing is saved to the live list</div>
 <div class="syncbanner" id="syncBanner" role="status" aria-live="polite" aria-atomic="true" hidden>
   <span id="syncText"></span>
-  <details class="syncsupport" id="syncSupport" hidden>
-    <summary>Support details</summary>
-    <code id="syncRequestId"></code>
-  </details>
   <button type="button" id="syncRetry" hidden>Retry</button>
 </div>
 
@@ -913,12 +885,6 @@ input[type="date"].input::-webkit-calendar-picker-indicator{
 </header>
 
 <main class="wrap watch-workspace">
-  <button class="activity-strip" id="dailyStatusPanel" type="button" aria-label="Open today's activity" hidden>
-    <span class="activity-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
-    <span class="activity-title">Today</span>
-    <span class="activity-summary" id="dailyStatusSummary" aria-live="polite"></span>
-    <svg class="activity-chevron" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-  </button>
   <div id="list"></div>
 </main>
 
@@ -1391,9 +1357,6 @@ function setVerifiedProof(envelope,verb,isRead){
   acceptCanonicalContext(envelope);
   var message=(verb||"Saved")+" · "+formatSgTime(at);
   lastVerifiedProof={serverTime:meta.serverTime,dataAsOf:at,requestId:meta.requestId||"",message:message};
-  var support=document.getElementById("syncSupport");
-  var request=document.getElementById("syncRequestId");
-  request.textContent="";support.hidden=true;
   setSyncState("live","",false);
   return true;
 }
@@ -1444,7 +1407,7 @@ function acceptRemoteRows(envelope){
   if(!Array.isArray(envelope)){
     requireCanonicalSuccess(envelope,true);
     acceptCanonicalContext(envelope);
-    setVerifiedProof(envelope,"Live",true);
+    setVerifiedProof(envelope,"Verified",true);
   }
   rows=next.filter(function(r){return !r.status||r.status==="active"});
   loaded=true; loadFailed=false; usingCache=false; cacheSave(); render();
@@ -1455,87 +1418,6 @@ async function refreshLeads(){
   acceptRemoteRows(data);
   return rows;
 }
-function validDailyStatus(data){
-  var status=data&&data.status;
-  var recorded=status&&status.recordedToday;
-  return !!(status&&/^\d{4}-\d{2}-\d{2}$/.test(status.businessDate||"")&&status.subject&&recorded&&Number.isFinite(Number(recorded.total))&&recorded.byKind);
-}
-function activityDetails(status){
-  var counts=status.recordedToday.byKind||{};
-  var outcomes=status.recordedToday.followUpsByOutcome||{};
-  var labels=[
-    ["followUpLogged","follow-up"],["leadCreated","lead added"],
-    ["leadUpdated","edit"],["leadArchived","archive"],["digestAccepted","digest"]
-  ];
-  var bits=labels.filter(function(pair){return Number(counts[pair[0]]||0)>0}).map(function(pair){
-    var n=Number(counts[pair[0]]||0);return n+" "+pair[1]+(n===1?"":"s");
-  });
-  if(Number(outcomes.won||0))bits.unshift(Number(outcomes.won)+" won");
-  if(Number(outcomes.lost||0))bits.unshift(Number(outcomes.lost)+" lost");
-  return bits.length?bits.join(" · "):"Nothing logged yet";
-}
-var dailyStatusItems=[],dailyStatusAsOf="";
-function renderDailyStatus(items,dataAsOf){
-  var panel=document.getElementById("dailyStatusPanel");
-  if(!items.length){panel.hidden=true;return}
-  dailyStatusItems=items.slice();dailyStatusAsOf=dataAsOf||"";
-  panel.hidden=false;
-  var summary=items.map(function(status){
-    var subject=status.subject||{};
-    var isMe=subject.uid&&currentIdentity.uid&&subject.uid===currentIdentity.uid;
-    var label=isMe?"You":(subject.label||actorLabel(subject.uid)||"Team member");
-    var total=Math.max(0,Number(status.recordedToday.total)||0);
-    return label+" "+total;
-  }).join(" · ");
-  document.getElementById("dailyStatusSummary").textContent=summary;
-  panel.setAttribute("aria-label","Today: "+summary+". Open details");
-}
-function openDailyStatusSheet(){
-  if(!dailyStatusItems.length)return;
-  sheetMode="activity";sheetDraft=null;sheetIsNew=false;
-  document.getElementById("sheetSave").hidden=true;
-  document.getElementById("sheetTitle").textContent="Today";
-  var cards=dailyStatusItems.map(function(status){
-    var subject=status.subject||{};
-    var isMe=subject.uid&&currentIdentity.uid&&subject.uid===currentIdentity.uid;
-    var label=isMe?"You":(subject.label||actorLabel(subject.uid)||"Team member");
-    var total=Math.max(0,Number(status.recordedToday.total)||0);
-    return '<div class="activity-detail"><div class="activity-detail-head"><strong>'+esc(label)+'</strong>'
-      +'<span class="activity-detail-count">'+total+'</span></div>'
-      +'<p class="activity-detail-copy">'+esc(activityDetails(status))+'</p></div>';
-  }).join("");
-  var stamp=dailyStatusAsOf?'<p class="provenance">Updated '+esc(formatSgTime(dailyStatusAsOf))+' · Singapore</p>':"";
-  document.getElementById("sheetBody").innerHTML='<div class="activity-details">'+cards+stamp+'</div>';
-  openSheetModal();
-}
-var dailyStatusLoading=null;
-function loadDailyStatus(){
-  if(PREVIEW)return Promise.resolve();
-  if(dailyStatusLoading)return dailyStatusLoading;
-  dailyStatusLoading=(async function(){
-    var results=[],asOf="";
-    try{
-      var mine=await apiRequest("/v1/daily-status",{attempts:2});
-      if(!validDailyStatus(mine))throw apiError("Daily status response was incomplete.",{code:"invalid_response"});
-      requireCanonicalSuccess(mine,true);
-      acceptCanonicalContext(mine);results.push(mine.status);asOf=mine.dataAsOf||mine.meta&&mine.meta.serverTime||asOf;
-    }catch(err){ /* Lead work remains available if this secondary panel fails. */ }
-    if(currentMember.role==="owner"){
-      try{
-        var team=await apiRequest("/v1/team/daily-status",{attempts:2});
-        if(!validDailyStatus(team))throw apiError("Team status response was incomplete.",{code:"invalid_response"});
-        requireCanonicalSuccess(team,true);
-        acceptCanonicalContext(team);
-        if(!results.some(function(s){return s.subject.uid===team.status.subject.uid}))results.push(team.status);
-        asOf=team.dataAsOf||team.meta&&team.meta.serverTime||asOf;
-      }catch(err){ /* A missing configured employee is not an employee performance signal. */ }
-    }
-    renderDailyStatus(results,asOf);
-    return results;
-  })().finally(function(){dailyStatusLoading=null});
-  return dailyStatusLoading;
-}
-document.getElementById("dailyStatusPanel").onclick=openDailyStatusSheet;
 function strictLead(row){
   return {name:String(row.name||"").trim(),phone:String(row.phone||"").trim(),note:String(row.note||"").trim(),followUp:String(row.followUp||"")};
 }
@@ -1665,7 +1547,7 @@ async function logFollowUp(item,resuming){
           setSyncState("stale","Follow-up receipt recovered, but the current Watchlist could not be refreshed. Existing confirmed rows were kept.",true,refreshLeads);
         }
       }
-      loadDailyStatus();return receipt;
+      return receipt;
     }catch(err){
       toastOff();
       var knownConflict=err&&[404,409].includes(err.status);
@@ -1718,7 +1600,7 @@ async function createRow(lead,key,msg,resuming){
       });
       var receipt=leadReceipt(data);
       acceptCanonicalContext(data);pendingCreateClear(key);applyReceipt(receipt);setVerifiedProof(data,"Saved");
-      toastOff();toast(msg||"Saved");loadDailyStatus();
+      toastOff();toast(msg||"Saved");
       return receipt;
     }catch(err){
       toastOff();
@@ -1763,7 +1645,7 @@ async function updateRow(wanted,msg){
       });
       var receipt=leadReceipt(data);
       acceptCanonicalContext(data);applyReceipt(receipt);setVerifiedProof(data,"Saved");
-      toastOff();toast(msg||"Saved");loadDailyStatus();
+      toastOff();toast(msg||"Saved");
       return receipt;
     }catch(err){
       toastOff();
@@ -1831,7 +1713,7 @@ async function doArchive(id,expectedRevision){
       var receipt=leadReceipt(data);
       if(receipt.status!=="archived") throw apiError("The archive receipt was incomplete.",{code:"missing_receipt",retryable:true});
       acceptCanonicalContext(data);rows=rows.filter(function(r){return r.id!==id});cacheSave();render();setVerifiedProof(data,"Archived");
-      toastOff();toast("Archived");loadDailyStatus();
+      toastOff();toast("Archived");
       return receipt;
     }catch(err){
       toastOff();
@@ -2221,7 +2103,6 @@ window.__acceptSession=function(session){
   setStorageScope(currentIdentity.uid);
   acceptRemoteRows(session);
   resumePendingCreate().then(resumePendingFollowUps);
-  loadDailyStatus();
 };
 window.__boot=function(prefetched,options){
   if(PREVIEW) document.getElementById("pvBanner").style.display="";
@@ -2233,7 +2114,6 @@ window.__boot=function(prefetched,options){
     setStorageScope(currentIdentity.uid);
     acceptRemoteRows(prefetched);
     resumePendingCreate().then(resumePendingFollowUps);
-    loadDailyStatus();
   }else{
     var c=cacheLoad();
     if(c){

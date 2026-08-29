@@ -608,9 +608,6 @@ input, textarea, select, button, optgroup { font-family: inherit; }
   font:inherit; cursor:pointer; flex-shrink:0;
 }
 .syncbanner button:disabled{ opacity:.55; cursor:wait; }
-.syncsupport{ margin:0; font-size:11px; font-weight:500; }
-.syncsupport summary{ cursor:pointer; min-height:44px; display:flex; align-items:center; }
-.syncsupport code{ display:block; margin-top:4px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }
 .delivery-pill{
   display:inline-flex; align-items:center; gap:7px; padding:7px 12px;
   border-radius:var(--radius-pill); font-size:12.5px; font-weight:700;
@@ -633,12 +630,6 @@ input, textarea, select, button, optgroup { font-family: inherit; }
 .timeline-step strong{ display:block; color:var(--color-ink); font-size:13px; }
 .receipt-id{ color:var(--color-faint); font:11px ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }
 .provenance{ color:var(--color-faint); font-size:11.5px; line-height:1.4; }
-.activity-panel{ margin-top:12px; padding:10px 12px; border:1px solid var(--color-line); border-radius:var(--radius-md); background:var(--color-surface-2); }
-.activity-panel h3{ margin:0 0 6px; font-size:13px; }
-.activity-panel p{ margin:0; color:var(--color-muted); font-size:12px; line-height:1.45; }
-.activity-lines{ display:grid; gap:5px; margin-top:0; }
-.activity-line{ display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12px; }
-.activity-line strong{ color:var(--color-ink); }
 .canonical-day{ margin:0 0 10px; color:var(--color-muted); font-size:12.5px; }
 .topbar .btn,.sheet-head .btn,.syncbanner button{ min-height:44px; }
 
@@ -781,10 +772,6 @@ input[type="date"].input::-webkit-calendar-picker-indicator{
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
   </span>
   <span id="syncText"></span>
-  <details class="syncsupport" id="syncSupport" hidden>
-    <summary>Details</summary>
-    <code id="syncRequestId"></code>
-  </details>
   <button type="button" id="syncRetry" hidden>Retry</button>
 </div>
 
@@ -871,11 +858,6 @@ input[type="date"].input::-webkit-calendar-picker-indicator{
         <div class="receipt-actions">
           <button type="button" class="btn btn--ghost" id="receiptRefresh">Refresh Telegram status</button>
         </div>
-      </section>
-      <section class="activity-panel" id="dailyStatusPanel" aria-labelledby="dailyStatusTitle" hidden>
-        <h3 id="dailyStatusTitle">Recorded today</h3>
-        <p class="sr-only" id="dailyStatusIntro">Only server-confirmed work is shown.</p>
-        <div class="activity-lines" id="dailyStatusBody" aria-live="polite"></div>
       </section>
     </div>
   </section>
@@ -1237,16 +1219,13 @@ var syncAction=null,lastVerifiedProof=null;
 function setSyncState(kind,message,showRetry,retryAction){
   var banner=document.getElementById("syncBanner");
   var button=document.getElementById("syncRetry");
-  var support=document.getElementById("syncSupport");
-  var request=document.getElementById("syncRequestId");
   if(!kind||kind==="live"){
     banner.hidden=true;banner.className="syncbanner";button.hidden=true;
-    support.hidden=true;syncAction=null;return;
+    syncAction=null;return;
   }
   banner.hidden=false;
   banner.className="syncbanner is-"+(kind==="error"?"error":"stale");
   document.getElementById("syncText").textContent=message||"";
-  support.hidden=!request.textContent;
   button.hidden=!showRetry;syncAction=retryAction||null;
 }
 function requireCanonicalSuccess(envelope,isRead){
@@ -1261,11 +1240,8 @@ function requireCanonicalSuccess(envelope,isRead){
 function setVerifiedProof(envelope,verb,isRead){
   var meta=requireCanonicalSuccess(envelope,!!isRead);
   var at=isRead?envelope.dataAsOf:meta.serverTime;
-  var message=(verb||"Live")+" · server verified "+formatSgTime(at);
+  var message=(verb||"Verified")+" · "+formatSgTime(at);
   lastVerifiedProof={serverTime:meta.serverTime,dataAsOf:at,requestId:meta.requestId||"",message:message};
-  var support=document.getElementById("syncSupport"), request=document.getElementById("syncRequestId");
-  if(meta.requestId){request.textContent="Request "+meta.requestId;support.hidden=true}
-  else{request.textContent="";support.hidden=true}
   setSyncState("live",message,false);return true;
 }
 window.__setSyncState=setSyncState;
@@ -1792,7 +1768,7 @@ async function loadExistingDigestReceipt(existingDigestId,frozen){
   var persisted=receiptSave(existingReceipt);
   if(persisted){submitSnapshot=null;saveNow()}else submitSnapshot=frozen;
   showReceipt(existingReceipt);setVerifiedProof(existingData,"Existing digest receipt loaded",true);
-  loadDailyStatus();startReceiptPolling();
+  startReceiptPolling();
   if(!persisted)setSyncState("error","Today's digest is accepted, but this browser could not save its receipt. Keep this page open and copy the receipt ID.",false);
   return existingReceipt;
 }
@@ -1876,7 +1852,7 @@ async function submitDigest(){
          keep the frozen key/payload and its in-memory receipt recoverable. */
       submitSnapshot=frozen;
     }
-    toastOff();setVerifiedProof(data,"Digest accepted");showReceipt(receipt);loadDailyStatus();
+    toastOff();setVerifiedProof(data,"Digest accepted");showReceipt(receipt);
     if(!receiptPersisted){
       setSyncState("error","Digest accepted, but this browser could not save the receipt. Keep this page open and copy the receipt ID.",false);
     }
@@ -1918,55 +1894,6 @@ async function submitDigest(){
 }
 document.getElementById("submitBtn").onclick=submitDigest;
 
-function validDailyStatus(data){
-  var status=data&&data.status,recorded=status&&status.recordedToday;
-  return !!(status&&/^\d{4}-\d{2}-\d{2}$/.test(status.businessDate||"")&&status.subject&&recorded&&Number.isFinite(Number(recorded.total))&&recorded.byKind);
-}
-function activityDetails(status){
-  var c=status.recordedToday.byKind||{};
-  var pairs=[["followUpLogged","follow-up"],["leadCreated","lead added"],["leadUpdated","lead updated"],["leadArchived","lead archived"],["digestAccepted","digest accepted"]];
-  var bits=pairs.filter(function(x){return Number(c[x[0]]||0)>0}).map(function(x){var n=Number(c[x[0]]||0);return n+" "+x[1]+(n===1?"":"s")});
-  return bits.length?bits.join(" · "):"No server-confirmed actions yet";
-}
-function renderDailyStatus(items,dataAsOf){
-  var panel=document.getElementById("dailyStatusPanel"),body=document.getElementById("dailyStatusBody");
-  if(!items.length){panel.hidden=true;return}
-  panel.hidden=false;
-  document.getElementById("dailyStatusIntro").textContent="Server-confirmed for "+formatBusinessDay(items[0].businessDate,false)+(dataAsOf?" · as of "+formatSgTime(dataAsOf):"")+".";
-  body.innerHTML=items.map(function(status){
-    var subject=status.subject||{},me=subject.uid&&currentIdentity.uid&&subject.uid===currentIdentity.uid;
-    var label=me?"You":(subject.label||actorLabel(subject.uid)||"Team member");
-    var total=Math.max(0,Number(status.recordedToday.total)||0);
-    return '<div class="activity-line" aria-label="'+esc(label)+': '+total+' recorded. '+esc(activityDetails(status))+'"><strong>'+esc(label)+'</strong><strong>'+total+'</strong></div>';
-  }).join("");
-}
-var dailyStatusLoading=null;
-function loadDailyStatus(){
-  if(PREVIEW)return Promise.resolve();
-  if(dailyStatusLoading)return dailyStatusLoading;
-  dailyStatusLoading=(async function(){
-    var items=[],asOf="";
-    try{
-      var mine=await apiRequest("/v1/daily-status",{attempts:2});
-      if(!validDailyStatus(mine))throw apiError("Daily status response was incomplete.",{code:"invalid_response"});
-      requireCanonicalSuccess(mine,true);
-      acceptCanonicalContext(mine);acceptActors(mine.actors);items.push(mine.status);asOf=mine.dataAsOf||mine.meta&&mine.meta.serverTime||asOf;
-    }catch(err){}
-    if(currentMember.role==="owner"){
-      try{
-        var team=await apiRequest("/v1/team/daily-status",{attempts:2});
-        if(!validDailyStatus(team))throw apiError("Team status response was incomplete.",{code:"invalid_response"});
-        requireCanonicalSuccess(team,true);
-        acceptCanonicalContext(team);acceptActors(team.actors);
-        if(!items.some(function(s){return s.subject.uid===team.status.subject.uid}))items.push(team.status);
-        asOf=team.dataAsOf||team.meta&&team.meta.serverTime||asOf;
-      }catch(err){}
-    }
-    renderDailyStatus(items,asOf);return items;
-  })().finally(function(){dailyStatusLoading=null});
-  return dailyStatusLoading;
-}
-
 /* ---------- go ----------
    __boot() is called by the auth gate: immediately when auth is off, or
    once a known account has signed in. Nothing loads before that. */
@@ -1976,7 +1903,7 @@ window.__acceptSession=function(session){
   currentIdentity=session&&session.identity||{};currentMember=session&&session.member||{};
   if(!currentIdentity.uid)throw apiError("Session identity was missing.",{code:"invalid_response"});
   setStorageScope(currentIdentity.uid);setStorageKeys(activeBusinessDate||session.meta&&session.meta.businessDate||sgTodayISO());
-  requireCanonicalSuccess(session,true);acceptCanonicalContext(session);setVerifiedProof(session,"Live",true);loadDailyStatus();
+  requireCanonicalSuccess(session,true);acceptCanonicalContext(session);setVerifiedProof(session,"Verified",true);
   if(activeReceipt)refreshReceipt(false);
 };
 window.__boot=function(session){
@@ -1989,7 +1916,7 @@ window.__boot=function(session){
     currentIdentity=session.identity||{};currentMember=session.member||{};
     if(!currentIdentity.uid)throw apiError("Session identity was missing.",{code:"invalid_response"});
     setStorageScope(currentIdentity.uid);
-    requireCanonicalSuccess(session,true);acceptCanonicalContext(session);setVerifiedProof(session,"Live",true);loadBusinessDayState();loadDailyStatus();return;
+    requireCanonicalSuccess(session,true);acceptCanonicalContext(session);setVerifiedProof(session,"Verified",true);loadBusinessDayState();return;
   }
   /* Offline boot cannot manufacture a current server day. Restore the latest
      day-scoped draft without labelling it current or allowing submission. */
