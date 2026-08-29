@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const workflow = readFileSync(path.join(ROOT, ".github/workflows/leads.yml"), "utf8");
+const functionsIndex = readFileSync(path.join(ROOT, "firebase-leads/functions/src/index.ts"), "utf8");
 
 test("CI actions are immutable and use Node 24-capable major versions", () => {
   const uses = [...workflow.matchAll(/uses:\s*(actions\/(?:checkout|setup-node))@([^\s#]+)\s*#\s*(v[^\s]+)/g)];
@@ -23,4 +24,15 @@ test("production write E2E remains explicit and separately guarded", () => {
   assert.match(workflow, /production_e2e:\s*[\s\S]*?type:\s*boolean/);
   assert.match(workflow, /production-write-e2e:[\s\S]*?inputs\.production_e2e\s*==\s*true/);
   assert.match(workflow, /ALLOW_PRODUCTION_E2E:\s*watchlist-v2-controlled-write/);
+});
+
+test("scheduled deploys preserve the narrow Firebase Scheduler invoker", () => {
+  assert.match(functionsIndex,
+    /SCHEDULER_INVOKER_SERVICE_ACCOUNT\s*=\s*"828546154700-compute@developer\.gserviceaccount\.com"/);
+  assert.equal((functionsIndex.match(/invoker:\s*SCHEDULER_INVOKER_SERVICE_ACCOUNT/g) || []).length, 3,
+    "all three scheduled Functions pin the Firebase Scheduler OIDC identity");
+  assert.equal((functionsIndex.match(/serviceAccount:\s*WORKER_SERVICE_ACCOUNT/g) || []).length, 3,
+    "all three scheduled Functions still run as the dedicated worker identity");
+  assert.match(functionsIndex, /secrets:\s*\[telegramBotToken,\s*telegramChatId\]/,
+    "only the outbox worker binds Telegram secrets");
 });

@@ -17,6 +17,11 @@ const REGION = "asia-southeast1";
 const TIME_ZONE = "Asia/Singapore";
 const API_SERVICE_ACCOUNT = "reputifly-leads-api@reputifly-leads-2.iam.gserviceaccount.com";
 const WORKER_SERVICE_ACCOUNT = "reputifly-leads-worker@reputifly-leads-2.iam.gserviceaccount.com";
+/* Firebase's Scheduler jobs authenticate as the project's default compute SA.
+   Declare that narrow invoker explicitly: otherwise a scheduled-function
+   redeploy can replace the service IAM policy with only the runtime SA and all
+   future Scheduler calls fail 403. This identity has no Telegram secret access. */
+const SCHEDULER_INVOKER_SERVICE_ACCOUNT = "828546154700-compute@developer.gserviceaccount.com";
 
 const legacyFirebaseApiKey = defineSecret("LEGACY_FIREBASE_API_KEY");
 const telegramBotToken = defineSecret("TELEGRAM_BOT_TOKEN");
@@ -67,6 +72,7 @@ export const outboxWorker = onSchedule(
     maxInstances: 1,
     concurrency: 1,
     serviceAccount: WORKER_SERVICE_ACCOUNT,
+    invoker: SCHEDULER_INVOKER_SERVICE_ACCOUNT,
     secrets: [telegramBotToken, telegramChatId],
   },
   async () => {
@@ -88,6 +94,7 @@ export const morningReminder = onSchedule(
     maxInstances: 1,
     concurrency: 1,
     serviceAccount: WORKER_SERVICE_ACCOUNT,
+    invoker: SCHEDULER_INVOKER_SERVICE_ACCOUNT,
   },
   async () => {
     const localDate = dateInTimeZone(new Date(), TIME_ZONE);
@@ -106,6 +113,7 @@ export const operationalHealth = onSchedule(
     maxInstances: 1,
     concurrency: 1,
     serviceAccount: WORKER_SERVICE_ACCOUNT,
+    invoker: SCHEDULER_INVOKER_SERVICE_ACCOUNT,
   },
   async () => {
     const now = new Date();

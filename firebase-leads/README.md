@@ -127,6 +127,12 @@ Do not put the legacy server API key or either Telegram value in source,
    row, and only then roll the worker back. Deploy the other schedulers only
    when their source or configuration changed.
 
+   The scheduled Functions explicitly name the Firebase-created Scheduler OIDC
+   service account as `invoker` while running as the dedicated worker service
+   account. This keeps future deploys from replacing the narrow invoker binding
+   and breaking every scheduled call with HTTP 403. The invoker has no access
+   to Telegram secrets.
+
 The API base URL is the deployed `api` Function URL. Do not guess or hardcode a
 URL until Firebase prints the actual deployment result.
 

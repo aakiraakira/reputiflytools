@@ -32,6 +32,13 @@ another independent channel, not through this Telegram outbox.
 Never include request Authorization headers, Telegram secrets, or digest bodies
 in alert payloads.
 
+All three scheduled Functions must declare the exact Firebase Scheduler OIDC
+identity (`828546154700-compute@developer.gserviceaccount.com`) as their
+`invoker`. The runtime remains the dedicated worker service account. After any
+scheduled-Function deploy, wait for a normal Scheduler `AttemptFinished` HTTP
+200; a deploy that silently resets the invoker policy otherwise produces 403s.
+The Scheduler identity must never receive Telegram secret access.
+
 ## Notification state machine
 
 ```text
