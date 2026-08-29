@@ -19,6 +19,9 @@ does not prove Telegram delivery.
    documents.
 7. A submitted digest reaches `digests/{id}.deliveryStatus == "delivered"` and
    records both `deliveredAt` and `telegramMessageId`.
+8. A controlled member-created lead reaches its deterministic `lead_created`
+   outbox receipt with both proof fields; routine edits create no additional
+   notification.
 
 Create Cloud Monitoring alerts for `operationalHealth` ERROR log entries,
 Function errors, Scheduler job failures, and a missing scheduled invocation for
@@ -73,6 +76,12 @@ If an expired lease follows a known incident, check the Telegram chat before
 manually changing it. Once the worker persists `telegramMessageId`, ordinary
 retries and digest POST replays cannot duplicate the message.
 
+The outbox intentionally has only three user-facing message types: a
+member-created lead summary, the 09:00 due/overdue Watchlist reminder, and the
+Daily Digest. Follow-up outcomes, edits, and archives are recorded
+transactionally and summarized in the Digest rather than sent as repetitive
+per-action messages.
+
 ## Recover a failed notification
 
 1. Inspect `notificationOutbox/{id}.lastFailure`, Function logs using the
@@ -91,12 +100,18 @@ retries and digest POST replays cannot duplicate the message.
    ```
 
 5. Verify the worker changes it to `delivered`, a `telegramMessageId` appears,
-   and the related digest becomes `delivered`.
+   and the related digest (when the row is a digest) becomes `delivered`.
 
 Do not create a second outbox document. One digest slot exists per actor and
 Singapore business date: the same payload under a new key returns the original
 receipt, while changed payload returns 409. Recover the `existingDigestId`
 instead of trying to create another same-day digest.
+
+When a release introduces a new outbox `type`, deploy `outboxWorker` first and
+prove its revision plus heartbeat before deploying the API that can enqueue the
+type. An older strict worker can correctly reject—but therefore dead-letter—a
+newer type. Roll back in reverse safety order: stop new API enqueues, reconcile
+all rows of the newer type, then roll back the worker.
 
 ## Rotate Telegram credentials
 

@@ -19,6 +19,7 @@ export interface Repository {
   getExpectedDigestMembers(): Promise<Array<{ uid: string; member: Member }>>;
   listActiveLeads(): Promise<Lead[]>;
   countDueLeads(localDate: string): Promise<number>;
+  getLeadNotification(leadId: string): Promise<NotificationOutbox | null>;
   createLead(input: {
     actor: Actor;
     lead: LeadInput;
@@ -27,6 +28,7 @@ export interface Repository {
     idempotencyKey?: string;
     payloadHash: string;
     businessDate: string;
+    notificationText?: string;
   }): Promise<LeadCreation>;
   putLead(input: {
     actor: Actor;
@@ -35,6 +37,7 @@ export interface Repository {
     expectedRevision: number;
     now: string;
     businessDate: string;
+    notificationText?: string;
   }): Promise<{ lead: Lead; created: boolean }>;
   archiveLead(input: {
     actor: Actor;

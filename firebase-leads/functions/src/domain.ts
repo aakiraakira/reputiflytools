@@ -107,8 +107,9 @@ export type OutboxStatus = "pending" | "retry" | "processing" | "delivered" | "d
 
 export interface NotificationOutbox {
   id: string;
-  type: "digest" | "morning_reminder";
+  type: "digest" | "morning_reminder" | "lead_created";
   digestId?: string;
+  leadId?: string;
   status: OutboxStatus;
   text: string;
   attempts: number;

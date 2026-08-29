@@ -6,6 +6,7 @@ import type {
   DailyStatus,
   Digest,
   Lead,
+  NotificationOutbox,
   PublicLead,
 } from "./domain";
 import { authenticate, type IdentityClient } from "./auth";
@@ -123,9 +124,18 @@ export function createApi(dependencies: ApiDependencies) {
     }));
   }));
 
+  app.get("/v1/leads/:id/notification", requireWriter, asyncRoute(async (request, response) => {
+    const leadId = parseDocumentId(routeParam(request.params.id), "lead id");
+    const notification = await dependencies.repository.getLeadNotification(leadId);
+    if (!notification) throw new AppError(404, "not_found", "Lead notification not found.");
+    response.status(200).json(withReadMeta(request, clock(), {
+      notification: leadNotificationPublicView(notification),
+    }));
+  }));
+
   app.post("/v1/leads", requireWriter, asyncRoute(async (request, response) => {
     const lead = parseBody(leadInputSchema, request.body);
-    const idempotencyKey = assertIdempotencyKey(request.header("idempotency-key"));
+    const idempotencyKey = assertIdempotencyKey(request.header("idempotency-key"), true) as string;
     const result = await leadService.create(actorFrom(request), lead, idempotencyKey);
     const actors = await actorLabelsForPublicLeads(resolveActorLabels, [result.lead]);
     response.status(result.replayed ? 200 : 201).json(withMeta(request, clock(), {
@@ -416,6 +426,30 @@ export function digestPublicView(digest: Digest) {
     deliveryStatus,
     ...(hasDeliveryProof ? { deliveredAt: digest.deliveredAt } : {}),
     ...(hasDeliveryProof ? { telegramMessageId: digest.telegramMessageId } : {}),
+  };
+}
+
+export function leadNotificationPublicView(notification: NotificationOutbox) {
+  const hasProof = notification.status === "delivered"
+    && typeof notification.deliveredAt === "string"
+    && notification.deliveredAt.length > 0
+    && Number.isInteger(notification.telegramMessageId)
+    && Number(notification.telegramMessageId) > 0;
+  const deliveryStatus = hasProof
+    ? "delivered"
+    : notification.status === "retry"
+      ? "retrying"
+      : notification.status === "dead"
+        ? "failed"
+        : notification.status === "delivered"
+          ? "unknown"
+          : "pending";
+  return {
+    id: notification.id,
+    leadId: notification.leadId,
+    deliveryStatus,
+    ...(hasProof ? { deliveredAt: notification.deliveredAt } : {}),
+    ...(hasProof ? { telegramMessageId: notification.telegramMessageId } : {}),
   };
 }
 

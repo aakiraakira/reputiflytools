@@ -60,7 +60,14 @@ export class IdentityToolkitClient implements IdentityClient {
       throw new AppError(503, "identity_unavailable", "Identity verification returned an invalid response.");
     }
 
-    if (response.status === 400 || response.status === 401 || response.status === 403) {
+    const providerCode = String(body.error?.message ?? "").split(/[\s:]+/, 1)[0] ?? "";
+    const rejectedSessionCodes = new Set([
+      "INVALID_ID_TOKEN",
+      "TOKEN_EXPIRED",
+      "USER_DISABLED",
+      "USER_NOT_FOUND",
+    ]);
+    if ([400, 401, 403].includes(response.status) && rejectedSessionCodes.has(providerCode)) {
       throw new AppError(401, "unauthorized", "The sign-in session is invalid or expired.");
     }
     if (!response.ok) {

@@ -122,6 +122,12 @@ describe("HTTP API", () => {
     expect(invalid.body.error.details.fields.length).toBeGreaterThan(1);
 
     const body = { name: "Alex", phone: "", note: "Asked for pricing", followUp: "2026-08-14" };
+    await request(app)
+      .post("/v1/leads")
+      .set("authorization", AUTHORIZATION)
+      .send(body)
+      .expect(400);
+    expect(repository.leads.size).toBe(0, "a retry-unsafe create without an idempotency key never mutates state");
     const first = await request(app)
       .post("/v1/leads")
       .set("authorization", AUTHORIZATION)
@@ -150,6 +156,70 @@ describe("HTTP API", () => {
       .set("idempotency-key", "create:browser-123")
       .send({ ...body, note: "Changed request" })
       .expect(409);
+    expect(repository.outbox.size).toBe(0, "owner-created leads do not notify the owner about their own action");
+  });
+
+  it("queues exactly one readable Telegram notification when the member creates a lead", async () => {
+    repository.members.set("uid-1", { active: true, role: "member", displayName: "Farhan" });
+    const body = {
+      name: "Acme Movers",
+      phone: "9123 4567",
+      note: "Needs a website quote and a sample before Friday.",
+      followUp: "2026-08-15",
+    };
+    const create = () => request(app)
+      .post("/v1/leads")
+      .set("authorization", AUTHORIZATION)
+      .set("idempotency-key", "create:member-notification")
+      .send(body);
+    await create().expect(201);
+    await create().expect(200);
+
+    expect(repository.outbox.size).toBe(1);
+    const first = [...repository.outbox.values()][0];
+    expect(first).toMatchObject({ type: "lead_created", status: "pending" });
+    expect(first?.text).toContain("🆕 New Watchlist lead");
+    expect(first?.text).toContain("Acme Movers");
+    expect(first?.text).toContain("Added by Farhan");
+    expect(first?.text).toContain("https://watchlist-v2.web.app/");
+    const pendingProof = await request(app)
+      .get(`/v1/leads/${first?.leadId}/notification`)
+      .set("authorization", AUTHORIZATION)
+      .expect(200);
+    expect(pendingProof.body.notification).toEqual({
+      id: first?.id,
+      leadId: first?.leadId,
+      deliveryStatus: "pending",
+    });
+    expect(pendingProof.body.notification).not.toHaveProperty("text");
+    if (first) {
+      first.status = "delivered";
+      first.deliveredAt = "2026-08-14T00:01:00.000Z";
+      first.telegramMessageId = 7788;
+      repository.outbox.set(first.id, first);
+    }
+    const deliveredProof = await request(app)
+      .get(`/v1/leads/${first?.leadId}/notification`)
+      .set("authorization", AUTHORIZATION)
+      .expect(200);
+    expect(deliveredProof.body.notification).toMatchObject({
+      deliveryStatus: "delivered",
+      deliveredAt: "2026-08-14T00:01:00.000Z",
+      telegramMessageId: 7788,
+    });
+
+    await request(app)
+      .put("/v1/leads/member_put_create")
+      .set("authorization", AUTHORIZATION)
+      .send({ ...body, expectedRevision: 0 })
+      .expect(201);
+    expect(repository.outbox.size).toBe(2, "PUT create uses the same notification contract");
+    await request(app)
+      .put("/v1/leads/member_put_create")
+      .set("authorization", AUTHORIZATION)
+      .send({ ...body, note: "Updated note", expectedRevision: 1 })
+      .expect(200);
+    expect(repository.outbox.size).toBe(2, "routine edits do not spam Telegram");
   });
 
   it("enforces optimistic revisions for update, upsert, and archive", async () => {
@@ -258,6 +328,27 @@ describe("HTTP API", () => {
       .set("authorization", AUTHORIZATION)
       .send({ ...body, payload: { ...body.payload, notes: "Different" } })
       .expect(409);
+  });
+
+  it("rejects a digest that Telegram could only truncate and preserves it as unsubmitted", async () => {
+    const response = await request(app)
+      .post("/v1/digests")
+      .set("authorization", AUTHORIZATION)
+      .send({
+        idempotencyKey: "digest:too-long:001",
+        payload: {
+          date: "Browser label",
+          newLeads: 0,
+          samplesSent: 0,
+          followUps: [],
+          dumped: [],
+          notes: "x".repeat(10_000),
+        },
+      })
+      .expect(400);
+    expect(response.body.error.message).toContain("too long for one complete Telegram message");
+    expect(repository.digests.size).toBe(0);
+    expect(repository.outbox.size).toBe(0);
   });
 
   it("allows only one digest per actor and Singapore business date across keys", async () => {
@@ -411,6 +502,7 @@ describe("HTTP API", () => {
   it("keeps viewer members read-only", async () => {
     repository.members.set("uid-1", { active: true, role: "viewer" });
     await request(app).get("/v1/leads").set("authorization", AUTHORIZATION).expect(200);
+    await request(app).get("/v1/leads/anything/notification").set("authorization", AUTHORIZATION).expect(403);
     await request(app)
       .post("/v1/leads")
       .set("authorization", AUTHORIZATION)

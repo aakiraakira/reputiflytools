@@ -373,7 +373,7 @@ test("digest localhost preview keeps its draft and makes no request", async () =
     await new Promise((resolve) => dom.window.setTimeout(resolve, 350));
     dom.window.document.getElementById("submitBtn").click();
     assert.equal(fetchCount, 0);
-    const key = `rfly_digest_draft_v6:${dom.window.activeBusinessDate}`;
+    const key = dom.window.DRAFT_KEY;
     const draft = JSON.parse(dom.window.localStorage.getItem(key));
     assert.match(draft.idempotencyKey, /^digest:/);
     assert.equal(draft.data.newLeads, 2);
@@ -410,11 +410,11 @@ test("digest clears the draft only after accepted=true plus digestId", async () 
     dom.window.document.getElementById("leadPills").children[0].click();
     dom.window.document.getElementById("samplePills").children[0].click();
     dom.window.saveNow();
-    const draftKey = `rfly_digest_draft_v6:${META.businessDate}`;
+    const draftKey = dom.window.DRAFT_KEY;
     assert.ok(dom.window.localStorage.getItem(draftKey));
     await dom.window.submitDigest();
     assert.equal(dom.window.localStorage.getItem(draftKey), null);
-    const receipt = JSON.parse(dom.window.localStorage.getItem(`rfly_digest_receipt_v2:${META.businessDate}`));
+    const receipt = JSON.parse(dom.window.localStorage.getItem(dom.window.RECEIPT_KEY));
     assert.equal(receipt.digestId, "digest_receipt_1");
     assert.match(dom.window.document.getElementById("deliveryTimeline").textContent, /Digest accepted/);
     dom.window.clearTimeout(dom.window.deliveryPollTimer);
@@ -438,10 +438,172 @@ test("a malformed success never clears a recoverable digest draft", async () => 
     dom.window.document.getElementById("leadPills").children[1].click();
     dom.window.document.getElementById("samplePills").children[1].click();
     await dom.window.submitDigest();
-    const draft = JSON.parse(dom.window.localStorage.getItem(`rfly_digest_draft_v6:${META.businessDate}`));
+    const draft = JSON.parse(dom.window.localStorage.getItem(dom.window.DRAFT_KEY));
     assert.ok(draft.submission.idempotencyKey);
-    assert.equal(dom.window.localStorage.getItem(`rfly_digest_receipt_v2:${META.businessDate}`), null);
+    assert.equal(dom.window.localStorage.getItem(dom.window.RECEIPT_KEY), null);
     assert.match(dom.window.document.getElementById("syncText").textContent, /not confirmed/i);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("a definite digest validation rejection keeps the draft editable instead of retry-locking it", async () => {
+  const dom = makeDom(DIGEST_PATH, "https://daily-digest-v2.web.app/");
+  try {
+    dom.window.__rflyToken = async () => "firebase-id-token";
+    dom.window.fetch = async () => response({
+      error: {
+        code: "bad_request",
+        message: "This digest is too long for one complete Telegram message. Shorten the notes; nothing was submitted.",
+      },
+    }, 400);
+    executeClassic(dom, DIGEST_PATH);
+    dom.window.currentIdentity = { uid: "member_self" };
+    dom.window.currentMember = { role: "member" };
+    dom.window.activeBusinessDate = META.businessDate;
+    dom.window.setStorageKeys(META.businessDate);
+    dom.window.updateDayLabels();
+    dom.window.document.getElementById("leadPills").children[1].click();
+    dom.window.document.getElementById("samplePills").children[1].click();
+    dom.window.document.getElementById("notes").value = "A long draft that must remain editable";
+
+    await dom.window.submitDigest();
+
+    assert.equal(dom.window.submitSnapshot, null, "definitively rejected payload is not frozen for an identical retry");
+    assert.equal(dom.window.document.getElementById("notes").disabled, false);
+    assert.match(dom.window.document.getElementById("syncText").textContent, /too long for one complete Telegram message/i);
+    assert.match(dom.window.document.getElementById("syncText").textContent, /draft is editable/i);
+    assert.match(dom.window.document.getElementById("submitTxt").textContent, /Send Tonight's Digest/);
+    const draft = JSON.parse(dom.window.localStorage.getItem(dom.window.DRAFT_KEY));
+    assert.equal(draft.data.notes, "A long draft that must remain editable");
+    assert.equal(draft.submission, null);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("a cross-tab digest conflict loads the already accepted server receipt instead of retrying forever", async () => {
+  const dom = makeDom(DIGEST_PATH, "https://daily-digest-v2.web.app/");
+  try {
+    dom.window.__rflyToken = async () => "firebase-id-token";
+    const existingId = "digest_existing_day_slot";
+    dom.window.fetch = async (url, options) => {
+      if (url.endsWith("/v1/digests") && options.method === "POST") {
+        return response({
+          error: {
+            code: "conflict",
+            message: "A different digest was already accepted for this business date.",
+            details: { existingDigestId: existingId, businessDate: META.businessDate },
+          },
+        }, 409);
+      }
+      if (url.endsWith(`/v1/digests/${existingId}`)) {
+        return response(success({
+          digest: {
+            id: existingId,
+            businessDate: META.businessDate,
+            payload: {},
+            acceptedAt: META.serverTime,
+            acceptedBy: "member_self",
+            deliveryStatus: "pending",
+          },
+          actors: { member_self: { label: "Employee" } },
+        }, true));
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    };
+    executeClassic(dom, DIGEST_PATH);
+    dom.window.loadDailyStatus = () => Promise.resolve();
+    dom.window.currentIdentity = { uid: "member_self" };
+    dom.window.currentMember = { role: "member" };
+    dom.window.activeBusinessDate = META.businessDate;
+    dom.window.setStorageKeys(META.businessDate);
+    dom.window.updateDayLabels();
+    dom.window.document.getElementById("leadPills").children[2].click();
+    dom.window.document.getElementById("samplePills").children[3].click();
+
+    await dom.window.submitDigest();
+
+    assert.equal(dom.window.submitSnapshot, null);
+    assert.equal(dom.window.activeReceipt.digestId, existingId);
+    assert.equal(dom.window.document.getElementById("submitBtn").hidden, true);
+    assert.match(dom.window.document.getElementById("deliveryTimeline").textContent, /Digest accepted/);
+    assert.match(dom.window.document.getElementById("toastTxt").textContent, /already accepted/i);
+    const receipt = JSON.parse(dom.window.localStorage.getItem(dom.window.RECEIPT_KEY));
+    assert.equal(receipt.digestId, existingId);
+    dom.window.clearTimeout(dom.window.deliveryPollTimer);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("a cross-tab conflict keeps submission locked while an accepted receipt read is temporarily unavailable", async () => {
+  const dom = makeDom(DIGEST_PATH, "https://daily-digest-v2.web.app/");
+  try {
+    dom.window.__rflyToken = async () => "firebase-id-token";
+    const existingId = "digest_existing_retry";
+    let receiptReads = 0;
+    dom.window.fetch = async (url, options) => {
+      if (url.endsWith("/v1/digests") && options.method === "POST") {
+        return response({ error: {
+          code: "conflict", message: "Already accepted.",
+          details: { existingDigestId: existingId, businessDate: META.businessDate },
+        } }, 409);
+      }
+      if (url.endsWith(`/v1/digests/${existingId}`)) {
+        receiptReads += 1;
+        if (receiptReads <= 3) return response({ error: { code: "internal_error", message: "Temporary read failure" } }, 503);
+        return response(success({
+          digest: {
+            id: existingId, businessDate: META.businessDate, payload: {},
+            acceptedAt: META.serverTime, acceptedBy: "member_self", deliveryStatus: "pending",
+          },
+          actors: { member_self: { label: "Employee" } },
+        }, true));
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    };
+    executeClassic(dom, DIGEST_PATH);
+    dom.window.loadDailyStatus = () => Promise.resolve();
+    dom.window.__setStorageScope("member_self");
+    dom.window.currentIdentity = { uid: "member_self" };
+    dom.window.currentMember = { role: "member" };
+    dom.window.activeBusinessDate = META.businessDate;
+    dom.window.setStorageKeys(META.businessDate);
+    dom.window.updateDayLabels();
+    dom.window.document.getElementById("leadPills").children[1].click();
+    dom.window.document.getElementById("samplePills").children[1].click();
+
+    await dom.window.submitDigest();
+    assert.ok(dom.window.submitSnapshot, "frozen retry proof remains until the existing receipt is loaded");
+    assert.equal(dom.window.document.getElementById("submitBtn").hidden, true);
+    assert.match(dom.window.document.getElementById("syncText").textContent, /already accepted on the server/i);
+    assert.match(dom.window.document.getElementById("syncText").textContent, /will not submit again/i);
+
+    await dom.window.syncAction();
+    assert.equal(dom.window.activeReceipt.digestId, existingId);
+    assert.equal(dom.window.submitSnapshot, null);
+    assert.equal(receiptReads, 4);
+    dom.window.clearTimeout(dom.window.deliveryPollTimer);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("a transient background receipt read keeps bounded Telegram polling alive", async () => {
+  const dom = makeDom(DIGEST_PATH, "https://daily-digest-v2.web.app/");
+  try {
+    executeClassic(dom, DIGEST_PATH);
+    dom.window.activeReceipt = {
+      digestId: "digest_pending_retry", businessDate: META.businessDate,
+      acceptedAt: META.serverTime, acceptedBy: "member_self", deliveryStatus: "pending",
+    };
+    dom.window.apiRequest = async () => { throw new Error("temporary network failure"); };
+    dom.window.deliveryPollAttempts = 0;
+    await dom.window.refreshReceipt(false);
+    assert.ok(dom.window.deliveryPollTimer, "the next bounded poll remains scheduled");
+    assert.equal(dom.window.deliveryPollAttempts, 1);
+    dom.window.clearTimeout(dom.window.deliveryPollTimer);
   } finally {
     dom.window.close();
   }
@@ -512,13 +674,13 @@ test("accepted digest keeps its frozen draft when receipt storage throws", async
     const storageProto = dom.window.Storage.prototype;
     const originalSet = storageProto.setItem;
     storageProto.setItem = function setItem(key, value) {
-      if (key === `rfly_digest_receipt_v2:${META.businessDate}`) throw new dom.window.DOMException("Quota exceeded", "QuotaExceededError");
+      if (key === dom.window.RECEIPT_KEY) throw new dom.window.DOMException("Quota exceeded", "QuotaExceededError");
       return originalSet.call(this, key, value);
     };
 
     await dom.window.submitDigest();
-    assert.equal(dom.window.localStorage.getItem(`rfly_digest_receipt_v2:${META.businessDate}`), null);
-    const draft = JSON.parse(dom.window.localStorage.getItem(`rfly_digest_draft_v6:${META.businessDate}`));
+    assert.equal(dom.window.localStorage.getItem(dom.window.RECEIPT_KEY), null);
+    const draft = JSON.parse(dom.window.localStorage.getItem(dom.window.DRAFT_KEY));
     assert.equal(draft.submission.idempotencyKey, draft.idempotencyKey);
     assert.equal(draft.submission.payload.newLeads, 2);
     assert.equal(draft.submission.payload.samplesSent, 3);
@@ -629,7 +791,89 @@ test("all follow-up outcomes use one idempotent transactional endpoint and no op
     }), 201));
     await pending;
     assert.equal(dom.window.rows[0].revision, 5);
-    assert.equal(dom.window.localStorage.getItem("rfly_watchlist_pending_followup_v1"), null);
+    assert.equal(dom.window.localStorage.getItem(dom.window.PENDING_FOLLOWUP_KEY), null);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("a replayed follow-up receipt never regresses a newer lead revision", async () => {
+  const dom = makeDom(WATCHLIST_PATH, "https://watchlist-v2.web.app/");
+  try {
+    executeClassic(dom, WATCHLIST_PATH);
+    dom.window.__setStorageScope("member_self");
+    const current = {
+      id: "lead_replay", name: "Current", phone: "", note: "newer edit",
+      followUp: "2026-08-16", revision: 3, status: "active",
+      updatedAt: "2026-08-14T02:00:00.000Z", updatedBy: "owner_self",
+    };
+    dom.window.rows = [current]; dom.window.loaded = true;
+    const item = {
+      key: "follow-up:lost-response", leadId: current.id, outcome: "spoke",
+      body: { expectedRevision: 1, outcome: "spoke", nextFollowUp: "2026-08-15" },
+    };
+    dom.window.pendingFollowUpSave(item);
+    dom.window.apiRequest = async (path) => {
+      if (path.endsWith("/follow-ups")) {
+        return success({
+          lead: { ...current, note: "older receipt", followUp: "2026-08-15", revision: 2 },
+          followUp: {
+            id: "follow_old", leadId: current.id, outcome: "spoke", nextFollowUp: "2026-08-15",
+            occurredAt: META.serverTime, businessDate: META.businessDate,
+            actorUid: "member_self", resultingRevision: 2,
+          },
+          replayed: true, actors: { member_self: { label: "Employee" } },
+        });
+      }
+      if (path === "/v1/leads") {
+        return success({ leads: [current], actors: { owner_self: { label: "Owner" } } }, true);
+      }
+      throw new Error(`unexpected path ${path}`);
+    };
+    await dom.window.logFollowUp(item, true);
+    assert.equal(dom.window.rows[0].revision, 3);
+    assert.equal(dom.window.rows[0].note, "newer edit");
+    assert.equal(dom.window.localStorage.getItem(dom.window.PENDING_FOLLOWUP_KEY), null);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("a replayed active follow-up cannot resurrect a lead that is no longer active", async () => {
+  const dom = makeDom(WATCHLIST_PATH, "https://watchlist-v2.web.app/");
+  try {
+    executeClassic(dom, WATCHLIST_PATH);
+    dom.window.__setStorageScope("member_self");
+    dom.window.rows = []; dom.window.loaded = true;
+    const item = {
+      key: "follow-up:archived-later", leadId: "lead_archived_later", outcome: "spoke",
+      body: { expectedRevision: 1, outcome: "spoke", nextFollowUp: "2026-08-15" },
+    };
+    dom.window.pendingFollowUpSave(item);
+    dom.window.apiRequest = async (path) => {
+      if (path.endsWith("/follow-ups")) {
+        return success({
+          lead: {
+            id: item.leadId, name: "Historical", phone: "", note: "old receipt",
+            followUp: "2026-08-15", revision: 2, status: "active",
+            updatedAt: META.serverTime, updatedBy: "member_self",
+          },
+          followUp: {
+            id: "follow_historical", leadId: item.leadId, outcome: "spoke", nextFollowUp: "2026-08-15",
+            occurredAt: META.serverTime, businessDate: META.businessDate,
+            actorUid: "member_self", resultingRevision: 2,
+          },
+          replayed: true, actors: { member_self: { label: "Employee" } },
+        });
+      }
+      if (path === "/v1/leads") throw new Error("temporary refresh failure");
+      throw new Error(`unexpected path ${path}`);
+    };
+    await dom.window.logFollowUp(item, true);
+    assert.equal(dom.window.rows.length, 0, "historical active receipt was not inserted");
+    assert.equal(dom.window.localStorage.getItem(dom.window.PENDING_FOLLOWUP_KEY), null);
+    assert.match(dom.window.document.getElementById("syncText").textContent, /could not be refreshed/i);
+    assert.equal(dom.window.document.getElementById("syncRetry").hidden, false);
   } finally {
     dom.window.close();
   }
@@ -652,6 +896,8 @@ test("midnight rollover preserves prior day-scoped draft and starts from server 
   const dom = makeDom(DIGEST_PATH, "https://reputifly.org/daily-digest/");
   try {
     executeClassic(dom, DIGEST_PATH);
+    dom.window.__setStorageScope("member_self");
+    dom.window.currentIdentity = { uid: "member_self" };
     dom.window.currentMember = { role: "member" };
     dom.window.activeBusinessDate = META.businessDate;
     dom.window.setStorageKeys(META.businessDate);
@@ -659,7 +905,7 @@ test("midnight rollover preserves prior day-scoped draft and starts from server 
     dom.window.document.getElementById("leadPills").children[2].click();
     dom.window.document.getElementById("samplePills").children[3].click();
     dom.window.saveNow();
-    const oldKey = `rfly_digest_draft_v6:${META.businessDate}`;
+    const oldKey = dom.window.DRAFT_KEY;
     assert.ok(dom.window.localStorage.getItem(oldKey));
     dom.window.acceptCanonicalContext(success({}, false));
     dom.window.acceptCanonicalContext({ meta: {
@@ -706,8 +952,9 @@ test("cache and offline modes are never labelled Live", () => {
   const dom = makeDom(WATCHLIST_PATH, "https://reputifly.org/watchlist/");
   try {
     executeClassic(dom, WATCHLIST_PATH);
-    dom.window.localStorage.setItem("rfly_watchlist_cache_v2", JSON.stringify({
-      version: 3, rows: [], actors: {}, businessDate: META.businessDate,
+    dom.window.__setStorageScope("member_self");
+    dom.window.localStorage.setItem(dom.window.CACHE_KEY, JSON.stringify({
+      version: 4, ownerUid: "member_self", rows: [], actors: {}, businessDate: META.businessDate,
     }));
     dom.window.__boot(null, { offline: true });
     const text = dom.window.document.getElementById("syncText").textContent;
@@ -716,5 +963,89 @@ test("cache and offline modes are never labelled Live", () => {
     assert.match(dom.window.document.getElementById("syncBanner").className, /is-stale/);
   } finally {
     dom.window.close();
+  }
+});
+
+test("offline storage is UID-scoped so account B cannot see or replay account A data", async () => {
+  const watch = makeDom(WATCHLIST_PATH, "https://watchlist-v2.web.app/");
+  try {
+    executeClassic(watch, WATCHLIST_PATH);
+    watch.window.__setStorageScope("user_a");
+    const aCacheKey = watch.window.CACHE_KEY;
+    const aCreateKey = watch.window.PENDING_CREATE_KEY;
+    const aFollowKey = watch.window.PENDING_FOLLOWUP_KEY;
+    watch.window.localStorage.setItem(aCacheKey, JSON.stringify({
+      version: 4,
+      ownerUid: "user_a",
+      rows: [{ id: "private_a", name: "Private A", phone: "90000000", note: "A-only lead", followUp: "" }],
+      actors: {},
+      businessDate: META.businessDate,
+    }));
+    watch.window.localStorage.setItem(aCreateKey, JSON.stringify([{
+      key: "create:user-a-only",
+      lead: { name: "Private A", phone: "90000000", note: "A-only pending", followUp: "" },
+    }]));
+    watch.window.localStorage.setItem(aFollowKey, JSON.stringify([{
+      key: "followup:user-a-only",
+      leadId: "private_a",
+      body: { expectedRevision: 1, outcome: "lost" },
+    }]));
+    // Old unowned beta data is deliberately never migrated during an outage.
+    watch.window.localStorage.setItem("rfly_watchlist_cache_v2", JSON.stringify({
+      rows: [{ id: "legacy_private", name: "Legacy private", note: "must stay hidden" }],
+    }));
+
+    watch.window.__setStorageScope("user_b");
+    watch.window.__boot(null, { offline: true });
+    assert.equal(watch.window.rows.length, 0);
+    assert.doesNotMatch(watch.window.document.getElementById("list").textContent, /Private A|Legacy private/);
+    assert.deepEqual(JSON.parse(JSON.stringify(watch.window.pendingCreatesLoad())), []);
+    assert.deepEqual(JSON.parse(JSON.stringify(watch.window.pendingFollowUpsLoad())), []);
+    assert.notEqual(watch.window.CACHE_KEY, aCacheKey);
+  } finally {
+    watch.window.close();
+  }
+
+  const digest = makeDom(DIGEST_PATH, "https://daily-digest-v2.web.app/");
+  try {
+    executeClassic(digest, DIGEST_PATH);
+    digest.window.__setStorageScope("user_a");
+    digest.window.currentIdentity = { uid: "user_a" };
+    digest.window.activeBusinessDate = META.businessDate;
+    digest.window.setStorageKeys(META.businessDate);
+    const aDraftKey = digest.window.DRAFT_KEY;
+    const aReceiptKey = digest.window.RECEIPT_KEY;
+    digest.window.localStorage.setItem(aDraftKey, JSON.stringify({
+      version: 6,
+      businessDate: META.businessDate,
+      idempotencyKey: "digest:user-a-only",
+      submission: null,
+      data: { date: "Fri, 14 Aug", newLeads: 1, samplesSent: 1, followUps: [], dumped: [], notes: "A-only draft" },
+    }));
+    digest.window.localStorage.setItem(aReceiptKey, JSON.stringify({
+      businessDate: META.businessDate,
+      idempotencyKey: "digest:user-a-only",
+      digestId: "digest_user_a",
+      acceptedAt: META.serverTime,
+      acceptedBy: "user_a",
+      deliveryStatus: "delivered",
+      deliveredAt: META.serverTime,
+      telegramMessageId: 42,
+    }));
+    digest.window.localStorage.setItem(`rfly_digest_draft_v6:${META.businessDate}`, JSON.stringify({
+      businessDate: META.businessDate,
+      data: { notes: "legacy A-only draft" },
+    }));
+
+    digest.window.__setStorageScope("user_b");
+    digest.window.currentIdentity = { uid: "user_b" };
+    digest.window.__boot(null);
+    assert.equal(digest.window.document.getElementById("notes").value, "");
+    assert.equal(digest.window.activeReceipt, null);
+    assert.notEqual(digest.window.DRAFT_KEY, aDraftKey);
+    assert.notEqual(digest.window.RECEIPT_KEY, aReceiptKey);
+    assert.doesNotMatch(digest.window.document.body.textContent, /A-only draft|legacy A-only draft/);
+  } finally {
+    digest.window.close();
   }
 });

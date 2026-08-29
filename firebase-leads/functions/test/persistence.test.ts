@@ -87,6 +87,17 @@ describe("persisted Firestore decoding", () => {
       .toThrow(PersistedDataError);
     expect(() => outboxFromPersisted("outbox-1", { ...outbox, attempts: "1" }))
       .toThrow(PersistedDataError);
+    expect(outboxFromPersisted("lead-outbox", {
+      ...outbox,
+      type: "lead_created",
+      digestId: undefined,
+      leadId: "lead-1",
+    })).toMatchObject({ type: "lead_created", leadId: "lead-1" });
+    expect(() => outboxFromPersisted("lead-outbox", {
+      ...outbox,
+      type: "lead_created",
+      digestId: undefined,
+    })).toThrow(PersistedDataError);
 
     const followUp = {
       leadId: "lead-1",

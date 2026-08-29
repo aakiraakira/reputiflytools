@@ -22,6 +22,10 @@ export function deterministicId(prefix: string, uid: string, key: string): strin
   return `${prefix}_${digest}`;
 }
 
+export function leadCreatedOutboxId(leadId: string): string {
+  return deterministicId("leadnotice", "system", leadId);
+}
+
 export function publicLead(lead: Lead) {
   return {
     id: lead.id,
@@ -95,6 +99,9 @@ export class LeadService {
       businessDate: businessDate(createdAt),
       ...(idempotencyKey ? { idempotencyKey } : {}),
       payloadHash: hashValue(lead),
+      ...(actor.role === "member" ? {
+        notificationText: formatLeadCreated(lead, actorDisplayLabel(actor)),
+      } : {}),
     });
     return { lead: publicLead(result.lead), replayed: result.replayed };
   }
@@ -108,6 +115,9 @@ export class LeadService {
       expectedRevision,
       now: updatedAt.toISOString(),
       businessDate: businessDate(updatedAt),
+      ...(actor.role === "member" ? {
+        notificationText: formatLeadCreated(lead, actorDisplayLabel(actor)),
+      } : {}),
     });
     return { lead: publicLead(result.lead), created: result.created };
   }
@@ -130,29 +140,65 @@ function countLabel(value: number): string {
   return value === 10 ? "10+" : String(value);
 }
 
+function oneLine(value: string, fallback: string, maximum = 120): string {
+  const cleaned = value.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim();
+  return (cleaned || fallback).slice(0, maximum);
+}
+
+function actorDisplayLabel(actor: Actor): string {
+  return oneLine(actor.memberDisplayName || actor.displayName || "Team member", "Team member", 80);
+}
+
+function visibleExcerpt(value: string, maximum: number): string {
+  const cleaned = value.replace(/\r\n?/g, "\n").trim();
+  if (cleaned.length <= maximum) return cleaned;
+  return `${cleaned.slice(0, maximum - 36).trimEnd()}…\n(Open Watchlist for the full note)`;
+}
+
+export function formatLeadCreated(lead: LeadInput, addedBy: string): string {
+  const lines = [
+    "🆕 New Watchlist lead",
+    `👤 ${oneLine(lead.name, "No name")}`,
+    `📱 ${oneLine(lead.phone, "No phone")}`,
+    `📅 Follow up: ${lead.followUp || "No date set"}`,
+    `➕ Added by ${oneLine(addedBy, "Team member", 80)}`,
+    "",
+    "📝 What to remember",
+    visibleExcerpt(lead.note, 700),
+    "",
+    "Open Watchlist: https://watchlist-v2.web.app/",
+  ];
+  return lines.join("\n");
+}
+
 export function formatDigest(payload: DigestPayload, submittedBy: string): string {
   const lines = [
-    "Reputifly Daily Digest",
-    payload.date,
+    "📋 Reputifly Daily Digest",
+    `📅 ${payload.date} · Singapore`,
+    `👤 Submitted by ${oneLine(submittedBy, "Team member", 80)}`,
     "",
-    `New leads: ${countLabel(payload.newLeads)}`,
-    `Samples sent: ${countLabel(payload.samplesSent)}`,
+    "SUMMARY",
+    `• New leads: ${countLabel(payload.newLeads)}`,
+    `• Samples sent: ${countLabel(payload.samplesSent)}`,
   ];
 
   if (payload.followUps.length) {
-    lines.push("", "Follow-ups:");
+    lines.push("", "FOLLOW-UPS");
     payload.followUps.forEach((item, index) => {
-      lines.push(`${index + 1}. ${item.phone} — ${item.round}; sample: ${item.sample}`);
+      lines.push(`${index + 1}. ${item.phone} — ${item.round} · Sample: ${item.sample}`);
     });
   }
   if (payload.dumped.length) {
-    lines.push("", "Dumped leads:");
+    lines.push("", "DUMPED LEADS");
     payload.dumped.forEach((item, index) => lines.push(`${index + 1}. ${item.reason}`));
   }
-  if (payload.notes) lines.push("", "Questions / notes:", payload.notes);
-  lines.push("", `Submitted by ${submittedBy}`);
+  if (payload.notes) lines.push("", "QUESTIONS / NOTES", payload.notes);
 
-  return lines.join("\n").slice(0, 4_096);
+  const text = lines.join("\n");
+  if (text.length > 4_096) {
+    throw new AppError(400, "bad_request", "This digest is too long for one complete Telegram message. Shorten the notes or split long entries; nothing was submitted.");
+  }
+  return text;
 }
 
 export class DigestService {
@@ -279,7 +325,7 @@ export class TelegramHttpClient implements TelegramSender {
         body: JSON.stringify({
           chat_id: this.chatId,
           text,
-          disable_web_page_preview: true,
+          link_preview_options: { is_disabled: true },
         }),
         signal: controller.signal,
       });
@@ -410,8 +456,14 @@ function deliveryErrorMessage(error: unknown): string {
 }
 
 export function buildMorningReminder(localDate: string, dueCount: number): string {
-  const due = `${dueCount} lead${dueCount === 1 ? " is" : "s are"} due or overdue.`;
-  return `Reputifly Watchlist — ${localDate}\n${due}\nReview the Watchlist.`;
+  const due = `${dueCount} lead${dueCount === 1 ? " is" : "s are"} due or overdue`;
+  return [
+    "📌 Reputifly Watchlist",
+    `📅 ${localDate} · Singapore`,
+    `⚠️ ${due}`,
+    "",
+    "Open Watchlist: https://watchlist-v2.web.app/",
+  ].join("\n");
 }
 
 export async function enqueueMorningReminder(input: {

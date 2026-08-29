@@ -13,7 +13,8 @@ No user is imported and no browser receives Firestore credentials.
 
 - `api`: public HTTPS Function, Node.js 22, one warm instance, explicit CORS.
 - `outboxWorker`: every minute; claims one queued notification at a time and
-  sends at most four per bounded run.
+  sends at most four per bounded run. It delivers de-duplicated Daily Digest,
+  due-lead reminder, and member-created lead notifications.
 - `morningReminder`: 09:00 every day in `Asia/Singapore`; creates one neutral
   Watchlist reminder only when at least one lead is due or overdue. Empty days
   record a skipped heartbeat and send nothing.
@@ -46,7 +47,9 @@ permissions, privacy-safe actor labels, digest public allowlists and replayed
 timestamps, one digest per actor/business date, strict persisted-document
 decoding, deterministic reminder skips, sequential bounded claims, expired
 leases, Telegram failures, backoff, dead-lettering, corrupt-row quarantine, and
-successful `message_id` persistence. External HTTP is mocked.
+successful `message_id` persistence. Message-boundary tests prove that digests
+are never silently truncated and member lead alerts are concise and
+deterministic. External HTTP is mocked.
 
 ## Deployment configuration
 
@@ -80,6 +83,8 @@ Do not put the legacy server API key or either Telegram value in source,
    all three jobs and verify fresh `system/*` heartbeats. A Functions deploy
    can recreate scheduler plumbing, so repeat this IAM check after every
    scheduled-Function deployment.
+   It must not have Secret Manager access; OIDC invocation does not require
+   reading any runtime secret.
 4. Create all three Secret Manager values through non-echoing prompts:
 
    ```sh
@@ -106,12 +111,21 @@ Do not put the legacy server API key or either Telegram value in source,
      dailyDigestExpected: optional boolean; true for exactly one active member
    ```
 
-6. Deploy rules/indexes first, then Functions:
+6. Deploy rules/indexes first. When a release adds an outbox type, deploy and
+   verify the new worker before the API that can enqueue that type:
 
    ```sh
    firebase deploy --only firestore:rules,firestore:indexes
-   firebase deploy --only functions
+   firebase deploy --only functions:outboxWorker
+   # Verify the new worker revision and a fresh system/outboxWorker heartbeat.
+   firebase deploy --only functions:api
    ```
+
+   This order matters: an older strict worker would quarantine a newer outbox
+   document it does not understand. For rollback, stop the newer API from
+   enqueueing first, drain or repair every newer pending/retry/processing/dead
+   row, and only then roll the worker back. Deploy the other schedulers only
+   when their source or configuration changed.
 
 The API base URL is the deployed `api` Function URL. Do not guess or hardcode a
 URL until Firebase prints the actual deployment result.
@@ -169,9 +183,9 @@ never contain emails or member metadata: migration maps to `Imported`, inactive
 members map to `Former/unknown member`, and missing/unsafe labels are omitted so
 the UI can say `Team member` without displaying a raw UID.
 
-`POST /v1/leads` accepts a flat lead. Frontends should send a stable
-`Idempotency-Key` header until the response is received; omitted keys remain
-supported for simple clients but cannot make a lost response replay-safe.
+`POST /v1/leads` accepts a flat lead and requires a stable `Idempotency-Key`
+header. A create without the header is rejected before mutation so a lost
+response can never produce a second lead or Telegram alert.
 
 ```json
 {
@@ -185,6 +199,18 @@ supported for simple clients but cannot make a lost response replay-safe.
 It returns `201 { "lead": {...}, "replayed": false }`, or `200` with
 `replayed: true` when the same key and body are retried. Reusing a key with a
 different body returns `409`.
+
+When a member creates a lead (through POST or a PUT upsert), the same Firestore
+transaction creates one deterministic `lead_created` outbox row. Owner-created
+leads do not notify the owner about their own action, and routine edits,
+follow-ups, and archives do not create Telegram spam. The alert contains a
+bounded summary and an explicit V2 Watchlist link; the full lead remains
+authoritative in Firestore.
+
+`GET /v1/leads/:id/notification` is writer-only and returns the explicit proof
+allowlist `id,leadId,deliveryStatus,deliveredAt?,telegramMessageId?` plus
+`dataAsOf,meta`. It never exposes message text or provider errors. `delivered`
+is returned only when both server proof fields are present.
 
 `PUT /v1/leads/:id` performs a revision-checked update or upsert:
 
@@ -291,6 +317,11 @@ with the same payload returns the original receipt; a different payload returns
 409 with only `existingDigestId` and `businessDate` so the client can recover
 the accepted receipt. A new business date creates a new slot.
 
+The fully formatted Telegram text must fit in one 4,096-character message. An
+oversized digest is rejected with 400 before any digest/outbox write, so the
+browser can keep and unlock the draft for editing; the server never truncates
+the notes or drops the submitter line.
+
 `GET /v1/digests/:id` returns only the explicit public allowlist:
 `id,businessDate,payload,acceptedAt,acceptedBy,deliveryStatus,deliveredAt?,telegramMessageId?`,
 plus `actors,dataAsOf,meta`. It never exposes hashes, idempotency keys, raw
@@ -317,7 +348,8 @@ sanitized quarantine reason so valid work behind them can continue.
 - IDs: `[A-Za-z0-9_-]{1,128}`.
 - Idempotency keys: `[A-Za-z0-9._:-]{8,200}`.
 - Digest: date 1–80; counts are integers 0–10; at most 100 follow-ups and 100
-  dumped leads; notes at most 10,000.
+  dumped leads; notes at most 10,000; the complete formatted Telegram message
+  must also fit within 4,096 characters or the entire request is rejected.
 - JSON bodies are limited to 64 KiB and reject unknown fields.
 
 Errors use one stable envelope:
