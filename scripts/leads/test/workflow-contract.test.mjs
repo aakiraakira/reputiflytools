@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const workflow = readFileSync(path.join(ROOT, ".github/workflows/leads.yml"), "utf8");
+const firebaseConfig = JSON.parse(readFileSync(path.join(ROOT, "firebase-leads/firebase.json"), "utf8"));
 const functionsIndex = readFileSync(path.join(ROOT, "firebase-leads/functions/src/index.ts"), "utf8");
 const schedulerIam = readFileSync(path.join(ROOT, "scripts/leads/configure-scheduler-invoker.mjs"), "utf8");
 const productionE2E = readFileSync(path.join(ROOT, "scripts/leads/production-e2e.mjs"), "utf8");
@@ -47,4 +48,8 @@ test("scheduled deploys preserve the narrow Firebase Scheduler invoker", () => {
   assert.match(schedulerIam, /TELEGRAM_BOT_TOKEN/);
   assert.match(schedulerIam, /TELEGRAM_CHAT_ID/);
   assert.match(schedulerIam, /must not have Telegram secret access/);
+  const functionsConfig = Array.isArray(firebaseConfig.functions) ? firebaseConfig.functions[0] : firebaseConfig.functions;
+  assert.ok(Array.isArray(functionsConfig.postdeploy), "Functions deploys must have a postdeploy IAM repair hook");
+  assert.match(functionsConfig.postdeploy.join("\n"), /ALLOW_SCHEDULER_IAM_CONFIG=reputifly-scheduler-invoker/);
+  assert.match(functionsConfig.postdeploy.join("\n"), /configure-scheduler-invoker\.mjs/);
 });
