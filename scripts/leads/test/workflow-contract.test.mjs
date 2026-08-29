@@ -15,6 +15,8 @@ test("CI actions are immutable and use Node 24-capable major versions", () => {
     assert.match(version, /^v7\./, `${action} must use its Node 24-capable v7 release`);
   }
   assert.doesNotMatch(workflow, /uses:\s*actions\/(?:checkout|setup-node)@v\d/i);
+  assert.match(workflow, /pull_request:\s*\n\s*push:\s*\n\s*branches:\s*\[main\]/);
+  assert.doesNotMatch(workflow, /^\s+paths:/m, "required CI must run for every PR and main push");
 });
 
 test("production write E2E remains explicit and separately guarded", () => {
