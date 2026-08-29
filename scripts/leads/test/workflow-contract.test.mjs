@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const workflow = readFileSync(path.join(ROOT, ".github/workflows/leads.yml"), "utf8");
 const functionsIndex = readFileSync(path.join(ROOT, "firebase-leads/functions/src/index.ts"), "utf8");
+const schedulerIam = readFileSync(path.join(ROOT, "scripts/leads/configure-scheduler-invoker.mjs"), "utf8");
 
 test("CI actions are immutable and use Node 24-capable major versions", () => {
   const uses = [...workflow.matchAll(/uses:\s*(actions\/(?:checkout|setup-node))@([^\s#]+)\s*#\s*(v[^\s]+)/g)];
@@ -27,12 +28,18 @@ test("production write E2E remains explicit and separately guarded", () => {
 });
 
 test("scheduled deploys preserve the narrow Firebase Scheduler invoker", () => {
-  assert.match(functionsIndex,
-    /SCHEDULER_INVOKER_SERVICE_ACCOUNT\s*=\s*"828546154700-compute@developer\.gserviceaccount\.com"/);
-  assert.equal((functionsIndex.match(/invoker:\s*SCHEDULER_INVOKER_SERVICE_ACCOUNT/g) || []).length, 3,
-    "all three scheduled Functions pin the Firebase Scheduler OIDC identity");
   assert.equal((functionsIndex.match(/serviceAccount:\s*WORKER_SERVICE_ACCOUNT/g) || []).length, 3,
     "all three scheduled Functions still run as the dedicated worker identity");
   assert.match(functionsIndex, /secrets:\s*\[telegramBotToken,\s*telegramChatId\]/,
     "only the outbox worker binds Telegram secrets");
+  assert.match(schedulerIam, /roles\/run\.invoker/);
+  assert.match(schedulerIam, /828546154700-compute@developer\.gserviceaccount\.com/);
+  for (const service of ["outboxworker", "operationalhealth", "morningreminder"]) {
+    assert.match(schedulerIam, new RegExp(`"${service}"`));
+  }
+  assert.match(schedulerIam, /run", "services", "add-iam-policy-binding/);
+  assert.match(schedulerIam, /run", "services", "get-iam-policy/);
+  assert.match(schedulerIam, /TELEGRAM_BOT_TOKEN/);
+  assert.match(schedulerIam, /TELEGRAM_CHAT_ID/);
+  assert.match(schedulerIam, /must not have Telegram secret access/);
 });
