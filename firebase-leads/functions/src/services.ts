@@ -171,7 +171,7 @@ export function formatLeadCreated(lead: LeadInput, addedBy: string): string {
     `Note: ${compactExcerpt(lead.note, "No note", 240)}`,
     `Added by ${oneLine(addedBy, "Team member", 80)}`,
     `https://wa.me/${digits}`,
-    "https://watchlist-v2.web.app/",
+    "https://reputifly.org/watchlist/",
   ];
   const text = lines.join("\n");
   if (text.length > 4_096) {

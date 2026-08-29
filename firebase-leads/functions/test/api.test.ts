@@ -209,7 +209,7 @@ describe("HTTP API", () => {
     expect(first?.text).toContain("🆕 New Watchlist lead");
     expect(first?.text).toContain("Acme Movers");
     expect(first?.text).toContain("Added by Farhan");
-    expect(first?.text).toContain("https://watchlist-v2.web.app/");
+    expect(first?.text).toContain("https://reputifly.org/watchlist/");
     const pendingProof = await request(app)
       .get(`/v1/leads/${first?.leadId}/notification`)
       .set("authorization", AUTHORIZATION)

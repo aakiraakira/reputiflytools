@@ -74,10 +74,11 @@ A candidate whose persisted fields fail strict decoding is quarantined as
 continues scanning for valid work. Inspect and repair the stored schema before
 any manual redrive; do not copy malformed contents into logs or tickets.
 
-The 09:00 scheduler is a legacy Watchlist reminder, not an employee deadline.
-It sends only when `dueCount > 0`, says only how many leads are due/overdue and
-asks the user to review the Watchlist. It must never contain Daily Digest
-deadline, late, missed, or performance language.
+The 09:00 scheduler is a Watchlist reminder, not an employee deadline. It stays
+silent when there are no overdue, today, or tomorrow leads. Otherwise it sends
+compact Overdue/Today/Tomorrow groups with one direct WhatsApp link per lead.
+It must never contain Daily Digest deadline, late, missed, or performance
+language.
 
 ## Telegram duplicate boundary
 

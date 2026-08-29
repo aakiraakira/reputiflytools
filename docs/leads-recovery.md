@@ -2,10 +2,10 @@
 
 Last reviewed: 2026-08-14 (Asia/Singapore)
 
-This runbook covers the new `reputifly-leads-2` Firebase backend, the primary
-`watchlist-v2.web.app` Watchlist, and the primary `daily-digest-v2.web.app`
-Daily Digest. The earlier `reputifly-leads-2.web.app` and
-`daily-digest-2.web.app` sites remain compatible aliases. “Never breaks”
+This runbook covers the `reputifly-leads-2` Firebase backend, the primary
+`https://reputifly.org/watchlist/` Watchlist, and the primary
+`https://reputifly.org/daily-digest/` Daily Digest. The Firebase Hosting sites
+remain compatibility and recovery origins. “Never breaks”
 cannot be guaranteed. The operating target is instead:
 fail closed on authorization, never turn a failed read into an empty list,
 never claim an unconfirmed write succeeded, preserve a recoverable copy of the
@@ -13,12 +13,12 @@ data, and detect drift before a user does.
 
 ## Architecture and authority
 
-- The two tracked source pages are `watchlist/index.html` and
-  `daily-digest/index.html`.
-- `scripts/leads/generate-hosting.mjs` performs the only allowed hosting
-  transformation: it copies those pages into ignored
-  `firebase-leads/hosting/*` artifacts and canonicalizes their cross-links.
-  The manifest records source/output byte counts and SHA-256 values.
+- The two source pages are `firebase-leads/apps/watchlist/index.html` and
+  `firebase-leads/apps/daily-digest/index.html`.
+- `scripts/leads/generate-pages.mjs` deterministically creates the tracked
+  `watchlist/index.html` and `daily-digest/index.html` GitHub Pages outputs with
+  same-origin links. `scripts/leads/generate-hosting.mjs` separately creates
+  ignored Firebase Hosting compatibility artifacts and their SHA manifest.
 - The API is
   `https://asia-southeast1-reputifly-leads-2.cloudfunctions.net/api`.
 - Browser users authenticate with the existing Reputifly Firebase identity.
@@ -72,6 +72,7 @@ From repository root:
 
 ```bash
 node --test scripts/leads/test/*.test.mjs
+node scripts/leads/generate-pages.mjs --check
 node scripts/leads/generate-hosting.mjs
 node scripts/leads/generate-hosting.mjs --check
 node scripts/leads/validate-hosting.mjs
@@ -86,10 +87,12 @@ node scripts/leads/backend-contract-gate.mjs
 Do not deploy if a generated artifact contains an Apps Script endpoint, an old
 app cross-link, a missing `reputifly-leads-2` API marker, changed bytes outside
 the deterministic link transform, duplicate HTML IDs, or invalid JavaScript.
-The Hosting config gate also requires non-cacheable HTML plus both
+The Firebase Hosting config gate also requires non-cacheable HTML plus both
 `X-Frame-Options: DENY` and CSP `frame-ancestors 'none'`; this prevents a hostile
-site from framing the authenticated apps and clickjacking write actions. CI
-repeats these gates and fails if a discovered package is missing a lockfile.
+site from framing the authenticated compatibility apps and clickjacking write
+actions. GitHub Pages cannot set those response headers, so the source also has
+a fail-closed frame guard before any auth or API boot. CI repeats these gates
+and fails if a discovered package is missing a lockfile.
 The independent backend gate starts the compiled API on localhost with a
 synthetic in-memory repository. It verifies response allowlists, server
 metadata, role boundaries, and follow-up idempotency without touching
@@ -109,6 +112,7 @@ referrer, and anti-framing response headers:
 
 ```bash
 node scripts/leads/verify-deployment.mjs
+node scripts/leads/verify-pages.mjs
 node scripts/leads/security-smoke.mjs
 ```
 
