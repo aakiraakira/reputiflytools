@@ -18,7 +18,7 @@ export interface Repository {
   resolveActorLabels(uids: string[]): Promise<Record<string, { label: string }>>;
   getExpectedDigestMembers(): Promise<Array<{ uid: string; member: Member }>>;
   listActiveLeads(): Promise<Lead[]>;
-  countDueLeads(localDate: string): Promise<number>;
+  listMorningReminderLeads(maxFollowUp: string): Promise<Lead[]>;
   getLeadNotification(leadId: string): Promise<NotificationOutbox | null>;
   createLead(input: {
     actor: Actor;
@@ -94,9 +94,9 @@ export interface Repository {
   }): Promise<"retry" | "dead" | "ignored">;
   enqueueMorningReminder(input: {
     localDate: string;
-    text: string;
+    messages: string[];
     now: string;
-  }): Promise<{ created: boolean; outboxId: string }>;
+  }): Promise<{ created: boolean; outboxIds: string[] }>;
   checkOperationalHealth(input: {
     now: string;
     staleBefore: string;

@@ -25,8 +25,8 @@ data, and detect drift before a user does.
   The API verifies that token and separately requires an active `members`
   document. A successful Firebase login alone does not grant app access.
 - Browser Firestore access is denied by rules. Only the API/Admin identity may
-  read or write `members`, `leads`, `leadFollowUps`, `digests`,
-  `notificationOutbox`, `auditEvents`, or `system`.
+  read or write `members`, `leads`, `activePhoneClaims`, `leadFollowUps`,
+  `digests`, `notificationOutbox`, `auditEvents`, or `system`.
 - Firestore is authoritative after cutover. A Google Sheet remains a rollback
   source only until the legacy-retention window ends.
 
@@ -123,8 +123,11 @@ production “test lead” cannot be deleted without leaving audit history.
 2. Deploy Firestore indexes/rules and the API before either Hosting site. Do not
    point users at the new pages yet. Verify `/healthz`, unauthenticated
    fail-closed checks, and the fresh-token read-only canary against the API.
-3. Import/reconcile frozen legacy data. Provision the owner, employee, and
-   read-only canary member documents; configure exactly one employee with
+3. Import/reconcile frozen legacy data. Manually correct or archive every active
+   row without a usable phone and next-chase date (`followUp`), resolve every canonical
+   duplicate without merging rows, then dry-run/apply/zero-diff the
+   `activePhoneClaims` migration. Only afterward provision the owner, employee,
+   and read-only canary member documents; configure exactly one employee with
    `dailyDigestExpected: true`. Repeat hashes and the canary.
 4. Publish both Hosting sites as paired versioned releases without changing the
    legacy links. Run served-SHA verification against each exact `-2` URL and
@@ -149,11 +152,12 @@ unreviewed production deployment.
 
 Enable Firestore point-in-time recovery and scheduled backups in Google Cloud.
 Before a migration, create an on-demand managed export to a versioned,
-retention-locked bucket in the same region, including `leadFollowUps` as well as
-the original collections. Record the operation ID, bucket object generation,
-project, database, commit SHA, and UTC time in the incident record. Restore that
-export into a separate recovery database, run collection count/canonical-hash
-reconciliation, and record the restore operation ID and results. Do not call a
+retention-locked bucket in the same region, including `activePhoneClaims` and
+`leadFollowUps` as well as the original collections. Record the operation ID,
+bucket object generation, project, database, commit SHA, and UTC time in the
+incident record. Restore that export into a separate recovery database, run
+collection count/canonical-hash reconciliation, and record the restore operation
+ID and results. Do not call a
 backup proven until this isolated restore drill succeeds.
 
 ### Local logical evidence copy
@@ -180,6 +184,14 @@ delete the local copy according to the retention policy. This REST logical copy
 is for evidence and targeted recovery; use a managed Firestore export for full
 database restoration and type-preserving disaster recovery.
 
+The default canonical collection set is `members`, `leads`,
+`activePhoneClaims`, `leadFollowUps`, `digests`, `notificationOutbox`,
+`auditEvents`, and `system`. A backup or restore manifest missing any one of
+these is incomplete. Reconciliation must compare the count and canonical hash
+for each collection independently; server envelope timestamps may change, but
+document IDs and decoded fields—including each claim's sole `leadId` field—must
+not.
+
 Never commit Sheet CSV/TSV files, Firestore exports, manifests containing raw
 records, `.env` files, tokens, or Firebase debug logs. The normal local input
 folder is the ignored `scripts/leads/input/` directory.
@@ -193,10 +205,24 @@ and `Archived At` are accepted. Required invariants are:
 
 - `id` matches `[A-Za-z0-9_-]{1,128}`. If absent, a deterministic, non-PII
   `legacy_<sha256>` ID is derived. Duplicate derived IDs stop the migration.
-- Name is at most 120 characters, phone 40, note 5,000; name or phone and a
-  non-empty note are required. Leading/trailing whitespace is rejected rather
-  than silently changing the legacy value.
-- `followUp` is empty or `YYYY-MM-DD`; timestamps are ISO-8601 with timezone.
+- Name is at most 120 characters, phone 40, note 5,000; legacy decoding requires
+  name or phone and a non-empty note. Leading/trailing whitespace is rejected
+  rather than silently changing the legacy value.
+- The legacy importer may preserve an empty phone or `followUp` so the source is
+  not silently rewritten. Before claim cutover, every active row must instead
+  have a usable canonical phone and a real `YYYY-MM-DD` `followUp`; correct it or
+  archive it. New API create/update writes require both values.
+- Admission remains a manual business check. Before retaining an active row,
+  confirm at least one exact shipped Watchlist event from the existing note and
+  source conversation:
+  - They name someone else who decides. Team, management, boss, partner, spouse.
+  - They give a date. For payment or for anything.
+  - They say they like it, then delay.
+  - They go quiet after seeing the price.
+  - Any complaint, or any mention of stopping or refunding.
+  - They ask for something we do not sell.
+  The migration does not infer this and no trigger, stage, priority, or
+  monetary-value field is added.
 - Missing timestamps deterministically become the other timestamp, or the Unix
   epoch when both are absent. Review this fallback count in the source before
   applying if historical ordering matters.
@@ -259,6 +285,59 @@ and `Archived At` are accepted. Required invariants are:
 10. End the freeze only after the canary and hashes pass. Mark Firestore
     authoritative, preserve the frozen Sheet read-only, and record the cutover
     timestamp.
+
+### Active-phone claim reconciliation
+
+`activePhoneClaims/v1_<sha256(canonicalDigits)>` is the private uniqueness index
+for active leads and stores only `{leadId}`. It is not reconstructible safely by
+choosing the first duplicate row. Keep all old and new writers frozen throughout
+this procedure and make the managed/logical backups first.
+
+From `firebase-leads/functions`, authenticate with Application Default
+Credentials for the explicit project and run the default dry run:
+
+```bash
+npm run claims:migrate -- --project reputifly-leads-2
+```
+
+The dry run attempts zero writes. `safeToApply` must be false, and apply must
+remain blocked, if any active lead has:
+
+- the same canonical phone as another active lead;
+- an unusable or missing phone; or
+- an empty next-chase date (`followUp`).
+
+Review the reported lead IDs only in the restricted incident workspace. Resolve
+each row manually by supplying both required values or archiving it. Never
+auto-merge notes/history, infer which duplicate should survive, or delete one
+claim to make the report green. Repeat the dry run until it reports
+`safeToApply:true`, then apply by repeating the project ID as confirmation:
+
+```bash
+npm run claims:migrate -- \
+  --project reputifly-leads-2 \
+  --apply reputifly-leads-2
+```
+
+Apply re-reads active leads and existing claims in one transaction, makes the
+claim index exact, and stops above 450 writes. A successful command is not the
+final proof. Run the dry run again and require all of the following before
+enabling any member with write authority:
+
+- `safeToApply:true`;
+- `createCount:0`, `updateCount:0`, `deleteCount:0`, and `writeCount:0`;
+- no duplicate, invalid-phone, or missing-follow-up IDs;
+- `activePhoneClaims` count and canonical hash equal the approved post-apply
+  logical manifest; and
+- every claim owner is an active lead whose canonical phone hashes to that
+  claim document ID.
+
+For an isolated restore, compare every canonical collection count/hash with the
+approved backup, then run the same claim dry run against the isolated project if
+it uses a default Firestore database. Metadata-only `createTime`/`updateTime`
+changes may alter the raw envelope hash, but the canonical claim hash must stay
+identical. Do not direct the apply command at production merely to test a
+restore.
 
 ### Historical Daily Digest migration
 
@@ -405,6 +484,12 @@ the failing state before changing anything.
 4. Run backend contract tests, unauthenticated security smoke, then authenticated
    read smoke before reopening writes.
 
+If the prior API does not maintain `activePhoneClaims`, any write accepted after
+rollback makes that index untrusted. Preserve the collection for evidence, but
+do not reopen claim-enforcing code against it. Freeze all writers and rerun the
+claim dry-run/apply/zero-diff sequence first. Never delete the whole collection,
+auto-select a duplicate owner, or run backfill concurrently with an old writer.
+
 For schema-compatible notification rollout, deploy the consumer before the
 producer: update and prove `outboxWorker`, then update `api`. Reverse that order
 for rollback, and never downgrade the worker while a newer outbox type remains
@@ -414,8 +499,10 @@ pending, retrying, processing, or dead without an explicit repair decision.
 
 1. Keep writes frozen. Export the current bad state so no post-backup legitimate
    changes disappear without review.
-2. Compare the pre-change manifest, current manifest, audit events, and source
-   export. Identify the exact affected IDs without publishing them.
+2. Compare the pre-change manifest, current manifest, audit events, source
+   export, and `activePhoneClaims` count/hash. Identify the exact affected IDs
+   without publishing them. A claim is valid only when its owner is active and
+   its document ID matches that owner's canonical phone.
 3. Prefer targeted, reviewed repairs when only a few documents are affected.
    For broad corruption, restore the managed export into a recovery database,
    verify counts/hashes there, and plan a controlled restore. Do not blindly
@@ -427,7 +514,8 @@ pending, retrying, processing, or dead without an explicit repair decision.
 Rollback triggers include any unauthorized successful request, Firestore public
 read, serving-SHA mismatch, source/target hash mismatch, unexplained empty list,
 confirmed write not readable afterward, elevated 5xx, sustained outbox failures,
-or a digest marked delivered without the expected Telegram receipt.
+claim/active-lead reconciliation drift, or a digest marked delivered without
+the expected Telegram receipt.
 
 ## Secret and access rotation
 

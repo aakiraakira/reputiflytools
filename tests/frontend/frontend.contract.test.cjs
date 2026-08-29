@@ -130,17 +130,13 @@ test("legacy Apps Script and opaque transports are completely absent", () => {
   }
 });
 
-test("auth waits for persisted state, supports Google, and separates cancellation from API access failure", () => {
+test("auth waits for persisted state and uses only the existing email/password accounts", () => {
   for (const file of [WATCHLIST_PATH, DIGEST_PATH]) {
     const html = read(file);
     assert.match(html, /await auth\.authStateReady\(\)/);
     assert.match(html, /window\.__api\(["']\/v1\/session["']/);
-    assert.match(html, /signInWithPopup/);
-    assert.match(html, /GoogleAuthProvider/);
-    assert.match(html, /auth\/popup-closed-by-user/);
-    assert.match(html, /Google sign-in was cancelled\. Nothing changed\./);
-    assert.match(html, /auth\/account-exists-with-different-credential/);
-    assert.match(html, /Sign in with email and password once/);
+    assert.match(html, /signInWithEmailAndPassword/);
+    assert.doesNotMatch(html, /signInWithPopup|GoogleAuthProvider|gateGoogle|Continue with Google/);
     assert.match(html, /does not have access to this app/);
     assert.match(html, /Offline .*server could not be checked|Offline .*Current leads could not be checked/);
     assert.match(html, /auth\/user-token-expired/);
@@ -336,10 +332,86 @@ test("watchlist localhost preview is seeded and cannot issue a live write", () =
 
     dom.window.document.getElementById("addBtn").click();
     dom.window.document.getElementById("wName").value = "Preview Person";
+    dom.window.document.getElementById("wPhone").value = "9333 4444";
     dom.window.document.getElementById("wNote").value = "Local-only contract test";
+    dom.window.document.getElementById("wDate").value = "2026-08-30";
     dom.window.document.getElementById("sheetSave").click();
     assert.equal(fetchCount, 0);
     assert.match(dom.window.localStorage.getItem("rfly_watchlist_preview_v2"), /Preview Person/);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("Watchlist phone matching follows the backend canonical WhatsApp rules", async () => {
+  const dom = makeDom(WATCHLIST_PATH, "https://watchlist-v2.web.app/");
+  try {
+    executeClassic(dom, WATCHLIST_PATH);
+    assert.equal(dom.window.waDigits("9123 4567"), "6591234567");
+    assert.equal(dom.window.waDigits("+65 9123 4567"), "6591234567");
+    assert.equal(dom.window.waDigits("0065 9123 4567"), "6591234567");
+    assert.equal(dom.window.waDigits("0123 4567"), "");
+
+    dom.window.__setStorageScope("member_self");
+    const key = "lead-create:duplicate-phone";
+    const lead = { name: "Duplicate", phone: "0065 9123 4567", note: "Same person", followUp: "2026-08-30" };
+    dom.window.pendingCreateSave({ key, lead, createdAt: META.serverTime });
+    let calls = 0;
+    dom.window.apiRequest = async (path) => {
+      calls += 1;
+      if (path === "/v1/leads" && calls === 1) {
+        const error = new Error("duplicate");
+        error.code = "duplicate_phone"; error.status = 409;
+        throw error;
+      }
+      return success({
+        leads: [{ id: "existing", ...lead, phone: "+65 9123 4567", revision: 1, status: "active" }],
+        actors: {},
+      }, true);
+    };
+    await assert.rejects(dom.window.createRow(lead, key, "Saved", false), /duplicate/);
+    assert.equal(dom.window.localStorage.getItem(dom.window.PENDING_CREATE_KEY), null, "definite duplicate does not retry forever");
+    assert.equal(dom.window.rows[0].id, "existing");
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("Add Lead exposes the exact shipped Watchlist triggers without cluttering the board", async () => {
+  const html = read(WATCHLIST_PATH);
+  for (const trigger of [
+    "Names another decision-maker",
+    "Gives you any date",
+    "Praises the work, then delays",
+    "Goes quiet after seeing the price",
+    "Raises a complaint, refund, or termination",
+    "Asks for something we do not offer",
+  ]) assert.match(html, new RegExp(trigger));
+  assert.match(html, /Then save a usable WhatsApp number and the next chase date/);
+  for (const explanation of [
+    "Still waiting · set the next chase",
+    "They replied · set the next chase",
+    "Deposit paid · archive the lead",
+    "Definite no · archive the lead",
+  ]) assert.match(html, new RegExp(explanation));
+  assert.match(html, /\.outcome-grid\{ display:grid; grid-template-columns:1fr;/);
+  assert.match(html, /\.sheet-body \.stack\{ display:flex; flex-direction:column; gap:14px; \}/);
+  assert.doesNotMatch(html, /Nothing changes until the server commits this outcome/i);
+
+  const dom = makeDom(WATCHLIST_PATH);
+  try {
+    executeClassic(dom, WATCHLIST_PATH);
+    dom.window.__boot();
+    dom.window.document.getElementById("addBtn").click();
+    dom.window.document.getElementById("watchRulesBtn").click();
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 1));
+    const overlay = dom.window.document.getElementById("watchRulesDialog");
+    assert.equal(overlay.hidden, false);
+    assert.equal(overlay.getAttribute("aria-hidden"), "false");
+    assert.equal(dom.window.document.activeElement.id, "watchRulesClose");
+    dom.window.document.getElementById("watchRulesDone").click();
+    assert.equal(overlay.hidden, true);
+    assert.equal(dom.window.document.activeElement.id, "watchRulesBtn");
   } finally {
     dom.window.close();
   }
@@ -473,7 +545,7 @@ test("a definite digest validation rejection keeps the draft editable instead of
     assert.equal(dom.window.document.getElementById("notes").disabled, false);
     assert.match(dom.window.document.getElementById("syncText").textContent, /too long for one complete Telegram message/i);
     assert.match(dom.window.document.getElementById("syncText").textContent, /draft is editable/i);
-    assert.match(dom.window.document.getElementById("submitTxt").textContent, /Send Tonight's Digest/);
+    assert.match(dom.window.document.getElementById("submitTxt").textContent, /Send digest/i);
     const draft = JSON.parse(dom.window.localStorage.getItem(dom.window.DRAFT_KEY));
     assert.equal(draft.data.notes, "A long draft that must remain editable");
     assert.equal(draft.submission, null);
@@ -718,8 +790,9 @@ test("server proof requires canonical meta and read dataAsOf equality", () => {
     assert.match(html, /isRead&&envelope\.dataAsOf!==meta\.serverTime/);
     assert.match(html, /meta\.businessDate/);
     assert.match(html, /meta\.requestId/);
-    assert.match(html, /server verified/);
-    assert.match(html, /Support details/);
+    assert.match(html, /function setSyncState\(kind,message,showRetry,retryAction\)/);
+    assert.match(html, /banner\.hidden=true/);
+    assert.match(html, /syncSupport/);
   }
 });
 
@@ -736,10 +809,14 @@ test("watchlist actor labels escape safely and never render raw UIDs", () => {
     dom.window.loaded = true;
     dom.window.render();
     const card = dom.window.document.querySelector(".wcard");
-    assert.match(card.textContent, /<img src=x onerror="boom">/);
+    assert.doesNotMatch(card.textContent, /<img src=x onerror="boom">/, "provenance stays off the compact card");
     assert.equal(card.querySelector("img"), null, "label is text, not executable markup");
     assert.doesNotMatch(card.textContent, /uid_secret_123/);
     assert.doesNotMatch(dom.window.provenanceFor(dom.window.rows[0]), /uid_secret_123/);
+    dom.window.openSheet("lead_actor");
+    const provenance = dom.window.document.querySelector("#sheetBody .provenance");
+    assert.match(provenance.textContent, /<img src=x onerror="boom">/);
+    assert.equal(provenance.querySelector("img"), null, "sheet label is escaped text");
   } finally {
     dom.window.close();
   }
@@ -883,12 +960,11 @@ test("daily status is neutral, server-only, and owner team scope is one configur
   for (const file of [WATCHLIST_PATH, DIGEST_PATH]) {
     const html = read(file);
     assert.match(html, /id="dailyStatusPanel"/);
-    assert.match(html, /Recorded today/);
     assert.match(html, /\/v1\/daily-status/);
     assert.match(html, /\/v1\/team\/daily-status/);
     assert.match(html, /currentMember\.role==="owner"/);
     assert.match(html, /status\.recordedToday/);
-    assert.doesNotMatch(html, /score|leaderboard|deadline reminder/i);
+    assert.doesNotMatch(html, /score|leaderboard|deadline reminder|idle|attendance/i);
   }
 });
 

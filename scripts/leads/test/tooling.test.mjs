@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   API_BASE,
   DIGEST_URL,
+  FIRESTORE_CANONICAL_COLLECTIONS,
   WATCHLIST_URL,
   canonicalHash,
   decodeUtf8,
@@ -26,6 +27,19 @@ import {
   parseLegacyDumped,
   parseLegacyFollowUps,
 } from "../digest-lib.mjs";
+
+test("canonical backup and denied-read collection set includes the phone claim index", () => {
+  assert.deepEqual(FIRESTORE_CANONICAL_COLLECTIONS, [
+    "members",
+    "leads",
+    "activePhoneClaims",
+    "leadFollowUps",
+    "digests",
+    "notificationOutbox",
+    "auditEvents",
+    "system",
+  ]);
+});
 
 test("CSV parser preserves quoted commas, quotes, and newlines", () => {
   const csv = 'ID,Name,Phone,Note,Follow Up,Created At\r\nlead_1,"Tan, Lee",91234567,"Said ""yes""\nCall back",2026-08-14,2026-08-13T01:02:03.000Z\r\n';

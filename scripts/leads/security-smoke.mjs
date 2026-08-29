@@ -1,5 +1,12 @@
 #!/usr/bin/env node
-import { API_BASE, PROJECT_ID, parseCli, publicError, requestJson } from "./ops-lib.mjs";
+import {
+  API_BASE,
+  FIRESTORE_CANONICAL_COLLECTIONS,
+  PROJECT_ID,
+  parseCli,
+  publicError,
+  requestJson,
+} from "./ops-lib.mjs";
 import {
   apiRequest,
   assertErrorEnvelope,
@@ -77,14 +84,13 @@ async function main() {
   ];
   for (const test of tests) await assertDenied(test, apiBase, timeoutMs);
 
-  const collections = ["members", "leads", "leadFollowUps", "digests", "notificationOutbox", "auditEvents", "system"];
-  for (const collection of collections) {
+  for (const collection of FIRESTORE_CANONICAL_COLLECTIONS) {
     const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(project)}/databases/(default)/documents/${collection}?pageSize=1`;
     const direct = await requestJson(firestoreUrl, { timeoutMs });
     assertStatus(direct, [401, 403], `direct Firestore ${collection} read`);
     console.log(`[PASS] direct Firestore ${collection} read: HTTP ${direct.response.status}`);
   }
-  const total = tests.length + collections.length;
+  const total = tests.length + FIRESTORE_CANONICAL_COLLECTIONS.length;
   console.log(`Security smoke passed (${total}/${total}); zero authenticated requests and zero mutations.`);
 }
 

@@ -14,16 +14,31 @@ import type {
   NotificationOutbox,
 } from "../../src/domain";
 import { AppError } from "../../src/errors";
+import { PersistedDataError } from "../../src/persistence";
+import { activePhoneClaimId, canonicalPhoneDigits } from "../../src/phone";
 import type { Repository } from "../../src/repository";
-import { leadCreatedOutboxId, outboxReady, publicDeliveryStatus } from "../../src/services";
+import {
+  leadCreatedOutboxId,
+  morningReminderOutboxIds,
+  outboxReady,
+  publicDeliveryStatus,
+} from "../../src/services";
 
 export class MemoryRepository implements Repository {
   readonly members = new Map<string, Member>();
   readonly leads = new Map<string, Lead>();
+  readonly activePhoneClaims = new Map<string, string>();
   readonly digests = new Map<string, Digest>();
   readonly outbox = new Map<string, NotificationOutbox>();
+  readonly morningReminderBatchSizes = new Map<string, number>();
   readonly followUps = new Map<string, LeadFollowUp>();
-  readonly audits: Array<{ actorUid: string; action: string; at: string; businessDate: string }> = [];
+  readonly audits: Array<{
+    actorUid: string;
+    action: string;
+    at: string;
+    businessDate: string;
+    metadata?: Record<string, unknown>;
+  }> = [];
   readonly heartbeats = new Map<string, Record<string, unknown>>();
 
   async getMember(uid: string): Promise<Member | null> {
@@ -66,10 +81,13 @@ export class MemoryRepository implements Repository {
       .map(clone);
   }
 
-  async countDueLeads(localDate: string): Promise<number> {
-    return [...this.leads.values()].filter(
-      (lead) => lead.status === "active" && lead.followUp !== "" && lead.followUp <= localDate,
-    ).length;
+  async listMorningReminderLeads(maxFollowUp: string): Promise<Lead[]> {
+    return [...this.leads.values()]
+      .filter(
+        (lead) => lead.status === "active" && lead.followUp !== "" && lead.followUp <= maxFollowUp,
+      )
+      .sort((left, right) => left.followUp.localeCompare(right.followUp) || left.id.localeCompare(right.id))
+      .map(clone);
   }
 
   async getLeadNotification(leadId: string): Promise<NotificationOutbox | null> {
@@ -86,6 +104,7 @@ export class MemoryRepository implements Repository {
     businessDate: string;
     notificationText?: string;
   }): Promise<LeadCreation> {
+    const claimId = activePhoneClaimId(input.lead.phone);
     const existing = this.leads.get(input.id);
     if (existing) {
       if (
@@ -94,10 +113,12 @@ export class MemoryRepository implements Repository {
         existing.createIdempotencyKey === input.idempotencyKey &&
         existing.createPayloadHash === input.payloadHash
       ) {
+        assertMemoryClaimParity(this.activePhoneClaims, existing);
         return { lead: clone(existing), replayed: true };
       }
       throw new AppError(409, "conflict", "This lead create request conflicts with an existing lead.");
     }
+    if (this.activePhoneClaims.has(claimId)) throw duplicatePhoneConflict();
     const lead: Lead = {
       id: input.id,
       ...input.lead,
@@ -115,6 +136,7 @@ export class MemoryRepository implements Repository {
       throw new AppError(409, "conflict", "Lead notification already exists.");
     }
     this.leads.set(lead.id, clone(lead));
+    this.activePhoneClaims.set(claimId, lead.id);
     this.audits.push({ actorUid: input.actor.uid, action: "lead.created", at: input.now, businessDate: input.businessDate });
     if (input.notificationText) {
       this.outbox.set(outboxId, {
@@ -141,9 +163,11 @@ export class MemoryRepository implements Repository {
     businessDate: string;
     notificationText?: string;
   }): Promise<{ lead: Lead; created: boolean }> {
+    const newClaimId = activePhoneClaimId(input.lead.phone);
     const current = this.leads.get(input.id);
     if (!current) {
       if (input.expectedRevision !== 0) throw revisionConflict(input.expectedRevision, null);
+      if (this.activePhoneClaims.has(newClaimId)) throw duplicatePhoneConflict();
       const lead: Lead = {
         id: input.id,
         ...input.lead,
@@ -159,6 +183,7 @@ export class MemoryRepository implements Repository {
         throw new AppError(409, "conflict", "Lead notification already exists.");
       }
       this.leads.set(input.id, clone(lead));
+      this.activePhoneClaims.set(newClaimId, lead.id);
       this.audits.push({ actorUid: input.actor.uid, action: "lead.upserted", at: input.now, businessDate: input.businessDate });
       if (input.notificationText) {
         this.outbox.set(outboxId, {
@@ -179,6 +204,15 @@ export class MemoryRepository implements Repository {
       throw revisionConflict(input.expectedRevision, current.revision);
     }
     if (current.status !== "active") throw new AppError(409, "conflict", "Archived leads cannot be updated.");
+    const oldClaimId = memoryClaimId(current.phone);
+    const sameClaim = oldClaimId === newClaimId;
+    const newClaimOwner = this.activePhoneClaims.get(newClaimId);
+    const oldClaimOwner = oldClaimId ? this.activePhoneClaims.get(oldClaimId) : undefined;
+    if (sameClaim && newClaimOwner !== current.id) {
+      if (newClaimOwner) throw duplicatePhoneConflict();
+      throw new PersistedDataError();
+    }
+    if (!sameClaim && newClaimOwner && newClaimOwner !== current.id) throw duplicatePhoneConflict();
     const lead: Lead = {
       ...current,
       ...input.lead,
@@ -187,6 +221,10 @@ export class MemoryRepository implements Repository {
       updatedBy: input.actor.uid,
     };
     this.leads.set(input.id, clone(lead));
+    if (!sameClaim) {
+      if (oldClaimId && oldClaimOwner === current.id) this.activePhoneClaims.delete(oldClaimId);
+      if (!newClaimOwner) this.activePhoneClaims.set(newClaimId, current.id);
+    }
     this.audits.push({ actorUid: input.actor.uid, action: "lead.updated", at: input.now, businessDate: input.businessDate });
     return { lead: clone(lead), created: false };
   }
@@ -204,6 +242,8 @@ export class MemoryRepository implements Repository {
       throw revisionConflict(input.expectedRevision, current.revision);
     }
     if (current.status !== "active") throw new AppError(409, "conflict", "Lead is already archived.");
+    const claimId = memoryClaimId(current.phone);
+    const claimOwner = claimId ? this.activePhoneClaims.get(claimId) : undefined;
     const lead: Lead = {
       ...current,
       status: "archived",
@@ -214,6 +254,7 @@ export class MemoryRepository implements Repository {
       archivedBy: input.actor.uid,
     };
     this.leads.set(input.id, clone(lead));
+    if (claimId && claimOwner === current.id) this.activePhoneClaims.delete(claimId);
     this.audits.push({ actorUid: input.actor.uid, action: "lead.archived", at: input.now, businessDate: input.businessDate });
     return clone(lead);
   }
@@ -252,6 +293,21 @@ export class MemoryRepository implements Repository {
       throw new AppError(409, "conflict", "Archived leads cannot receive follow-ups.");
     }
     const terminal = input.outcome === "won" || input.outcome === "lost";
+    const claimId = memoryClaimId(current.phone);
+    const claimOwner = claimId ? this.activePhoneClaims.get(claimId) : undefined;
+    if (!terminal) {
+      if (!claimId) {
+        throw new AppError(
+          409,
+          "conflict",
+          "Add a usable WhatsApp number before keeping this lead active.",
+        );
+      }
+      if (claimOwner !== current.id) {
+        if (claimOwner) throw duplicatePhoneConflict();
+        throw new PersistedDataError();
+      }
+    }
     const lead: Lead = {
       ...current,
       followUp: terminal ? "" : (input.nextFollowUp as string),
@@ -275,8 +331,15 @@ export class MemoryRepository implements Repository {
       resultingLead: clone(lead),
     };
     this.leads.set(input.leadId, clone(lead));
+    if (terminal && claimId && claimOwner === current.id) this.activePhoneClaims.delete(claimId);
     this.followUps.set(input.eventId, clone(followUp));
-    this.audits.push({ actorUid: input.actor.uid, action: "lead.followup_logged", at: input.now, businessDate: input.businessDate });
+    this.audits.push({
+      actorUid: input.actor.uid,
+      action: "lead.followup_logged",
+      at: input.now,
+      businessDate: input.businessDate,
+      metadata: { outcome: input.outcome },
+    });
     return { lead: clone(lead), followUp: clone(followUp), replayed: false };
   }
 
@@ -371,6 +434,12 @@ export class MemoryRepository implements Repository {
       followUpLogged: 0,
       digestAccepted: 0,
     };
+    const followUpsByOutcome: DailyStatus["recordedToday"]["followUpsByOutcome"] = {
+      no_reply: 0,
+      spoke: 0,
+      won: 0,
+      lost: 0,
+    };
     const kinds: Record<string, keyof typeof byKind> = {
       "lead.created": "leadCreated",
       "lead.upserted": "leadCreated",
@@ -382,6 +451,10 @@ export class MemoryRepository implements Repository {
     matching.forEach((event) => {
       const kind = kinds[event.action];
       if (kind) byKind[kind] += 1;
+      if (kind === "followUpLogged") {
+        const outcome = followUpOutcome(event.metadata);
+        if (outcome) followUpsByOutcome[outcome] += 1;
+      }
     });
     const first = matching.find((event) => kinds[event.action]);
     const digest = [...this.digests.values()]
@@ -396,6 +469,7 @@ export class MemoryRepository implements Repository {
       recordedToday: {
         total: Object.values(byKind).reduce((sum, count) => sum + count, 0),
         byKind,
+        followUpsByOutcome,
         ...(first ? { lastSuccessfulAction: { kind: kinds[first.action] as keyof typeof byKind, at: first.at } } : {}),
       },
       digest: digest
@@ -513,22 +587,52 @@ export class MemoryRepository implements Repository {
 
   async enqueueMorningReminder(input: {
     localDate: string;
-    text: string;
+    messages: string[];
     now: string;
-  }): Promise<{ created: boolean; outboxId: string }> {
-    const outboxId = `reminder_${input.localDate}`;
-    if (this.outbox.has(outboxId)) return { created: false, outboxId };
-    this.outbox.set(outboxId, {
-      id: outboxId,
+  }): Promise<{ created: boolean; outboxIds: string[] }> {
+    if (
+      !input.messages.length ||
+      input.messages.length > 450 ||
+      input.messages.some((text) => text.length < 1 || text.length > 4_096)
+    ) {
+      throw new AppError(500, "internal_error", "Morning reminder messages are invalid.");
+    }
+    const outboxIds = morningReminderOutboxIds(input.localDate, input.messages.length);
+    if (this.outbox.has(outboxIds[0])) {
+      const base = outboxIds[0];
+      const recordedCount = this.morningReminderBatchSizes.get(base);
+      if (recordedCount !== undefined) {
+        const originalIds = morningReminderOutboxIds(input.localDate, recordedCount);
+        if (originalIds.some((id) => !this.outbox.has(id))) throw new PersistedDataError();
+        return { created: false, outboxIds: originalIds };
+      }
+      const originalIds = [...this.outbox.keys()]
+        .filter((id) => id === base || id.startsWith(`${base}_`))
+        .sort((left, right) => {
+          if (left === base) return -1;
+          if (right === base) return 1;
+          return Number(left.slice(base.length + 1)) - Number(right.slice(base.length + 1));
+        });
+      originalIds.forEach((id, index) => {
+        const expected = index === 0 ? base : `${base}_${index + 1}`;
+        if (id !== expected) throw new PersistedDataError();
+      });
+      return { created: false, outboxIds: originalIds };
+    }
+    if (outboxIds.some((id) => this.outbox.has(id))) throw new PersistedDataError();
+    const outboxes = outboxIds.map((id, index): NotificationOutbox => ({
+      id,
       type: "morning_reminder",
       status: "pending",
-      text: input.text,
+      text: input.messages[index],
       attempts: 0,
-      availableAt: input.now,
+      availableAt: new Date(Date.parse(input.now) + index).toISOString(),
       createdAt: input.now,
       updatedAt: input.now,
-    });
-    return { created: true, outboxId };
+    }));
+    outboxes.forEach((outbox) => this.outbox.set(outbox.id, outbox));
+    this.morningReminderBatchSizes.set(outboxIds[0], input.messages.length);
+    return { created: true, outboxIds };
   }
 
   async checkOperationalHealth(input: {
@@ -568,6 +672,47 @@ function revisionConflict(expected: number, actual: number | null): AppError {
     expectedRevision: expected,
     actualRevision: actual,
   });
+}
+
+function duplicatePhoneConflict(): AppError {
+  return new AppError(
+    409,
+    "duplicate_phone",
+    "That WhatsApp number is already on the active Watchlist.",
+  );
+}
+
+function memoryClaimId(phone: string): string | null {
+  return canonicalPhoneDigits(phone) ? activePhoneClaimId(phone) : null;
+}
+
+function assertMemoryClaimParity(claims: Map<string, string>, lead: Lead): void {
+  const claimId = memoryClaimId(lead.phone);
+  if (!claimId) {
+    if (lead.status === "active") throw new PersistedDataError();
+    return;
+  }
+  const owner = claims.get(claimId);
+  if (
+    (lead.status === "active" && owner !== lead.id) ||
+    (lead.status === "archived" && owner === lead.id)
+  ) {
+    throw new PersistedDataError();
+  }
+}
+
+function followUpOutcome(value: unknown): FollowUpOutcome | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const outcome = (value as Record<string, unknown>).outcome;
+  switch (outcome) {
+    case "no_reply":
+    case "spoke":
+    case "won":
+    case "lost":
+      return outcome;
+    default:
+      return null;
+  }
 }
 
 function clone<T>(value: T): T {

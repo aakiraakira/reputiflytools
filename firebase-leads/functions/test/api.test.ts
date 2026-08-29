@@ -3,11 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/api";
 import type { IdentityClient } from "../src/auth";
 import { PersistedDataError } from "../src/persistence";
+import { activePhoneClaimId } from "../src/phone";
 import { MemoryRepository } from "./support/memory-repository";
 
 const AUTHORIZATION = "Bearer valid-token";
 const ORIGIN = "https://reputifly.org";
 const NOW = new Date("2026-08-13T16:00:01.000Z"); // 14 Aug in Singapore
+
+function claimActivePhone(repository: MemoryRepository, leadId: string, phone: string): void {
+  repository.activePhoneClaims.set(activePhoneClaimId(phone), leadId);
+}
 
 describe("HTTP API", () => {
   let repository: MemoryRepository;
@@ -120,8 +125,10 @@ describe("HTTP API", () => {
       .expect(400);
     expect(invalid.body.error.code).toBe("bad_request");
     expect(invalid.body.error.details.fields.length).toBeGreaterThan(1);
+    expect(invalid.body.error.details.fields.map((field: { path: string }) => field.path))
+      .toEqual(expect.arrayContaining(["phone", "note", "followUp"]));
 
-    const body = { name: "Alex", phone: "", note: "Asked for pricing", followUp: "2026-08-14" };
+    const body = { name: "Alex", phone: "9123 4567", note: "Asked for pricing", followUp: "2026-08-14" };
     await request(app)
       .post("/v1/leads")
       .set("authorization", AUTHORIZATION)
@@ -157,6 +164,27 @@ describe("HTTP API", () => {
       .send({ ...body, note: "Changed request" })
       .expect(409);
     expect(repository.outbox.size).toBe(0, "owner-created leads do not notify the owner about their own action");
+  });
+
+  it("requires a usable phone and next date on both create and update writes", async () => {
+    const create = await request(app)
+      .post("/v1/leads")
+      .set("authorization", AUTHORIZATION)
+      .set("idempotency-key", "create:required-fields")
+      .send({ name: "Alex", phone: "123", note: "Needs a quote" })
+      .expect(400);
+    expect(create.body.error.details.fields.map((field: { path: string }) => field.path))
+      .toEqual(expect.arrayContaining(["phone", "followUp"]));
+
+    const update = await request(app)
+      .put("/v1/leads/required_fields")
+      .set("authorization", AUTHORIZATION)
+      .send({ name: "Alex", note: "Needs a quote", expectedRevision: 0 })
+      .expect(400);
+    expect(update.body.error.details.fields.map((field: { path: string }) => field.path))
+      .toEqual(expect.arrayContaining(["phone", "followUp"]));
+    expect(repository.leads.size).toBe(0);
+    expect(repository.activePhoneClaims.size).toBe(0);
   });
 
   it("queues exactly one readable Telegram notification when the member creates a lead", async () => {
@@ -211,13 +239,13 @@ describe("HTTP API", () => {
     await request(app)
       .put("/v1/leads/member_put_create")
       .set("authorization", AUTHORIZATION)
-      .send({ ...body, expectedRevision: 0 })
+      .send({ ...body, phone: "9234 5678", expectedRevision: 0 })
       .expect(201);
     expect(repository.outbox.size).toBe(2, "PUT create uses the same notification contract");
     await request(app)
       .put("/v1/leads/member_put_create")
       .set("authorization", AUTHORIZATION)
-      .send({ ...body, note: "Updated note", expectedRevision: 1 })
+      .send({ ...body, phone: "9234 5678", note: "Updated note", expectedRevision: 1 })
       .expect(200);
     expect(repository.outbox.size).toBe(2, "routine edits do not spam Telegram");
   });
@@ -228,9 +256,9 @@ describe("HTTP API", () => {
       .set("authorization", AUTHORIZATION)
       .send({
         name: "Alex",
-        phone: "",
+        phone: "8123 4567",
         note: "Initial note",
-        followUp: "",
+        followUp: "2026-08-14",
         expectedRevision: 0,
       })
       .expect(201);
@@ -255,9 +283,9 @@ describe("HTTP API", () => {
       .set("authorization", AUTHORIZATION)
       .send({
         name: "Alex",
-        phone: "",
+        phone: "9123 4567",
         note: "Stale overwrite",
-        followUp: "",
+        followUp: "2026-08-15",
         expectedRevision: 1,
       })
       .expect(409);
@@ -270,6 +298,54 @@ describe("HTTP API", () => {
       .expect(200);
     expect(archived.body.lead).toMatchObject({ status: "archived", revision: 3 });
     expect((await repository.listActiveLeads())).toHaveLength(0);
+  });
+
+  it("serializes canonical duplicate phones and releases claims on move, archive, and terminal outcome", async () => {
+    const write = (id: string, phone: string, expectedRevision = 0) => request(app)
+      .put(`/v1/leads/${id}`)
+      .set("authorization", AUTHORIZATION)
+      .send({
+        name: id,
+        phone,
+        note: "Duplicate prevention",
+        followUp: "2026-08-15",
+        expectedRevision,
+      });
+
+    const concurrent = await Promise.all([
+      write("duplicate_a", "9123 0000"),
+      write("duplicate_b", "+65 9123-0000"),
+    ]);
+    expect(concurrent.map((response) => response.status).sort()).toEqual([201, 409]);
+    const winnerIndex = concurrent.findIndex((response) => response.status === 201);
+    const winner = winnerIndex === 0 ? "duplicate_a" : "duplicate_b";
+    const loser = winner === "duplicate_a" ? "duplicate_b" : "duplicate_a";
+    const conflict = concurrent.find((response) => response.status === 409);
+    expect(conflict?.body.error.code).toBe("duplicate_phone");
+    expect(repository.leads.size).toBe(1);
+    expect(repository.activePhoneClaims.size).toBe(1);
+
+    await request(app)
+      .post(`/v1/leads/${winner}/archive`)
+      .set("authorization", AUTHORIZATION)
+      .send({ expectedRevision: 1 })
+      .expect(200);
+    expect(repository.activePhoneClaims.size).toBe(0);
+
+    await write(loser, "+65 9123-0000").expect(201);
+    await write(loser, "9234 0000", 1).expect(200);
+    expect(repository.activePhoneClaims.has(activePhoneClaimId("9123 0000"))).toBe(false);
+    expect(repository.activePhoneClaims.get(activePhoneClaimId("9234 0000"))).toBe(loser);
+
+    await write("reused_old_phone", "65 9123 0000").expect(201);
+    await request(app)
+      .post(`/v1/leads/${loser}/follow-ups`)
+      .set("authorization", AUTHORIZATION)
+      .set("idempotency-key", "followup:release-won")
+      .send({ expectedRevision: 2, outcome: "won" })
+      .expect(201);
+    expect(repository.activePhoneClaims.has(activePhoneClaimId("9234 0000"))).toBe(false);
+    await write("reused_won_phone", "+65 9234 0000").expect(201);
   });
 
   it("accepts one deterministic digest and returns its delivery state", async () => {
@@ -582,6 +658,7 @@ describe("HTTP API", () => {
       updatedAt: NOW.toISOString(),
       updatedBy: "uid-1",
     });
+    claimActivePhone(repository, id, "9123 4567");
     const body = {
       expectedRevision: 3,
       outcome,
@@ -623,13 +700,23 @@ describe("HTTP API", () => {
     expect(replay.body.followUp.id).toBe(first.body.followUp.id);
     expect(repository.followUps.size).toBe(1);
     expect(repository.audits.filter((event) => event.action === "lead.followup_logged")).toHaveLength(1);
+    const daily = await request(app)
+      .get("/v1/daily-status")
+      .set("authorization", AUTHORIZATION)
+      .expect(200);
+    expect(daily.body.status.recordedToday.followUpsByOutcome).toEqual({
+      no_reply: outcome === "no_reply" ? 1 : 0,
+      spoke: outcome === "spoke" ? 1 : 0,
+      won: outcome === "won" ? 1 : 0,
+      lost: outcome === "lost" ? 1 : 0,
+    });
   });
 
   it("validates follow-up dates, revisions, required key, and changed replays", async () => {
     repository.leads.set("lead_test", {
       id: "lead_test",
       name: "Alex",
-      phone: "",
+      phone: "8111 0001",
       note: "Follow up",
       followUp: "",
       status: "active",
@@ -639,6 +726,7 @@ describe("HTTP API", () => {
       updatedAt: NOW.toISOString(),
       updatedBy: "uid-1",
     });
+    claimActivePhone(repository, "lead_test", "8111 0001");
     await request(app)
       .post("/v1/leads/lead_test/follow-ups")
       .set("authorization", AUTHORIZATION)
@@ -691,7 +779,7 @@ describe("HTTP API", () => {
     repository.leads.set("lead_concurrent", {
       id: "lead_concurrent",
       name: "Concurrent",
-      phone: "",
+      phone: "8111 0002",
       note: "Only once",
       followUp: "",
       status: "active",
@@ -701,6 +789,7 @@ describe("HTTP API", () => {
       updatedAt: NOW.toISOString(),
       updatedBy: "uid-1",
     });
+    claimActivePhone(repository, "lead_concurrent", "8111 0002");
     const makeRequest = (outcome: "spoke" | "no_reply") => request(app)
       .post("/v1/leads/lead_concurrent/follow-ups")
       .set("authorization", AUTHORIZATION)
@@ -719,7 +808,7 @@ describe("HTTP API", () => {
     repository.leads.set("lead_conflicting", {
       id: "lead_conflicting",
       name: "Conflicting",
-      phone: "",
+      phone: "8111 0003",
       note: "One wins",
       followUp: "",
       status: "active",
@@ -729,6 +818,7 @@ describe("HTTP API", () => {
       updatedAt: NOW.toISOString(),
       updatedBy: "uid-1",
     });
+    claimActivePhone(repository, "lead_conflicting", "8111 0003");
     const conflicting = (outcome: "spoke" | "no_reply") => request(app)
       .post("/v1/leads/lead_conflicting/follow-ups")
       .set("authorization", AUTHORIZATION)
@@ -758,6 +848,7 @@ describe("HTTP API", () => {
           followUpLogged: 0,
           digestAccepted: 0,
         },
+        followUpsByOutcome: { no_reply: 0, spoke: 0, won: 0, lost: 0 },
       },
       digest: { state: "not_submitted" },
     });
@@ -773,6 +864,7 @@ describe("HTTP API", () => {
       action: "lead.followup_logged",
       at: NOW.toISOString(),
       businessDate: "2026-08-14",
+      metadata: { outcome: "won" },
     });
     const team = await request(app)
       .get("/v1/team/daily-status")
@@ -783,6 +875,7 @@ describe("HTTP API", () => {
       recordedToday: {
         total: 1,
         byKind: { followUpLogged: 1 },
+        followUpsByOutcome: { no_reply: 0, spoke: 0, won: 1, lost: 0 },
         lastSuccessfulAction: { kind: "followUpLogged", at: NOW.toISOString() },
       },
     });
@@ -952,7 +1045,7 @@ describe("HTTP API", () => {
       .post("/v1/leads")
       .set("authorization", AUTHORIZATION)
       .set("idempotency-key", "create:actor-fallback")
-      .send({ name: "Alex", phone: "", note: "Still committed", followUp: "" })
+      .send({ name: "Alex", phone: "8333 4444", note: "Still committed", followUp: "2026-08-15" })
       .expect(201);
     expect(response.body.lead).toMatchObject({ name: "Alex", revision: 1 });
     expect(response.body.actors).toEqual({});

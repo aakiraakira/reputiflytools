@@ -22,6 +22,10 @@ does not prove Telegram delivery.
 8. A controlled member-created lead reaches its deterministic `lead_created`
    outbox receipt with both proof fields; routine edits create no additional
    notification.
+9. Every active lead has a usable canonical phone, a real next-chase date,
+   and exactly one matching `activePhoneClaims/v1_<sha256(canonicalDigits)>`
+   document containing only its `leadId`. No claim points to an archived or
+   missing lead.
 
 Create Cloud Monitoring alerts for `operationalHealth` ERROR log entries,
 Function errors, Scheduler job failures, and a missing scheduled invocation for
@@ -191,13 +195,59 @@ preserve their `id`, `name`, `phone`, `note`, `followUp`, `createdAt`, and
 `updatedAt`, then add `status:"active"`, `revision:1`, and migration actor
 markers. Legacy archive `removedAt` maps to `archivedAt`.
 
+New create/update writes require both a usable WhatsApp phone and a real
+next-chase date (`followUp`, `YYYY-MM-DD`). Legacy rows with empty values remain readable
+only so they can be deliberately corrected or archived; they are not ready for
+claim cutover.
+
+An active row must also pass the exact shipped Watchlist admission policy. A
+human reviewer must confirm at least one of these six events from the existing
+note and source conversation:
+
+- They name someone else who decides. Team, management, boss, partner, spouse.
+- They give a date. For payment or for anything.
+- They say they like it, then delay.
+- They go quiet after seeing the price.
+- Any complaint, or any mention of stopping or refunding.
+- They ask for something we do not sell.
+
+This manual check is outside the claim-migration tool; do not represent it with
+a new trigger, stage, priority, or monetary-value field. Correct or archive a
+row that does not belong on the Watchlist.
+
 Historical digest imports must use `deliveryStatus:"legacy_unknown"` unless a
 Telegram `message_id` proves delivery. Never create `notificationOutbox` rows
 for imported historical digests; only new API submissions create outbox work.
 
 Before cutover, compare source and destination counts plus a stable hash of the
-six preserved fields. Keep the legacy Apps Script read-only until both new
+preserved source fields. Keep the legacy Apps Script read-only until both new
 frontends and Telegram delivery pass end-to-end checks.
+
+While all writers are frozen, back up `activePhoneClaims` together with every
+other canonical root collection. From `firebase-leads/functions`, dry-run the
+claim reconciliation with explicit project selection:
+
+```sh
+npm run claims:migrate -- --project reputifly-leads-2
+```
+
+The apply gate is closed if any active row has a duplicate canonical phone, an
+invalid/missing phone, or a missing `followUp`. Correct or archive each row
+manually. Never auto-merge duplicates or choose a claim owner based on row
+order. When the dry run reports `safeToApply:true`, apply with the project ID
+repeated as confirmation:
+
+```sh
+npm run claims:migrate -- \
+  --project reputifly-leads-2 \
+  --apply reputifly-leads-2
+```
+
+Rerun the dry run before reopening writes. It must report `safeToApply:true`
+with zero creates, updates, deletes, and writes. A restored database is not
+release-ready until the `leads` and `activePhoneClaims` collection counts and
+canonical hashes match the approved backup and this zero-diff reconciliation
+passes in the isolated restore environment.
 
 ## Rollback
 
@@ -206,3 +256,9 @@ the prior endpoint while leaving new Firestore data intact. Do not delete the
 new database or Functions during an incident. Pause new writes, export data,
 identify the last consistent revision/audit event, and choose a deliberate
 forward repair or point-in-time restore.
+
+If the rolled-back API predates `activePhoneClaims` and accepts any writes, the
+claim index is no longer trusted even when those writes appear unrelated.
+Preserve it as evidence, keep writes frozen, and rerun the dry-run/apply/zero-diff
+sequence before claim-enforcing code is restored. Never blindly delete the
+collection or backfill it while an older writer is active.

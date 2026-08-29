@@ -33,7 +33,13 @@ import {
   outboxFromPersisted,
 } from "./persistence";
 import type { Repository } from "./repository";
-import { leadCreatedOutboxId, outboxReady, publicDeliveryStatus } from "./services";
+import {
+  leadCreatedOutboxId,
+  morningReminderOutboxIds,
+  outboxReady,
+  publicDeliveryStatus,
+} from "./services";
+import { activePhoneClaimId, canonicalPhoneDigits } from "./phone";
 
 function leadCreatedOutbox(id: string, leadId: string, text: string, now: string): NotificationOutbox {
   return {
@@ -140,15 +146,22 @@ export class FirestoreRepository implements Repository {
     }
   }
 
-  async countDueLeads(localDate: string): Promise<number> {
+  async listMorningReminderLeads(maxFollowUp: string): Promise<Lead[]> {
     const snapshot = await this.db
       .collection("leads")
       .where("status", "==", "active")
       .where("followUp", ">", "")
-      .where("followUp", "<=", localDate)
-      .count()
+      .where("followUp", "<=", maxFollowUp)
+      .orderBy("followUp", "asc")
       .get();
-    return snapshot.data().count;
+    if (snapshot.size > 5_000) {
+      throw new AppError(
+        503,
+        "internal_error",
+        "The Watchlist is above its safe reminder capacity. Support has been alerted.",
+      );
+    }
+    return snapshot.docs.map((doc) => leadFromSnapshot(doc));
   }
 
   async getLeadNotification(leadId: string): Promise<NotificationOutbox | null> {
@@ -176,6 +189,7 @@ export class FirestoreRepository implements Repository {
     const auditRef = this.db.collection("auditEvents").doc(randomUUID());
     const outboxId = leadCreatedOutboxId(input.id);
     const outboxRef = this.db.collection("notificationOutbox").doc(outboxId);
+    const inputClaimRef = this.db.collection("activePhoneClaims").doc(activePhoneClaimId(input.lead.phone));
 
     return this.db.runTransaction(async (transaction) => {
       const existing = await transaction.get(leadRef);
@@ -187,10 +201,26 @@ export class FirestoreRepository implements Repository {
           lead.createIdempotencyKey === input.idempotencyKey &&
           lead.createPayloadHash === input.payloadHash
         ) {
+          const currentClaimRef = activePhoneClaimReference(this.db, lead.phone);
+          if (currentClaimRef) {
+            const currentClaim = await transaction.get(currentClaimRef);
+            const owner = activePhoneClaimOwner(currentClaim.exists ? currentClaim.data() : undefined);
+            if (
+              (lead.status === "active" && owner !== lead.id) ||
+              (lead.status === "archived" && owner === lead.id)
+            ) {
+              throw new PersistedDataError();
+            }
+          } else if (lead.status === "active") {
+            throw new PersistedDataError();
+          }
           return { lead, replayed: true };
         }
         throw new AppError(409, "conflict", "This lead create request conflicts with an existing lead.");
       }
+      const claim = await transaction.get(inputClaimRef);
+      const claimedLeadId = activePhoneClaimOwner(claim.exists ? claim.data() : undefined);
+      if (claimedLeadId) throw duplicatePhoneConflict();
 
       const lead: Lead = {
         id: input.id,
@@ -205,6 +235,7 @@ export class FirestoreRepository implements Repository {
         createPayloadHash: input.payloadHash,
       };
       transaction.create(leadRef, lead);
+      transaction.create(inputClaimRef, { leadId: lead.id });
       transaction.create(
         auditRef,
         audit(
@@ -237,6 +268,7 @@ export class FirestoreRepository implements Repository {
     const auditRef = this.db.collection("auditEvents").doc(randomUUID());
     const outboxId = leadCreatedOutboxId(input.id);
     const outboxRef = this.db.collection("notificationOutbox").doc(outboxId);
+    const newClaimRef = this.db.collection("activePhoneClaims").doc(activePhoneClaimId(input.lead.phone));
 
     return this.db.runTransaction(async (transaction) => {
       const existing = await transaction.get(leadRef);
@@ -244,6 +276,9 @@ export class FirestoreRepository implements Repository {
         if (input.expectedRevision !== 0) {
           throw revisionConflict(input.expectedRevision, null);
         }
+        const newClaim = await transaction.get(newClaimRef);
+        const newClaimOwner = activePhoneClaimOwner(newClaim.exists ? newClaim.data() : undefined);
+        if (newClaimOwner) throw duplicatePhoneConflict();
         const lead: Lead = {
           id: input.id,
           ...input.lead,
@@ -255,6 +290,7 @@ export class FirestoreRepository implements Repository {
           updatedBy: input.actor.uid,
         };
         transaction.create(leadRef, lead);
+        transaction.create(newClaimRef, { leadId: lead.id });
         transaction.create(
           auditRef,
           audit(
@@ -280,6 +316,19 @@ export class FirestoreRepository implements Repository {
       if (current.status !== "active") {
         throw new AppError(409, "conflict", "Archived leads cannot be updated.");
       }
+      const oldClaimRef = activePhoneClaimReference(this.db, current.phone);
+      const sameClaim = oldClaimRef?.path === newClaimRef.path;
+      const newClaim = await transaction.get(newClaimRef);
+      const oldClaim = sameClaim || !oldClaimRef ? newClaim : await transaction.get(oldClaimRef);
+      const newClaimOwner = activePhoneClaimOwner(newClaim.exists ? newClaim.data() : undefined);
+      const oldClaimOwner = oldClaimRef
+        ? activePhoneClaimOwner(oldClaim.exists ? oldClaim.data() : undefined)
+        : null;
+      if (sameClaim && newClaimOwner !== current.id) {
+        if (newClaimOwner) throw duplicatePhoneConflict();
+        throw new PersistedDataError();
+      }
+      if (!sameClaim && newClaimOwner && newClaimOwner !== current.id) throw duplicatePhoneConflict();
 
       const lead: Lead = {
         ...current,
@@ -289,6 +338,10 @@ export class FirestoreRepository implements Repository {
         updatedBy: input.actor.uid,
       };
       transaction.set(leadRef, lead);
+      if (!sameClaim) {
+        if (oldClaimRef && oldClaimOwner === current.id) transaction.delete(oldClaimRef);
+        if (!newClaimOwner) transaction.create(newClaimRef, { leadId: lead.id });
+      }
       transaction.create(
         auditRef,
         audit(input.actor, "lead.updated", "lead", input.id, input.now, input.businessDate, {
@@ -320,6 +373,9 @@ export class FirestoreRepository implements Repository {
       if (current.status !== "active") {
         throw new AppError(409, "conflict", "Lead is already archived.");
       }
+      const claimRef = activePhoneClaimReference(this.db, current.phone);
+      const claim = claimRef ? await transaction.get(claimRef) : null;
+      const claimOwner = activePhoneClaimOwner(claim?.exists ? claim.data() : undefined);
 
       const lead: Lead = {
         ...current,
@@ -331,6 +387,7 @@ export class FirestoreRepository implements Repository {
         archivedBy: input.actor.uid,
       };
       transaction.set(leadRef, lead);
+      if (claimRef && claimOwner === current.id) transaction.delete(claimRef);
       transaction.create(
         auditRef,
         audit(input.actor, "lead.archived", "lead", input.id, input.now, input.businessDate, {
@@ -397,6 +454,22 @@ export class FirestoreRepository implements Repository {
       }
 
       const terminal = input.outcome === "won" || input.outcome === "lost";
+      const claimRef = activePhoneClaimReference(this.db, current.phone);
+      const claim = claimRef ? await transaction.get(claimRef) : null;
+      const claimOwner = activePhoneClaimOwner(claim?.exists ? claim.data() : undefined);
+      if (!terminal) {
+        if (!claimRef) {
+          throw new AppError(
+            409,
+            "conflict",
+            "Add a usable WhatsApp number before keeping this lead active.",
+          );
+        }
+        if (claimOwner !== current.id) {
+          if (claimOwner) throw duplicatePhoneConflict();
+          throw new PersistedDataError();
+        }
+      }
       const lead: Lead = {
         ...current,
         followUp: terminal ? "" : (input.nextFollowUp as string),
@@ -421,6 +494,7 @@ export class FirestoreRepository implements Repository {
       };
 
       transaction.set(leadRef, lead);
+      if (terminal && claimRef && claimOwner === current.id) transaction.delete(claimRef);
       transaction.create(eventRef, followUp);
       transaction.create(
         auditRef,
@@ -543,12 +617,17 @@ export class FirestoreRepository implements Repository {
         .get(),
     ]);
     const byKind = emptyRecordedByKind();
+    const followUpsByOutcome = emptyFollowUpsByOutcome();
     let lastSuccessfulAction: DailyStatus["recordedToday"]["lastSuccessfulAction"];
     for (const snapshot of audits.docs) {
       const data = snapshot.data();
       const kind = recordedKind(data.action);
       if (!kind || typeof data.at !== "string") continue;
       byKind[kind] += 1;
+      if (kind === "followUpLogged") {
+        const outcome = recordedFollowUpOutcome(data.metadata);
+        if (outcome) followUpsByOutcome[outcome] += 1;
+      }
       if (!lastSuccessfulAction) lastSuccessfulAction = { kind, at: data.at };
     }
     const digestSnapshot = digests.docs[0];
@@ -564,6 +643,7 @@ export class FirestoreRepository implements Repository {
       recordedToday: {
         total: Object.values(byKind).reduce((sum, count) => sum + count, 0),
         byKind,
+        followUpsByOutcome,
         ...(lastSuccessfulAction ? { lastSuccessfulAction } : {}),
       },
       digest: digest
@@ -724,26 +804,60 @@ export class FirestoreRepository implements Repository {
 
   async enqueueMorningReminder(input: {
     localDate: string;
-    text: string;
+    messages: string[];
     now: string;
-  }): Promise<{ created: boolean; outboxId: string }> {
-    const outboxId = `reminder_${input.localDate}`;
-    const outboxRef = this.db.collection("notificationOutbox").doc(outboxId);
+  }): Promise<{ created: boolean; outboxIds: string[] }> {
+    if (
+      !input.messages.length ||
+      input.messages.length > 450 ||
+      input.messages.some((text) => text.length < 1 || text.length > 4_096)
+    ) {
+      throw new AppError(500, "internal_error", "Morning reminder messages are invalid.");
+    }
+    const outboxIds = morningReminderOutboxIds(input.localDate, input.messages.length);
+    const outboxRefs = outboxIds.map((id) => this.db.collection("notificationOutbox").doc(id));
+    const manifestRef = this.db.collection("notificationBatchManifests").doc(outboxIds[0]!);
     return this.db.runTransaction(async (transaction) => {
-      const existing = await transaction.get(outboxRef);
-      if (existing.exists) return { created: false, outboxId };
-      const outbox: NotificationOutbox = {
-        id: outboxId,
-        type: "morning_reminder",
-        status: "pending",
-        text: input.text,
-        attempts: 0,
-        availableAt: input.now,
+      const [manifest, existing] = await Promise.all([
+        transaction.get(manifestRef),
+        transaction.get(outboxRefs[0]!),
+      ]);
+      if (manifest.exists) {
+        const storedCount = manifest.data()?.messageCount;
+        if (!Number.isInteger(storedCount) || storedCount < 1 || storedCount > 450) {
+          throw new PersistedDataError();
+        }
+        const originalCount = storedCount as number;
+        const originalIds = morningReminderOutboxIds(input.localDate, originalCount);
+        const originalRows = await Promise.all(
+          originalIds.map((id) => transaction.get(this.db.collection("notificationOutbox").doc(id))),
+        );
+        if (originalRows.some((snapshot) => !snapshot.exists)) throw new PersistedDataError();
+        return { created: false, outboxIds: originalIds };
+      }
+      // A single reminder created before batch manifests existed remains
+      // first-run-wins and is never duplicated by a replay.
+      if (existing.exists) return { created: false, outboxIds: [outboxIds[0]!] };
+      transaction.create(manifestRef, {
+        localDate: input.localDate,
+        messageCount: input.messages.length,
         createdAt: input.now,
-        updatedAt: input.now,
-      };
-      transaction.create(outboxRef, outbox);
-      return { created: true, outboxId };
+      });
+      outboxRefs.forEach((outboxRef, index) => {
+        const availableAt = new Date(Date.parse(input.now) + index).toISOString();
+        const outbox: NotificationOutbox = {
+          id: outboxIds[index]!,
+          type: "morning_reminder",
+          status: "pending",
+          text: input.messages[index]!,
+          attempts: 0,
+          availableAt,
+          createdAt: input.now,
+          updatedAt: input.now,
+        };
+        transaction.create(outboxRef, outbox);
+      });
+      return { created: true, outboxIds };
     });
   }
 
@@ -812,6 +926,30 @@ function revisionConflict(expected: number, actual: number | null): AppError {
   });
 }
 
+function duplicatePhoneConflict(): AppError {
+  return new AppError(
+    409,
+    "duplicate_phone",
+    "That WhatsApp number is already on the active Watchlist.",
+  );
+}
+
+function activePhoneClaimReference(db: Firestore, phone: string): DocumentReference | null {
+  return canonicalPhoneDigits(phone)
+    ? db.collection("activePhoneClaims").doc(activePhoneClaimId(phone))
+    : null;
+}
+
+function activePhoneClaimOwner(data: unknown): string | null {
+  if (data === undefined) return null;
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new PersistedDataError();
+  const leadId = (data as Record<string, unknown>).leadId;
+  if (typeof leadId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(leadId)) {
+    throw new PersistedDataError();
+  }
+  return leadId;
+}
+
 function audit(
   actor: Actor,
   action: string,
@@ -863,6 +1001,24 @@ function emptyRecordedByKind(): DailyStatus["recordedToday"]["byKind"] {
     followUpLogged: 0,
     digestAccepted: 0,
   };
+}
+
+function emptyFollowUpsByOutcome(): DailyStatus["recordedToday"]["followUpsByOutcome"] {
+  return { no_reply: 0, spoke: 0, won: 0, lost: 0 };
+}
+
+function recordedFollowUpOutcome(value: unknown): FollowUpOutcome | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const outcome = (value as Record<string, unknown>).outcome;
+  switch (outcome) {
+    case "no_reply":
+    case "spoke":
+    case "won":
+    case "lost":
+      return outcome;
+    default:
+      return null;
+  }
 }
 
 function recordedKind(value: unknown): keyof ReturnType<typeof emptyRecordedByKind> | null {

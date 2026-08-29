@@ -42,6 +42,8 @@ describe("persisted Firestore decoding", () => {
     ]) {
       expect(() => leadFromPersisted("lead-1", malformed)).toThrow(PersistedDataError);
     }
+    expect(leadFromPersisted("legacy-lead", { ...validLead, phone: "", followUp: "" }))
+      .toMatchObject({ id: "legacy-lead", phone: "", followUp: "", status: "active" });
   });
 
   it("rejects malformed digest enums, arrays, timestamps, and required fields", () => {

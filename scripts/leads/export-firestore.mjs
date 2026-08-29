@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   PROJECT_ID,
   REPO_ROOT,
+  FIRESTORE_CANONICAL_COLLECTIONS,
   atomicWrite,
   decodeFirestoreFields,
   documentIdFromName,
@@ -14,15 +15,6 @@ import {
   stableJson,
 } from "./ops-lib.mjs";
 
-const DEFAULT_COLLECTIONS = [
-  "members",
-  "leads",
-  "leadFollowUps",
-  "digests",
-  "notificationOutbox",
-  "auditEvents",
-  "system",
-];
 const DEFAULT_OUTPUT = path.join(REPO_ROOT, "scripts/leads/output/firestore-logical-backup.json");
 
 function help() {
@@ -48,7 +40,7 @@ async function main() {
   if (args._.length) throw new Error("Unexpected positional arguments");
   const project = args.project || process.env.FIREBASE_PROJECT_ID || PROJECT_ID;
   if (!/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(project)) throw new Error("Invalid Firebase project id");
-  const collections = (args.collections ? args.collections.split(",") : DEFAULT_COLLECTIONS)
+  const collections = (args.collections ? args.collections.split(",") : FIRESTORE_CANONICAL_COLLECTIONS)
     .map((item) => item.trim())
     .filter(Boolean);
   if (!collections.length || collections.some((item) => !/^[A-Za-z0-9_-]+$/.test(item))) {

@@ -5,7 +5,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { decodeFirestoreFields, encodeFirestoreFields, REPO_ROOT } from "../ops-lib.mjs";
+import { decodeFirestoreFields, encodeFirestoreFields, REPO_ROOT, sha256 } from "../ops-lib.mjs";
 
 function runNode(arguments_, environment) {
   return new Promise((resolve, reject) => {
@@ -173,6 +173,15 @@ test("lead and digest importers apply, re-read, and reconcile without an outbox"
     assert.equal(digestFields.deliveryStatus.stringValue, "legacy_unknown");
     assert.equal(digestFields.createdBy.stringValue, "migration");
     assert.equal(digestFields.businessDate.stringValue, "2026-07-20");
+    const phoneClaimId = `v1_${sha256("6591234567")}`;
+    firestore.collections.set("activePhoneClaims", new Map([
+      [phoneClaimId, firestoreDocument(
+        "activePhoneClaims",
+        phoneClaimId,
+        { leadId: "legacy_one" },
+        "2029-01-07T00:00:00.000Z",
+      )],
+    ]));
 
     const backup = await runNode([
       "scripts/leads/export-firestore.mjs", "--out", backupPath, "--manifest", backupManifest,
@@ -183,9 +192,16 @@ test("lead and digest importers apply, re-read, and reconcile without an outbox"
     assert.equal(backupRecord.collections.leads.length, 1);
     assert.equal(backupRecord.collections.digests.length, 1);
     assert.ok(Object.hasOwn(backupRecord.collections, "leadFollowUps"));
+    assert.equal(backupRecord.collections.activePhoneClaims.length, 1);
+    assert.deepEqual(
+      decodeFirestoreFields(backupRecord.collections.activePhoneClaims[0].fields),
+      { leadId: "legacy_one" },
+    );
     assert.equal(backupEvidence.collections.leads.documentCount, 1);
     assert.equal(backupEvidence.collections.digests.documentCount, 1);
     assert.ok(Object.hasOwn(backupEvidence.collections, "leadFollowUps"));
+    assert.equal(backupEvidence.collections.activePhoneClaims.documentCount, 1);
+    assert.match(backupEvidence.collections.activePhoneClaims.canonicalFieldsSha256, /^[a-f0-9]{64}$/);
     assert.match(backupEvidence.collections.leads.canonicalFieldsSha256, /^[a-f0-9]{64}$/);
     assert.equal(
       backupEvidence.collections.leads.canonicalSha256,
@@ -199,7 +215,10 @@ test("lead and digest importers apply, re-read, and reconcile without an outbox"
     // must still match when document IDs and decoded fields are identical.
     const originalCanonical = backupEvidence.collections.leads.canonicalFieldsSha256;
     const originalRaw = backupEvidence.collections.leads.rawEnvelopeSha256;
+    const originalClaimCanonical = backupEvidence.collections.activePhoneClaims.canonicalFieldsSha256;
+    const originalClaimRaw = backupEvidence.collections.activePhoneClaims.rawEnvelopeSha256;
     [...firestore.collections.get("leads").values()][0].updateTime = "2040-01-01T00:00:00.000Z";
+    [...firestore.collections.get("activePhoneClaims").values()][0].updateTime = "2040-01-02T00:00:00.000Z";
     const metadataOnlyManifest = path.join(temporaryDirectory, "logical-backup.metadata-only.manifest.json");
     const metadataOnly = await runNode([
       "scripts/leads/export-firestore.mjs", "--manifest-only", "--manifest", metadataOnlyManifest,
@@ -208,6 +227,11 @@ test("lead and digest importers apply, re-read, and reconcile without an outbox"
     const metadataEvidence = JSON.parse(await readFile(metadataOnlyManifest, "utf8"));
     assert.equal(metadataEvidence.collections.leads.canonicalFieldsSha256, originalCanonical);
     assert.notEqual(metadataEvidence.collections.leads.rawEnvelopeSha256, originalRaw);
+    assert.equal(
+      metadataEvidence.collections.activePhoneClaims.canonicalFieldsSha256,
+      originalClaimCanonical,
+    );
+    assert.notEqual(metadataEvidence.collections.activePhoneClaims.rawEnvelopeSha256, originalClaimRaw);
 
     const importedDigest = [...firestore.collections.get("digests").values()][0];
     delete importedDigest.fields.businessDate;

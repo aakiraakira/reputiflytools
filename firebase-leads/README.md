@@ -24,8 +24,14 @@ No user is imported and no browser receives Firestore credentials.
 - Firestore indexes for active leads, due leads, ready outbox work, and expired
   worker leases.
 
-Collections are `members`, `leads`, `leadFollowUps`, `digests`,
-`notificationOutbox`, `auditEvents`, and `system`.
+Collections are `members`, `leads`, `activePhoneClaims`, `leadFollowUps`,
+`digests`, `notificationOutbox`, `auditEvents`, and `system`.
+
+`activePhoneClaims/v1_<sha256(canonicalDigits)>` contains only `{leadId}` and is
+the atomic uniqueness index for usable phone numbers on active leads. The phone
+itself is not stored in the claim document ID or fields. Eight-digit local
+numbers canonicalize with Singapore country code `65`; explicit `+` and `00`
+international prefixes canonicalize to the same digits.
 
 ## Local verification
 
@@ -41,8 +47,9 @@ npm audit --omit=dev
 ```
 
 The tests exercise legacy auth and membership, strict validation, CORS, lead
-create idempotency, revision conflicts, all four transactional follow-up
-outcomes and concurrency, Singapore midnight/month/year rollover, self/team
+create idempotency, revision conflicts, canonical-phone uniqueness and claim
+migration, all four transactional follow-up outcomes and concurrency,
+Singapore midnight/month/year rollover, self/team
 permissions, privacy-safe actor labels, digest public allowlists and replayed
 timestamps, one digest per actor/business date, strict persisted-document
 decoding, deterministic reminder skips, sequential bounded claims, expired
@@ -190,15 +197,38 @@ never contain emails or member metadata: migration maps to `Imported`, inactive
 members map to `Former/unknown member`, and missing/unsafe labels are omitted so
 the UI can say `Team member` without displaying a raw UID.
 
+### Watchlist admission contract
+
+The shipped Watchlist rules admit a row when at least one of these six events
+has happened:
+
+- They name someone else who decides. Team, management, boss, partner, spouse.
+- They give a date. For payment or for anything.
+- They say they like it, then delay.
+- They go quiet after seeing the price.
+- Any complaint, or any mention of stopping or refunding.
+- They ask for something we do not sell.
+
+This is a human review of the existing note and source conversation, not a new
+API classification. Do not add a trigger enum, pipeline stage, priority, or
+monetary-value field. The narrow lead contract remains the existing
+name/phone/note/follow-up data plus persistence and audit metadata.
+
 `POST /v1/leads` accepts a flat lead and requires a stable `Idempotency-Key`
 header. A create without the header is rejected before mutation so a lost
 response can never produce a second lead or Telegram alert.
+
+Every create and revision-checked update requires a usable WhatsApp number and
+a real next-chase date (`followUp`, `YYYY-MM-DD`). Legacy stored rows with empty values
+remain readable, but they must be updated with both values or archived before
+they can remain in the active workflow. A phone already claimed by another
+active lead returns `409` with `error.code == "duplicate_phone"`.
 
 ```json
 {
   "name": "Alex",
   "phone": "9123 4567",
-  "note": "Asked for pricing",
+  "note": "Accounts team will make payment Friday",
   "followUp": "2026-08-14"
 }
 ```
@@ -260,6 +290,8 @@ checks the revision, changes the lead, and creates one immutable
 return 201; exact lost-response replays return the original lead/event receipt
 with 200 and `replayed:true`, including after a terminal archive. A changed
 payload under the same key or a stale revision returns 409 without mutation.
+An active outcome also requires the lead's canonical phone claim to be intact;
+terminal outcomes and archive release only the claim owned by that lead.
 
 ### Recorded today
 
@@ -281,6 +313,12 @@ payload under the same key or a stale revision returns 409 without mutation.
         "leadArchived": 0,
         "followUpLogged": 1,
         "digestAccepted": 1
+      },
+      "followUpsByOutcome": {
+        "no_reply": 0,
+        "spoke": 1,
+        "won": 0,
+        "lost": 0
       },
       "lastSuccessfulAction": { "kind": "digestAccepted", "at": "..." }
     },
@@ -348,10 +386,47 @@ enums, arrays, timestamps, revisions, or required fields fail closed with a
 generic `internal_error`; malformed outbox candidates are marked `dead` with a
 sanitized quarantine reason so valid work behind them can continue.
 
+### Active-phone claim cutover
+
+Do not expose writer accounts to claim-enforcing code before reconciling every
+active lead. Freeze writes, make the managed and logical backups, then run from
+`firebase-leads/functions` with Application Default Credentials scoped to the
+explicit project:
+
+```sh
+npm run claims:migrate -- --project reputifly-leads-2
+```
+
+This is a dry run and attempts zero writes. Apply is blocked when any active
+lead has a duplicate canonical phone, an unusable/missing phone, or a missing
+next-chase date (`followUp`). Resolve each row manually by correcting it or archiving it;
+the tool never picks a duplicate winner and never merges leads. Only after the
+dry run reports `safeToApply:true` may the operator repeat the project ID as the
+destructive confirmation:
+
+```sh
+npm run claims:migrate -- \
+  --project reputifly-leads-2 \
+  --apply reputifly-leads-2
+```
+
+The apply re-reads active leads and claims inside one transaction and creates,
+repairs, or removes claim documents atomically. It refuses plans above the
+450-write safety limit. Afterward, rerun the dry run; success requires
+`safeToApply:true` and `createCount`, `updateCount`, `deleteCount`, and
+`writeCount` all equal to zero.
+
+Backups and restore drills must include `activePhoneClaims` with its own count
+and canonical hash. If an API rollback permits writes through code that does
+not maintain claims, freeze again and rerun this reconciliation before bringing
+claim-enforcing code back. Do not delete or rebuild claims while writes remain
+open.
+
 ### Validation limits
 
-- Lead: name 120, phone 40, note 1–5,000, and `followUp` empty or `YYYY-MM-DD`.
-  At least name or phone is required.
+- Lead writes: name 120, usable phone 1–40, note 1–5,000, and a real
+  `followUp` date in `YYYY-MM-DD`. Legacy persistence decoding still permits an
+  empty phone/date so old rows can be read and explicitly repaired or archived.
 - IDs: `[A-Za-z0-9_-]{1,128}`.
 - Idempotency keys: `[A-Za-z0-9._:-]{8,200}`.
 - Digest: date 1–80; counts are integers 0–10; at most 100 follow-ups and 100
