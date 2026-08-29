@@ -32,12 +32,17 @@ another independent channel, not through this Telegram outbox.
 Never include request Authorization headers, Telegram secrets, or digest bodies
 in alert payloads.
 
-All three scheduled Functions must declare the exact Firebase Scheduler OIDC
-identity (`828546154700-compute@developer.gserviceaccount.com`) as their
-`invoker`. The runtime remains the dedicated worker service account. After any
-scheduled-Function deploy, wait for a normal Scheduler `AttemptFinished` HTTP
-200; a deploy that silently resets the invoker policy otherwise produces 403s.
-The Scheduler identity must never receive Telegram secret access.
+Firebase scheduled-Function deploys replace the service-level invoker policy
+with the runtime service account, while the generated Scheduler jobs authenticate
+as `828546154700-compute@developer.gserviceaccount.com`. A source-level
+`invoker` option is ignored by the scheduled provider. Immediately after every
+scheduled-Function deploy, restore and verify the three exact service policies with
+`ALLOW_SCHEDULER_IAM_CONFIG=reputifly-scheduler-invoker node
+../scripts/leads/configure-scheduler-invoker.mjs`; it grants `run.invoker` on
+only the three scheduled Reputifly services. The
+runtime remains the dedicated worker account and the Scheduler identity must
+never receive Telegram secret access. After any scheduled-Function deploy,
+wait for a normal Scheduler `AttemptFinished` HTTP 200.
 
 ## Notification state machine
 
