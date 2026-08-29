@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Actor, DigestPayload, NotificationOutbox } from "../src/domain";
+import type { Actor, DigestPayload, Lead, NotificationOutbox } from "../src/domain";
 import {
   DigestService,
   TelegramHttpClient,
@@ -8,6 +8,7 @@ import {
   formatDigest,
   formatLeadCreated,
   leadCreatedOutboxId,
+  nextCalendarDate,
   processOutboxBatch,
 } from "../src/services";
 import { MemoryRepository } from "./support/memory-repository";
@@ -28,6 +29,23 @@ const payload: DigestPayload = {
   notes: "",
 };
 
+function leadFixture(id: string, overrides: Partial<Lead> = {}): Lead {
+  return {
+    id,
+    name: `Lead ${id}`,
+    phone: "+65 9123 4567",
+    note: "Follow up directly",
+    followUp: "2026-08-13",
+    status: "active",
+    revision: 1,
+    createdAt: "2026-08-12T00:00:00.000Z",
+    createdBy: "migration",
+    updatedAt: "2026-08-12T00:00:00.000Z",
+    updatedBy: "migration",
+    ...overrides,
+  };
+}
+
 describe("notification outbox", () => {
   it("formats complete, concise Telegram messages without hidden truncation", () => {
     const digest = formatDigest({
@@ -46,25 +64,70 @@ describe("notification outbox", () => {
     expect(digest.length).toBeLessThanOrEqual(4_096);
 
     const lead = formatLeadCreated({
-      name: "Acme Movers",
+      name: "Acme\nMovers\u0000",
       phone: "9123 4567",
-      note: "x".repeat(1_000),
+      note: `Call\nabout\tthe quote ${"x".repeat(1_000)}`,
       followUp: "2026-08-15",
-    }, "Farhan");
-    expect(lead).toContain("🆕 New Watchlist lead");
+    }, "Farhan\nTan");
+    expect(lead).toContain("🆕 New Watchlist lead · Acme Movers");
+    expect(lead).toContain("Next chase: 2026-08-15");
+    expect(lead).toContain("Note: Call about the quote");
+    expect(lead).toContain("…");
     expect(lead).toContain("Added by Farhan");
-    expect(lead).toContain("Open Watchlist for the full note");
-    expect(lead).toContain("https://watchlist-v2.web.app/");
+    expect(lead).toContain("https://wa.me/6591234567");
+    expect(lead).not.toContain("?");
+    expect(lead).not.toContain("\u0000");
     expect(lead.length).toBeLessThanOrEqual(4_096);
 
-    const reminder = buildMorningReminder("2026-08-13", 2);
-    expect(reminder).toContain("⚠️ 2 leads are due or overdue");
-    expect(reminder).toContain("https://watchlist-v2.web.app/");
-    expect(reminder).not.toMatch(/digest|deadline|late|missed/i);
+    const reminder = buildMorningReminder("2026-08-13", [
+      leadFixture("overdue", { followUp: "2026-08-12" }),
+      leadFixture("today", { phone: "+65 9234 5678" }),
+    ]);
+    expect(reminder).toMatchObject({
+      leadCount: 2,
+      bucketCounts: { overdue: 1, today: 1, tomorrow: 0 },
+    });
+    expect(reminder.messages).toHaveLength(1);
+    expect(reminder.messages[0]).toContain("Overdue (1)");
+    expect(reminder.messages[0]).toContain("Today (1)");
+    expect(reminder.messages[0]).toContain("https://wa.me/6591234567");
+    expect(reminder.messages[0]).not.toContain("watchlist-v2");
 
     const longestLegalLeadId = "x".repeat(128);
     expect(leadCreatedOutboxId(longestLegalLeadId)).toHaveLength(75);
     expect(leadCreatedOutboxId(longestLegalLeadId)).toBe(leadCreatedOutboxId(longestLegalLeadId));
+  });
+
+  it.each([
+    ["9123 4567", "https://wa.me/6591234567"],
+    ["+65 9123 4567", "https://wa.me/6591234567"],
+    ["0065 9123 4567", "https://wa.me/6591234567"],
+  ])("uses one canonical direct WhatsApp link for %s", (phone, expected) => {
+    const text = formatLeadCreated({
+      name: "Acme",
+      phone,
+      note: "Call back",
+      followUp: "2026-08-15",
+    }, "Farhan");
+    expect(text.match(/https:\/\/wa\.me\/\d+/g)).toEqual([expected]);
+    expect(text).not.toMatch(/wa\.me\/[^\s?]+\?/);
+  });
+
+  it("refuses to format an unusable member lead phone", () => {
+    expect(() => formatLeadCreated({
+      name: "Acme",
+      phone: "not a phone",
+      note: "Call back",
+      followUp: "2026-08-15",
+    }, "Farhan")).toThrow("A usable WhatsApp number is required");
+  });
+
+  it("computes tomorrow across month, year, common-year, and leap-year boundaries", () => {
+    expect(nextCalendarDate("2026-01-31")).toBe("2026-02-01");
+    expect(nextCalendarDate("2026-12-31")).toBe("2027-01-01");
+    expect(nextCalendarDate("2026-02-28")).toBe("2026-03-01");
+    expect(nextCalendarDate("2028-02-28")).toBe("2028-02-29");
+    expect(nextCalendarDate("2028-02-29")).toBe("2028-03-01");
   });
 
   it("persists Telegram failure, retries later, and stores message_id on success", async () => {
@@ -181,30 +244,135 @@ describe("notification outbox", () => {
 
   it("creates only one deterministic 9am reminder per Singapore date", async () => {
     const repository = new MemoryRepository();
-    repository.leads.set("due", {
-      id: "due",
-      name: "Due lead",
-      phone: "",
-      note: "Follow up",
-      followUp: "2026-08-13",
-      status: "active",
-      revision: 1,
-      createdAt: "2026-08-12T00:00:00.000Z",
-      createdBy: "migration",
-      updatedAt: "2026-08-12T00:00:00.000Z",
-      updatedBy: "migration",
-    });
+    repository.leads.set("due", leadFixture("due"));
     const now = () => new Date("2026-08-13T01:00:00.000Z");
 
     const first = await enqueueMorningReminder({ repository, localDate: "2026-08-13", now });
     const replay = await enqueueMorningReminder({ repository, localDate: "2026-08-13", now });
 
-    expect(first).toMatchObject({ created: true, outboxId: "reminder_2026-08-13", dueCount: 1 });
-    expect(replay).toMatchObject({ created: false, outboxId: "reminder_2026-08-13", dueCount: 1 });
+    expect(first).toMatchObject({
+      created: true,
+      outboxIds: ["reminder_2026-08-13"],
+      leadCount: 1,
+      bucketCounts: { overdue: 0, today: 1, tomorrow: 0 },
+      messageCount: 1,
+    });
+    expect(replay).toMatchObject({
+      created: false,
+      outboxIds: ["reminder_2026-08-13"],
+      leadCount: 1,
+      messageCount: 1,
+    });
     expect(repository.outbox.size).toBe(1);
-    expect(repository.outbox.get(first.outboxId)?.text).toContain("1 lead is due or overdue");
-    expect(repository.outbox.get(first.outboxId)?.text).toContain("https://watchlist-v2.web.app/");
-    expect(repository.outbox.get(first.outboxId)?.text).not.toMatch(/digest|deadline|late|missed/i);
+    const text = repository.outbox.get(first.outboxIds[0])?.text ?? "";
+    expect(text).toContain("Today (1)");
+    expect(text).toContain("https://wa.me/6591234567");
+    expect(text).not.toContain("watchlist-v2");
+  });
+
+  it("includes overdue, today, and Singapore tomorrow exactly once and excludes the rest", async () => {
+    const repository = new MemoryRepository();
+    repository.leads.set("overdue", leadFixture("overdue", {
+      phone: "+65 8111 1111",
+      followUp: "2026-01-30",
+    }));
+    repository.leads.set("today", leadFixture("today", {
+      phone: "+65 8222 2222",
+      followUp: "2026-01-31",
+    }));
+    repository.leads.set("tomorrow", leadFixture("tomorrow", {
+      phone: "+65 8333 3333",
+      followUp: "2026-02-01",
+    }));
+    repository.leads.set("day-two", leadFixture("day-two", {
+      phone: "+65 8444 4444",
+      followUp: "2026-02-02",
+    }));
+    repository.leads.set("undated", leadFixture("undated", {
+      phone: "+65 8555 5555",
+      followUp: "",
+    }));
+    repository.leads.set("archived", leadFixture("archived", {
+      phone: "+65 8666 6666",
+      followUp: "2026-01-30",
+      status: "archived",
+    }));
+
+    const result = await enqueueMorningReminder({
+      repository,
+      localDate: "2026-01-31",
+      now: () => new Date("2026-01-31T01:00:00.000Z"),
+    });
+    expect(result).toMatchObject({
+      leadCount: 3,
+      bucketCounts: { overdue: 1, today: 1, tomorrow: 1 },
+      messageCount: 1,
+    });
+    const text = repository.outbox.get("reminder_2026-01-31")?.text ?? "";
+    ["6581111111", "6582222222", "6583333333"].forEach((digits) => {
+      expect(text.match(new RegExp(`https://wa.me/${digits}`, "g"))).toHaveLength(1);
+    });
+    expect(text).not.toMatch(/6584444444|6585555555|6586666666/);
+    expect(text).toContain("Overdue (1)");
+    expect(text).toContain("Today (1)");
+    expect(text).toContain("Tomorrow (1)");
+  });
+
+  it("fails before enqueue when an included persisted lead has no usable WhatsApp number", async () => {
+    const repository = new MemoryRepository();
+    repository.leads.set("bad-phone", leadFixture("bad-phone", { phone: "not a phone" }));
+    await expect(enqueueMorningReminder({
+      repository,
+      localDate: "2026-08-13",
+      now: () => new Date("2026-08-13T01:00:00.000Z"),
+    })).rejects.toThrow("Stored data could not be safely read");
+    expect(repository.outbox.size).toBe(0);
+    expect(repository.heartbeats.has("morningReminder")).toBe(false);
+  });
+
+  it("chunks deterministically at Telegram limits and replays without duplicates", async () => {
+    const repository = new MemoryRepository();
+    for (let index = 0; index < 180; index += 1) {
+      const id = `lead-${String(index).padStart(3, "0")}`;
+      repository.leads.set(id, leadFixture(id, {
+        phone: `+1 202 555 ${String(index).padStart(4, "0")}`,
+        name: `Prospect ${String(index).padStart(3, "0")} ${"N".repeat(70)}`,
+        note: `Recorded context ${"x".repeat(220)}`,
+      }));
+    }
+    const now = () => new Date("2026-08-13T01:00:00.000Z");
+    const first = await enqueueMorningReminder({ repository, localDate: "2026-08-13", now });
+    const originalTexts = first.outboxIds.map((id) => repository.outbox.get(id)?.text ?? "");
+    const replay = await enqueueMorningReminder({ repository, localDate: "2026-08-13", now });
+
+    expect(first.created).toBe(true);
+    expect(first.messageCount).toBeGreaterThan(1);
+    expect(first.outboxIds[0]).toBe("reminder_2026-08-13");
+    expect(first.outboxIds[1]).toBe("reminder_2026-08-13_2");
+    expect(replay).toMatchObject({ created: false, outboxIds: first.outboxIds });
+    expect(repository.outbox.size).toBe(first.messageCount);
+    expect(first.outboxIds.map((id) => repository.outbox.get(id)?.text ?? "")).toEqual(originalTexts);
+    originalTexts.forEach((text, index) => {
+      expect(text.length).toBeGreaterThan(0);
+      expect(text.length).toBeLessThanOrEqual(4_096);
+      expect(text).toContain(`${index + 1}/${first.messageCount}`);
+      expect(repository.outbox.get(first.outboxIds[index]!)?.availableAt)
+        .toBe(new Date(Date.parse("2026-08-13T01:00:00.000Z") + index).toISOString());
+    });
+    const combined = originalTexts.join("\n");
+    for (let index = 0; index < 180; index += 1) {
+      const digits = `1202555${String(index).padStart(4, "0")}`;
+      expect(combined.match(new RegExp(`https://wa.me/${digits}`, "g"))).toHaveLength(1);
+    }
+    expect(repository.heartbeats.get("morningReminder")).toMatchObject({
+      leadCount: 180,
+      bucketCounts: { overdue: 0, today: 180, tomorrow: 0 },
+      messageCount: first.messageCount,
+    });
+
+    repository.outbox.delete(first.outboxIds.at(-1)!);
+    await expect(enqueueMorningReminder({ repository, localDate: "2026-08-13", now }))
+      .rejects.toThrow("Stored data could not be safely read");
   });
 
   it("records a skipped heartbeat and sends no reminder when no lead is due", async () => {
@@ -215,15 +383,117 @@ describe("notification outbox", () => {
       now: () => new Date("2026-08-13T01:00:00.000Z"),
     });
 
-    expect(result).toEqual({ created: false, skipped: true, dueCount: 0 });
+    expect(result).toEqual({
+      created: false,
+      skipped: true,
+      outboxIds: [],
+      leadCount: 0,
+      bucketCounts: { overdue: 0, today: 0, tomorrow: 0 },
+      messageCount: 0,
+    });
     expect(repository.outbox.size).toBe(0);
     expect(repository.heartbeats.get("morningReminder")).toEqual({
       at: "2026-08-13T01:00:00.000Z",
       localDate: "2026-08-13",
       created: false,
       skipped: true,
-      dueCount: 0,
+      outboxIds: [],
+      leadCount: 0,
+      bucketCounts: { overdue: 0, today: 0, tomorrow: 0 },
+      messageCount: 0,
     });
+  });
+
+  it("appends only nonzero server-recorded outcomes to the nightly digest", async () => {
+    const repository = new MemoryRepository();
+    repository.audits.push(
+      {
+        actorUid: actor.uid,
+        action: "lead.followup_logged",
+        at: "2026-08-13T00:10:00.000Z",
+        businessDate: "2026-08-13",
+        metadata: { outcome: "no_reply" },
+      },
+      {
+        actorUid: actor.uid,
+        action: "lead.followup_logged",
+        at: "2026-08-13T00:20:00.000Z",
+        businessDate: "2026-08-13",
+        metadata: { outcome: "no_reply" },
+      },
+      {
+        actorUid: actor.uid,
+        action: "lead.followup_logged",
+        at: "2026-08-13T00:30:00.000Z",
+        businessDate: "2026-08-13",
+        metadata: { outcome: "won" },
+      },
+      {
+        actorUid: actor.uid,
+        action: "lead.followup_logged",
+        at: "2026-08-13T00:40:00.000Z",
+        businessDate: "2026-08-13",
+        metadata: { outcome: "spoke" },
+      },
+      {
+        actorUid: actor.uid,
+        action: "lead.followup_logged",
+        at: "2026-08-13T00:50:00.000Z",
+        businessDate: "2026-08-13",
+        metadata: { outcome: "lost" },
+      },
+    );
+    expect(repository.outbox.size).toBe(0);
+    const service = new DigestService(repository, () => new Date("2026-08-13T10:00:00.000Z"));
+    const first = await service.create(actor, "digest:2026-08-13:uid-1", payload);
+    const replay = await service.create(actor, "digest:2026-08-13:uid-1", payload);
+    const text = repository.outbox.get(`digest_${first.digestId}`)?.text ?? "";
+
+    expect(text).toContain("RECORDED OUTCOMES");
+    expect(text).toContain("No reply: 2 recorded");
+    expect(text).toContain("Spoke: 1 recorded");
+    expect(text).toContain("Won: 1 recorded");
+    expect(text).toContain("Lost: 1 recorded");
+    expect(repository.outbox.get(`digest_${first.digestId}`)?.type).toBe("digest");
+    expect(replay.replayed).toBe(true);
+    expect(repository.outbox.size).toBe(1);
+
+    const zeroText = formatDigest(payload, "Farhan", {
+      no_reply: 0,
+      spoke: 0,
+      won: 0,
+      lost: 0,
+    });
+    expect(zeroText).not.toContain("RECORDED OUTCOMES");
+    expect(zeroText).not.toMatch(/\brecorded\b/i);
+  });
+
+  it("rejects a digest when the recorded outcome suffix would cross 4096", async () => {
+    const repository = new MemoryRepository();
+    repository.audits.push({
+      actorUid: actor.uid,
+      action: "lead.followup_logged",
+      at: "2026-08-13T00:10:00.000Z",
+      businessDate: "2026-08-13",
+      metadata: { outcome: "won" },
+    });
+    const submittedBy = actor.email;
+    const empty = formatDigest({ ...payload, date: "2026-08-13" }, submittedBy);
+    const notesHeading = "\n\nQUESTIONS / NOTES\n";
+    const boundaryPayload: DigestPayload = {
+      ...payload,
+      notes: "x".repeat(4_096 - empty.length - notesHeading.length),
+    };
+    expect(formatDigest({ ...boundaryPayload, date: "2026-08-13" }, submittedBy)).toHaveLength(4_096);
+
+    await expect(new DigestService(
+      repository,
+      () => new Date("2026-08-13T10:00:00.000Z"),
+    ).create(actor, "digest:overflow:uid-1", boundaryPayload)).rejects.toThrow(
+      "This digest is too long for one complete Telegram message",
+    );
+    expect(repository.digests.size).toBe(0);
+    expect(repository.outbox.size).toBe(0);
   });
 
   it("claims one item at a time and leaves later attempts untouched when the run budget is used", async () => {

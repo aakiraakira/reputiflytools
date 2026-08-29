@@ -4,6 +4,7 @@ export type ErrorCode =
   | "forbidden"
   | "not_found"
   | "conflict"
+  | "duplicate_phone"
   | "unsupported_media_type"
   | "origin_not_allowed"
   | "identity_unavailable"

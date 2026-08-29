@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FieldValue } from "firebase-admin/firestore";
 import { FirestoreRepository } from "../src/firestore-repository";
+import { activePhoneClaimId } from "../src/phone";
 
 describe("FirestoreRepository corrupt outbox isolation", () => {
   it("paginates the active Watchlist instead of silently dropping lead 501", async () => {
@@ -209,3 +210,187 @@ describe("FirestoreRepository corrupt outbox isolation", () => {
     expect(updates.flatMap(({ patch }) => Object.values(patch)).includes(null)).toBe(false);
   });
 });
+
+describe("FirestoreRepository active phone claims", () => {
+  const actor = {
+    uid: "uid-1",
+    email: "owner@example.com",
+    emailVerified: true,
+    role: "owner" as const,
+  };
+  const now = "2026-08-14T00:00:00.000Z";
+
+  it("claims canonical phones atomically and maintains them across replay, move, and outcomes", async () => {
+    const harness = transactionalDb();
+    const repository = new FirestoreRepository(harness.db as never);
+    const initialLead = {
+      name: "Alex",
+      phone: "9123 4567",
+      note: "Needs a quote",
+      followUp: "2026-08-15",
+    };
+    const create = {
+      actor,
+      lead: initialLead,
+      id: "lead_one",
+      now,
+      idempotencyKey: "create:lead-one",
+      payloadHash: "lead-one-hash",
+      businessDate: "2026-08-14",
+    };
+
+    await expect(repository.createLead(create)).resolves.toMatchObject({ replayed: false });
+    await expect(repository.createLead(create)).resolves.toMatchObject({ replayed: true });
+    const firstClaimPath = `activePhoneClaims/${activePhoneClaimId(initialLead.phone)}`;
+    expect(harness.documents.get(firstClaimPath)).toEqual({ leadId: "lead_one" });
+    expect(firstClaimPath).not.toContain("6591234567");
+    expect([...harness.documents.keys()].filter((path) => path.startsWith("auditEvents/")))
+      .toHaveLength(1);
+
+    await expect(repository.createLead({
+      ...create,
+      id: "lead_two",
+      idempotencyKey: "create:lead-two",
+      payloadHash: "lead-two-hash",
+      lead: { ...initialLead, phone: "+65 9123-4567" },
+    })).rejects.toMatchObject({ status: 409, code: "duplicate_phone" });
+    expect(harness.documents.has("leads/lead_two")).toBe(false);
+
+    const movedPhone = "9234 5678";
+    await repository.putLead({
+      actor,
+      id: "lead_one",
+      lead: { ...initialLead, phone: movedPhone },
+      expectedRevision: 1,
+      now,
+      businessDate: "2026-08-14",
+    });
+    const movedClaimPath = `activePhoneClaims/${activePhoneClaimId(movedPhone)}`;
+    expect(harness.documents.has(firstClaimPath)).toBe(false);
+    expect(harness.documents.get(movedClaimPath)).toEqual({ leadId: "lead_one" });
+
+    await repository.logFollowUp({
+      actor,
+      leadId: "lead_one",
+      eventId: "event_spoke",
+      idempotencyKey: "followup:spoke",
+      payloadHash: "followup-spoke-hash",
+      expectedRevision: 2,
+      outcome: "spoke",
+      nextFollowUp: "2026-08-16",
+      now,
+      businessDate: "2026-08-14",
+    });
+    expect(harness.documents.get(movedClaimPath)).toEqual({ leadId: "lead_one" });
+
+    await repository.logFollowUp({
+      actor,
+      leadId: "lead_one",
+      eventId: "event_won",
+      idempotencyKey: "followup:won",
+      payloadHash: "followup-won-hash",
+      expectedRevision: 3,
+      outcome: "won",
+      now,
+      businessDate: "2026-08-14",
+    });
+    expect(harness.documents.has(movedClaimPath)).toBe(false);
+  });
+
+  it("archives a known duplicate without deleting the other active lead's claim", async () => {
+    const phone = "6583005988";
+    const claimPath = `activePhoneClaims/${activePhoneClaimId(phone)}`;
+    const harness = transactionalDb({
+      "leads/claim_owner": persistedLead("claim_owner", phone),
+      "leads/duplicate_to_archive": persistedLead("duplicate_to_archive", phone),
+      [claimPath]: { leadId: "claim_owner" },
+    });
+    const repository = new FirestoreRepository(harness.db as never);
+
+    await expect(repository.archiveLead({
+      actor,
+      id: "duplicate_to_archive",
+      expectedRevision: 1,
+      now,
+      businessDate: "2026-08-14",
+    })).resolves.toMatchObject({ status: "archived", revision: 2 });
+
+    expect(harness.documents.get(claimPath)).toEqual({ leadId: "claim_owner" });
+    expect(harness.documents.get("leads/duplicate_to_archive"))
+      .toMatchObject({ status: "archived", revision: 2 });
+  });
+});
+
+type FakeRef = { id: string; path: string };
+
+function transactionalDb(seed: Record<string, Record<string, unknown>> = {}) {
+  const documents = new Map<string, Record<string, unknown>>(
+    Object.entries(seed).map(([path, value]) => [path, structuredClone(value)]),
+  );
+  const db = {
+    collection(name: string) {
+      return {
+        doc(id: string): FakeRef {
+          return { id, path: `${name}/${id}` };
+        },
+      };
+    },
+    async runTransaction<T>(callback: (transaction: {
+      get(ref: FakeRef): Promise<{
+        id: string;
+        ref: FakeRef;
+        exists: boolean;
+        data(): Record<string, unknown> | undefined;
+      }>;
+      create(ref: FakeRef, value: Record<string, unknown>): void;
+      set(ref: FakeRef, value: Record<string, unknown>): void;
+      delete(ref: FakeRef): void;
+    }) => Promise<T>): Promise<T> {
+      const pending = new Map<string, Record<string, unknown>>(
+        [...documents].map(([path, value]) => [path, structuredClone(value)]),
+      );
+      const result = await callback({
+        async get(ref) {
+          const value = pending.get(ref.path);
+          return {
+            id: ref.id,
+            ref,
+            exists: value !== undefined,
+            data: () => value === undefined ? undefined : structuredClone(value),
+          };
+        },
+        create(ref, value) {
+          if (pending.has(ref.path)) throw new Error(`document already exists: ${ref.path}`);
+          pending.set(ref.path, structuredClone(value));
+        },
+        set(ref, value) {
+          pending.set(ref.path, structuredClone(value));
+        },
+        delete(ref) {
+          pending.delete(ref.path);
+        },
+      });
+      documents.clear();
+      pending.forEach((value, path) => documents.set(path, value));
+      return result;
+    },
+  };
+  return { db, documents };
+}
+
+function persistedLead(id: string, phone: string): Record<string, unknown> {
+  const at = "2026-08-14T00:00:00.000Z";
+  return {
+    id,
+    name: id,
+    phone,
+    note: "Known duplicate",
+    followUp: "2026-08-15",
+    status: "active",
+    revision: 1,
+    createdAt: at,
+    createdBy: "migration",
+    updatedAt: at,
+    updatedBy: "migration",
+  };
+}

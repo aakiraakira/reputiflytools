@@ -9,6 +9,16 @@ export const API_BASE = `https://asia-southeast1-${PROJECT_ID}.cloudfunctions.ne
 export const WATCHLIST_URL = "https://watchlist-v2.web.app/";
 export const DIGEST_URL = "https://daily-digest-v2.web.app/";
 export const DEFAULT_TIMEOUT_MS = 15_000;
+export const FIRESTORE_CANONICAL_COLLECTIONS = Object.freeze([
+  "members",
+  "leads",
+  "activePhoneClaims",
+  "leadFollowUps",
+  "digests",
+  "notificationOutbox",
+  "auditEvents",
+  "system",
+]);
 
 export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");

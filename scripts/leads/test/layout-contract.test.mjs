@@ -62,22 +62,22 @@ test("mobile-first invariants and primary action target sizes remain intact", ()
     assert.match(css, /\.optpill\s*\{[^}]*min-height\s*:\s*4[4-9]px/i, `${label} option controls meet 44px target`);
   }
   assert.match(watchlist, /\.wacts\s+\.btn\s*\{[^}]*min-height\s*:\s*44px/i);
-  assert.match(watchlist, /\.outcome-grid\s+\.optpill\s*\{[^}]*min-height\s*:\s*44px/i);
+  assert.match(watchlist, /\.outcome-grid\s*\{[^}]*grid-template-columns\s*:\s*1fr/i, "follow-up outcomes are one clear row each");
+  assert.match(watchlist, /\.outcome-grid\s+\.optpill\s*\{[^}]*min-height\s*:\s*5[0-9]px/i);
 });
 
-test("server proof, safe provenance, and neutral accountability hooks are persistent", () => {
+test("server proof remains canonical while healthy diagnostics stay out of the mobile layout", () => {
   for (const [label, html] of [["Watchlist", watchlist], ["Digest", digest]]) {
     const markup = staticMarkup(html);
-    assert.match(markup, /id=["']syncBanner["'][^>]*role=["']status["']/i, `${label} has persistent sync status`);
-    assert.match(markup, /id=["']syncSupport["']/i, `${label} has support-only request details`);
+    assert.match(markup, /id=["']syncBanner["'][^>]*role=["']status["'][^>]*hidden/i, `${label} reserves sync UI for stale/error states`);
+    assert.match(markup, /id=["']syncSupport["'][^>]*hidden/i, `${label} hides support details by default`);
     assert.match(html, /envelope\.dataAsOf\s*!==\s*meta\.serverTime/, `${label} requires server as-of proof to match server time`);
     assert.match(html, /meta\.requestId/, `${label} exposes the support request ID`);
     assert.match(html, /function\s+acceptActors\s*\(/, `${label} accepts referenced actor labels`);
     assert.match(html, /function\s+actorLabel\s*\(/, `${label} has neutral unresolved-actor fallback`);
   }
   assert.match(watchlist, /id=["']dailyStatusPanel["']/);
-  assert.match(watchlist, />Recorded today</);
-  assert.match(watchlist, /Only server-confirmed work/);
+  assert.match(watchlist, /class=["']activity-title["']>Today</);
   assert.match(watchlist, /["']\/v1\/daily-status["']/);
   assert.match(watchlist, /["']\/v1\/team\/daily-status["']/);
   assert.doesNotMatch(watchlist, /keystroke|screen time|online time|productivity score/i);

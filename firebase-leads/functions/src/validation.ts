@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AppError } from "./errors";
+import { canonicalPhoneDigits } from "./phone";
 
 const isoDate = /^\d{4}-\d{2}-\d{2}$/;
 const documentId = /^[A-Za-z0-9_-]{1,128}$/;
@@ -13,33 +14,24 @@ const calendarDateSchema = z
 
 const leadShape = {
   name: z.string().trim().max(120).default(""),
-  phone: z.string().trim().max(40).default(""),
+  phone: z
+    .string()
+    .trim()
+    .min(1, "A WhatsApp number is required")
+    .max(40)
+    .refine((value) => canonicalPhoneDigits(value) !== null, "Must be a usable WhatsApp number"),
   note: z.string().trim().min(1).max(5_000),
-  followUp: z.union([z.literal(""), calendarDateSchema]).default(""),
+  followUp: calendarDateSchema,
 };
 
-function requireLeadIdentity(
-  lead: { name: string; phone: string },
-  context: z.RefinementCtx,
-): void {
-    if (!lead.name && !lead.phone) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "A name or phone number is required.",
-        path: ["name"],
-      });
-    }
-}
-
-export const leadInputSchema = z.object(leadShape).strict().superRefine(requireLeadIdentity);
+export const leadInputSchema = z.object(leadShape).strict();
 
 export const updateLeadSchema = z
   .object({
     ...leadShape,
     expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   })
-  .strict()
-  .superRefine(requireLeadIdentity);
+  .strict();
 
 export const archiveLeadSchema = z
   .object({ expectedRevision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) })

@@ -203,6 +203,7 @@ export type RecordedActionKind =
 export interface RecordedToday {
   total: number;
   byKind: Record<RecordedActionKind, number>;
+  followUpsByOutcome: Record<FollowUpOutcome, number>;
   lastSuccessfulAction?: {
     kind: RecordedActionKind;
     at: string;
