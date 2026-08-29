@@ -28,7 +28,7 @@ function assertUniqueStaticIds(html, label) {
   assert.equal(duplicate, undefined, `${label} must not clone any static DOM ID`);
 }
 
-test("desktop layouts are CSS-only views of one mobile DOM", () => {
+test("desktop and mobile preserve one familiar single-column DOM", () => {
   const watchMarkup = staticMarkup(watchlist);
   const digestMarkup = staticMarkup(digest);
   assert.equal(count(watchMarkup, /<main\b/gi), 1, "Watchlist has one main DOM");
@@ -42,25 +42,24 @@ test("desktop layouts are CSS-only views of one mobile DOM", () => {
 
   const watchCss = styles(watchlist);
   const digestCss = styles(digest);
-  assert.match(watchCss, /@media\s*\(min-width\s*:\s*1100px\)[\s\S]*?\.wcard\s*\{[^}]*display\s*:\s*grid/i);
-  assert.match(digestCss, /@media\s*\(min-width\s*:\s*1100px\)[\s\S]*?\.digest-workspace\s*\{[^}]*display\s*:\s*grid/i);
-  assert.match(digestCss, /\.digest-rail\s*\{[^}]*position\s*:\s*sticky/i);
+  assert.match(watchCss, /\.watch-workspace\s*\{[^}]*max-width\s*:\s*560px/i);
+  assert.match(digestCss, /\.digest-workspace\s*\{[^}]*max-width\s*:\s*560px/i);
+  assert.doesNotMatch(watchCss, /\.wcard\s*\{[^}]*display\s*:\s*grid/i);
+  assert.doesNotMatch(digestCss, /\.digest-workspace\s*\{[^}]*display\s*:\s*grid/i);
+  assert.doesNotMatch(digestCss, /\.digest-rail\s*\{[^}]*position\s*:\s*sticky/i);
   assert.doesNotMatch(staticMarkup(digest), /desktop[-_ ]only|mobile[-_ ]only/i, "Responsive layout must not fork editor DOM");
 });
 
 test("mobile-first invariants and primary action target sizes remain intact", () => {
   for (const [label, html] of [["Watchlist", watchlist], ["Digest", digest]]) {
     const css = styles(html);
-    const desktopIndex = css.search(/@media\s*\(min-width\s*:\s*1100px\)/i);
-    assert.ok(desktopIndex > 0, `${label} desktop breakpoint exists after base styles`);
-    const mobileCss = css.slice(0, desktopIndex);
-    assert.match(mobileCss, /\.wrap\s*\{[^}]*max-width\s*:\s*560px/i, `${label} keeps familiar narrow mobile base`);
-    assert.match(mobileCss, /\.tabbar\s*\{[^}]*position\s*:\s*fixed/i, `${label} keeps mobile tab bar`);
-    assert.match(mobileCss, /\.sheet\s*\{[^}]*position\s*:\s*fixed[^}]*bottom\s*:\s*0/i, `${label} keeps bottom sheet`);
-    assert.match(mobileCss, /safe-area-inset-bottom/i, `${label} retains safe-area padding`);
-    assert.match(mobileCss, /\.btn\s*\{[^}]*min-height\s*:\s*44px/i, `${label} base buttons meet 44px target`);
-    assert.match(mobileCss, /\.input\s*\{[^}]*min-height\s*:\s*44px/i, `${label} inputs meet 44px target`);
-    assert.match(mobileCss, /\.optpill\s*\{[^}]*min-height\s*:\s*4[4-9]px/i, `${label} option controls meet 44px target`);
+    assert.match(css, /\.wrap\s*\{[^}]*max-width\s*:\s*560px/i, `${label} keeps familiar narrow base`);
+    assert.match(css, /\.tabbar\s*\{[^}]*position\s*:\s*fixed/i, `${label} keeps mobile tab bar`);
+    assert.match(css, /\.sheet\s*\{[^}]*position\s*:\s*fixed[^}]*bottom\s*:\s*0/i, `${label} keeps bottom sheet`);
+    assert.match(css, /safe-area-inset-bottom/i, `${label} retains safe-area padding`);
+    assert.match(css, /\.btn\s*\{[^}]*min-height\s*:\s*44px/i, `${label} base buttons meet 44px target`);
+    assert.match(css, /\.input\s*\{[^}]*min-height\s*:\s*44px/i, `${label} inputs meet 44px target`);
+    assert.match(css, /\.optpill\s*\{[^}]*min-height\s*:\s*4[4-9]px/i, `${label} option controls meet 44px target`);
   }
   assert.match(watchlist, /\.wacts\s+\.btn\s*\{[^}]*min-height\s*:\s*44px/i);
   assert.match(watchlist, /\.outcome-grid\s+\.optpill\s*\{[^}]*min-height\s*:\s*44px/i);

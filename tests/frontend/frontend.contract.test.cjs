@@ -529,23 +529,23 @@ test("accepted digest keeps its frozen draft when receipt storage throws", async
   }
 });
 
-test("desktop layout is same-DOM, sticky only at 1100px, and mobile remains single-column", () => {
+test("desktop and mobile keep the familiar single-column layout", () => {
   const watch = read(WATCHLIST_PATH);
   const digest = read(DIGEST_PATH);
   for (const html of [watch, digest]) {
-    assert.match(html, /@media \(min-width:1100px\)/);
     assert.doesNotMatch(html, /@media[^}]*max-width[^}]*display\s*:\s*none[^}]*digest-(?:rail|editor)/i);
     const dom = new JSDOM(html.replace(/<script[\s\S]*?<\/script>/g, ""));
     const ids = [...dom.window.document.querySelectorAll("[id]")].map((el) => el.id);
     assert.equal(new Set(ids).size, ids.length, "no cloned desktop/mobile IDs");
     dom.window.close();
   }
-  assert.match(digest, /\.digest-workspace[\s\S]{0,220}grid-template-columns/);
-  assert.match(digest, /\.digest-rail[\s\S]{0,180}position:sticky/);
+  assert.match(digest, /\.digest-workspace\{ max-width:560px; \}/);
+  assert.doesNotMatch(digest, /\.digest-workspace[\s\S]{0,220}grid-template-columns/);
+  assert.doesNotMatch(digest, /\.digest-rail[\s\S]{0,180}position:sticky/);
   assert.equal((digest.match(/id="submitBtn"/g) || []).length, 1);
   assert.equal((digest.match(/id="sumGrid"/g) || []).length, 1);
-  assert.match(watch, /\.wcard\{ display:grid; grid-template-columns/);
-  assert.match(watch, /min-height:92px/);
+  assert.match(watch, /\.watch-workspace\{ max-width:560px; \}/);
+  assert.doesNotMatch(watch, /\.wcard\{ display:grid; grid-template-columns/);
   assert.match(watch, /min-height:44px/);
 });
 
