@@ -12,7 +12,7 @@ import {
 
 export const HOSTING_APPS = {
   watchlist: {
-    source: path.join(REPO_ROOT, "watchlist/index.html"),
+    source: path.join(REPO_ROOT, "firebase-leads/apps/watchlist/index.html"),
     output: path.join(REPO_ROOT, "firebase-leads/hosting/watchlist/index.html"),
     url: WATCHLIST_URL,
     crossLink: DIGEST_URL,
@@ -20,7 +20,7 @@ export const HOSTING_APPS = {
     label: "Daily Digest",
   },
   "daily-digest": {
-    source: path.join(REPO_ROOT, "daily-digest/index.html"),
+    source: path.join(REPO_ROOT, "firebase-leads/apps/daily-digest/index.html"),
     output: path.join(REPO_ROOT, "firebase-leads/hosting/daily-digest/index.html"),
     url: DIGEST_URL,
     crossLink: WATCHLIST_URL,

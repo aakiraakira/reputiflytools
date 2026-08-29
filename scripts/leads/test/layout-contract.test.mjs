@@ -5,8 +5,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const watchlist = readFileSync(path.join(ROOT, "watchlist/index.html"), "utf8");
-const digest = readFileSync(path.join(ROOT, "daily-digest/index.html"), "utf8");
+const watchlist = readFileSync(path.join(ROOT, "firebase-leads/apps/watchlist/index.html"), "utf8");
+const digest = readFileSync(path.join(ROOT, "firebase-leads/apps/daily-digest/index.html"), "utf8");
 
 function staticMarkup(html) {
   return html

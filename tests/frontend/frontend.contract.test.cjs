@@ -6,8 +6,8 @@ const vm = require("node:vm");
 const { JSDOM } = require("jsdom");
 
 const ROOT = path.resolve(__dirname, "../..");
-const WATCHLIST_PATH = path.join(ROOT, "watchlist/index.html");
-const DIGEST_PATH = path.join(ROOT, "daily-digest/index.html");
+const WATCHLIST_PATH = path.join(ROOT, "firebase-leads/apps/watchlist/index.html");
+const DIGEST_PATH = path.join(ROOT, "firebase-leads/apps/daily-digest/index.html");
 const API_BASE = "https://asia-southeast1-reputifly-leads-2.cloudfunctions.net/api";
 
 function read(file) {
