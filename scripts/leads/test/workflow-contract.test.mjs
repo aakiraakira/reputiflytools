@@ -8,6 +8,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 const workflow = readFileSync(path.join(ROOT, ".github/workflows/leads.yml"), "utf8");
 const functionsIndex = readFileSync(path.join(ROOT, "firebase-leads/functions/src/index.ts"), "utf8");
 const schedulerIam = readFileSync(path.join(ROOT, "scripts/leads/configure-scheduler-invoker.mjs"), "utf8");
+const productionE2E = readFileSync(path.join(ROOT, "scripts/leads/production-e2e.mjs"), "utf8");
 
 test("CI actions are immutable and use Node 24-capable major versions", () => {
   const uses = [...workflow.matchAll(/uses:\s*(actions\/(?:checkout|setup-node))@([^\s#]+)\s*#\s*(v[^\s]+)/g)];
@@ -25,6 +26,10 @@ test("production write E2E remains explicit and separately guarded", () => {
   assert.match(workflow, /production_e2e:\s*[\s\S]*?type:\s*boolean/);
   assert.match(workflow, /production-write-e2e:[\s\S]*?inputs\.production_e2e\s*==\s*true/);
   assert.match(workflow, /ALLOW_PRODUCTION_E2E:\s*watchlist-v2-controlled-write/);
+  assert.match(productionE2E, /const CANARY_PHONE = "[1-9][0-9 ]{7,}"/,
+    "the production canary must satisfy the live required-phone contract");
+  assert.equal((productionE2E.match(/phone: CANARY_PHONE/g) || []).length, 2,
+    "the canary keeps one stable phone through create and update");
 });
 
 test("scheduled deploys preserve the narrow Firebase Scheduler invoker", () => {

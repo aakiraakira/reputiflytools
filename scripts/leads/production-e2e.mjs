@@ -4,6 +4,8 @@ import { apiRequest, assertJson, assertNoStore, assertStatus, normalizeApiBase }
 
 const WRITE_GUARD = "watchlist-v2-controlled-write";
 const MARKER = "Automated production E2E — safe to delete";
+// Singapore-format but deliberately non-routable test number (1-prefix).
+const CANARY_PHONE = "1000 0000";
 
 function requiredEnvironment(name) {
   const value = String(process.env[name] || "").trim();
@@ -102,7 +104,7 @@ async function main() {
       token,
       timeoutMs,
       method: "PUT",
-      body: { name: "SYSTEM TEST", phone: "", note: MARKER, followUp: businessDate, expectedRevision: 0 },
+      body: { name: "SYSTEM TEST", phone: CANARY_PHONE, note: MARKER, followUp: businessDate, expectedRevision: 0 },
     }, [200, 201], "E2E lead create");
     if (created.lead?.id !== leadId || created.lead.status !== "active" || created.lead.revision !== 1) {
       throw new Error("E2E lead create receipt was not canonical");
@@ -140,7 +142,7 @@ async function main() {
       token,
       timeoutMs,
       method: "PUT",
-      body: { name: "SYSTEM TEST", phone: "", note: `${MARKER} (updated)`, followUp: nextBusinessDate(businessDate), expectedRevision: currentRevision },
+      body: { name: "SYSTEM TEST", phone: CANARY_PHONE, note: `${MARKER} (updated)`, followUp: nextBusinessDate(businessDate), expectedRevision: currentRevision },
     }, 200, "E2E lead update");
     if (updated.lead?.revision !== 2 || updated.lead.note !== `${MARKER} (updated)`) {
       throw new Error("E2E lead update receipt was not canonical");
