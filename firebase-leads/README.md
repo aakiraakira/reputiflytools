@@ -173,6 +173,10 @@ Allowed browser origins:
 - `https://daily-digest-v2.firebaseapp.com`
 - HTTP/HTTPS localhost, `127.0.0.1`, and `[::1]`, with any development port
 
+Primary user routes are `https://reputifly.org/watchlist/` and
+`https://reputifly.org/daily-digest/`. The Firebase Hosting origins remain
+tested compatibility and recovery routes.
+
 ### Session and leads
 
 `GET /v1/session` returns:
