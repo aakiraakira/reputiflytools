@@ -259,7 +259,7 @@ test("digest delivery timeline is monotonic and acceptance identity is immutable
 test("Recorded today aggregates committed successful events only", () => {
   const events = [
     { committed: true, actorUid: "uid-member", businessDate: BUSINESS_DATE, kind: "leadCreated", at: "2026-08-13T16:01:00.000Z" },
-    { committed: true, actorUid: "uid-member", businessDate: BUSINESS_DATE, kind: "followUpLogged", at: "2026-08-13T16:03:00.000Z" },
+    { committed: true, actorUid: "uid-member", businessDate: BUSINESS_DATE, kind: "followUpLogged", outcome: "spoke", at: "2026-08-13T16:03:00.000Z" },
     { committed: false, actorUid: "uid-member", businessDate: BUSINESS_DATE, kind: "leadUpdated", at: "2026-08-13T16:04:00.000Z" },
     { committed: true, replayed: true, actorUid: "uid-member", businessDate: BUSINESS_DATE, kind: "followUpLogged", at: "2026-08-13T16:05:00.000Z" },
     { committed: true, actorUid: "another-uid", businessDate: BUSINESS_DATE, kind: "leadArchived", at: "2026-08-13T16:06:00.000Z" },
@@ -271,6 +271,7 @@ test("Recorded today aggregates committed successful events only", () => {
   assert.equal(recordedToday.byKind.leadCreated, 1);
   assert.equal(recordedToday.byKind.followUpLogged, 1);
   assert.equal(recordedToday.byKind.leadUpdated, 0);
+  assert.deepEqual(recordedToday.followUpsByOutcome, { no_reply: 0, spoke: 1, won: 0, lost: 0 });
   assert.deepEqual(recordedToday.lastSuccessfulAction, {
     kind: "followUpLogged",
     at: "2026-08-13T16:03:00.000Z",

@@ -12,6 +12,13 @@ export const RECORDED_ACTION_KINDS = Object.freeze([
   "digestAccepted",
 ]);
 
+export const FOLLOW_UP_OUTCOMES = Object.freeze([
+  "no_reply",
+  "spoke",
+  "won",
+  "lost",
+]);
+
 export const DIGEST_DELIVERY_STATES = Object.freeze([
   "pending",
   "retrying",
@@ -273,8 +280,8 @@ export function validateDailyStatusEnvelope(value, label = "GET daily status") {
 
 export function validateRecordedToday(value, label = "recordedToday") {
   assertExactKeys(value, {
-    allowed: ["total", "byKind", "lastSuccessfulAction"],
-    required: ["total", "byKind"],
+    allowed: ["total", "byKind", "followUpsByOutcome", "lastSuccessfulAction"],
+    required: ["total", "byKind", "followUpsByOutcome"],
   }, label);
   assertExactKeys(value.byKind, { allowed: RECORDED_ACTION_KINDS }, `${label}.byKind`);
   let sum = 0;
@@ -283,6 +290,16 @@ export function validateRecordedToday(value, label = "recordedToday") {
     sum += value.byKind[kind];
   }
   if (!Number.isInteger(value.total) || value.total !== sum) throw new Error(`${label}.total: must equal committed action sum`);
+  assertExactKeys(value.followUpsByOutcome, { allowed: FOLLOW_UP_OUTCOMES }, `${label}.followUpsByOutcome`);
+  let outcomeTotal = 0;
+  for (const outcome of FOLLOW_UP_OUTCOMES) {
+    const count = value.followUpsByOutcome[outcome];
+    if (!Number.isInteger(count) || count < 0) throw new Error(`${label}.followUpsByOutcome.${outcome}: invalid`);
+    outcomeTotal += count;
+  }
+  if (outcomeTotal > value.byKind.followUpLogged) {
+    throw new Error(`${label}.followUpsByOutcome: cannot exceed committed follow-ups`);
+  }
   if (Object.hasOwn(value, "lastSuccessfulAction")) {
     assertExactKeys(value.lastSuccessfulAction, { allowed: ["kind", "at"] }, `${label}.lastSuccessfulAction`);
     if (!RECORDED_ACTION_KINDS.includes(value.lastSuccessfulAction.kind)) throw new Error(`${label}.lastSuccessfulAction.kind: invalid`);
@@ -295,15 +312,22 @@ export function validateRecordedToday(value, label = "recordedToday") {
 
 export function aggregateCommittedActions(events, { actorUid, businessDate }) {
   const byKind = Object.fromEntries(RECORDED_ACTION_KINDS.map((kind) => [kind, 0]));
+  const followUpsByOutcome = Object.fromEntries(FOLLOW_UP_OUTCOMES.map((outcome) => [outcome, 0]));
   const accepted = events
     .filter((event) => event && event.committed === true && event.replayed !== true)
     .filter((event) => event.actorUid === actorUid && event.businessDate === businessDate)
     .filter((event) => RECORDED_ACTION_KINDS.includes(event.kind))
     .sort((left, right) => String(right.at).localeCompare(String(left.at)));
-  for (const event of accepted) byKind[event.kind] += 1;
+  for (const event of accepted) {
+    byKind[event.kind] += 1;
+    if (event.kind === "followUpLogged" && FOLLOW_UP_OUTCOMES.includes(event.outcome)) {
+      followUpsByOutcome[event.outcome] += 1;
+    }
+  }
   return {
     total: accepted.length,
     byKind,
+    followUpsByOutcome,
     ...(accepted[0] ? { lastSuccessfulAction: { kind: accepted[0].kind, at: accepted[0].at } } : {}),
   };
 }

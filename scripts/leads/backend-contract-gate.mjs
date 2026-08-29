@@ -121,6 +121,7 @@ class ContractRepository {
           followUpLogged: 1,
           digestAccepted: 0,
         },
+        followUpsByOutcome: { no_reply: 0, spoke: 1, won: 0, lost: 0 },
         lastSuccessfulAction: { kind: "followUpLogged", at: NOW.toISOString() },
       },
       digest: { state: "not_submitted" },
