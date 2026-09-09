@@ -41,6 +41,7 @@ test('approved final corrections and protected close',()=>{
  assert.equal(n.answered.scripts[0].t,'Hi thanks. Let me know when transferred');
  assert.match(n.payment.do,/replaces that day/);
  assert.match(n.answered.scripts[0].sit,/No earlier reminder that day/);
+ assert(!dom.window.MENU.some(m=>['react, don’t reply','one nudge only','7-day decay = urgency'].includes(m.ds)));
  assert.equal(n.tree.scripts[0].t,"the total price for the project is *$590*, we just require a *70% deposit* which is *$413*\nthose changes are extremely easy, don't worry\n\nshall we start the project?");
  assert.equal(n.price.attachments[0].url,null);
  assert(!JSON.stringify(n.close_wobble.asset).includes('Proposed image text correction'));

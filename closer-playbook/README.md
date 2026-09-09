@@ -2,7 +2,7 @@
 
 Live: https://reputifly.org/closer-playbook/
 
-## Approved release: 20260909-1
+## Approved release: 20260909-2
 
 The September 9 release applies the reviewed sales-copy and routing changes,
 including the final owner corrections. The local redline is historical review
