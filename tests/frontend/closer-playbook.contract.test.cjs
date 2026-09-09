@@ -19,6 +19,7 @@ test('every node renders, every route resolves, copied text stays plain',()=>{
   for(const x of n.next||[]){const [node,tag]=x.to.split('/');assert(w.NODES[node],x.to);if(tag)assert(w.NODES[node].scripts.some(s=>s.id===tag),x.to);}
   for(const [i,s] of (n.scripts||[]).entries()){
    if(s.route)continue;
+   assert(w.document.getElementById('script-'+(s.id||'s'+i)),id+' script target');
    assert.equal(w.curScripts[i],s.t,id+' copy');
    assert(!/\[\[|Agreed In Principle|Proposed Replacement|verified client-review link/.test(s.t),id+' leaked review metadata');
   }
