@@ -16,6 +16,7 @@ RULES JULIAN SET FOR THIS DOCUMENT (12 Sep 2026) -- do not quietly reverse them:
   * Never a promise. Past example only. Julian asked for the disclaimer off the
     cover on 12 Sep; it lives as two quiet lines at the foot of the LAST page
     instead. It does not get deleted outright -- the claim needs it.
+  * The Search Console image is Julian's raw file. See the note on it below.
   * The word "GEO" never appears anywhere a client can read it.
 
 Page 1  Cover + the Search Console numbers
@@ -31,12 +32,13 @@ makes the text too small to read on a phone.
 All images live in ./assets and are committed, so the PDF rebuilds anywhere.
 Prepared once from Julian's screenshots in ~/Downloads:
 
-  gsc-performance.jpg          airdropped Search Console export, whole image,
-                               clipped tab row trimmed at y=706. The red
-                               annotation originally read "SEO and GEO
-                               Integration Started here"; repainted to
-                               "Google and AI Work Started Here" because the
-                               word GEO is never client-facing. Chart untouched.
+  gsc-performance.jpg          Julian's own Search Console export, BYTE FOR BYTE
+                               as he sent it. Do not crop it, do not repaint the
+                               marker annotations, do not "clean up" the clipped
+                               tab row at the bottom. He asked for the raw shot
+                               on 12 Sep after seeing an edited one, and the fact
+                               that it is visibly an untouched screenshot is the
+                               point of it.
   serp-best-barber-orchard.jpg 'image (95).png'  crop (55,6,805,478) @vw1500
   serp-barber-orchard.jpg      'image (94).png'  crop (55,6,805,512) @vw1500
   ai-chatgpt.jpg               'image (83).png'  crop (330,55,1075,866) @vw1400
