@@ -48,6 +48,8 @@ test('approved final corrections and protected close',()=>{
  assert.equal(att.file,'Reputifly Case Study - Google and AI Results.pdf');
  assert(fs.existsSync(path.resolve(root,att.url)),'the case study PDF is missing from the repo');
  assert.deepEqual(n.credibility.attachments[0],att,'credibility must offer the same case study');
+ assert.equal(n.faq.attachments[0].url,att.url,'faq is where ranking questions land, it needs the proof too');
+ assert.match(n.faq.attachments[0].note,/never an answer to/,'faq must keep the no-guarantee guard on the attachment');
  assert(!JSON.stringify(n.close_wobble.asset).includes('Proposed image text correction'));
  dom.window.close();
 });
@@ -76,5 +78,9 @@ test('deep links, additions and copy actions survive rendering',async()=>{
  assert.match(card.textContent,/Send the file, never the link/,'the WhatsApp instruction must survive rendering');
  w.go('credibility');assert(w.document.querySelector('.portfolio-shortlist a'));
  assert(w.document.querySelector('.asset-status a[download]'),'credibility must render the case study download too');
+ w.go('faq');
+ const faqCard=w.document.querySelector('.asset-status');
+ assert(faqCard.querySelector('a[download]'),'faq must render the case study download');
+ assert.match(faqCard.querySelector('.as-note').textContent,/Say the no first/,'the faq guard note must render');
  dom.window.close();
 });
